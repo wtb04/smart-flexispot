@@ -1,0 +1,100 @@
+menu "Loctek desk control"
+
+    config LOCTEK_UART_NUM
+        int "UART controller"
+        range 0 4
+        default 0
+        help
+            UART0 is free only once the console moves to USB Serial/JTAG, which
+            sdkconfig.defaults does. Otherwise pick another controller.
+
+    config LOCTEK_TX_GPIO
+        int "TX GPIO (to control box RJ45 pin 6)"
+        default 37
+        help
+            Default is the Tab5 M5-Bus TXD0 on connector pin 14.
+            GPIO6 (PC_TX, bus pin 16) is the alternative if you would rather
+            keep the console on UART0.
+
+    config LOCTEK_RX_GPIO
+        int "RX GPIO (from control box RJ45 pin 5)"
+        default 38
+        help
+            Default is the Tab5 M5-Bus RXD0 on connector pin 13.
+            GPIO7 (PC_RX, bus pin 15) is the alternative.
+
+    config LOCTEK_WAKE_GPIO
+        int "Wake GPIO (to control box RJ45 pin 4, 'PIN 20'), -1 if unwired"
+        default 47
+        help
+            M5-Bus pin 23. Must match where the wake wire actually is: driving
+            the wrong pin looks exactly like a control box that will not wake.
+
+    config LOCTEK_WAKE_PULSE_MS
+        int "Wake pulse, line held high (ms)"
+        range 100 3000
+        default 1000
+        help
+            turnon() in the reference implementation: the line rests low, is
+            driven high for about a second to wake the panel, then returns low.
+
+    config LOCTEK_NUDGE_WAKE
+        bool "Also nudge with a single step if the pulse is not enough"
+        default n
+        # Off by default on purpose: this physically moves the desk.
+        help
+            The control box ignores the "no keys pressed" frame but always
+            answers a real key. When the panel is found asleep, send one Up
+            frame followed by the release frame. One frame is the smallest
+            movement the desk can make -- a click rather than a visible move --
+            and it makes the box report its height again. Turn this off if you
+            would rather the desk never move on its own.
+
+    config LOCTEK_REPEAT_MS
+        int "Key repeat interval while moving (ms)"
+        range 20 500
+        default 50
+        help
+            The desk moves one step per frame received, and replies to each
+            one, so this sets both how smoothly it travels and how often the
+            height updates. 108 ms is the upstream ESPHome value; 50 ms is
+            smoother on several control boxes.
+
+    config LOCTEK_IDLE_POLL_MS
+        int "Idle poll interval (ms), 0 to stay quiet"
+        range 0 10000
+        default 1000
+        help
+            Sends a "no keys pressed" frame this often while idle. No upstream
+            implementation does this, because they are command-driven and can
+            tolerate the first command being swallowed. Here it keeps the box
+            responsive: left completely alone it goes fully silent, and in that
+            state it ignores movement frames too, so the first button press
+            does nothing. Set to 0 to go quiet and accept that.
+
+    config LOCTEK_PRESS_MS
+        int "How long a preset or memory key is held (ms)"
+        range 50 1500
+        default 300
+        help
+            A key press is a stream of frames, not one frame. Sending a preset
+            once registers only sometimes. Must stay well under the five
+            seconds of M that triggers a factory reset.
+
+    config LOCTEK_STORE_GAP_MS
+        int "Gap between the M key and the preset key when storing (ms)"
+        range 100 2000
+        default 300
+        help
+            The control box wants a moment between the two key presses that
+            store a preset. Reports suggest values below ~250 ms are flaky.
+
+    config LOCTEK_MOVE_TIMEOUT_MS
+        int "Maximum continuous travel (ms)"
+        range 1000 120000
+        default 30000
+        help
+            Failsafe: stop the desk if a direction is somehow held this long,
+            for instance if a touch release event went missing.
+
+endmenu

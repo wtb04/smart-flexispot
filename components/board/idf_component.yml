@@ -1,0 +1,4 @@
+dependencies:
+  # Official Espressif BSP for the Tab5: MIPI-DSI panel (both ILI9881C and
+  # ST7123 revisions), touch, I2C, IO expander, LVGL port, audio, SD.
+  espressif/m5stack_tab5: "^1.3.0"
