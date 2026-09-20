@@ -6,7 +6,6 @@
 #include "freertos/task.h"
 #include "power.h"
 #include "ui.h"
-#include "wifi.h"
 
 #include <cmath>
 
@@ -15,8 +14,9 @@ namespace {
 
 constexpr char TAG[] = "battery";
 
-// A battery does not move quickly, and each read costs two I2C transactions.
-constexpr TickType_t POLL_INTERVAL = pdMS_TO_TICKS(2000);
+// Nothing on screen shows more than a charge icon now, and the pack moves
+// slowly, so this is as often as it is worth taking the shared I2C bus.
+constexpr TickType_t POLL_INTERVAL = pdMS_TO_TICKS(30000);
 
 constexpr std::uint32_t TASK_STACK    = 3072;
 constexpr UBaseType_t   TASK_PRIORITY = 2;
@@ -32,18 +32,11 @@ StackType_t  s_task_stack[TASK_STACK];
 
         power::State state{};
         if (power::read(state) == ESP_OK) {
-            const int milliamps = static_cast<int>(std::lround(state.current_amps * 1000.0f));
-            if (state.present) {
-                ESP_LOGI(TAG, "%d%% %.2f V %d mA (shunt %.3f mV)", state.percent,
-                         state.bus_volts, milliamps, state.shunt_millivolts);
-            } else {
-                ESP_LOGI(TAG, "no battery (%.2f V)", state.bus_volts);
-            }
+            ESP_LOGI(TAG, "%d%% %.2f V %d mA", state.percent, state.bus_volts,
+                     static_cast<int>(std::lround(state.current_amps * 1000.0f)));
             ESP_ERROR_CHECK_WITHOUT_ABORT(
-                ui::set_battery(state.present, state.percent, state.bus_volts, milliamps,
-                                state.charging));
+                ui::set_battery(state.present, state.percent, state.charging));
         }
-        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_wifi(wifi::connected()));
         vTaskDelay(POLL_INTERVAL);
     }
 }

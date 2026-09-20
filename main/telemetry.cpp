@@ -111,6 +111,8 @@ void fill_network(hass::protocol::Telemetry &out)
             fill_network(out);
         }
 
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_links(wifi::connected(), hass::connected()));
+
         // Returns an error while the broker is unreachable, which is normal and
         // not worth logging every two seconds.
         hass::publish(out);

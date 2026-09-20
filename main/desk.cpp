@@ -60,7 +60,8 @@ void run_preset(const PresetCommand &cmd)
     const auto preset = static_cast<loctek::Preset>(cmd.index);
     if (cmd.store) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(loctek::store_preset(preset));
-        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_status("preset saved"));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(
+            ui::notify("", "Preset saved", "success", 2500));
     } else {
         ESP_ERROR_CHECK_WITHOUT_ABORT(loctek::goto_preset(preset));
     }
@@ -145,7 +146,6 @@ const char *link_status(const loctek::Stats &stats, bool link_up, int wake_attem
 #endif
 
             // The last known height stays on screen; only the status changes.
-            ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_status(status));
         }
         // Only until the first reading lands. After that the last known height
         // stands and the box is left to sleep; loctek wakes it again by itself

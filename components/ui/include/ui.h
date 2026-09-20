@@ -31,27 +31,24 @@ using PresetHandler = void (*)(int index, bool store);
 /** Invoked from the LVGL task as the brightness slider moves. */
 using BrightnessHandler = void (*)(int percent);
 
-/** Builds the screen. Requires the LVGL port to be running. */
-esp_err_t init(MoveHandler on_move, PresetHandler on_preset,
-               BrightnessHandler on_brightness, int initial_brightness);
-
 /** Number of preset buttons on screen. */
 inline constexpr int kPresetCount = 4;
 
-/** Battery readout in the corner. Thread-safe. */
-esp_err_t set_battery(bool present, int percent, float volts, int milliamps,
-                      bool charging);
+/** Builds the screen. Requires the LVGL port to be running. */
+esp_err_t init(MoveHandler on_move, PresetHandler on_preset, BrightnessHandler on_brightness,
+               int initial_brightness);
 
-/** Network indicator in the corner. Thread-safe. */
-esp_err_t set_wifi(bool connected);
+/** Height in millimetres, or negative for "unknown". Thread-safe. */
+esp_err_t set_height(int height_mm);
 
-/** Clock in the corner. Pass nullptr while the time is still unknown. */
+/** Clock in the top bar. Pass nullptr while the time is unknown. Thread-safe. */
 esp_err_t set_time(const char *text);
 
+/** Network and broker indicators. Thread-safe. */
+esp_err_t set_links(bool wifi, bool mqtt);
 
-
-/** Height in millimetres, or a negative value for "unknown". Thread-safe. */
-esp_err_t set_height(int height_mm);
+/** Battery indicator: an icon only, coloured by level. Thread-safe. */
+esp_err_t set_battery(bool present, int percent, bool charging);
 
 /**
  * @brief Queues a notification popup. Thread-safe; text is copied.
@@ -61,8 +58,5 @@ esp_err_t set_height(int height_mm);
  * oldest.
  */
 esp_err_t notify(const char *title, const char *message, const char *level, int timeout_ms);
-
-/** One-line status under the height. Thread-safe. Text is copied. */
-esp_err_t set_status(const char *text);
 
 }  // namespace ui
