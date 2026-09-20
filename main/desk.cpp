@@ -17,6 +17,12 @@ constexpr char TAG[] = "desk";
 constexpr char kConnected[] = "connected";
 constexpr char kAsleep[]    = "desk display asleep";
 constexpr char kNoReply[]   = "disconnected";
+constexpr char kWaking[]    = "waking desk";
+
+// A sleeping control box is silent, so at startup "nothing on the wire" is the
+// normal state rather than a fault. Only call it a wiring problem once we have
+// pulsed the wake line a few times and still heard nothing.
+constexpr int WIRING_FAULT_AFTER_WAKES = 3;
 
 constexpr TickType_t SUPERVISE_TICK = pdMS_TO_TICKS(500);
 // The box streams in bursts with gaps of a second or so between them, and the
@@ -60,7 +66,9 @@ void run_preset(const PresetCommand &cmd)
     }
 }
 
-std::atomic<int> s_height_mm{-1};
+std::atomic<int>  s_height_mm{-1};
+std::atomic<bool> s_linked{false};
+std::atomic<int>  s_motion{0};  // -1 down, 0 idle, +1 up
 
 // Straight from the wire. Repaints only when the value actually changes: the
 // box streams frames far faster than the display needs, and redrawing a label
@@ -75,7 +83,7 @@ void on_height(int height_mm)
 // The wake line is held high, so the box should stream continuously. Anything
 // else is a fault worth naming precisely: nothing on the wire, bytes that never
 // form frames, or a link that has gone quiet.
-const char *link_status(const loctek::Stats &stats, bool link_up)
+const char *link_status(const loctek::Stats &stats, bool link_up, int wake_attempts)
 {
     if (link_up) {
         // Height frames with nothing readable in them mean the box has blanked
@@ -88,7 +96,8 @@ const char *link_status(const loctek::Stats &stats, bool link_up)
         return kConnected;
     }
     if (stats.bytes_received == 0) {
-        return "no data on RX - check wiring";
+        return wake_attempts < WIRING_FAULT_AFTER_WAKES ? kWaking
+                                                        : "no data on RX - check wiring";
     }
     if (stats.frames_decoded == 0) {
         return "garbage on RX - check baud and TX/RX";
@@ -102,8 +111,9 @@ const char *link_status(const loctek::Stats &stats, bool link_up)
 {
     const char   *shown      = nullptr;
     loctek::Stats previous   = loctek::stats();
-    TickType_t    last_wake  = 0;
-    TickType_t    last_frame = 0;
+    TickType_t    last_wake     = 0;
+    TickType_t    last_frame    = 0;
+    int           wake_attempts = 0;
 
     for (;;) {
         PresetCommand cmd;
@@ -119,10 +129,11 @@ const char *link_status(const loctek::Stats &stats, bool link_up)
         previous = stats;
 
         const bool  link_up = last_frame != 0 && (now - last_frame) < LINK_TIMEOUT;
-        const char *status  = link_status(stats, link_up);
+        const char *status  = link_status(stats, link_up, wake_attempts);
 
         if (status != shown) {
             shown = status;
+            s_linked.store(status == kConnected, std::memory_order_relaxed);
             ESP_LOGI(TAG, "%s", status);
 #if CONFIG_LOCTEK_NUDGE_WAKE
             if (status == kAsleep) {
@@ -143,6 +154,7 @@ const char *link_status(const loctek::Stats &stats, bool link_up)
         const bool never_read = s_height_mm.load(std::memory_order_relaxed) < 0;
         if (never_read && status != kConnected && (last_wake == 0 || now - last_wake > WAKE_RETRY)) {
             last_wake = now;
+            ++wake_attempts;
             ESP_LOGI(TAG, "waking panel");
             ESP_ERROR_CHECK_WITHOUT_ABORT(loctek::wake());
         }
@@ -179,14 +191,35 @@ void on_preset(int index, bool store)
     xQueueSend(s_preset_queue, &cmd, 0);
 }
 
+int height_mm()
+{
+    return s_height_mm.load(std::memory_order_relaxed);
+}
+
+bool linked()
+{
+    return s_linked.load(std::memory_order_relaxed);
+}
+
+const char *motion()
+{
+    switch (s_motion.load(std::memory_order_relaxed)) {
+        case 1:  return "moving_up";
+        case -1: return "moving_down";
+        default: return "idle";
+    }
+}
+
 void on_move(ui::Move direction)
 {
-    loctek::Move move = loctek::Move::Stop;
+    loctek::Move move   = loctek::Move::Stop;
+    int          motion = 0;
     switch (direction) {
-        case ui::Move::Up:   move = loctek::Move::Up; break;
-        case ui::Move::Down: move = loctek::Move::Down; break;
-        case ui::Move::Stop: move = loctek::Move::Stop; break;
+        case ui::Move::Up:   move = loctek::Move::Up;   motion = 1;  break;
+        case ui::Move::Down: move = loctek::Move::Down; motion = -1; break;
+        case ui::Move::Stop: move = loctek::Move::Stop; motion = 0;  break;
     }
+    s_motion.store(motion, std::memory_order_relaxed);
     ESP_ERROR_CHECK_WITHOUT_ABORT(loctek::request_move(move));
 }
 

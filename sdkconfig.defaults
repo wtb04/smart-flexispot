@@ -7,7 +7,10 @@ CONFIG_ESP32P4_REV_MIN_100=y
 
 # Flash / partitions (Tab5 has 16 MB)
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
-CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y
+# 4 MB for the app and a SPIFFS partition, out of the board's 16 MB. The
+# default 1.5 MB leaves no room once MQTT and TLS are linked in.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
 # PSRAM (Tab5 has 32 MB, hex mode). LVGL draw buffers for 720x1280 do not fit
 # in internal RAM.
@@ -50,3 +53,38 @@ CONFIG_LV_USE_MEM_MONITOR=y
 # Fonts used by components/ui (only _14 is built in by default).
 CONFIG_LV_FONT_MONTSERRAT_28=y
 CONFIG_LV_FONT_MONTSERRAT_48=y
+
+# --- Wi-Fi via the ESP32-C6 co-processor -------------------------------------
+# The P4 has no radio. esp_hosted carries the Wi-Fi API to the C6 over SDIO;
+# the C6 runs its own slave firmware, flashed separately over its own port.
+CONFIG_ESP_HOSTED_ENABLED=y
+# The slave target is derived from this choice, not set directly.
+CONFIG_SLAVE_IDF_TARGET_ESP32C6=y
+CONFIG_ESP_HOSTED_SDIO_HOST_INTERFACE=y
+CONFIG_ESP_HOSTED_SDIO_4_BIT_BUS=y
+CONFIG_ESP_HOSTED_SDIO_BUS_WIDTH=4
+CONFIG_ESP_HOSTED_SDIO_CLOCK_FREQ_KHZ=40000
+CONFIG_ESP_HOSTED_SDIO_PIN_CMD=13
+CONFIG_ESP_HOSTED_SDIO_PIN_CLK=12
+CONFIG_ESP_HOSTED_SDIO_PIN_D0=11
+# In 4-bit mode D1 comes from the _PRIV_ symbol; setting only SDIO_PIN_D1
+# leaves it at the default 15, which collides with the slave reset line.
+CONFIG_ESP_HOSTED_SDIO_PIN_D1=10
+CONFIG_ESP_HOSTED_SDIO_PRIV_PIN_D1_4BIT_BUS=10
+CONFIG_ESP_HOSTED_PRIV_SDIO_OPTION=y
+CONFIG_ESP_HOSTED_SDIO_PIN_D2=9
+CONFIG_ESP_HOSTED_SDIO_PIN_D3=8
+CONFIG_ESP_HOSTED_SDIO_GPIO_RESET_SLAVE=15
+CONFIG_ESP_HOSTED_RESET_GPIO_ACTIVE_LOW=y
+CONFIG_ESP_HOSTED_SDIO_OPTIMIZATION_RX_STREAMING_MODE=y
+
+# Lets a DHCP-offered NTP server win over pool.ntp.org, which esp_netif_sntp
+# refuses to configure without this.
+CONFIG_LWIP_DHCP_GET_NTP_SRV=y
+
+# --- MQTT --------------------------------------------------------------------
+# Plain mqtt:// on the LAN. Leaving the TLS transport compiled in makes
+# esp_transport_ssl_init reachable, which drags in the whole of mbedTLS
+# (250-350 KB) even though nothing ever calls it.
+CONFIG_MQTT_TRANSPORT_SSL=n
+CONFIG_MQTT_TRANSPORT_WEBSOCKET=n

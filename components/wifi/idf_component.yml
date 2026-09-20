@@ -1,0 +1,6 @@
+dependencies:
+  # The ESP32-P4 has no radio: Wi-Fi runs on the Tab5's ESP32-C6 co-processor
+  # and is reached over SDIO. esp_wifi_remote forwards the normal esp_wifi API
+  # across that link, esp_hosted carries it.
+  espressif/esp_hosted: "1.4.0"
+  espressif/esp_wifi_remote: "0.8.5"

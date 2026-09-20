@@ -6,6 +6,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include <algorithm>
+
 namespace board {
 namespace {
 
@@ -13,7 +15,7 @@ constexpr char TAG[] = "board";
 
 constexpr TickType_t LCD_RAIL_SETTLE   = pdMS_TO_TICKS(200);
 constexpr TickType_t TOUCH_RAIL_SETTLE = pdMS_TO_TICKS(500);
-constexpr int        BRIGHTNESS_PCT    = 80;
+
 
 constexpr int LVGL_TASK_PRIORITY  = 4;
 constexpr int LVGL_TASK_STACK     = 8192;
@@ -76,8 +78,18 @@ esp_err_t init()
     bsp_display_rotate(disp, LV_DISPLAY_ROTATION_90);
 
     ESP_RETURN_ON_ERROR(bsp_display_backlight_on(), TAG, "backlight");
-    ESP_RETURN_ON_ERROR(bsp_display_brightness_set(BRIGHTNESS_PCT), TAG, "brightness");
+    ESP_RETURN_ON_ERROR(set_brightness(kDefaultBrightness), TAG, "brightness");
     return ESP_OK;
+}
+
+esp_err_t set_brightness(int percent)
+{
+    return bsp_display_brightness_set(std::clamp(percent, kMinBrightness, 100));
+}
+
+void set_brightness_percent(int percent)
+{
+    ESP_ERROR_CHECK_WITHOUT_ABORT(set_brightness(percent));
 }
 
 }  // namespace board

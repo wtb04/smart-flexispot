@@ -14,4 +14,13 @@ void on_move(ui::Move direction);
 /** UI preset handler: tap travels to a preset, hold stores the current height. */
 void on_preset(int index, bool store);
 
+/** Last reported height in millimetres, or negative if none yet. */
+int height_mm();
+
+/** True while the control box is talking to us. */
+bool linked();
+
+/** "idle", "moving_up" or "moving_down", as last commanded. */
+const char *motion();
+
 }  // namespace desk

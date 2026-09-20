@@ -5,3 +5,7 @@ sdkconfig.old
 .vscode/
 *.swp
 .DS_Store
+# Any *_secrets.h anywhere, so a new one is covered without anyone having to
+# remember. The .example.h templates stay tracked.
+*_secrets.h
+!*_secrets.example.h

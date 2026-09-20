@@ -1,0 +1,12 @@
+menu "Notification sound"
+
+    config SOUND_VOLUME
+        int "Chime volume (0-100)"
+        range 0 100
+        default 40
+        help
+            Codec output volume for the notification chime. The speaker is
+            close to the user on a desk, so this wants to be well below what
+            sounds reasonable on a bench.
+
+endmenu

@@ -12,4 +12,21 @@ namespace board {
  */
 esp_err_t init();
 
+/** Panel backlight, 0-100. */
+esp_err_t set_brightness(int percent);
+
+/** Same, shaped for ui::BrightnessHandler, which cannot report errors. */
+void set_brightness_percent(int percent);
+
+/** Brightness applied at startup. */
+inline constexpr int kDefaultBrightness = 80;
+
+/**
+ * @brief Lowest backlight the panel actually responds to.
+ *
+ * Below this the display does not get any dimmer, so offering the range is
+ * just a control that appears broken.
+ */
+inline constexpr int kMinBrightness = 20;
+
 }  // namespace board
