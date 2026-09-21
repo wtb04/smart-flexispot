@@ -32,6 +32,7 @@ constexpr Spec SPECS[] = {
     // Zero until a colour has been chosen, which leaves the panel on its own.
     {"accent", 0, 0, 0xffffff},
     {"rail_right", 0, 0, 1},
+    {"flipped", 0, 0, 1},
 };
 constexpr int COUNT = static_cast<int>(Key::Count);
 static_assert(std::size(SPECS) == COUNT, "every key needs a spec");

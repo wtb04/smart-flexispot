@@ -9,3 +9,6 @@ sdkconfig.old
 # remember. The .example.h templates stay tracked.
 *_secrets.h
 !*_secrets.example.h
+
+# Natural Earth downloads for tools/make_map.py.
+.map-cache/

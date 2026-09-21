@@ -1,3 +1,6 @@
 dependencies:
   idf:
     version: ">=5.5"
+  # The part's jpeg engine is baseline only and every aircraft photograph
+  # planespotters serves is progressive, so those are decoded in software.
+  espressif/libjpeg-turbo: "^3.1.0"

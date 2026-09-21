@@ -5,8 +5,12 @@
 namespace board {
 
 /** Brings up rails, panel, touch and the LVGL port task. Once, before any lv_*
- *  call. */
-esp_err_t init();
+ *  call. flipped hangs the panel the other way up. */
+esp_err_t init(bool flipped);
+
+/** Turns the picture and the touchscreen over together. Call with the LVGL
+ *  lock held. */
+void set_flipped(bool flipped);
 
 /** Panel backlight, 0-100. */
 esp_err_t set_brightness(int percent);

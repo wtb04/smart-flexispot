@@ -14,6 +14,7 @@ enum class Key : std::uint8_t {
     DeskBluetooth,
     Accent,
     RailSide,
+    Flipped,
     Count,
 };
 

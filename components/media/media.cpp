@@ -10,7 +10,9 @@
 #include "hass_secrets.h"
 
 #include "esp_heap_caps.h"
+#include "jpeglib.h"
 
+#include <csetjmp>
 #include <cstdio>
 #include <cstring>
 
@@ -255,6 +257,89 @@ bool decode(std::size_t bytes)
     }
 }
 
+
+// SOF0 and SOF1 are the two the engine can read; SOF2 is progressive. Walking
+// the segment headers is enough, and stops at the first scan.
+bool baseline(const std::uint8_t *jpeg, std::size_t length)
+{
+    std::size_t at = 2;  // past the start-of-image marker
+    while (at + 4 <= length && jpeg[at] == 0xff) {
+        const std::uint8_t marker = jpeg[at + 1];
+        if (marker == 0xc0 || marker == 0xc1) {
+            return true;
+        }
+        if (marker == 0xda || (marker >= 0xc2 && marker <= 0xcf && marker != 0xc4 &&
+                               marker != 0xc8 && marker != 0xcc)) {
+            return false;
+        }
+        at += 2 + (static_cast<std::size_t>(jpeg[at + 2]) << 8) + jpeg[at + 3];
+    }
+    return false;
+}
+
+struct JpegError {
+    jpeg_error_mgr pub;
+    jmp_buf        escape;
+};
+
+void on_jpeg_error(j_common_ptr info)
+{
+    std::longjmp(reinterpret_cast<JpegError *>(info->err)->escape, 1);
+}
+
+// The part's engine takes baseline jpegs only, and every aircraft photograph
+// planespotters serves is progressive, so those come through here instead.
+// A progressive decode holds the whole coefficient array at once, which is far
+// larger than the picture; SPIRAM_MALLOC_ALWAYSINTERNAL sends an allocation
+// that size to PSRAM, which is the only reason this is affordable.
+bool decode_soft(const void *jpeg, std::size_t length, std::uint16_t *out, int max_w, int max_h,
+                 int &out_w, int &out_h)
+{
+    jpeg_decompress_struct info{};
+    JpegError              err{};
+
+    info.err           = jpeg_std_error(&err.pub);
+    err.pub.error_exit = on_jpeg_error;
+    if (setjmp(err.escape) != 0) {
+        jpeg_destroy_decompress(&info);
+        return false;
+    }
+
+    jpeg_create_decompress(&info);
+    jpeg_mem_src(&info, static_cast<const unsigned char *>(jpeg), length);
+    jpeg_read_header(&info, TRUE);
+
+    info.out_color_space = JCS_RGB565;
+    // Scaling during the inverse DCT rather than afterwards, so a picture
+    // larger than the frame never has to exist at full size.
+    info.scale_num   = 1;
+    info.scale_denom = 1;
+    jpeg_calc_output_dimensions(&info);
+    while ((static_cast<int>(info.output_width) > max_w ||
+            static_cast<int>(info.output_height) > max_h) &&
+           info.scale_denom < 8) {
+        info.scale_denom *= 2;
+        jpeg_calc_output_dimensions(&info);
+    }
+    if (static_cast<int>(info.output_width) > max_w ||
+        static_cast<int>(info.output_height) > max_h) {
+        jpeg_destroy_decompress(&info);
+        return false;
+    }
+
+    jpeg_start_decompress(&info);
+    out_w = static_cast<int>(info.output_width);
+    out_h = static_cast<int>(info.output_height);
+    while (info.output_scanline < info.output_height) {
+        auto *row = reinterpret_cast<JSAMPROW>(
+            out + static_cast<std::size_t>(info.output_scanline) * out_w);
+        jpeg_read_scanlines(&info, &row, 1);
+    }
+    jpeg_finish_decompress(&info);
+    jpeg_destroy_decompress(&info);
+    return true;
+}
+
 }  // namespace
 
 bool decode_image(const void *jpeg, std::size_t length, std::uint16_t *out, int max_w, int max_h,
@@ -272,12 +357,14 @@ bool decode_image(const void *jpeg, std::size_t length, std::uint16_t *out, int 
     // be moved into it rather than decoded where they landed.
     std::memcpy(s_jpeg, jpeg, length);
 
-    // The engine refuses a picture whose width times height is not a multiple
-    // of eight, and refuses it loudly from inside the driver. Roughly one
-    // aircraft thumbnail in five is such a picture, which is a normal thing to
-    // come across rather than three lines of error.
+    // The engine is asked only where it can actually help: it refuses a picture
+    // whose width times height is not a multiple of eight, and it cannot read a
+    // progressive one at all. Anything it will not take goes to the software
+    // decoder below rather than being given up on. Progressive is spotted here
+    // rather than by asking, because asking makes the driver complain about a
+    // file that was never its business.
     jpeg_decode_picture_info_t info{};
-    if (jpeg_decoder_get_info(s_jpeg, length, &info) == ESP_OK &&
+    if (baseline(s_jpeg, length) && jpeg_decoder_get_info(s_jpeg, length, &info) == ESP_OK &&
         (info.width * info.height) % 8 == 0 &&
         static_cast<int>(info.width) <= max_w && static_cast<int>(info.height) <= max_h &&
         static_cast<int>(info.width) <= MAX_DECODE_SIDE &&
@@ -309,6 +396,10 @@ bool decode_image(const void *jpeg, std::size_t length, std::uint16_t *out, int 
             }
             ok = true;
         }
+    }
+
+    if (!ok) {
+        ok = decode_soft(s_jpeg, length, out, max_w, max_h, out_w, out_h);
     }
 
     xSemaphoreGive(s_decoder_lock);

@@ -7,6 +7,11 @@
 
 namespace radar {
 
+// The feed returns whatever is in range and this decides how many of them get
+// kept, drawn and tapped. Each one costs a line and a label on the scope, drawn
+// from internal memory: sixty took the low-water mark from 44 KB to 15 KB, and
+// this corner of the sky has never held forty at a hundred and sixty
+// kilometres.
 inline constexpr int kMaxAircraft = 40;
 
 struct Snapshot {

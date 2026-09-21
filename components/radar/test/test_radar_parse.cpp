@@ -208,6 +208,23 @@ void test_lookup_rejects()
     check(!parse_aircraft(nullptr, 0, details), "null aircraft input");
 }
 
+void test_photo(const std::string &json, const std::string &none)
+{
+    char url[160] = {};
+    check(parse_photo(json.c_str(), json.size(), url, sizeof(url)), "a photo is found");
+    // The address arrives with its slashes escaped and has to come out usable.
+    check(std::strncmp(url, "https://", 8) == 0, "the photo address is a url");
+    check(std::strstr(url, "\\") == nullptr, "the escapes are gone");
+    check(std::strstr(url, "_280.jpg") != nullptr, "the larger thumbnail is taken");
+
+    url[0] = 'x';
+    check(!parse_photo(none.c_str(), none.size(), url, sizeof(url)),
+          "an aircraft nobody has photographed");
+    check(url[0] == '\0', "and it leaves nothing behind");
+
+    check(!parse_photo(nullptr, 0, url, sizeof(url)), "null photo input");
+}
+
 }  // namespace
 
 int main(int argc, char **argv)
@@ -229,6 +246,12 @@ int main(int argc, char **argv)
         test_aircraft(aircraft);
     }
     test_lookup_rejects();
+
+    const std::string photo = read_file(argc > 4 ? argv[4] : "planespotters_photo.json");
+    const std::string none  = read_file(argc > 5 ? argv[5] : "planespotters_none.json");
+    if (!photo.empty() && !none.empty()) {
+        test_photo(photo, none);
+    }
     std::printf("\n%s\n", g_failures == 0 ? "ALL PASS" : "FAILURES");
     return g_failures == 0 ? 0 : 1;
 }

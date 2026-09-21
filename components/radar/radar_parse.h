@@ -44,6 +44,7 @@ struct Details {
     char photo_url[160];
     bool has_route;
     bool has_aircraft;
+    bool photo_checked;  // the photo database has been asked, whatever it said
 };
 
 /** Reads /v0/callsign/{callsign}. Leaves the aircraft half of `out` alone. */
@@ -51,6 +52,11 @@ bool parse_route(const char *json, std::size_t length, Details &out);
 
 /** Reads /v0/aircraft/{hex}. Leaves the route half of `out` alone. */
 bool parse_aircraft(const char *json, std::size_t length, Details &out);
+
+/** Reads planespotters' /pub/photos/hex/{hex} and takes the larger thumbnail's
+ *  address. False when the aircraft has no photograph on file, which is an
+ *  ordinary answer rather than a failure. */
+bool parse_photo(const char *json, std::size_t length, char *out, std::size_t size);
 
 /** Reads an adsb.fi v2 response, which is far too large to hand to a DOM
  *  parser on this part: the allocator keeps anything under sixteen kilobytes

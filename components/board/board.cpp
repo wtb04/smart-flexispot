@@ -13,6 +13,8 @@ namespace {
 
 constexpr char TAG[] = "board";
 
+lv_display_t *s_disp = nullptr;
+
 constexpr TickType_t LCD_RAIL_SETTLE   = pdMS_TO_TICKS(200);
 constexpr TickType_t TOUCH_RAIL_SETTLE = pdMS_TO_TICKS(500);
 
@@ -71,20 +73,30 @@ esp_err_t start_display(lv_display_t **out_disp)
 
 }  // namespace
 
-esp_err_t init()
+esp_err_t init(bool flipped)
 {
     ESP_RETURN_ON_ERROR(power_up_panel(), TAG, "panel power");
 
     lv_display_t *disp = nullptr;
     ESP_RETURN_ON_ERROR(start_display(&disp), TAG, "display");
 
-    // Panel is natively 720x1280 portrait; the Tab5 is used landscape.
-    bsp_display_rotate(disp, LV_DISPLAY_ROTATION_90);
+    s_disp = disp;
+    set_flipped(flipped);
 
     // Backlight stays off until display_on(): the panel powers up showing
     // whatever was in it, and lighting that is the blue flash at boot.
     ESP_RETURN_ON_ERROR(bsp_display_backlight_off(), TAG, "backlight");
     return ESP_OK;
+}
+
+// The touchscreen follows for free: the BSP hands esp_lcd_touch no mirroring
+// or swapping of its own, so LVGL maps every raw portrait coordinate through
+// the display rotation itself. Turning the picture turns the touch with it.
+void set_flipped(bool flipped)
+{
+    // Panel is natively 720x1280 portrait; the Tab5 is used landscape, and the
+    // other way up is that same landscape a further half turn round.
+    bsp_display_rotate(s_disp, flipped ? LV_DISPLAY_ROTATION_270 : LV_DISPLAY_ROTATION_90);
 }
 
 esp_err_t set_brightness(int percent)

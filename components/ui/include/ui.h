@@ -92,6 +92,9 @@ using PrimaryHandler = void (*)(std::uint32_t colour);
 /** True while the rail is against the right edge. */
 using RailSideHandler = void (*)(bool right);
 
+/** True while the panel is hung the other way up. */
+using OrientationHandler = void (*)(bool flipped);
+
 /** showing is true while the scope is the page on screen, reachable is false
  *  once presence gating has hidden it away entirely. */
 using RadarHandler = void (*)(bool showing, bool reachable);
@@ -165,12 +168,15 @@ struct Handlers {
     LogHandler         log;
     PrimaryHandler     primary;
     RailSideHandler    rail_side;
+    OrientationHandler orientation;
 };
 
 /** Requires the LVGL port to be running. A zero accent keeps the built-in
- *  colour; rail_right puts the rail against the right edge instead of the left. */
+ *  colour; rail_right puts the rail against the right edge instead of the left.
+ *  flipped only tells the page which way board::init() already turned the
+ *  panel. */
 esp_err_t init(const Handlers &handlers, int initial_brightness, std::uint32_t accent,
-               bool rail_right);
+               bool rail_right, bool flipped);
 
 // Advances the startup screen. Ignored once it has been dismissed.
 esp_err_t splash_step(const char *label, int percent);

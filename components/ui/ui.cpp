@@ -55,6 +55,10 @@ struct Layout {
 // rather than assuming the left.
 bool s_rail_right = false;
 
+// Which way up the panel is hung. The picture and the touchscreen are turned
+// together by board::set_flipped(); this is only what the page shows.
+bool s_flipped = false;
+
 Layout layout()
 {
     lv_display_t      *disp = lv_display_get_default();
@@ -92,6 +96,7 @@ lv_obj_t *s_rail          = nullptr;
 lv_obj_t *s_content       = nullptr;
 lv_obj_t *s_clock_box     = nullptr;
 lv_obj_t *s_side_buttons[2] = {};
+lv_obj_t *s_flip_buttons[2] = {};
 lv_obj_t *s_wifi_icon     = nullptr;
 lv_obj_t *s_wifi_slash    = nullptr;
 lv_obj_t *s_phone_icon    = nullptr;
@@ -550,14 +555,19 @@ void place_for_side()
                  GAP + l.content_h / 2 - l.screen_h / 2);
 }
 
-void paint_side_buttons()
+void paint_choice(lv_obj_t *const buttons[2], bool second)
 {
     for (int i = 0; i < 2; ++i) {
-        const bool chosen = s_rail_right == (i == 1);
-        lv_obj_set_state(s_side_buttons[i], LV_STATE_CHECKED, chosen);
-        theme::set_text_color(lv_obj_get_child(s_side_buttons[i], 0),
+        const bool chosen = second == (i == 1);
+        lv_obj_set_state(buttons[i], LV_STATE_CHECKED, chosen);
+        theme::set_text_color(lv_obj_get_child(buttons[i], 0),
                               chosen ? theme::text : theme::secondary);
     }
+}
+
+void paint_side_buttons()
+{
+    paint_choice(s_side_buttons, s_rail_right);
 }
 
 void apply_rail_side(bool right)
@@ -1631,11 +1641,12 @@ constexpr std::int32_t DETAIL_ROW_H = 30;
 constexpr std::int32_t TILE_DOT     = 14;
 constexpr std::size_t  LOG_TEXT_MAX = 4096;
 
-lv_obj_t *s_settings_view = nullptr;
-lv_obj_t *s_diag_view     = nullptr;
-lv_obj_t *s_diag_summary  = nullptr;
-lv_obj_t *s_volume_value  = nullptr;
-lv_obj_t *s_volume_slider = nullptr;
+lv_obj_t *s_settings_view   = nullptr;
+lv_obj_t *s_appearance_view = nullptr;
+lv_obj_t *s_diag_view       = nullptr;
+lv_obj_t *s_diag_summary    = nullptr;
+lv_obj_t *s_volume_value    = nullptr;
+lv_obj_t *s_volume_slider   = nullptr;
 
 lv_obj_t *s_tile_value[INFO_CARD_COUNT] = {};
 lv_obj_t *s_tile_dot[INFO_CARD_COUNT]   = {};
@@ -1746,9 +1757,16 @@ void show_diagnostics_cb(lv_event_t *)
     lv_obj_set_hidden(s_diag_view, false);
 }
 
+void show_appearance_cb(lv_event_t *)
+{
+    lv_obj_set_hidden(s_settings_view, true);
+    lv_obj_set_hidden(s_appearance_view, false);
+}
+
 void show_settings_cb(lv_event_t *)
 {
     lv_obj_set_hidden(s_diag_view, true);
+    lv_obj_set_hidden(s_appearance_view, true);
     lv_obj_set_hidden(s_settings_view, false);
 }
 
@@ -2062,6 +2080,20 @@ void side_clicked_cb(lv_event_t *e)
     }
 }
 
+void flip_clicked_cb(lv_event_t *e)
+{
+    const bool flipped = lv_event_get_user_data(e) != nullptr;
+    if (flipped == s_flipped) {
+        return;
+    }
+    s_flipped = flipped;
+    board::set_flipped(flipped);
+    paint_choice(s_flip_buttons, flipped);
+    if (s_handlers.orientation != nullptr) {
+        s_handlers.orientation(flipped);
+    }
+}
+
 // The same shell as a slider card: icon, caption, then whatever the setting is
 // operated with. A handler makes it a button, so the whole row is the target.
 lv_obj_t *build_row_card(lv_obj_t *parent, std::int32_t y, std::int32_t w, const char *icon,
@@ -2099,19 +2131,22 @@ void build_accent_card(lv_obj_t *parent, std::int32_t y, std::int32_t w)
     theme::make_label(root, LV_SYMBOL_RIGHT, theme::secondary, fonts::size_28());
 }
 
-void build_side_card(lv_obj_t *parent, std::int32_t y, std::int32_t w)
+// The pair carries the choice at LV_STATE_CHECKED, so showing it again is a
+// state change rather than a restyle, and the accent follows on its own.
+void build_choice_card(lv_obj_t *parent, std::int32_t y, std::int32_t w, const char *icon,
+                       const char *title, const char *first, const char *second,
+                       lv_event_cb_t clicked, lv_obj_t *out[2])
 {
-    lv_obj_t *root = build_row_card(parent, y, w, LV_SYMBOL_BARS, "Sidebar", nullptr);
+    lv_obj_t         *root    = build_row_card(parent, y, w, icon, title, nullptr);
+    const char *const text[2] = {first, second};
     for (int i = 0; i < 2; ++i) {
-        lv_obj_t *btn =
-            theme::make_button(root, i == 0 ? "LEFT" : "RIGHT", theme::panel, fonts::size_22());
+        lv_obj_t *btn = theme::make_button(root, text[i], theme::panel, fonts::size_22());
         lv_obj_set_size(btn, SIDE_BTN_W, SIDE_BTN_H);
         theme::fill_accent(btn, LV_STATE_CHECKED);
-        lv_obj_add_event_cb(btn, side_clicked_cb, LV_EVENT_CLICKED,
+        lv_obj_add_event_cb(btn, clicked, LV_EVENT_CLICKED,
                             reinterpret_cast<void *>(static_cast<std::intptr_t>(i)));
-        s_side_buttons[i] = btn;
+        out[i] = btn;
     }
-    paint_side_buttons();
 }
 
 // Swatches, not sliders: a hue is chosen by eye, and the target has to be found
@@ -2162,55 +2197,18 @@ void build_colour_picker(lv_obj_t *parent)
     s_colour_picker->add_close_button();
 }
 
-void build_settings_view(lv_obj_t *parent, std::int32_t w, std::int32_t h)
+lv_obj_t *build_sub_view(lv_obj_t *parent, std::int32_t w, std::int32_t h)
 {
     lv_obj_t *view = lv_obj_create(parent);
     lv_obj_set_pos(view, 0, 0);
     lv_obj_set_size(view, w, h);
     theme::style_panel(view, theme::panel, 0);
     lv_obj_set_style_bg_opa(view, LV_OPA_TRANSP, 0);
-
-    build_slider_card(view, 0, w, LV_SYMBOL_EYE_OPEN, "Brightness", s_initial_brightness,
-                      board::kMinBrightness, brightness_event_cb, &s_brightness_value);
-    s_volume_slider = build_slider_card(view, ROW_CARD_H + BUTTON_GAP, w, LV_SYMBOL_VOLUME_MAX,
-                                        "Notification volume", 0, 0, volume_changed_cb,
-                                        &s_volume_value);
-
-    build_accent_card(view, 2 * (ROW_CARD_H + BUTTON_GAP), w);
-    build_side_card(view, 3 * (ROW_CARD_H + BUTTON_GAP), w);
-
-    // Side by side and as tall as the rows above leave them: the page is full,
-    // and stacked they no longer fit.
-    const std::int32_t tiles_y = 4 * (ROW_CARD_H + BUTTON_GAP);
-    const std::int32_t tiles_h = h - tiles_y;
-    const std::int32_t diag_w  = (w - BUTTON_GAP) * 5 / 8;
-    const std::int32_t rest_w  = w - diag_w - BUTTON_GAP;
-
-    lv_obj_t *diag = build_tile(view, 0, tiles_y, diag_w, tiles_h, LV_SYMBOL_LIST, "Diagnostics");
-    lv_obj_add_event_cb(diag, show_diagnostics_cb, LV_EVENT_CLICKED, nullptr);
-    s_diag_summary = tile_value(diag, diag_w, "");
-    theme::set_text_color(s_diag_summary, theme::secondary);
-    lv_obj_t *chevron = theme::make_label(diag, LV_SYMBOL_RIGHT, theme::secondary,
-                                          fonts::size_28());
-    lv_obj_align(chevron, LV_ALIGN_RIGHT_MID, 0, 0);
-
-    lv_obj_t *restart = build_tile(view, diag_w + BUTTON_GAP, tiles_y, rest_w, tiles_h,
-                                   LV_SYMBOL_POWER, "Restart panel");
-    lv_obj_add_event_cb(restart, restart_held_cb, LV_EVENT_LONG_PRESSED, nullptr);
-    theme::set_text_color(tile_value(restart, rest_w, "Hold to restart"), theme::secondary);
-
-    s_settings_view = view;
+    return view;
 }
 
-void build_diagnostics_view(lv_obj_t *parent, std::int32_t w, std::int32_t h)
+void build_sub_header(lv_obj_t *view, const char *title)
 {
-    lv_obj_t *view = lv_obj_create(parent);
-    lv_obj_set_pos(view, 0, 0);
-    lv_obj_set_size(view, w, h);
-    theme::style_panel(view, theme::panel, 0);
-    lv_obj_set_style_bg_opa(view, LV_OPA_TRANSP, 0);
-    lv_obj_set_hidden(view, true);
-
     lv_obj_t *back = lv_button_create(view);
     lv_obj_set_pos(back, 0, 0);
     lv_obj_set_size(back, 120, DIAG_HEADER_H);
@@ -2218,8 +2216,80 @@ void build_diagnostics_view(lv_obj_t *parent, std::int32_t w, std::int32_t h)
     lv_obj_center(theme::make_label(back, LV_SYMBOL_LEFT, theme::text, fonts::size_28()));
     lv_obj_add_event_cb(back, show_settings_cb, LV_EVENT_CLICKED, nullptr);
 
-    lv_obj_t *title = theme::make_label(view, "Diagnostics", theme::text, fonts::size_28());
-    lv_obj_set_pos(title, 140, 12);
+    lv_obj_t *label = theme::make_label(view, title, theme::text, fonts::size_28());
+    lv_obj_set_pos(label, 140, 12);
+}
+
+lv_obj_t *build_page_tile(lv_obj_t *parent, std::int32_t y, std::int32_t w, std::int32_t h,
+                          const char *icon, const char *title, lv_event_cb_t clicked)
+{
+    lv_obj_t *tile = build_tile(parent, 0, y, w, h, icon, title);
+    lv_obj_add_event_cb(tile, clicked, LV_EVENT_CLICKED, nullptr);
+    lv_obj_t *chevron = theme::make_label(tile, LV_SYMBOL_RIGHT, theme::secondary,
+                                          fonts::size_28());
+    lv_obj_align(chevron, LV_ALIGN_RIGHT_MID, 0, 0);
+    return tile;
+}
+
+void build_settings_view(lv_obj_t *parent, std::int32_t w, std::int32_t h)
+{
+    lv_obj_t *view = build_sub_view(parent, w, h);
+
+    s_volume_slider = build_slider_card(view, 0, w, LV_SYMBOL_VOLUME_MAX, "Notification volume", 0,
+                                        0, volume_changed_cb, &s_volume_value);
+
+    const std::int32_t tiles_y = ROW_CARD_H + BUTTON_GAP;
+    const std::int32_t tile_h  = (h - tiles_y - 2 * BUTTON_GAP) / 3;
+    const std::int32_t pitch   = tile_h + BUTTON_GAP;
+
+    lv_obj_t *look = build_page_tile(view, tiles_y, w, tile_h, LV_SYMBOL_IMAGE, "Appearance",
+                                     show_appearance_cb);
+    theme::set_text_color(tile_value(look, w, "Colour, sidebar, orientation, brightness"),
+                          theme::secondary);
+
+    lv_obj_t *diag = build_page_tile(view, tiles_y + pitch, w, tile_h, LV_SYMBOL_LIST,
+                                     "Diagnostics", show_diagnostics_cb);
+    s_diag_summary = tile_value(diag, w, "");
+    theme::set_text_color(s_diag_summary, theme::secondary);
+
+    lv_obj_t *restart = build_tile(view, 0, tiles_y + 2 * pitch, w, tile_h, LV_SYMBOL_POWER,
+                                   "Restart panel");
+    lv_obj_add_event_cb(restart, restart_held_cb, LV_EVENT_LONG_PRESSED, nullptr);
+    theme::set_text_color(tile_value(restart, w, "Hold to restart"), theme::secondary);
+
+    s_settings_view = view;
+}
+
+void build_appearance_view(lv_obj_t *parent, std::int32_t w, std::int32_t h)
+{
+    lv_obj_t *view = build_sub_view(parent, w, h);
+    lv_obj_set_hidden(view, true);
+    build_sub_header(view, "Appearance");
+
+    const std::int32_t body_y = DIAG_HEADER_H + BUTTON_GAP;
+    // Stacked with an ordinary gap rather than spread to fill the page: four
+    // rows pushed to the corners of all that room read as four unrelated
+    // things rather than one list.
+    const std::int32_t pitch = ROW_CARD_H + BUTTON_GAP;
+
+    build_slider_card(view, body_y, w, LV_SYMBOL_EYE_OPEN, "Brightness", s_initial_brightness,
+                      board::kMinBrightness, brightness_event_cb, &s_brightness_value);
+    build_accent_card(view, body_y + pitch, w);
+    build_choice_card(view, body_y + 2 * pitch, w, LV_SYMBOL_BARS, "Sidebar", "LEFT", "RIGHT",
+                      side_clicked_cb, s_side_buttons);
+    paint_side_buttons();
+    build_choice_card(view, body_y + 3 * pitch, w, LV_SYMBOL_REFRESH, "Orientation", "NORMAL",
+                      "FLIPPED", flip_clicked_cb, s_flip_buttons);
+    paint_choice(s_flip_buttons, s_flipped);
+
+    s_appearance_view = view;
+}
+
+void build_diagnostics_view(lv_obj_t *parent, std::int32_t w, std::int32_t h)
+{
+    lv_obj_t *view = build_sub_view(parent, w, h);
+    lv_obj_set_hidden(view, true);
+    build_sub_header(view, "Diagnostics");
 
     const std::int32_t grid_y = DIAG_HEADER_H + BUTTON_GAP;
     const int          rows   = (INFO_CARD_COUNT + 2) / 3;
@@ -2247,6 +2317,7 @@ void build_settings_page(lv_obj_t *page)
     }
 
     build_settings_view(page, inner_w, inner_h);
+    build_appearance_view(page, inner_w, inner_h);
     build_diagnostics_view(page, inner_w, inner_h);
     build_detail_overlay(page);
     build_log_overlay(page);
@@ -2545,7 +2616,7 @@ esp_err_t splash_done()
 }
 
 esp_err_t init(const Handlers &handlers, int initial_brightness, std::uint32_t accent,
-               bool rail_right)
+               bool rail_right, bool flipped)
 {
     ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
     // Before any label exists: the fonts carry the fallback Montserrat lacks.
@@ -2557,6 +2628,7 @@ esp_err_t init(const Handlers &handlers, int initial_brightness, std::uint32_t a
         theme::set_primary(accent);
     }
     s_rail_right         = rail_right;
+    s_flipped            = flipped;
     s_handlers           = handlers;
     s_initial_brightness = initial_brightness;
     build_screen();

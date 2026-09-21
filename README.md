@@ -27,6 +27,16 @@ idf.py build
 idf.py -p /dev/cu.usbmodem* flash monitor
 ```
 
+On a clean tree the first `idf.py build` fails while configuring
+`espressif/libjpeg-turbo`: that component asks CMake for the include path of a
+target named `idf::libjpeg-turbo`, but the component manager installs it under
+its namespace, so the target is `idf::espressif__libjpeg-turbo` and the
+expression never resolves. The top-level `CMakeLists.txt` rewrites the line, but
+the component is only downloaded part-way through that same run, so it takes
+effect on the second. **Run `idf.py build` again and it goes through.** The
+component is there for aircraft photographs, which are progressive jpegs; the
+part's own engine reads baseline only.
+
 `set-target` regenerates `sdkconfig` from `sdkconfig.defaults`, and the
 component manager pulls `espressif/m5stack_tab5` and its dependencies (LVGL,
 `esp_lvgl_port`, panel and touch drivers) into `managed_components/` on the

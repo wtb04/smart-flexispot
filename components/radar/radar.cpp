@@ -11,6 +11,9 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
+#include <algorithm>
+#include <atomic>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 
@@ -19,34 +22,54 @@ namespace {
 
 constexpr char TAG[] = "radar";
 
-// adsb.fi's open feed: no account, no key, and it returns the distance and
-// bearing from the point asked about, which saves doing it here.
-constexpr char FEED_HOST[]  = "https://opendata.adsb.fi";
+// adsb.lol's open feed: no account, no key, and it returns the distance and
+// bearing from the point asked about, which saves doing it here. Taken over
+// plain http, which it serves without redirecting, so the sweep no longer sets
+// up a TLS session every few seconds -- that session is drawn from the same
+// internal memory the Bluetooth and AES drivers need, and it was the largest
+// recurring claim on it. Compared against adsb.fi at the same moment: the same
+// twenty-one aircraft, to the hex. Its data is ODbL.
+constexpr char FEED_HOST[]  = "http://api.adsb.lol";
 // Who is flying it and where it is going. Also keyless, and asked only about
 // whatever aircraft has been tapped or is about to be.
 constexpr char LOOKUP_HOST[] = "https://api.adsbdb.com";
-constexpr char AGENT[] = "tab5-panel";
+
+// adsbdb has a picture for about a third of what flies past here; planespotters
+// has one for four fifths, and covers everything adsbdb does. Their thumbnails
+// also come off a plain http host, so the one request per photograph that used
+// to need a TLS session now needs none at all. The api itself refuses a request
+// whose agent carries no way of getting in touch.
+constexpr char PHOTO_HOST[]  = "https://api.planespotters.net";
+constexpr char PHOTO_AGENT[] = "tab5-panel (+https://woutertenbrinke.nl)";
+constexpr char AGENT[]       = "tab5-panel";
 
 // Asked for in nautical miles because that is what the feed takes, shown in
 // kilometres because that is what the rings are labelled in. Four rings across
 // eighty land on 20, 40, 60 and 80.
-constexpr int RANGE_KM = 80;
-constexpr int RANGE_NM = 44;
+// How far the scope reaches, in kilometres, chosen from the page. The feed
+// takes nautical miles.
+// Always the farthest the page can be set to. One sweep covers every zoom
+// level, so changing the zoom shows the right aircraft at once instead of the
+// previous range's until the next request comes back.
+constexpr int    RANGE_DEFAULT_KM = 160;
+constexpr float  NM_PER_KM        = 0.539957f;
+std::atomic<int>  s_range_km{RANGE_DEFAULT_KM};
+std::atomic<bool> s_force_fetch{false};
 
 // Big enough for the thumbnails adsbdb points at, which run to a few hundred
 // pixels across.
 constexpr int PHOTO_MAX_W = 320;
 constexpr int PHOTO_MAX_H = 240;
 
-// The feed asks for no more than one request a second; the fast rate is a
-// tenth of that and still quicker than aircraft cross forty miles of scope.
+// The feed asks for no more than one request a second; the fast rate is a fifth
+// of that, and costs nothing but bytes now that it needs no handshake.
 // The slow one only has to keep the page from opening on nothing.
 // The home position lands while the broker, the socket and Bluetooth are all
 // still coming up, and a TLS handshake thrown in on top of that has failed for
 // want of internal memory. A few seconds is enough for the rest to settle.
 constexpr std::int64_t FIRST_FETCH_DELAY_US = 6 * 1000000LL;
 
-constexpr std::int64_t POLL_ACTIVE_US = 10 * 1000000LL;
+constexpr std::int64_t POLL_ACTIVE_US = 5 * 1000000LL;
 constexpr std::int64_t POLL_IDLE_US   = 60 * 1000000LL;
 
 // Forty nautical miles over a busy corner of Europe is about 25 kB; this is
@@ -82,12 +105,32 @@ std::size_t  s_body_len = 0;
 // already open. That is worth the 9 KB it holds while the page is in use.
 constexpr std::int64_t IDLE_CLOSE_US = 20 * 1000000LL;
 
-esp_http_client_handle_t s_feed_client   = nullptr;
-esp_http_client_handle_t s_lookup_client = nullptr;
-esp_http_client_handle_t s_photo_client  = nullptr;
+// The picture host gets a far shorter leash than the lookup host. Tapping
+// around the scope fetches several photographs in a row, so the connection is
+// worth keeping through a burst, but between bursts it is holding memory the
+// TLS and AES drivers need and nothing is using it. Twenty seconds of that was
+// enough to run the DMA-capable heap down to thirteen kilobytes.
+constexpr std::int64_t PHOTO_IDLE_US = 5 * 1000000LL;
+
+esp_http_client_handle_t s_feed_client     = nullptr;
+esp_http_client_handle_t s_lookup_client   = nullptr;
+esp_http_client_handle_t s_photoapi_client = nullptr;
+esp_http_client_handle_t s_photo_client    = nullptr;
 
 std::int64_t s_lookup_at_us = 0;
 bool         s_lookups_open = false;
+std::int64_t s_photo_at_us  = 0;
+bool         s_photo_open   = false;
+
+// There are rarely more than a dozen aircraft in range, and what is known about
+// one never changes, so the whole scope can be warmed rather than just the
+// aircraft most likely to be tapped. Spread over a few sweeps so a busy sky
+// does not turn into a burst of requests at a free database.
+constexpr int PREFETCH_PER_SWEEP = 3;
+
+// Cleared on the radar task rather than wherever the page was navigated away
+// from, since the cache belongs to that task.
+std::atomic<bool> s_drop_cache{false};
 
 // Nothing looked up ever changes, so nothing needs looking up twice: a route
 // belongs to a callsign and a registration to an airframe. Keyed on both,
@@ -161,16 +204,21 @@ esp_err_t on_event(esp_http_client_event_t *event)
     return ESP_OK;
 }
 
-esp_http_client_handle_t open_client(const char *url)
+// The certificate bundle is attached only where it can be needed. Two of these
+// hosts are spoken to over plain http, and a client that can never negotiate
+// TLS has no use for a root store.
+esp_http_client_handle_t open_client(const char *url, const char *agent = AGENT)
 {
     esp_http_client_config_t cfg = {};
     cfg.url                      = url;
     cfg.event_handler            = on_event;
     cfg.timeout_ms               = 10000;
-    cfg.crt_bundle_attach        = esp_crt_bundle_attach;
-    cfg.user_agent               = AGENT;
+    cfg.user_agent               = agent;
     cfg.buffer_size              = 2048;
     cfg.keep_alive_enable        = true;
+    if (std::strncmp(url, "https://", 8) == 0) {
+        cfg.crt_bundle_attach = esp_crt_bundle_attach;
+    }
     return esp_http_client_init(&cfg);
 }
 
@@ -249,18 +297,26 @@ void cache_put(const char *hex, const char *flight, const Details &details)
     slot->valid   = true;
 }
 
+// Set when the feed says it has had enough, and honoured by skipping a sweep.
+// Free to use and asking for no more than a request a second, so being told to
+// slow down should actually slow something down.
+bool s_feed_backoff = false;
+
 bool fetch(float lat, float lon)
 {
+    const int range_km = s_range_km.load(std::memory_order_relaxed);
+
     char url[128];
-    std::snprintf(url, sizeof(url), "%s/api/v2/lat/%.4f/lon/%.4f/dist/%d", FEED_HOST,
-                  static_cast<double>(lat), static_cast<double>(lon), RANGE_NM);
+    std::snprintf(url, sizeof(url), "%s/v2/point/%.4f/%.4f/%d", FEED_HOST,
+                  static_cast<double>(lat), static_cast<double>(lon),
+                  static_cast<int>(std::lround(static_cast<float>(range_km) * NM_PER_KM)));
     const int status = get(s_feed_client, url, "feed");
-    // Ten seconds apart and nothing waiting on it, so its handshake is free as
-    // far as anyone can tell, and its session is not worth the memory.
     esp_http_client_close(s_feed_client);
     if (status != 200) {
+        s_feed_backoff = status == 429;
         return false;
     }
+    s_feed_backoff = false;
 
     const int count = parse(s_body, s_body_len, s_scratch, kMaxAircraft);
 
@@ -271,7 +327,7 @@ bool fetch(float lat, float lon)
     s_fetched_us = esp_timer_get_time();
     xSemaphoreGive(s_lock);
 
-    ESP_LOGI(TAG, "%d aircraft within %d km, %u bytes", count, RANGE_KM,
+    ESP_LOGI(TAG, "%d aircraft within %d km, %u bytes", count, range_km,
              static_cast<unsigned>(s_body_len));
 
     if (s_on_update != nullptr) {
@@ -304,6 +360,8 @@ void fetch_photo(const char *hex, const Details &details)
     int                width  = 0;
     int                height = 0;
     const int status = get(s_photo_client, details.photo_url, "photo");
+    s_photo_at_us    = esp_timer_get_time();
+    s_photo_open     = true;
     if (status == 200 &&
         media::decode_image(s_body, s_body_len, s_photo, PHOTO_MAX_W, PHOTO_MAX_H, width,
                             height)) {
@@ -371,18 +429,57 @@ bool fetch_details(const char *hex, const char *callsign, Details &out)
 // moment anybody is waiting on.
 void close_idle_lookups()
 {
-    if (!s_lookups_open || esp_timer_get_time() - s_lookup_at_us < IDLE_CLOSE_US) {
-        return;
+    const std::int64_t now = esp_timer_get_time();
+    if (s_photo_open && now - s_photo_at_us >= PHOTO_IDLE_US) {
+        esp_http_client_close(s_photo_client);
+        s_photo_open = false;
     }
-    esp_http_client_close(s_lookup_client);
-    esp_http_client_close(s_photo_client);
-    s_lookups_open = false;
+    if (s_lookups_open && now - s_lookup_at_us >= IDLE_CLOSE_US) {
+        esp_http_client_close(s_lookup_client);
+        // Warmed on the same burst as the lookups, so it is given back with
+        // them; leaving it out held a TLS session open for the whole uptime.
+        esp_http_client_close(s_photoapi_client);
+        s_lookups_open = false;
+    }
 }
 
-void look_up(const char *hex, const char *callsign)
+// `with_photo` is false when warming the cache: only the selected aircraft's
+// picture is ever shown, so fetching one per aircraft downloaded and decoded
+// a dozen images nobody would see, and held the connection to the picture
+// host open for the whole time the page was up. That connection costs
+// DMA-capable memory, of which this part has very little.
+// Asked once per aircraft and remembered with the rest of what is known about
+// it, including the answer "no photograph", so the burst of warming requests at
+// the start of a sweep is the only time this host is talked to. Downgraded to
+// plain http deliberately: the picture is public, the thumbnails are served
+// over it without a redirect, and a TLS session costs memory the AES and
+// Bluetooth drivers are already short of.
+void resolve_photo(const char *hex, Details &out)
+{
+    out.photo_checked = true;
+
+    char url[128];
+    std::snprintf(url, sizeof(url), "%s/pub/photos/hex/%s", PHOTO_HOST, hex);
+    if (get(s_photoapi_client, url, "photo lookup") != 200) {
+        return;
+    }
+
+    char found[sizeof(out.photo_url)];
+    if (!parse_photo(s_body, s_body_len, found, sizeof(found))) {
+        // Nothing on file there; whatever adsbdb offered is still worth a try.
+        return;
+    }
+    if (std::strncmp(found, "https://", 8) == 0) {
+        std::snprintf(out.photo_url, sizeof(out.photo_url), "http://%s", found + 8);
+    } else {
+        std::snprintf(out.photo_url, sizeof(out.photo_url), "%s", found);
+    }
+}
+
+void look_up(const char *hex, const char *callsign, bool with_photo)
 {
     Details           details{};
-    const CacheEntry *hit = cache_find(hex, callsign);
+    CacheEntry *hit = cache_find(hex, callsign);
 
     s_lookup_at_us = esp_timer_get_time();
     s_lookups_open = true;
@@ -395,6 +492,7 @@ void look_up(const char *hex, const char *callsign)
         const std::int64_t began = esp_timer_get_time();
         fetch_details(hex, callsign, details);
         cache_put(hex, callsign, details);
+        hit = cache_find(hex, callsign);
         ESP_LOGI(TAG, "%s: %s%s%s in %d ms", hex,
                  details.has_aircraft ? details.model : "unknown type",
                  details.has_route ? ", " : "", details.has_route ? details.origin_code : "",
@@ -405,43 +503,112 @@ void look_up(const char *hex, const char *callsign)
     s_details = details;
     xSemaphoreGive(s_lock);
 
+    if (with_photo && !details.photo_checked) {
+        resolve_photo(hex, details);
+        if (hit != nullptr) {
+            hit->details = details;
+        }
+    }
+
     if (s_on_details != nullptr) {
         s_on_details(hex, details);
     }
-    fetch_photo(hex, details);
+    if (with_photo) {
+        fetch_photo(hex, details);
+    }
 }
 
-// The nearest aircraft is the one the page selects on its own and the one a tap
-// is most likely to land on, so it is looked up before anybody asks: the only
-// lookup that feels instant is one that has already happened. Just the nearest,
-// though -- asking a free database about every aircraft in the sky every ten
-// seconds would be a poor way to treat it.
-void prefetch_nearest()
+// Asked for separately from the details, because the two answers come from
+// different hosts: doing them aircraft by aircraft left a TLS session open to
+// both at once, and each of those is drawn from the same internal memory the
+// Bluetooth and AES drivers are short of.
+void warm_photo(const char *hex, const char *callsign)
 {
-    char  hex[kHexLen]       = {};
-    char  flight[kFlightLen] = {};
-    float best               = 0.0f;
-    bool  have               = false;
+    CacheEntry *entry = cache_find(hex, callsign);
+    if (entry == nullptr || entry->details.photo_checked) {
+        return;
+    }
+    resolve_photo(hex, entry->details);
+}
+
+// Everything in range gets looked up before anybody asks for it: the only
+// lookup that feels instant is one that has already happened, and a scope this
+// empty can hold all of it. Nearest first, so a tap lands on a warm entry even
+// while the far side of the scope is still filling.
+void prefetch_visible()
+{
+    struct Want {
+        char  hex[kHexLen];
+        char  flight[kFlightLen];
+        float distance;
+    };
+    static Want wanted[kMaxAircraft];
+    int         count = 0;
 
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    for (int i = 0; i < s_count; ++i) {
+    for (int i = 0; i < s_count && count < kMaxAircraft; ++i) {
         const Aircraft &aircraft = s_list[i];
         if (aircraft.on_ground || aircraft.hex[0] == '\0') {
             continue;
         }
-        if (have && aircraft.distance_nm >= best) {
-            continue;
-        }
-        std::memcpy(hex, aircraft.hex, sizeof(hex));
-        std::memcpy(flight, aircraft.flight, sizeof(flight));
-        best = aircraft.distance_nm;
-        have = true;
+        std::memcpy(wanted[count].hex, aircraft.hex, sizeof(wanted[count].hex));
+        std::memcpy(wanted[count].flight, aircraft.flight, sizeof(wanted[count].flight));
+        wanted[count].distance = aircraft.distance_nm;
+        ++count;
     }
     xSemaphoreGive(s_lock);
 
-    if (have && cache_find(hex, flight) == nullptr) {
-        look_up(hex, flight);
+    std::sort(wanted, wanted + count,
+              [](const Want &a, const Want &b) { return a.distance < b.distance; });
+
+    // Details for all of them first, then photographs for all of them, so only
+    // one of the two hosts is ever connected at a time.
+    int chosen[PREFETCH_PER_SWEEP];
+    int fetched = 0;
+    for (int i = 0; i < count && fetched < PREFETCH_PER_SWEEP; ++i) {
+        if (cache_find(wanted[i].hex, wanted[i].flight) != nullptr) {
+            continue;
+        }
+        look_up(wanted[i].hex, wanted[i].flight, false);
+        chosen[fetched++] = i;
     }
+    if (fetched == 0) {
+        return;
+    }
+
+    esp_http_client_close(s_lookup_client);
+    for (int i = 0; i < fetched; ++i) {
+        warm_photo(wanted[chosen[i]].hex, wanted[chosen[i]].flight);
+    }
+    esp_http_client_close(s_photoapi_client);
+}
+
+// An aircraft that has left the scope will not be tapped, so what was learned
+// about it is no longer worth the room. Everything goes when the page does.
+void expire_cache()
+{
+    if (s_cache == nullptr) {
+        return;
+    }
+    if (s_drop_cache.exchange(false, std::memory_order_relaxed)) {
+        for (int i = 0; i < CACHE_SIZE; ++i) {
+            s_cache[i].valid = false;
+        }
+        return;
+    }
+
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    for (int i = 0; i < CACHE_SIZE; ++i) {
+        if (!s_cache[i].valid) {
+            continue;
+        }
+        bool still_here = false;
+        for (int j = 0; j < s_count && !still_here; ++j) {
+            still_here = std::strcmp(s_cache[i].hex, s_list[j].hex) == 0;
+        }
+        s_cache[i].valid = still_here;
+    }
+    xSemaphoreGive(s_lock);
 }
 
 [[noreturn]] void radar_task(void *)
@@ -464,9 +631,13 @@ void prefetch_nearest()
         s_want_pending = false;
         xSemaphoreGive(s_lock);
 
+        if (s_drop_cache.load(std::memory_order_relaxed)) {
+            expire_cache();
+        }
+
         // A tap is waiting on an answer, so it goes before the next sweep.
         if (pending) {
-            look_up(hex, callsign);
+            look_up(hex, callsign, true);
             continue;
         }
 
@@ -483,11 +654,22 @@ void prefetch_nearest()
             continue;
         }
 
-        const std::int64_t due = active ? POLL_ACTIVE_US : POLL_IDLE_US;
+        if (s_force_fetch.exchange(false, std::memory_order_relaxed)) {
+            last_fetch = 0;
+        }
+
+        std::int64_t due = active ? POLL_ACTIVE_US : POLL_IDLE_US;
+        // Doubled rather than more: the refusals come in ones rather than in
+        // runs, and three skipped sweeps to answer a single one is a visible
+        // gap on a page somebody is watching.
+        if (s_feed_backoff) {
+            due *= 2;
+        }
         if (last_fetch == 0 || esp_timer_get_time() - last_fetch >= due) {
             if (fetch(lat, lon)) {
+                expire_cache();
                 if (active) {
-                    prefetch_nearest();
+                    prefetch_visible();
                 }
             } else {
                 xSemaphoreTake(s_lock, portMAX_DELAY);
@@ -502,7 +684,11 @@ void prefetch_nearest()
         // A notification cuts the wait short, which is how opening the page
         // gets a reading straight away rather than up to a minute later.
         const std::int64_t waited = esp_timer_get_time() - last_fetch;
-        const std::int64_t rest   = waited >= due ? 1000 : (due - waited) / 1000;
+        std::int64_t       rest   = waited >= due ? 1000 : (due - waited) / 1000;
+        // A connection waiting to be given back is not worth a ten second wait.
+        if ((s_photo_open || s_lookups_open) && rest > 2000) {
+            rest = 2000;
+        }
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(rest));
     }
 }
@@ -532,11 +718,14 @@ esp_err_t start(UpdateHandler on_update, DetailsHandler on_details, PhotoHandler
     // Opened against each host up front so the url is all that changes later:
     // a client given a new url on the same host keeps the connection, which is
     // the whole point of holding on to them.
-    s_feed_client   = open_client(FEED_HOST);
-    s_lookup_client = open_client(LOOKUP_HOST);
-    s_photo_client  = open_client(LOOKUP_HOST);
+    s_feed_client     = open_client(FEED_HOST);
+    s_lookup_client   = open_client(LOOKUP_HOST);
+    s_photoapi_client = open_client(PHOTO_HOST, PHOTO_AGENT);
+    // The thumbnails themselves come off a plain http host, so this one never
+    // negotiates TLS at all.
+    s_photo_client = open_client("http://t.plnspttrs.net");
     ESP_RETURN_ON_FALSE(s_feed_client != nullptr && s_lookup_client != nullptr &&
-                            s_photo_client != nullptr,
+                            s_photoapi_client != nullptr && s_photo_client != nullptr,
                         ESP_ERR_NO_MEM, TAG, "http clients");
 
     s_task = xTaskCreateStaticPinnedToCore(radar_task, "radar", TASK_STACK, nullptr,
@@ -554,6 +743,10 @@ void set_active(bool active)
     const bool woke = active && !s_active;
     s_active        = active;
     xSemaphoreGive(s_lock);
+
+    if (!active) {
+        s_drop_cache.store(true, std::memory_order_relaxed);
+    }
 
     if (woke && s_task != nullptr) {
         xTaskNotifyGive(s_task);
@@ -626,7 +819,7 @@ void snapshot(Snapshot &out)
     out.count    = s_count;
     out.home_lat = s_home_lat;
     out.home_lon = s_home_lon;
-    out.range_km = RANGE_KM;
+    out.range_km = s_range_km.load(std::memory_order_relaxed);
     out.ok       = s_ok;
     out.age_s    = s_fetched_us == 0
                        ? -1

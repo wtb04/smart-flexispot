@@ -371,6 +371,56 @@ bool parse_route(const char *json, std::size_t length, Details &out)
     return out.has_route;
 }
 
+bool parse_photo(const char *json, std::size_t length, char *out, std::size_t size)
+{
+    if (json == nullptr || out == nullptr || size == 0) {
+        return false;
+    }
+    out[0] = '\0';
+
+    Scanner in{json, json + length};
+    if (!in.take('{')) {
+        return false;
+    }
+    for (;;) {
+        const char *key     = nullptr;
+        std::size_t key_len = 0;
+        if (!in.string(key, key_len) || !in.take(':')) {
+            return false;
+        }
+        if (key_is(key, key_len, "photos")) {
+            break;
+        }
+        if (!in.skip_value() || !in.take(',')) {
+            return false;
+        }
+    }
+
+    // An aircraft nobody has photographed answers with an empty array.
+    if (!in.take('[') || !in.take('{')) {
+        return false;
+    }
+    if (!enter_object(in, "thumbnail_large")) {
+        return false;
+    }
+
+    const Field fields[] = {{"src", out, size}};
+    if (!read_fields(in, fields, 1)) {
+        return false;
+    }
+
+    // The address comes back with its slashes escaped, which no url wants.
+    char *write = out;
+    for (const char *read = out; *read != '\0'; ++read) {
+        if (*read == '\\' && read[1] != '\0') {
+            ++read;
+        }
+        *write++ = *read;
+    }
+    *write = '\0';
+    return out[0] != '\0';
+}
+
 bool parse_aircraft(const char *json, std::size_t length, Details &out)
 {
     if (json == nullptr) {

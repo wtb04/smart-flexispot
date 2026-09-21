@@ -73,6 +73,11 @@ void on_rail_side(bool right)
     settings::set(settings::Key::RailSide, right);
 }
 
+void on_orientation(bool flipped)
+{
+    settings::set(settings::Key::Flipped, flipped);
+}
+
 void on_radar_page(bool showing, bool reachable)
 {
     radar::set_enabled(reachable);
@@ -104,17 +109,18 @@ extern "C" void app_main(void)
     ESP_ERROR_CHECK_WITHOUT_ABORT(logbuf::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(settings::load());
 
-    ESP_ERROR_CHECK(board::init());
+    const bool flipped = settings::enabled(settings::Key::Flipped);
+    ESP_ERROR_CHECK(board::init(flipped));
     const ui::Handlers handlers{desk::on_move,      desk::on_preset,      on_brightness_changed,
                                 room::on_media,     room::on_setpoint,    room::on_mode,
                                 room::on_lights,    room::on_light,       room::on_dial_toggle,
                                 diagnostics::refresh, on_setting,         on_volume,
                                 on_restart,           on_radar_page,      diagnostics::logs,
-                                on_primary,           on_rail_side};
+                                on_primary,           on_rail_side,       on_orientation};
     const int brightness = settings::get(settings::Key::Brightness);
     ESP_ERROR_CHECK(ui::init(handlers, brightness,
                              static_cast<std::uint32_t>(settings::get(settings::Key::Accent)),
-                             settings::enabled(settings::Key::RailSide)));
+                             settings::enabled(settings::Key::RailSide), flipped));
     // Through the same path a change takes, so the panel, the backlight and
     // what gets published all start out agreeing.
     on_brightness_changed(brightness);

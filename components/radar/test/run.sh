@@ -3,4 +3,5 @@
 set -e
 cd "$(dirname "$0")"
 c++ -std=c++20 -Wall -Wextra -I.. -o /tmp/radar_test test_radar_parse.cpp ../radar_parse.cpp
-exec /tmp/radar_test adsb_sample.json adsbdb_route.json adsbdb_aircraft.json
+exec /tmp/radar_test adsb_sample.json adsbdb_route.json adsbdb_aircraft.json \
+    planespotters_photo.json planespotters_none.json

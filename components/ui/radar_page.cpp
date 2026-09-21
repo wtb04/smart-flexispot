@@ -1,5 +1,7 @@
 #include "radar_page.h"
 
+#include "esp_heap_caps.h"
+#include "map_data.h"
 #include "theme.h"
 
 #include <algorithm>
@@ -36,8 +38,40 @@ struct Blip;
 // drawing a scope is that you can see the bearing.
 constexpr int READINGS = 5;
 
-// Where the altitude scale beside the scope tops out.
-constexpr int SCALE_TOP_FT = 40000;
+// Coastline, borders and water, drawn once when Home Assistant says where home
+// is. A pool rather than an object per path: the embedded map covers several
+// hundred kilometres and only the part inside the outer ring is ever wanted,
+// which is a few dozen runs of it. The vertices live in PSRAM, where several
+// thousand of them are not missed.
+// The longest single path the generator emits, projected one at a time.
+constexpr int MAP_POINTS     = 2400;
+constexpr int MASK_MAX_EDGES = 64;
+
+// Water is the one thing on this screen allowed to be cold: everything else is
+// warm on near-black, and a coastline that reads as the edge of the sea tells
+// you more than another cream line would.
+constexpr std::uint32_t INK_WATER = 0x5d93b8;
+
+// The steps the two buttons walk through, in kilometres.
+// Lakes are filled rather than outlined, which LVGL has no primitive for, so
+// they are scanline-filled into a canvas laid under the scope. One canvas for
+// all of them, the size of the scope, in PSRAM.
+
+constexpr int RANGES[]     = {20, 40, 60, 80, 100, 120, 140, 160};
+constexpr int RANGE_COUNT  = static_cast<int>(std::size(RANGES));
+constexpr int RANGE_BUTTON = 72;
+
+// A degree of latitude is 110.57 km and a degree of longitude is 111.32 km
+// times the cosine of the latitude. Flat earth over eighty kilometres is off by
+// less than the width of the line being drawn.
+constexpr float KM_PER_LAT = 110.574f;
+constexpr float KM_PER_LON = 111.320f;
+
+// The altitude scale in the scope's bottom-left corner.
+constexpr int          SCALE_TOP_FT = 40000;
+constexpr int          LEGEND_STEPS = 18;
+constexpr std::int32_t LEGEND_W     = 108;
+constexpr std::int32_t LEGEND_H     = 8;
 
 constexpr float KM_PER_NM = 1.852f;
 
@@ -114,9 +148,32 @@ struct Row {
 
 lv_obj_t *s_scope  = nullptr;
 lv_obj_t *s_marker = nullptr;
+lv_obj_t   *s_rings[RINGS]  = {};
+lv_obj_t   *s_zoom_in       = nullptr;
+lv_obj_t   *s_zoom_out      = nullptr;
+int         s_range_step    = 3;  // 80 km, which is where it starts
 
 Blip               s_blips[radar::kMaxAircraft] = {};
 lv_obj_t          *s_rim[RIM_DOTS]              = {};
+lv_obj_t          *s_legend[LEGEND_STEPS]       = {};
+
+// Water is an area, so it is filled rather than outlined, and LVGL has no
+// polygon primitive. Everything wet is scanline-filled into one alpha mask --
+// one byte a pixel, one image object, one colour from the object's recolour --
+// instead of a line object per path. A full ARGB layer the size of the scope
+// was what took the internal heap to nothing and brought down the Wi-Fi
+// co-processor's SDIO driver, which asserts when it cannot get a buffer.
+constexpr std::uint8_t WATER_ALPHA = 0x5c;
+
+lv_obj_t     *s_water_canvas = nullptr;
+lv_obj_t     *s_land_canvas  = nullptr;
+std::uint8_t *s_water_mask   = nullptr;
+std::uint8_t *s_land_mask    = nullptr;
+std::int32_t  s_ground_side  = 0;
+
+lv_point_precise_t *s_map_points = nullptr;
+float               s_map_lat    = 0.0f;
+float               s_map_lon    = 0.0f;
 lv_point_precise_t s_spokes[SPOKES][2]          = {};
 
 lv_obj_t *s_title      = nullptr;
@@ -125,8 +182,15 @@ lv_obj_t *s_airframe   = nullptr;
 lv_obj_t *s_route      = nullptr;
 lv_obj_t *s_cities     = nullptr;
 lv_obj_t *s_summary    = nullptr;
-lv_obj_t *s_photo      = nullptr;
-lv_obj_t *s_photo_note = nullptr;
+lv_obj_t *s_photo       = nullptr;
+lv_obj_t *s_photo_frame = nullptr;
+lv_obj_t *s_photo_note  = nullptr;
+
+// The frame is shrunk to whatever the picture actually fills, because corners
+// can only be cut off something that reaches them: rounding a frame wider than
+// the picture inside it rounds empty space.
+std::int32_t s_photo_box_y = 0;
+std::int32_t s_photo_box_h = 0;
 lv_obj_t *s_nearby     = nullptr;
 
 lv_image_dsc_t s_photo_dsc     = {};
@@ -170,20 +234,12 @@ Plot s_plots[radar::kMaxAircraft];
 int  s_shown  = 0;
 int  s_beyond = 0;
 
-// Height by brightness inside the panel's own palette, rather than by hue. The
-// map projects use a full rainbow, and borrowing it put cyan and violet on a
-// screen that is otherwise warm orange on near-black: readable, and wrong.
-struct Stop {
-    int           feet;
-    std::uint32_t ink;
-};
-
-constexpr Stop ALTITUDE_INK[] = {
-    {0, 0x8a4a1e},      // dim, so low traffic sits back
-    {12000, theme::orange},
-    {25000, theme::amber},
-    {40000, theme::text},  // pale cream at cruise
-};
+// Height by brightness within whatever the accent colour happens to be, rather
+// than by hue. The map projects use a full rainbow, and borrowing it put cyan
+// and violet on a screen that is otherwise one warm colour on near-black:
+// readable, and wrong. Built from the accent at each call so that choosing a
+// different one takes the scope with it.
+constexpr int ALTITUDE_STOPS[] = {0, 12000, 25000, 40000};
 
 // Not on the scale: an aircraft that has not said how high it is.
 constexpr std::uint32_t INK_UNKNOWN = 0x6b5a50;
@@ -205,15 +261,21 @@ std::uint32_t altitude_ink(int feet)
     if (feet < 0) {
         return INK_UNKNOWN;
     }
-    const int count = static_cast<int>(std::size(ALTITUDE_INK));
+    const std::uint32_t ink[] = {
+        theme::dim_of(theme::primary_dim),          // low traffic sits back
+        theme::primary,
+        mix(theme::primary, theme::text, 0.45f),
+        theme::text,                                // near white at cruise
+    };
+    const int count = static_cast<int>(std::size(ALTITUDE_STOPS));
     for (int i = 1; i < count; ++i) {
-        if (feet <= ALTITUDE_INK[i].feet) {
-            const float span = static_cast<float>(ALTITUDE_INK[i].feet - ALTITUDE_INK[i - 1].feet);
-            const float frac = static_cast<float>(feet - ALTITUDE_INK[i - 1].feet) / span;
-            return mix(ALTITUDE_INK[i - 1].ink, ALTITUDE_INK[i].ink, frac);
+        if (feet <= ALTITUDE_STOPS[i]) {
+            const float span = static_cast<float>(ALTITUDE_STOPS[i] - ALTITUDE_STOPS[i - 1]);
+            const float frac = static_cast<float>(feet - ALTITUDE_STOPS[i - 1]) / span;
+            return mix(ink[i - 1], ink[i], frac);
         }
     }
-    return ALTITUDE_INK[count - 1].ink;
+    return ink[count - 1];
 }
 
 // 7500 is a hijacking, 7600 a dead radio and 7700 everything else. Rare enough
@@ -314,12 +376,13 @@ void build_chart(lv_obj_t *scope, int range_km)
         // On the north spoke alone: the same number four times over is three
         // more than anybody needs. Sitting above the ring rather than centred
         // on it, so the line does not run through the digits.
-        char text[8];
+        char text[12];
         std::snprintf(text, sizeof(text), "%d", range_km * i / RINGS);
         lv_obj_t *label = theme::make_label(scope, text, theme::secondary, fonts::size_16());
         lv_obj_set_style_text_opa(label, LV_OPA_40, 0);
         lv_obj_set_pos(label, s_centre + 8, s_centre - radius - fonts::size_16()->line_height - 2);
         quiet(label);
+        s_rings[i - 1] = label;
     }
 }
 
@@ -377,31 +440,268 @@ void scope_clicked(lv_event_t *event)
 // on the page behind it, rather than taking room in the column.
 void build_legend(lv_obj_t *parent, std::int32_t side)
 {
-    constexpr std::int32_t BAR_W = 132;
-    constexpr std::int32_t BAR_H = 8;
-    constexpr int          STEPS = 22;
+    const std::int32_t line = fonts::size_16()->line_height;
+    // Sat against the bottom-left, with its whole box kept outside the outer
+    // ring: the corner is only so big, and half the scale tucked under the
+    // scope is worse than no scale at all.
+    const std::int32_t x = 4;
+    const std::int32_t y = side - line - LEGEND_H - 4;
+    const std::int32_t step = LEGEND_W / LEGEND_STEPS;
 
-    const std::int32_t x    = 8;
-    const std::int32_t y    = side - 46;
-    const std::int32_t step = BAR_W / STEPS;
-
-    for (int i = 0; i < STEPS; ++i) {
-        lv_obj_t *segment = lv_obj_create(parent);
-        lv_obj_set_size(segment, step + 1, BAR_H);
-        lv_obj_set_pos(segment, x + i * step, y);
-        theme::style_panel(segment, altitude_ink(SCALE_TOP_FT * i / (STEPS - 1)), 0);
-        quiet(segment);
+    for (int i = 0; i < LEGEND_STEPS; ++i) {
+        s_legend[i] = lv_obj_create(parent);
+        lv_obj_set_size(s_legend[i], step + 1, LEGEND_H);
+        lv_obj_set_pos(s_legend[i], x + i * step, y);
+        theme::style_panel(s_legend[i], theme::panel, 0);
+        quiet(s_legend[i]);
     }
 
     lv_obj_t *low = theme::make_label(parent, "0", theme::secondary, fonts::size_16());
     lv_obj_set_style_text_opa(low, LV_OPA_50, 0);
-    lv_obj_set_pos(low, x, y + BAR_H + 3);
+    lv_obj_set_pos(low, x, y + LEGEND_H + 2);
     quiet(low);
 
     lv_obj_t *high = theme::make_label(parent, "40 000 ft", theme::secondary, fonts::size_16());
     lv_obj_set_style_text_opa(high, LV_OPA_50, 0);
-    lv_obj_set_pos(high, x + BAR_W - text_width("40 000 ft", fonts::size_16()), y + BAR_H + 3);
+    lv_obj_set_pos(high, x + LEGEND_W - text_width("40 000 ft", fonts::size_16()),
+                   y + LEGEND_H + 2);
     quiet(high);
+}
+
+// Everything the map is drawn from, and nothing about where the panel is: the
+// data covers a region, and which part of it shows is decided here from
+// whatever position arrives at runtime.
+// The ground is two pictures, not a few dozen line objects. Everything wet goes
+// into one alpha mask and every political line into another; each is a single
+// image with its colour coming from the object's recolour. Drawn as objects it
+// was forty-odd lines for LVGL to re-render whenever anything on the scope
+// changed, which is what made opening the page take a visible moment and took
+// the internal heap to nothing -- the Wi-Fi co-processor's SDIO driver asserts
+// when it cannot get a receive buffer, and that is how the panel went down.
+void mask_line(std::uint8_t *mask, std::int32_t x0, std::int32_t y0, std::int32_t x1,
+               std::int32_t y1, std::uint8_t value)
+{
+    const std::int32_t dx    = std::abs(x1 - x0);
+    const std::int32_t dy    = -std::abs(y1 - y0);
+    const std::int32_t step_x = x0 < x1 ? 1 : -1;
+    const std::int32_t step_y = y0 < y1 ? 1 : -1;
+    std::int32_t       error  = dx + dy;
+    const float        limit  = static_cast<float>(s_radius) * static_cast<float>(s_radius);
+
+    for (;;) {
+        const float ox = static_cast<float>(x0 - s_centre);
+        const float oy = static_cast<float>(y0 - s_centre);
+        if (ox * ox + oy * oy <= limit && x0 >= 0 && x0 < s_ground_side && y0 >= 0 &&
+            y0 < s_ground_side) {
+            mask[static_cast<std::size_t>(y0) * s_ground_side + x0] = value;
+        }
+        if (x0 == x1 && y0 == y1) {
+            return;
+        }
+        const std::int32_t twice = 2 * error;
+        if (twice >= dy) {
+            error += dy;
+            x0 += step_x;
+        }
+        if (twice <= dx) {
+            error += dx;
+            y0 += step_y;
+        }
+    }
+}
+
+// Even-odd scanline fill, clipped to the outer ring. The polygon is whole --
+// the generator clips areas with a polygon clipper so they stay closed -- so a
+// lake half off the scope still fills the half that is on it.
+// `rings` gives the length of each ring in `points`; the ones after the first
+// are holes -- the islands in a sea -- and counting crossings across every ring
+// at once is what leaves them unfilled.
+void fill_water(const lv_point_precise_t *points, const std::uint16_t *rings, int ring_count,
+                int count)
+{
+    if (s_water_mask == nullptr || count < 3) {
+        return;
+    }
+    const float limit = static_cast<float>(s_radius) * static_cast<float>(s_radius);
+
+    std::int32_t top    = points[0].y;
+    std::int32_t bottom = points[0].y;
+    for (int i = 1; i < count; ++i) {
+        top    = std::min<std::int32_t>(top, points[i].y);
+        bottom = std::max<std::int32_t>(bottom, points[i].y);
+    }
+    top    = std::max<std::int32_t>(top, s_centre - s_radius);
+    bottom = std::min<std::int32_t>(bottom, s_centre + s_radius);
+
+    for (std::int32_t y = top; y <= bottom; ++y) {
+        std::int32_t crossings[MASK_MAX_EDGES];
+        int          found = 0;
+        int          base  = 0;
+        for (int r = 0; r < ring_count; ++r) {
+            const int length = rings[r];
+            for (int i = 0, j = length - 1; i < length && found < MASK_MAX_EDGES; j = i++) {
+                const auto yi = static_cast<float>(points[base + i].y);
+                const auto yj = static_cast<float>(points[base + j].y);
+                if ((yi > static_cast<float>(y)) == (yj > static_cast<float>(y))) {
+                    continue;
+                }
+                const auto  xi = static_cast<float>(points[base + i].x);
+                const auto  xj = static_cast<float>(points[base + j].x);
+                const float t  = (static_cast<float>(y) - yi) / (yj - yi);
+                crossings[found++] = static_cast<std::int32_t>(std::lround(xi + t * (xj - xi)));
+            }
+            base += length;
+        }
+        std::sort(crossings, crossings + found);
+
+        const float dy   = static_cast<float>(y - s_centre);
+        const float span = limit - dy * dy;
+        if (span < 0.0f) {
+            continue;
+        }
+        // The ring's half-width at this row, so staying inside the circle is
+        // one square root a row rather than a test a pixel.
+        const auto         half = static_cast<std::int32_t>(std::sqrt(span));
+        const std::int32_t low  = std::max<std::int32_t>(s_centre - half, 0);
+        const std::int32_t high = std::min<std::int32_t>(s_centre + half, s_ground_side - 1);
+
+        for (int i = 0; i + 1 < found; i += 2) {
+            const std::int32_t from = std::max(crossings[i], low);
+            const std::int32_t to   = std::min(crossings[i + 1], high);
+            if (to < from) {
+                continue;
+            }
+            std::memset(s_water_mask + static_cast<std::size_t>(y) * s_ground_side + from,
+                        WATER_ALPHA, static_cast<std::size_t>(to - from + 1));
+        }
+    }
+}
+
+void draw_map(float home_lat, float home_lon, int range_km)
+{
+    if (s_water_mask == nullptr || s_land_mask == nullptr || s_map_points == nullptr) {
+        return;
+    }
+
+    const auto  area = static_cast<std::size_t>(s_ground_side) * s_ground_side;
+    std::memset(s_water_mask, 0, area);
+    std::memset(s_land_mask, 0, area);
+
+    const float scale   = static_cast<float>(s_radius) / static_cast<float>(range_km);
+    const float per_lat = KM_PER_LAT * scale;
+    const float per_lon = KM_PER_LON * std::cos(home_lat * DEG) * scale;
+    const auto  centre  = static_cast<float>(s_centre);
+    const auto  reach   = static_cast<float>(s_radius);
+
+    for (int i = 0; i < radar::kMapPathCount; ++i) {
+        const radar::MapPath &path = radar::kMapPaths[i];
+        const bool            fill = path.layer == radar::MapLayer::Ocean ||
+                                     path.layer == radar::MapLayer::Lake;
+
+        int count = 0;
+        for (int v = 0; v < path.count && count < MAP_POINTS; ++v) {
+            const float lat = static_cast<float>(path.points[v * 2]) / 1000000.0f;
+            const float lon = static_cast<float>(path.points[v * 2 + 1]) / 1000000.0f;
+            const float x   = centre + (lon - home_lon) * per_lon;
+            const float y   = centre - (lat - home_lat) * per_lat;
+
+            // Kept far enough out that the rasteriser still draws the part
+            // that crosses the scope, but not so far that the coordinates grow
+            // silly. Every vertex is kept, so the ring lengths stay true.
+            const float clamped_x = std::clamp(x, centre - reach * 4.0f, centre + reach * 4.0f);
+            const float clamped_y = std::clamp(y, centre - reach * 4.0f, centre + reach * 4.0f);
+            s_map_points[count++] = {static_cast<std::int32_t>(std::lround(clamped_x)),
+                                     static_cast<std::int32_t>(std::lround(clamped_y))};
+        }
+
+        if (fill) {
+            fill_water(s_map_points, path.rings, path.ring_count, count);
+            continue;
+        }
+
+        std::uint8_t *mask  = path.layer == radar::MapLayer::River ? s_water_mask : s_land_mask;
+        const auto    value = static_cast<std::uint8_t>(
+            path.layer == radar::MapLayer::Province ? 0x38 : 0x70);
+        for (int v = 1; v < count; ++v) {
+            mask_line(mask, s_map_points[v - 1].x, s_map_points[v - 1].y, s_map_points[v].x,
+                      s_map_points[v].y, value);
+        }
+    }
+
+    if (s_water_canvas != nullptr) {
+        lv_obj_invalidate(s_water_canvas);
+    }
+    if (s_land_canvas != nullptr) {
+        lv_obj_invalidate(s_land_canvas);
+    }
+}
+
+// Greyed rather than merely inert, so the end of the range is visible before
+// pressing rather than after.
+void paint_range_buttons()
+{
+    if (s_zoom_in != nullptr) {
+        s_range_step > 0 ? lv_obj_remove_state(s_zoom_in, LV_STATE_DISABLED)
+                         : lv_obj_add_state(s_zoom_in, LV_STATE_DISABLED);
+    }
+    if (s_zoom_out != nullptr) {
+        s_range_step < RANGE_COUNT - 1 ? lv_obj_remove_state(s_zoom_out, LV_STATE_DISABLED)
+                                       : lv_obj_add_state(s_zoom_out, LV_STATE_DISABLED);
+    }
+}
+
+// Nothing is fetched again. The sweep always asks for the farthest range the
+// buttons go to and the page shows whichever of those are inside the one it is
+// set to, so zooming is instant and never shows the wrong aircraft while a
+// request for the new range is still in the air.
+void apply_range()
+{
+    const int range_km = RANGES[s_range_step];
+    for (int i = 1; i <= RINGS; ++i) {
+        char text[12];
+        std::snprintf(text, sizeof(text), "%d", range_km * i / RINGS);
+        theme::set_text(s_rings[i - 1], text);
+    }
+    if (s_map_lat != 0.0f || s_map_lon != 0.0f) {
+        draw_map(s_map_lat, s_map_lon, range_km);
+    }
+    paint_range_buttons();
+    show_radar(s_last);
+}
+
+void range_clicked(lv_event_t *event)
+{
+    const auto step =
+        static_cast<int>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(event)));
+    const int next = std::clamp(s_range_step + step, 0, RANGE_COUNT - 1);
+    if (next == s_range_step) {
+        return;
+    }
+    s_range_step = next;
+    apply_range();
+}
+
+// A button rather than a styled panel, so it grows under a finger the way every
+// other button on the panel does; that comes from the theme, not from here.
+lv_obj_t *build_range_button(lv_obj_t *parent, std::int32_t x, const char *text, int step)
+{
+    lv_obj_t *button = lv_button_create(parent);
+    lv_obj_set_size(button, RANGE_BUTTON, RANGE_BUTTON);
+    lv_obj_set_pos(button, x, 4);
+    // The same helper the navigation tabs use, so these press and grow like
+    // every other button rather than like a panel that happens to be tappable.
+    theme::style_button(button, theme::panel_light);
+    lv_obj_set_style_radius(button, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(button, lv_color_hex(theme::disabled), LV_STATE_DISABLED);
+    lv_obj_add_event_cb(button, range_clicked, LV_EVENT_CLICKED,
+                        reinterpret_cast<void *>(static_cast<std::intptr_t>(step)));
+
+    lv_obj_t *label = theme::make_label(button, text, theme::secondary, fonts::size_28());
+    lv_obj_set_style_text_color(label, lv_color_hex(theme::text), LV_STATE_PRESSED);
+    lv_obj_set_style_text_color(label, lv_color_hex(theme::disabled_ink), LV_STATE_DISABLED);
+    lv_obj_center(label);
+    quiet(label);
+    return button;
 }
 
 void build_scope(lv_obj_t *parent, std::int32_t side, int range_km)
@@ -415,6 +715,40 @@ void build_scope(lv_obj_t *parent, std::int32_t side, int range_km)
     theme::style_panel(scope, theme::background, side / 2);
     lv_obj_set_scrollable(scope, false);
     lv_obj_add_event_cb(scope, scope_clicked, LV_EVENT_CLICKED, nullptr);
+
+    // The ground goes in a layer of its own, made before the rings so that
+    // everything in it is underneath them. Shuffling each line to the back
+    // afterwards was doing the same job by hand, and doing it wrong: rivers
+    // came out over the rings they should pass beneath.
+    lv_obj_t *ground = lv_obj_create(scope);
+    lv_obj_set_pos(ground, 0, 0);
+    lv_obj_set_size(ground, side, side);
+    lv_obj_set_style_bg_opa(ground, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(ground, 0, 0);
+    lv_obj_set_style_pad_all(ground, 0, 0);
+    quiet(ground);
+
+    s_ground_side = side;
+    const auto area = static_cast<std::size_t>(side) * side;
+
+    s_water_mask = static_cast<std::uint8_t *>(heap_caps_calloc(area, 1, MALLOC_CAP_SPIRAM));
+    s_land_mask  = static_cast<std::uint8_t *>(heap_caps_calloc(area, 1, MALLOC_CAP_SPIRAM));
+    s_map_points = static_cast<lv_point_precise_t *>(heap_caps_malloc(
+        sizeof(lv_point_precise_t) * MAP_POINTS, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+
+    if (s_water_mask != nullptr && s_land_mask != nullptr) {
+        s_water_canvas = lv_canvas_create(ground);
+        lv_canvas_set_buffer(s_water_canvas, s_water_mask, side, side, LV_COLOR_FORMAT_A8);
+        lv_obj_set_style_image_recolor(s_water_canvas, lv_color_hex(INK_WATER), 0);
+        lv_obj_set_style_image_recolor_opa(s_water_canvas, LV_OPA_COVER, 0);
+        quiet(s_water_canvas);
+
+        s_land_canvas = lv_canvas_create(ground);
+        lv_canvas_set_buffer(s_land_canvas, s_land_mask, side, side, LV_COLOR_FORMAT_A8);
+        lv_obj_set_style_image_recolor(s_land_canvas, lv_color_hex(theme::secondary), 0);
+        lv_obj_set_style_image_recolor_opa(s_land_canvas, LV_OPA_COVER, 0);
+        quiet(s_land_canvas);
+    }
 
     build_chart(scope, range_km);
 
@@ -529,13 +863,26 @@ void build_column(lv_obj_t *parent, std::int32_t x, std::int32_t height)
     const std::int32_t photo_y = ROWS_Y + READINGS * ROW_H + 16;
     const std::int32_t photo_h = height - photo_y - FOOT_H - 4;
 
-    s_photo = lv_image_create(column);
-    lv_obj_set_pos(s_photo, 0, photo_y);
-    lv_obj_set_size(s_photo, COLUMN_W, photo_h);
+    // An image draws its own content rather than drawing it as a child, so a
+    // radius on the image itself rounds nothing. The corners have to be cut by
+    // a parent that clips what it contains.
+    s_photo_box_y = photo_y;
+    s_photo_box_h = photo_h;
+
+    s_photo_frame = lv_obj_create(column);
+    lv_obj_set_pos(s_photo_frame, 0, photo_y);
+    lv_obj_set_size(s_photo_frame, COLUMN_W, photo_h);
+    lv_obj_set_style_bg_opa(s_photo_frame, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(s_photo_frame, 0, 0);
+    lv_obj_set_style_pad_all(s_photo_frame, 0, 0);
+    lv_obj_set_style_radius(s_photo_frame, 12, 0);
+    lv_obj_set_style_clip_corner(s_photo_frame, true, 0);
+    lv_obj_set_hidden(s_photo_frame, true);
+    quiet(s_photo_frame);
+
+    s_photo = lv_image_create(s_photo_frame);
+    lv_obj_set_pos(s_photo, 0, 0);
     lv_image_set_inner_align(s_photo, LV_IMAGE_ALIGN_CONTAIN);
-    lv_obj_set_style_radius(s_photo, 10, 0);
-    lv_obj_set_style_clip_corner(s_photo, true, 0);
-    lv_obj_set_hidden(s_photo, true);
     quiet(s_photo);
 
     // With nothing selected the picture's space would be a hole, so it holds
@@ -573,7 +920,7 @@ void show_picture()
         default: break;
     }
     theme::set_text(s_photo_note, note != nullptr ? note : "");
-    lv_obj_set_hidden(s_photo, s_picture != Picture::Shown);
+    lv_obj_set_hidden(s_photo_frame, s_picture != Picture::Shown);
 }
 
 const char *blip_name(const radar::Aircraft &aircraft)
@@ -755,10 +1102,20 @@ void show_selected(const radar::Aircraft &aircraft)
     }
 
     // Registration and shape on one line: three labels for three short strings
-    // was most of the clutter.
-    const char *shape = aircraft.desc[0] != '\0'              ? aircraft.desc
-                        : (mine && s_details.model[0] != '\0') ? s_details.model
-                                                               : aircraft.type;
+    // was most of the clutter. The feed sends no prose description, so who built
+    // it and what model it is are put back together from the lookup, which
+    // keeps them in separate fields.
+    char shape[56] = {};
+    if (mine && s_details.manufacturer[0] != '\0' && s_details.model[0] != '\0') {
+        std::snprintf(shape, sizeof(shape), "%s %s", s_details.manufacturer, s_details.model);
+    } else if (aircraft.desc[0] != '\0') {
+        std::snprintf(shape, sizeof(shape), "%s", aircraft.desc);
+    } else if (mine && s_details.model[0] != '\0') {
+        std::snprintf(shape, sizeof(shape), "%s", s_details.model);
+    } else {
+        std::snprintf(shape, sizeof(shape), "%s", aircraft.type);
+    }
+
     if (aircraft.reg[0] != '\0' && shape[0] != '\0') {
         std::snprintf(text, sizeof(text), "%s  ·  %s", aircraft.reg, shape);
     } else {
@@ -832,8 +1189,11 @@ void show_selected(const radar::Aircraft &aircraft)
 void build_radar_page(lv_obj_t *page, std::int32_t width, std::int32_t height)
 {
     const std::int32_t side = std::min(width - COLUMN_W - COLUMN_GAP, height);
-    build_scope(page, side, 80);
+    build_scope(page, side, RANGES[s_range_step]);
     build_legend(page, side);
+    s_zoom_out = build_range_button(page, 4, LV_SYMBOL_MINUS, 1);
+    s_zoom_in  = build_range_button(page, side - RANGE_BUTTON - 4, LV_SYMBOL_PLUS, -1);
+    paint_range_buttons();
     build_column(page, side + COLUMN_GAP, height);
     show_radar(s_last);
 }
@@ -852,7 +1212,19 @@ void show_radar(const radar::Snapshot &snapshot)
         s_last = snapshot;
     }
 
-    const int range_km = s_last.range_km > 0 ? s_last.range_km : 80;
+    // What the page is set to rather than what the last reading was fetched
+    // at: the two differ for one sweep after the range is changed, and the
+    // scope should redraw at the range its rings are labelled with.
+    const int range_km = RANGES[s_range_step];
+
+    // Only when the centre actually moves, which is once at startup.
+    if (s_last.home_lat != s_map_lat || s_last.home_lon != s_map_lon) {
+        s_map_lat = s_last.home_lat;
+        s_map_lon = s_last.home_lon;
+        if (s_map_lat != 0.0f || s_map_lon != 0.0f) {
+            draw_map(s_map_lat, s_map_lon, range_km);
+        }
+    }
 
     s_shown      = 0;
     int rim_used = 0;
@@ -880,6 +1252,13 @@ void show_radar(const radar::Snapshot &snapshot)
     }
     s_beyond = rim_used;
 
+    // The scale is built from the accent, so it has to be repainted when the
+    // accent changes. set_bg_color skips a write that would change nothing, so
+    // when it has not changed this costs nothing.
+    for (int i = 0; i < LEGEND_STEPS; ++i) {
+        theme::set_bg_color(s_legend[i], altitude_ink(SCALE_TOP_FT * i / (LEGEND_STEPS - 1)));
+    }
+
     std::sort(s_plots, s_plots + s_shown, [](const Plot &a, const Plot &b) {
         return a.aircraft->distance_nm < b.aircraft->distance_nm;
     });
@@ -888,12 +1267,26 @@ void show_radar(const radar::Snapshot &snapshot)
     // one whose details have already been fetched, so this costs no network.
     if (s_following) {
         if (s_shown > 0) {
-            const bool changed = std::strcmp(s_chosen, s_plots[0].aircraft->hex) != 0;
-            std::memcpy(s_chosen, s_plots[0].aircraft->hex, sizeof(s_chosen));
-            s_chosen[sizeof(s_chosen) - 1] = '\0';
-            if (changed && std::strcmp(s_details_hex, s_chosen) != 0) {
-                s_picture = Picture::Looking;
-                radar::request_details(s_chosen, s_plots[0].aircraft->flight);
+            // Two aircraft at much the same distance trade places every sweep,
+            // and each swap threw away the picture that had just been fetched
+            // for the other one. The one being followed keeps its place until
+            // something is clearly nearer.
+            int held = -1;
+            for (int i = 0; i < s_shown; ++i) {
+                if (std::strcmp(s_chosen, s_plots[i].aircraft->hex) == 0) {
+                    held = i;
+                    break;
+                }
+            }
+            const bool keep = held >= 0 && s_plots[held].aircraft->distance_nm <
+                                               s_plots[0].aircraft->distance_nm * 1.2f;
+            if (!keep) {
+                std::memcpy(s_chosen, s_plots[0].aircraft->hex, sizeof(s_chosen));
+                s_chosen[sizeof(s_chosen) - 1] = '\0';
+                if (std::strcmp(s_details_hex, s_chosen) != 0) {
+                    s_picture = Picture::Looking;
+                    radar::request_details(s_chosen, s_plots[0].aircraft->flight);
+                }
             }
         } else {
             s_chosen[0] = '\0';
@@ -973,6 +1366,15 @@ void show_radar_photo(const char *hex, const void *pixels, int width, int height
     s_photo_dsc.data_size     = static_cast<std::uint32_t>(width * height * 2);
     s_photo_dsc.data          = static_cast<const std::uint8_t *>(pixels);
 
+    // Sized to what the picture will occupy once contained, and centred in the
+    // space kept for it, so the rounded frame follows the picture's own edges.
+    const std::int32_t fit_w = std::min(COLUMN_W, width * s_photo_box_h / height);
+    const std::int32_t fit_h = std::min(s_photo_box_h, height * COLUMN_W / width);
+    lv_obj_set_size(s_photo_frame, fit_w, fit_h);
+    lv_obj_set_pos(s_photo_frame, (COLUMN_W - fit_w) / 2,
+                   s_photo_box_y + (s_photo_box_h - fit_h) / 2);
+    lv_obj_set_size(s_photo, fit_w, fit_h);
+
     lv_image_set_src(s_photo, &s_photo_dsc);
     s_picture = Picture::Shown;
     show_picture();
@@ -987,8 +1389,13 @@ void show_radar_details(const char *hex, const radar::Details &details)
     s_details = details;
     std::snprintf(s_details_hex, sizeof(s_details_hex), "%s", hex);
     // The picture is a second request behind this one, so the wait carries on
-    // being shown rather than looking as though nothing is coming.
-    s_picture = details.photo_url[0] != '\0' ? Picture::Loading : Picture::Missing;
+    // being shown rather than looking as though nothing is coming. Not knowing
+    // of a picture is not the same as knowing there is none: details published
+    // before the photo database has been asked would otherwise say there is no
+    // photograph, and then one would appear a moment later.
+    s_picture = !details.photo_checked          ? Picture::Loading
+                : details.photo_url[0] != '\0' ? Picture::Loading
+                                                : Picture::Missing;
     show_radar(s_last);
 }
 

@@ -222,7 +222,10 @@ void on_album_art(media::Art state, const void *pixels)
         static std::int64_t complained = 0;
         const std::size_t   dma_free   = heap_caps_get_free_size(MALLOC_CAP_DMA);
         const std::size_t   internal   = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-        if (dma_free < 48 * 1024 && esp_timer_get_time() - complained > 30000000) {
+        // Set from what actually broke rather than from what felt comfortable:
+        // allocations began failing around eleven kilobytes and the panel was
+        // still steady at thirty-five, so the line is drawn between them.
+        if (dma_free < 24 * 1024 && esp_timer_get_time() - complained > 30000000) {
             complained = esp_timer_get_time();
             ESP_LOGW(TAG, "low memory: %u KB dma-capable, %u KB internal",
                      static_cast<unsigned>(dma_free / 1024),
