@@ -12,3 +12,15 @@
 // Prefixes every topic and identifies the device in Home Assistant. Changing
 // it after the fact leaves the old entities behind as ghosts.
 #define HASS_DEVICE_ID "tab5_desk"
+
+// Home Assistant WebSocket API, for reading other entities and calling
+// services. Leave the URL empty to skip it entirely.
+//
+// The token is a long-lived access token: Home Assistant -> your profile ->
+// Security -> Long-lived access tokens.
+#define HASS_WS_URI   "ws://homeassistant.local:8123/api/websocket"
+#define HASS_WS_TOKEN ""
+
+// Comma separated. An empty list subscribes to nothing rather than to
+// everything, which is what omitting it would do.
+#define HASS_WS_ENTITIES ""

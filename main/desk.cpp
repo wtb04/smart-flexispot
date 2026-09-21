@@ -134,7 +134,14 @@ const char *link_status(const loctek::Stats &stats, bool link_up, int wake_attem
 
         if (status != shown) {
             shown = status;
-            s_linked.store(status == kConnected, std::memory_order_relaxed);
+            const bool linked = status == kConnected;
+            s_linked.store(linked, std::memory_order_relaxed);
+            ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_desk_available(linked));
+            // Push the reading again on every transition: on_height only fires
+            // when the value changes, so coming back from a dropout would
+            // otherwise leave the readout showing dashes until the desk moved.
+            ESP_ERROR_CHECK_WITHOUT_ABORT(
+                ui::set_height(linked ? s_height_mm.load(std::memory_order_relaxed) : -1));
             ESP_LOGI(TAG, "%s", status);
 #if CONFIG_LOCTEK_NUDGE_WAKE
             if (status == kAsleep) {

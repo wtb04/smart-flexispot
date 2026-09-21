@@ -9,8 +9,10 @@
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "ha_ws.h"
 #include "hass.h"
 #include "power.h"
+#include "room.h"
 #include "sound.h"
 #include "ui.h"
 #include "wifi.h"
@@ -24,6 +26,12 @@ namespace {
 constexpr char TAG[] = "telemetry";
 
 constexpr TickType_t PUBLISH_INTERVAL = pdMS_TO_TICKS(2000);
+
+// How long to wait for an address before starting the network clients anyway.
+// Generous: the C6 has to come up and associate, which is slower than on-die
+// Wi-Fi. If it expires we start regardless, since both clients retry and the
+// network may simply be late.
+constexpr int NETWORK_WAIT_MS = 30000;
 
 constexpr std::uint32_t TASK_STACK    = 4096;
 constexpr UBaseType_t   TASK_PRIORITY = 2;
@@ -47,6 +55,13 @@ void on_brightness(int percent)
     ESP_LOGI(TAG, "brightness %d%% requested", percent);
     s_brightness.store(percent, std::memory_order_relaxed);
     board::set_brightness_percent(percent);
+}
+
+// Until the screens that use these exist, say what arrived so the entity ids
+// and their states can be seen without guessing at them.
+void on_entities(const hass::ws::EntityStore &store)
+{
+    room::render(store);
 }
 
 void on_move(hass::protocol::Move direction)
@@ -89,6 +104,18 @@ void fill_network(hass::protocol::Telemetry &out)
 
 [[noreturn]] void telemetry_task(void *)
 {
+    // Neither client can do anything without an address, and starting them
+    // early only produces a burst of connection failures that make a real
+    // fault harder to spot.
+    if (!wifi::wait_for_ip(NETWORK_WAIT_MS)) {
+        ESP_LOGW(TAG, "no address after %d s, starting clients anyway", NETWORK_WAIT_MS / 1000);
+    }
+
+    const hass::Handlers handlers{on_preset, on_brightness, on_notify, on_move};
+    ESP_ERROR_CHECK_WITHOUT_ABORT(hass::start(handlers));
+    // Not fatal: the desk works without Home Assistant.
+    ESP_ERROR_CHECK_WITHOUT_ABORT(hass::ws::start(on_entities));
+
     for (;;) {
         hass::protocol::Telemetry out;
         out.height_mm      = desk::height_mm();
@@ -113,9 +140,11 @@ void fill_network(hass::protocol::Telemetry &out)
 
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_links(wifi::connected(), hass::connected()));
 
-        // Returns an error while the broker is unreachable, which is normal and
-        // not worth logging every two seconds.
+        // Last, so everything gathered above is in the document. Returns an
+        // error while the broker is unreachable, which is normal and not worth
+        // logging every two seconds.
         hass::publish(out);
+
         vTaskDelay(PUBLISH_INTERVAL);
     }
 }
@@ -124,9 +153,6 @@ void fill_network(hass::protocol::Telemetry &out)
 
 esp_err_t start()
 {
-    const hass::Handlers handlers{on_preset, on_brightness, on_notify, on_move};
-    ESP_RETURN_ON_ERROR(hass::start(handlers), TAG, "mqtt");
-
     TaskHandle_t task = xTaskCreateStaticPinnedToCore(telemetry_task, "telemetry", TASK_STACK,
                                                       nullptr, TASK_PRIORITY, s_task_stack,
                                                       &s_task_ctrl, TASK_CORE);

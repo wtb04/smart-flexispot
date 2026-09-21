@@ -15,4 +15,12 @@ esp_err_t start();
 /** True once an IP address has been assigned. */
 bool connected();
 
+/**
+ * @brief Blocks until an IP address is assigned, or the timeout expires.
+ *
+ * For code that has nothing useful to do without the network. Returns false
+ * on timeout, so the caller can decide whether that is fatal.
+ */
+bool wait_for_ip(int timeout_ms);
+
 }  // namespace wifi

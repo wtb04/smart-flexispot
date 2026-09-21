@@ -11,6 +11,7 @@
 #include "nvs_flash.h"
 
 #include "freertos/FreeRTOS.h"
+#include "freertos/event_groups.h"
 #include "freertos/task.h"
 
 #include <atomic>
@@ -33,6 +34,12 @@ namespace {
 constexpr char TAG[] = "wifi";
 
 std::atomic<bool> s_connected{false};
+
+// So callers can wait for the network rather than starting doomed clients and
+// relying on their retries.
+constexpr EventBits_t GOT_IP_BIT = BIT0;
+StaticEventGroup_t    s_events_ctrl;
+EventGroupHandle_t    s_events = nullptr;
 bool              s_sntp_started = false;
 
 // A POSIX TZ string rather than a zone name: there is no timezone database on
@@ -67,6 +74,9 @@ void on_wifi_event(void *, esp_event_base_t base, std::int32_t id, void *data)
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         const auto *event = static_cast<wifi_event_sta_disconnected_t *>(data);
         s_connected.store(false, std::memory_order_relaxed);
+        if (s_events != nullptr) {
+            xEventGroupClearBits(s_events, GOT_IP_BIT);
+        }
         ESP_LOGW(TAG, "disconnected from '%s' (reason %d), retrying", TAB5_WIFI_SSID,
                  event->reason);
         // Retry forever rather than giving up: this is a wall panel, and the
@@ -77,6 +87,9 @@ void on_wifi_event(void *, esp_event_base_t base, std::int32_t id, void *data)
     if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         const auto *event = static_cast<ip_event_got_ip_t *>(data);
         s_connected.store(true, std::memory_order_relaxed);
+        if (s_events != nullptr) {
+            xEventGroupSetBits(s_events, GOT_IP_BIT);
+        }
         ESP_LOGI(TAG, "joined '%s', ip " IPSTR, TAB5_WIFI_SSID, IP2STR(&event->ip_info.ip));
         start_time_sync();
     }
@@ -100,6 +113,8 @@ esp_err_t start()
     // by the UTC offset, and the error only shows up once something formats it.
     setenv("TZ", TIMEZONE, 1);
     tzset();
+
+    s_events = xEventGroupCreateStatic(&s_events_ctrl);
 
     if (std::strlen(TAB5_WIFI_SSID) == 0) {
         ESP_LOGW(TAG, "no SSID compiled in, not starting - see wifi_secrets.example.h");
@@ -144,6 +159,16 @@ esp_err_t start()
 bool connected()
 {
     return s_connected.load(std::memory_order_relaxed);
+}
+
+bool wait_for_ip(int timeout_ms)
+{
+    if (s_events == nullptr) {
+        return false;  // start() was never called, or there is no SSID
+    }
+    const EventBits_t bits =
+        xEventGroupWaitBits(s_events, GOT_IP_BIT, pdFALSE, pdTRUE, pdMS_TO_TICKS(timeout_ms));
+    return (bits & GOT_IP_BIT) != 0;
 }
 
 }  // namespace wifi

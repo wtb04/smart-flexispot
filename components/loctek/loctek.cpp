@@ -226,11 +226,18 @@ esp_err_t init_wake_gpio()
     }
 }
 
-// Drops the line low briefly to guarantee an edge, then raises it and leaves
-// it there. The reference sketch returns the line low afterwards, but a box
-// left with this line low goes fully silent -- no height and no heartbeat --
-// and in that state it ignores movement frames too. Held high it keeps
-// streaming, so the desk stays responsive and the reading stays current.
+// Drops the line low, then raises it and leaves it there. The reference sketch
+// returns the line low afterwards, but a box left with this line low goes fully
+// silent -- no height and no heartbeat -- and in that state it ignores movement
+// frames too. Held high it keeps streaming, so the desk stays responsive and the
+// reading stays current.
+//
+// The low period has to be long enough for the box to see it. On a warm reset we
+// left the line high, and the pin only floats while the core restarts, so a
+// couple of milliseconds low can pass unnoticed: the box never sees an edge and
+// the panel stays dark even though the link comes straight back up.
+constexpr TickType_t WAKE_LOW = pdMS_TO_TICKS(200);
+
 esp_err_t turn_on()
 {
     if constexpr (CONFIG_LOCTEK_WAKE_GPIO < 0) {
@@ -238,7 +245,7 @@ esp_err_t turn_on()
     } else {
         constexpr auto pin = static_cast<gpio_num_t>(CONFIG_LOCTEK_WAKE_GPIO);
         ESP_RETURN_ON_ERROR(gpio_set_level(pin, 0), TAG, "wake low");
-        vTaskDelay(pdMS_TO_TICKS(20));
+        vTaskDelay(WAKE_LOW);
         ESP_RETURN_ON_ERROR(gpio_set_level(pin, 1), TAG, "wake high");
         vTaskDelay(pdMS_TO_TICKS(CONFIG_LOCTEK_WAKE_PULSE_MS));
         return ESP_OK;

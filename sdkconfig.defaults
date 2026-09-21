@@ -88,8 +88,39 @@ CONFIG_ESP_HOSTED_SDIO_OPTIMIZATION_RX_STREAMING_MODE=y
 CONFIG_LWIP_DHCP_GET_NTP_SRV=y
 
 # --- MQTT --------------------------------------------------------------------
-# Plain mqtt:// on the LAN. Leaving the TLS transport compiled in makes
-# esp_transport_ssl_init reachable, which drags in the whole of mbedTLS
-# (250-350 KB) even though nothing ever calls it.
+# Plain mqtt:// on the LAN, so neither transport is needed.
+#
+# These save far less than it first appears. mbedTLS is linked regardless:
+# esp-mqtt calls esp_tls_get_and_clear_last_error() unconditionally, which
+# pulls in esp_tls.c, whose read dispatch references esp_mbedtls_read, which
+# drags in the TLS engine -- about 165 KB that turning this off does not
+# remove. What it actually saves is the transport registration, a couple of
+# kilobytes. The websocket transport is the larger of the two.
 CONFIG_MQTT_TRANSPORT_SSL=n
 CONFIG_MQTT_TRANSPORT_WEBSOCKET=n
+
+# LVGL's own allocator is a fixed 64 KB pool that cannot grow, and every object,
+# style, label buffer and draw mask comes out of it. A NULL from lv_malloc is not
+# reported -- the radius mask dereferences it and the panic lands in the drawing
+# code, far from the real cause. Hand LVGL the system heap instead, which has the
+# board's PSRAM behind it.
+CONFIG_LV_USE_CLIB_MALLOC=y
+CONFIG_LV_USE_CLIB_STRING=y
+CONFIG_LV_USE_CLIB_SPRINTF=y
+# Rounded corners are cached per distinct radius, and the screen now uses about
+# ten. At the default of 4 every frame evicted and re-allocated the rest.
+CONFIG_LV_DRAW_SW_CIRCLE_CACHE_SIZE=16
+
+# LVGL renders in software on a dual-core chip, and by default it uses one core.
+# A page change is one large frame -- the whole content area at once -- so that
+# frame is where the cost lands. Two draw units split it across both cores.
+# Needs an OS abstraction: with LV_OS_NONE the draw-unit count is ignored.
+CONFIG_LV_OS_FREERTOS=y
+CONFIG_LV_DRAW_SW_DRAW_UNIT_CNT=2
+CONFIG_LV_DRAW_THREAD_PRIO=3
+
+# 33 ms is 30 Hz, which gave a 180 ms animation about five frames to work with --
+# that reads as steps, not motion. The panel runs at 60, and with the render
+# split across both cores small invalidations are cheap, so match it.
+CONFIG_LV_DEF_REFR_PERIOD=16
+

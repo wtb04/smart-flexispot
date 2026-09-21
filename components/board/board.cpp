@@ -48,11 +48,20 @@ esp_err_t start_display(lv_display_t **out_disp)
             .task_stack_caps  = MALLOC_CAP_INTERNAL | MALLOC_CAP_DEFAULT,
             .timer_period_ms  = LVGL_TICK_PERIOD_MS,
         },
-        .buffer_size   = BSP_LCD_H_RES * CONFIG_BSP_LCD_DRAW_BUF_HEIGHT,
+        // A whole frame, not a strip. LVGL renders only what is invalid either
+        // way, but it can only do so in one pass if the buffer is big enough to
+        // hold it -- otherwise a page change is rendered and flushed in bands
+        // and you watch the screen fill downwards. The port forbids
+        // full_refresh and direct_mode alongside sw_rotate, which the portrait
+        // panel needs, so the capacity is the lever.
+        .buffer_size   = BSP_LCD_H_RES * BSP_LCD_V_RES,
         .double_buffer = true,
         .flags = {
-            .buff_dma    = true,
-            .buff_spiram = false,
+            // In PSRAM, because the buffer wanted to be far larger than the
+            // internal DMA pool can spare: at 50 lines a full-screen change
+            // took 26 render-and-flush passes and filled in visible bands.
+            .buff_dma    = false,
+            .buff_spiram = true,
             // Rotation off the CPU: the port routes this through the P4's PPA
             // when CONFIG_LVGL_PORT_ENABLE_PPA is set.
             .sw_rotate   = true,

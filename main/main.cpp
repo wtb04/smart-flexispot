@@ -3,6 +3,7 @@
 #include "desk.h"
 #include "esp_log.h"
 #include "sound.h"
+#include "room.h"
 #include "telemetry.h"
 #include "ui.h"
 #include "wallclock.h"
@@ -23,8 +24,11 @@ void on_brightness_changed(int percent)
 extern "C" void app_main(void)
 {
     ESP_ERROR_CHECK(board::init());
-    ESP_ERROR_CHECK(ui::init(desk::on_move, desk::on_preset, on_brightness_changed,
-                             board::kDefaultBrightness));
+    const ui::Handlers handlers{desk::on_move,   desk::on_preset,   on_brightness_changed,
+                                room::on_tile,   room::on_setpoint, room::on_mode,
+                                room::on_lights, room::on_light,    room::on_dial_toggle};
+    ESP_ERROR_CHECK(ui::init(handlers, board::kDefaultBrightness));
+    room::init();
     ESP_ERROR_CHECK(desk::start());
     ESP_ERROR_CHECK(battery::start());
     // Not fatal: no chime is better than no panel.
