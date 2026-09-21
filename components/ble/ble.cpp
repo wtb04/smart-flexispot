@@ -2,6 +2,7 @@
 
 #include "ble_secrets.h"
 #include "esp_check.h"
+#include "proxy_link.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -176,11 +177,20 @@ void on_resolved(int rssi)
     }
 }
 
+void start_scanning();
+
 int on_gap_event(ble_gap_event *event, void *)
 {
+    // The link to the desk proxy shares this host and these events.
+    if (proxy::handle(event)) {
+        return 0;
+    }
+
     if (event->type == BLE_GAP_EVENT_DISC) {
         if (is_resolvable_private(event->disc.addr) && matches_irk(event->disc.addr.val)) {
             on_resolved(event->disc.rssi);
+        } else if (proxy::consider(event->disc)) {
+            s_ready.store(false, std::memory_order_relaxed);
         }
     } else if (event->type == BLE_GAP_EVENT_DISC_COMPLETE) {
         ESP_LOGW(TAG, "scan ended (%d)", event->disc_complete.reason);
@@ -209,7 +219,11 @@ void start_scanning()
     ESP_LOGI(TAG, "scanning, %u ms window every %u ms", SCAN_WINDOW_MS, SCAN_INTERVAL_MS);
 }
 
-void on_sync() { start_scanning(); }
+void on_sync()
+{
+    proxy::set_rescan(start_scanning);
+    start_scanning();
+}
 
 void on_reset(int reason)
 {
@@ -241,6 +255,7 @@ esp_err_t start()
     ble_hs_cfg.sync_cb  = on_sync;
     ble_hs_cfg.reset_cb = on_reset;
     nimble_port_freertos_init(host_task);
+    ESP_RETURN_ON_ERROR(proxy::start(), TAG, "proxy link");
     return ESP_OK;
 }
 

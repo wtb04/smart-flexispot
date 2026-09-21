@@ -1446,9 +1446,14 @@ constexpr InfoRow HASS_ROWS[] = {
     {Info::HaSocket, "Socket"},
     {Info::HaEntities, "Entities"},
 };
-constexpr InfoRow PHONE_ROWS[] = {
-    {Info::PhoneRadio, "Bluetooth"},
-    {Info::PhoneKey, "Key"},
+constexpr InfoRow BLUETOOTH_ROWS[] = {
+    {Info::PhoneRadio, "Radio"},
+    {Info::BleLink, "Desk proxy"},
+    {Info::BleTrip, "Round trip"},
+    {Info::BleLoss, "Dropped"},
+};
+constexpr InfoRow PRESENCE_ROWS[] = {
+    {Info::PhoneKey, "Identity key"},
     {Info::PhoneState, "Phone"},
     {Info::PhoneSignal, "Signal"},
 };
@@ -1458,9 +1463,10 @@ constexpr InfoRow POWER_ROWS[] = {
     {Info::PowerStatus, "State"},
 };
 constexpr InfoRow DESK_ROWS[] = {
-    {Info::DeskLink, "Controller"}, {Info::DeskHeight, "Height"}, {Info::DeskActive, "Standing at"},
-    {Info::DeskStand, "Stand"},     {Info::DeskSit, "Sit"},       {Info::DeskOne, "Preset 1"},
-    {Info::DeskTwo, "Preset 2"},
+    {Info::DeskTransport, "Driven over"}, {Info::DeskLink, "Controller"},
+    {Info::DeskHeight, "Height"},         {Info::DeskActive, "Standing at"},
+    {Info::DeskStand, "Stand"},           {Info::DeskSit, "Sit"},
+    {Info::DeskOne, "Preset 1"},          {Info::DeskTwo, "Preset 2"},
 };
 constexpr InfoRow SYSTEM_ROWS[] = {
     {Info::SysFirmware, "Firmware"}, {Info::SysBuilt, "Built"},  {Info::SysUptime, "Uptime"},
@@ -1473,12 +1479,15 @@ constexpr InfoCard INFO_CARDS[] = {
      Info::WifiState, false, Setting::Charging, nullptr},
     {"Home Assistant", LV_SYMBOL_HOME, HASS_ROWS, static_cast<int>(std::size(HASS_ROWS)),
      Info::HaSocket, false, Setting::Charging, nullptr},
-    {"Phone", LV_SYMBOL_BLUETOOTH, PHONE_ROWS, static_cast<int>(std::size(PHONE_ROWS)),
+    {"Bluetooth", LV_SYMBOL_BLUETOOTH, BLUETOOTH_ROWS,
+     static_cast<int>(std::size(BLUETOOTH_ROWS)), Info::BleLink, false, Setting::Charging,
+     nullptr},
+    {"Presence", LV_SYMBOL_EYE_OPEN, PRESENCE_ROWS, static_cast<int>(std::size(PRESENCE_ROWS)),
      Info::PhoneState, true, Setting::PresenceGate, "Hide pages while away"},
     {"Power", LV_SYMBOL_BATTERY_FULL, POWER_ROWS, static_cast<int>(std::size(POWER_ROWS)),
      Info::PowerCharge, true, Setting::Charging, "Charge the battery"},
     {"Desk", LV_SYMBOL_UP, DESK_ROWS, static_cast<int>(std::size(DESK_ROWS)), Info::DeskLink,
-     false, Setting::Charging, nullptr},
+     true, Setting::DeskBluetooth, "Drive it over Bluetooth"},
     {"System", LV_SYMBOL_SETTINGS, SYSTEM_ROWS, static_cast<int>(std::size(SYSTEM_ROWS)),
      Info::SysUptime, false, Setting::Charging, nullptr},
 };

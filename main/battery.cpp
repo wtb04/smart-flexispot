@@ -28,15 +28,35 @@ StackType_t  s_task_stack[TASK_STACK];
 
 [[noreturn]] void battery_task(void *)
 {
+    bool charging_on = settings::enabled(settings::Key::Charging);
+
     for (;;) {
         power::reassert_charging();
 
         power::State state{};
         if (power::read(state) == ESP_OK) {
-            ESP_LOGI(TAG, "%d%% %.2f V %d mA", state.percent, state.bus_volts,
-                     static_cast<int>(std::lround(state.current_amps * 1000.0f)));
+            if (state.present) {
+                ESP_LOGI(TAG, "%d%% %.2f V %d mA", state.percent, state.bus_volts,
+                         static_cast<int>(std::lround(state.current_amps * 1000.0f)));
+            } else {
+                ESP_LOGI(TAG, "no pack (%.2f V)", state.bus_volts);
+            }
             ESP_ERROR_CHECK_WITHOUT_ABORT(
                 ui::set_battery(state.present, state.percent, state.charging));
+
+            // No sense driving a charger into an empty socket: that is what
+            // makes the sense node swing, and it is what the pack detection has
+            // to see through.
+            // Settled rather than inferred: the charger comes off for a moment
+            // and the voltage is asked whether anything is holding it up.
+            bool present = false;
+            ESP_ERROR_CHECK_WITHOUT_ABORT(power::probe_pack(present));
+
+            const bool wanted = settings::enabled(settings::Key::Charging) && present;
+            if (wanted != charging_on && power::set_charging(wanted) == ESP_OK) {
+                charging_on = wanted;
+                ESP_LOGI(TAG, "charger %s", wanted ? "on" : "off, nothing to charge");
+            }
         }
         vTaskDelay(POLL_INTERVAL);
     }

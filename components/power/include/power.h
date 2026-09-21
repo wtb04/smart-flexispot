@@ -29,6 +29,11 @@ void reassert_charging();
 /** Safe from any task once init() has returned. */
 esp_err_t read(State &out);
 
+/** Settles the question by switching the charger off for a moment and seeing
+ *  whether the voltage holds: a pack does, an empty socket does not. Blocks for
+ *  a few hundred milliseconds and briefly interrupts charging. */
+esp_err_t probe_pack(bool &present);
+
 /** The most recent successful read, without touching the bus. False if there
  *  has not been one. */
 bool last(State &out);

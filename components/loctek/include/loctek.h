@@ -49,4 +49,8 @@ struct Stats {
 
 Stats stats();
 
+/** Copies out the most recent bytes seen on the wire, newest last, for when
+ *  frames are not decoding and the question is what is arriving at all. */
+int peek_raw(std::uint8_t *out, int capacity);
+
 }  // namespace loctek

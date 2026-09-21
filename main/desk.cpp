@@ -1,14 +1,17 @@
 #include "desk.h"
 
+#include "ble.h"
 #include "esp_check.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "loctek.h"
+#include "settings.h"
 #include "nvs.h"
 #include "nvs_flash.h"
 
 #include <atomic>
+#include <cstring>
 #include <cstdlib>
 #include <ctime>
 
@@ -170,6 +173,16 @@ void clear_active()
 
 std::atomic<int>  s_height_mm{-1};
 
+// Which wire the commands take. Read once at startup: handing a moving desk
+// from one transport to the other while it travels is not something to do for
+// the sake of a toggle, so the setting takes effect on the next boot.
+bool s_over_ble = false;
+
+bool over_ble()
+{
+    return s_over_ble;
+}
+
 TickType_t s_commanded_at   = 0;  // zero when nothing is expected to move
 int        s_commanded_from = -1;
 
@@ -180,13 +193,21 @@ void run_preset(const PresetCommand &cmd)
     }
     const auto preset = static_cast<loctek::Preset>(cmd.index);
     if (cmd.store) {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(loctek::store_preset(preset));
+        if (over_ble()) {
+            ble::desk::store(cmd.index);
+        } else {
+            ESP_ERROR_CHECK_WITHOUT_ABORT(loctek::store_preset(preset));
+        }
         remember_preset(cmd.index, s_height_mm.load(std::memory_order_relaxed));
         ESP_ERROR_CHECK_WITHOUT_ABORT(
             ui::notify("", "Preset saved", "success", 2500));
     } else {
         clear_active();
-        ESP_ERROR_CHECK_WITHOUT_ABORT(loctek::goto_preset(preset));
+        if (over_ble()) {
+            ble::desk::preset(cmd.index);
+        } else {
+            ESP_ERROR_CHECK_WITHOUT_ABORT(loctek::goto_preset(preset));
+        }
         s_learning        = cmd.index;
         s_learn_from      = s_height_mm.load(std::memory_order_relaxed);
         s_learn_started   = xTaskGetTickCount();
@@ -200,11 +221,41 @@ std::atomic<int>  s_motion{0};  // -1 down, 0 idle, +1 up
 
 // Repaints only on a change: the box streams frames far faster than the display
 // needs, and redrawing an already-correct label just costs the LVGL task time.
+void on_height(int height_mm);
+
+// Straight from the link to the screen. Reading it from the supervisor instead
+// sampled what the box reports every fifty-five milliseconds once every two
+// hundred, which is what made the height feel like it was catching up.
+void on_proxy_status(int height_mm, bool box_linked, deskproto::Motion motion)
+{
+    (void)box_linked;
+    (void)motion;
+    if (height_mm >= 0) {
+        on_height(height_mm);
+    }
+}
+
 void on_height(int height_mm)
 {
     if (s_height_mm.exchange(height_mm, std::memory_order_relaxed) != height_mm) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_height(height_mm));
     }
+}
+
+// What the link and the box on the far end of it are doing, which are two
+// separate things and fail separately.
+const char *proxy_status()
+{
+    if (!ble::desk::connected()) {
+        return "no proxy in range";
+    }
+    int               height     = -1;
+    bool              box_linked = false;
+    deskproto::Motion motion     = deskproto::Motion::Idle;
+    if (!ble::desk::last(height, box_linked, motion)) {
+        return "proxy not reporting";
+    }
+    return box_linked ? kConnected : "proxy up, control box silent";
 }
 
 const char *link_status(const loctek::Stats &stats, bool link_up, int wake_attempts)
@@ -251,7 +302,9 @@ const char *link_status(const loctek::Stats &stats, bool link_up, int wake_attem
         }
         previous = stats;
 
-        const bool  link_up = last_frame != 0 && (now - last_frame) < LINK_TIMEOUT;
+        const bool  link_up = over_ble()
+                                  ? std::strcmp(proxy_status(), kConnected) == 0
+                                  : (last_frame != 0 && (now - last_frame) < LINK_TIMEOUT);
 
         const int height = s_height_mm.load(std::memory_order_relaxed);
         if (height != settled_at) {
@@ -291,7 +344,7 @@ const char *link_status(const loctek::Stats &stats, bool link_up, int wake_attem
                             now - settled_since < STILL_TIME;
         publish_active(height, link_up, moving);
 
-        const char *status  = link_status(stats, link_up, wake_attempts);
+        const char *status = over_ble() ? proxy_status() : link_status(stats, link_up, wake_attempts);
 
         if (status != shown) {
             shown = status;
@@ -319,7 +372,11 @@ const char *link_status(const loctek::Stats &stats, bool link_up, int wake_attem
             last_wake = now;
             ++wake_attempts;
             ESP_LOGI(TAG, "waking panel");
-            ESP_ERROR_CHECK_WITHOUT_ABORT(loctek::wake());
+            if (over_ble()) {
+                ble::desk::wake();
+            } else {
+                ESP_ERROR_CHECK_WITHOUT_ABORT(loctek::wake());
+            }
         }
     }
 }
@@ -336,7 +393,18 @@ esp_err_t start()
     s_preset_queue = presets;
 
     load_presets();
-    ESP_RETURN_ON_ERROR(loctek::start(on_height), TAG, "loctek");
+
+    s_over_ble = settings::enabled(settings::Key::DeskBluetooth);
+    ESP_LOGI(TAG, "driving the desk over %s", s_over_ble ? "bluetooth" : "the local wire");
+    if (s_over_ble) {
+        ble::desk::on_status(on_proxy_status);
+    }
+    if (!s_over_ble) {
+        // Left alone entirely when the proxy holds the wire: an unconnected
+        // UART polling into nothing is noise, and the wake retries below are
+        // worse.
+        ESP_RETURN_ON_ERROR(loctek::start(on_height), TAG, "loctek");
+    }
 
     TaskHandle_t task = xTaskCreateStaticPinnedToCore(supervisor_task, "desk", TASK_STACK, nullptr,
                                                       TASK_PRIORITY, s_task_stack, &s_task_ctrl,
@@ -397,7 +465,15 @@ void on_move(ui::Move direction)
     if (motion != 0) {
         clear_active();
     }
-    ESP_ERROR_CHECK_WITHOUT_ABORT(loctek::request_move(move));
+    if (over_ble()) {
+        // The repeating is the link's job, and its stopping is what stops the
+        // desk; this only says which way.
+        ble::desk::hold(direction == ui::Move::Up     ? deskproto::Motion::Up
+                        : direction == ui::Move::Down ? deskproto::Motion::Down
+                                                      : deskproto::Motion::Idle);
+    } else {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(loctek::request_move(move));
+    }
 }
 
 }  // namespace desk

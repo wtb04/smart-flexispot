@@ -13,6 +13,7 @@
 #include "ha_ws.h"
 #include "hass.h"
 #include "logbuf.h"
+#include "settings.h"
 #include "power.h"
 #include "room.h"
 #include "ui.h"
@@ -143,22 +144,48 @@ void update_hass()
                    links == 2 ? Level::Good : links == 1 ? Level::Warn : Level::Bad);
 }
 
-void update_phone()
+void update_bluetooth()
 {
-    const ble::Stats radio = ble::stats();
+    const ble::Stats     radio      = ble::stats();
+    const ble::LinkStats link       = ble::link_stats();
+    const bool           wants_link = settings::enabled(settings::Key::DeskBluetooth);
+
     push(Info::PhoneRadio, radio.ready ? "scanning" : "starting",
          radio.ready ? Level::Good : Level::Warn);
+
+    push(Info::BleLink, link.connected ? "connected" : wants_link ? "searching" : "not needed",
+         link.connected ? Level::Good : wants_link ? Level::Bad : Level::Neutral);
+
+    char text[32];
+    if (link.samples > 0) {
+        std::snprintf(text, sizeof(text), "%d ms, worst %d", link.median_us / 1000,
+                      link.max_us / 1000);
+        push(Info::BleTrip, text);
+        std::snprintf(text, sizeof(text), "%d of %d", link.lost, link.lost + link.samples);
+        push(Info::BleLoss, text, link.lost == 0 ? Level::Good : Level::Warn);
+    } else {
+        push_missing(Info::BleTrip);
+        push_missing(Info::BleLoss);
+    }
+
+    // The radio's own health: is it up, and is it carrying what it is asked to.
+    ui::set_health(ui::Subsystem::Bluetooth, !radio.ready ? Level::Bad
+                                             : (wants_link && !link.connected) ? Level::Bad
+                                                                               : Level::Good);
+}
+
+void update_presence()
+{
+    const ble::Stats radio = ble::stats();
+    char             text[32];
     push(Info::PhoneKey, radio.has_key ? "loaded" : "missing",
          radio.has_key ? Level::Good : Level::Bad);
 
-    // Health is whether the tracker is doing its job, not whether the answer is
-    // the one you wanted: a phone correctly seen to be away is working
-    // perfectly. Only a dead radio, a missing key or a phone never once
-    // recognised say something is wrong.
-    ui::set_health(ui::Subsystem::Phone, !radio.ready         ? Level::Bad
-                                         : !radio.has_key     ? Level::Bad
-                                         : !radio.ever_seen   ? Level::Warn
-                                                              : Level::Good);
+    // Whether the tracker is doing its job, not whether the answer is the one
+    // you wanted: a phone correctly seen to be away is working perfectly.
+    ui::set_health(ui::Subsystem::Presence, !radio.has_key     ? Level::Bad
+                                            : !radio.ever_seen ? Level::Warn
+                                                               : Level::Good);
 
     if (!radio.ever_seen) {
         push(Info::PhoneState, "not seen");
@@ -167,7 +194,6 @@ void update_phone()
     }
 
     push(Info::PhoneState, radio.phone_present ? "home" : "away");
-    char text[16];
     std::snprintf(text, sizeof(text), "%d dBm", radio.phone_rssi);
     push(Info::PhoneSignal, text);
 }
@@ -238,10 +264,38 @@ const char *preset_label(const char *preset)
 
 void update_desk()
 {
-    const bool linked = desk::linked();
+    // Which wire the commands are meant to take, and whether that wire is
+    // there. Said plainly, because the two look the same from the outside and
+    // only one of them is plugged in at a time.
+    const bool over_ble = settings::enabled(settings::Key::DeskBluetooth);
+    push(Info::DeskTransport, over_ble ? "Bluetooth" : "Local wire");
+
+    bool              linked   = false;
+    int               height   = -1;
+    deskproto::Motion motion   = deskproto::Motion::Idle;
+    const char       *state    = "silent";
+
+    if (over_ble) {
+        int  proxy_height = -1;
+        bool box_linked   = false;
+        if (!ble::desk::connected()) {
+            state = "no proxy";
+        } else if (!ble::desk::last(proxy_height, box_linked, motion)) {
+            state = "proxy quiet";
+        } else {
+            linked = box_linked;
+            height = proxy_height;
+            state  = box_linked ? "responding" : "proxy up, box silent";
+        }
+    } else {
+        linked = desk::linked();
+        height = desk::height_mm();
+        state  = linked ? "responding" : "silent";
+    }
+
     ui::set_health(ui::Subsystem::Desk, linked ? Level::Good : Level::Bad);
-    push(Info::DeskLink, linked ? "responding" : "silent", linked ? Level::Good : Level::Bad);
-    push_height(Info::DeskHeight, desk::height_mm());
+    push(Info::DeskLink, state, linked ? Level::Good : Level::Bad);
+    push_height(Info::DeskHeight, height);
     push(Info::DeskActive, preset_label(desk::active_preset()));
     push_height(Info::DeskStand, desk::preset_height_mm(2));
     push_height(Info::DeskSit, desk::preset_height_mm(3));
@@ -288,9 +342,9 @@ constexpr const char *NETWORK_TAGS[] = {
 constexpr const char *HASS_TAGS[] = {"hass", "ha_ws",     "websocket_client",
                                      "room", "telemetry", "mqtt_client",
                                      "MQTT_CLIENT",       "transport_base"};
-constexpr const char *PHONE_TAGS[]  = {"ble", "NimBLE", "vhci_drv"};
+constexpr const char *BLUETOOTH_TAGS[] = {"ble", "NimBLE", "vhci_drv", "BTDM_INIT", "phy_init"};
 constexpr const char *POWER_TAGS[]  = {"power", "battery"};
-constexpr const char *DESK_TAGS[]   = {"desk", "loctek"};
+constexpr const char *DESK_TAGS[] = {"desk", "loctek", "desklink", "deskproxy"};
 constexpr const char *SYSTEM_TAGS[] = {"tab5",  "ui",       "diag",   "media", "clock",
                                        "sound", "settings", "logbuf", "board", "main_task",
                                        "cpu_start", "heap_init", "spiram", "esp_psram", "esp_image"};
@@ -304,7 +358,8 @@ struct TagSet {
 constexpr TagSet TAG_SETS[] = {
     {"Network", NETWORK_TAGS, static_cast<int>(std::size(NETWORK_TAGS))},
     {"Home Assistant", HASS_TAGS, static_cast<int>(std::size(HASS_TAGS))},
-    {"Phone", PHONE_TAGS, static_cast<int>(std::size(PHONE_TAGS))},
+    {"Bluetooth", BLUETOOTH_TAGS, static_cast<int>(std::size(BLUETOOTH_TAGS))},
+    {"Presence", BLUETOOTH_TAGS, static_cast<int>(std::size(BLUETOOTH_TAGS))},
     {"Power", POWER_TAGS, static_cast<int>(std::size(POWER_TAGS))},
     {"Desk", DESK_TAGS, static_cast<int>(std::size(DESK_TAGS))},
     {"System", SYSTEM_TAGS, static_cast<int>(std::size(SYSTEM_TAGS))},
@@ -314,7 +369,8 @@ void update()
 {
     update_network();
     update_hass();
-    update_phone();
+    update_bluetooth();
+    update_presence();
     update_power();
     update_desk();
     update_system();

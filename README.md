@@ -85,6 +85,38 @@ Two naming traps worth knowing:
   is indistinguishable from a control box that refuses to wake, which is a
   miserable thing to debug.
 
+### The proxy board
+
+The panel runs off a battery, so tying it to the desk by a cable defeats the
+point. `proxy/` is a second firmware for an ESP32 that stays behind with the
+desk and is driven over the air. It shares `components/loctek`, so the frames,
+the failsafes and their tests have one home.
+
+| Signal | ESP32 GPIO | Control box RJ45 |
+| --- | --- | --- |
+| TX (ESP32 → box) | 16 | pin 6 |
+| RX (box → ESP32) | 17 | pin 5 |
+| Wake ("PIN 20") | 23 | pin 4 |
+| GND | GND | pin 7 |
+
+If nothing decodes, try these two the other way round before touching anything
+else. The box answers every frame it receives, so a silent box with a clean
+console means it is not hearing us rather than that we are not hearing it, and
+the two faults look identical from the receiving end.
+
+The same three signals and the same warnings as above: straight rather than
+crossed, meter pins 7 and 8 before trusting any table, and the box's 5 V UART
+against a part whose GPIOs are not 5 V tolerant.
+
+One thing differs in the proxy's favour. Pin 8's 5 V can feed the board's
+`5V`/`VIN` pin, which is what that pin and its regulator are for, so the proxy
+needs no supply of its own -- unlike the Tab5, whose M5-Bus power pins are a
+6-24 V raw rail. Meter pin 8 first: on an HS13A-1 it is 29 V and will destroy
+the board.
+
+Build it with `cd proxy && idf.py build flash monitor`. It needs the Xtensa
+toolchain, which `install.sh esp32` adds alongside the panel's RISC-V one.
+
 Pins, the repeat interval and the travel failsafe are all under
 `idf.py menuconfig` → *Loctek desk control*.
 

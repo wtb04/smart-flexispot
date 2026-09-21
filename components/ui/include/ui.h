@@ -73,6 +73,7 @@ using DiagnosticsHandler = void (*)();
 enum class Setting : std::uint8_t {
     Charging,
     PresenceGate,
+    DeskBluetooth,
     Count,
 };
 
@@ -89,10 +90,13 @@ using RestartHandler = void (*)();
  *  once presence gating has hidden it away entirely. */
 using RadarHandler = void (*)(bool showing, bool reachable);
 
+// Bluetooth is the radio. Presence and the desk are two things that ride on
+// it, and they fail separately from it and from each other.
 enum class Subsystem : std::uint8_t {
     Network,
     HomeAssistant,
-    Phone,
+    Bluetooth,
+    Presence,
     Power,
     Desk,
     System,
@@ -201,11 +205,15 @@ enum class Info : std::uint8_t {
     PhoneKey,
     PhoneState,
     PhoneSignal,
+    BleLink,
+    BleTrip,
+    BleLoss,
     PowerSource,
     PowerCharge,
     PowerVolts,
     PowerCurrent,
     PowerStatus,
+    DeskTransport,
     DeskLink,
     DeskHeight,
     DeskActive,

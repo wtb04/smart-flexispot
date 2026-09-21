@@ -149,7 +149,29 @@ CONFIG_BT_NIMBLE_ROLE_CENTRAL=y
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
 # The NimBLE host runs our advertisement callback, which does an AES pass and
 # can log a presence transition, underneath its own HCI frames.
-CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=6144
+# NimBLE narrates every read and write, which at five a second is most of what
+# the log ring holds and most of what the diagnostics page shows.
+CONFIG_BT_NIMBLE_LOG_LEVEL_NONE=y
+# Whatever logs runs the log ring's formatting on its own stack, and this task
+# does the most logging of any.
+CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=8192
+
+# The Bluetooth transport to the other chip allocates DMA-capable memory to
+# send, and so does the AES that TLS runs on. What failed was not a Bluetooth
+# pool but internal memory that can be reached by DMA -- enlarging those pools
+# would have consumed more of exactly what had run out. The two settings below
+# are the actual fix.
+
+# mbedtls holds a sixteen kilobyte input buffer for the whole life of a
+# connection. This frees the large buffers between records instead, which is
+# what it is for.
+CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
+
+# Anything smaller than this stays in internal memory even though it does not
+# need to be there. At sixteen kilobytes that included mbedtls's buffers and a
+# great deal else, crowding out the allocations that genuinely must be internal
+# because something DMAs from them.
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096
 
 # LVGL's on-screen monitors rewrite a label every refresh period, so the
 # rendering pipeline never reaches an idle frame and task_max_sleep_ms can

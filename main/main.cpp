@@ -1,4 +1,5 @@
 #include "battery.h"
+#include "ble.h"
 #include "board.h"
 #include "desk.h"
 #include "diagnostics.h"
@@ -41,6 +42,9 @@ void on_setting(ui::Setting setting, bool on)
             break;
         case ui::Setting::PresenceGate:
             settings::set(settings::Key::PresenceGate, on);
+            break;
+        case ui::Setting::DeskBluetooth:
+            settings::set(settings::Key::DeskBluetooth, on);
             break;
         default:
             break;
@@ -107,6 +111,8 @@ extern "C" void app_main(void)
         ui::set_setting(ui::Setting::Charging, settings::enabled(settings::Key::Charging)));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_setting(
         ui::Setting::PresenceGate, settings::enabled(settings::Key::PresenceGate)));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_setting(
+        ui::Setting::DeskBluetooth, settings::enabled(settings::Key::DeskBluetooth)));
     const int volume = settings::get(settings::Key::Volume);
     sound::set_volume(volume);
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_notification_volume(volume));

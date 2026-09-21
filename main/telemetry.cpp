@@ -6,6 +6,7 @@
 #include "ble.h"
 #include "media.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "esp_netif.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
@@ -200,6 +201,19 @@ void on_album_art(media::Art state, const void *pixels)
         // error while the broker is unreachable, which is normal and not worth
         // logging every two seconds.
         hass::publish(out);
+
+        // What ran out when the Bluetooth transport and TLS both wanted DMA
+        // memory at once. Reported when it is low rather than all the time, so
+        // it says something when it appears.
+        static std::int64_t complained = 0;
+        const std::size_t   dma_free   = heap_caps_get_free_size(MALLOC_CAP_DMA);
+        const std::size_t   internal   = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+        if (dma_free < 48 * 1024 && esp_timer_get_time() - complained > 30000000) {
+            complained = esp_timer_get_time();
+            ESP_LOGW(TAG, "low memory: %u KB dma-capable, %u KB internal",
+                     static_cast<unsigned>(dma_free / 1024),
+                     static_cast<unsigned>(internal / 1024));
+        }
 
         vTaskDelay(PUBLISH_INTERVAL);
     }

@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 
@@ -60,9 +61,21 @@ constexpr std::array<CellPoint, 11> CELL_CURVE{{
 }};
 constexpr int CELLS_IN_SERIES = 2;
 
-// An empty socket floats around 1.9 V and a flat pack disconnects near 2.75 V
-// per cell, so anything under this is no pack rather than a dead one.
-constexpr float PACK_PRESENT_VOLTS = 4.0f;
+// Whether a pack is there cannot be read off the voltage while the charger is
+// running, because then the charger is what sets it. With no pack it walks up
+// to its constant-voltage setpoint, finds nothing to push into, collapses and
+// tries again: measured here, the node alternated between 8.41 V and 4.15 V
+// every few seconds, which read as a full pack half the time and a flat one the
+// rest, and the smoothing blended the two into a plausible-looking number that
+// wandered between fifty and seventy per cent.
+//
+// Switching the charger off for a moment settles it. A pack holds its voltage,
+// because that is what a battery does; an empty socket has nothing to hold it
+// and collapses. This is a measurement rather than a guess, and it costs one
+// interruption of a few hundred milliseconds per poll.
+constexpr float      PACK_MIN_VOLTS = 6.0f;
+constexpr float      PACK_MAX_VOLTS = 8.8f;
+constexpr TickType_t PROBE_SETTLE   = pdMS_TO_TICKS(250);
 
 // Terminal voltage is not open-circuit voltage: the pack sags under load and is
 // pushed up while charging, which walked the percentage by ten points or more
@@ -108,6 +121,8 @@ StaticSemaphore_t s_read_lock_ctrl;
 float        s_percent  = 0.0f;
 bool         s_smoothed = false;
 std::int64_t s_percent_us = 0;
+
+std::atomic<bool> s_pack_present{false};
 
 esp_err_t read_register(std::uint8_t reg, std::uint16_t &out)
 {
@@ -156,7 +171,12 @@ esp_err_t read_locked(State &out)
 
     out.bus_volts    = static_cast<std::int16_t>(raw_bus) * BUS_VOLTAGE_LSB;
     out.current_amps = static_cast<std::int16_t>(raw_current) * CURRENT_LSB;
-    out.present      = out.bus_volts >= PACK_PRESENT_VOLTS;
+    // A reading no two-cell pack could give means it has gone, without waiting
+    // for the next probe to say so. The probe is what puts it back.
+    if (out.bus_volts < PACK_MIN_VOLTS || out.bus_volts > PACK_MAX_VOLTS) {
+        s_pack_present.store(false, std::memory_order_relaxed);
+    }
+    out.present      = s_pack_present.load(std::memory_order_relaxed);
     out.on_battery   = out.present && out.current_amps > CURRENT_DEADBAND_A;
     out.charging     = out.present && out.current_amps < -CURRENT_DEADBAND_A;
 
@@ -229,6 +249,10 @@ esp_err_t init()
 
     State probe{};
     ESP_RETURN_ON_ERROR(read(probe), TAG, "first read");
+
+    bool present = false;
+    ESP_ERROR_CHECK_WITHOUT_ABORT(probe_pack(present));
+    ESP_LOGI(TAG, "%s", present ? "pack present" : "no pack");
     return ESP_OK;
 }
 
@@ -296,6 +320,28 @@ esp_err_t read(State &out)
     return err;
 }
 
+
+esp_err_t probe_pack(bool &present)
+{
+    const bool charging = s_charging_wanted;
+    if (charging) {
+        ESP_RETURN_ON_ERROR(set_charging(false), TAG, "charger off for probe");
+        vTaskDelay(PROBE_SETTLE);
+    }
+
+    State settled{};
+    const esp_err_t err = read(settled);
+    present = err == ESP_OK && settled.bus_volts >= PACK_MIN_VOLTS &&
+              settled.bus_volts <= PACK_MAX_VOLTS;
+    s_pack_present.store(present, std::memory_order_relaxed);
+
+    // Only back on if something is there to charge. set_charging refuses a pack
+    // below its floor anyway, and an empty socket reads far below it.
+    if (charging && present) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(set_charging(true));
+    }
+    return err;
+}
 
 bool last(State &out)
 {

@@ -1,7 +1,10 @@
 #include "loctek.h"
 
 #include "driver/gpio.h"
+#include "soc/soc_caps.h"
 #include "driver/uart.h"
+
+#include <cstring>
 #include "esp_check.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -157,6 +160,24 @@ const KeyFrame &frame_for(Move direction)
     }
 }
 
+// A window on the wire, for when nothing decodes and the question is whether
+// the bytes are the desk's at all.
+constexpr int RAW_KEEP = 64;
+std::uint8_t  s_raw[RAW_KEEP];
+int           s_raw_len = 0;
+
+void keep_raw(const std::uint8_t *bytes, int count)
+{
+    for (int i = 0; i < count; ++i) {
+        if (s_raw_len < RAW_KEEP) {
+            s_raw[s_raw_len++] = bytes[i];
+        } else {
+            std::memmove(s_raw, s_raw + 1, RAW_KEEP - 1);
+            s_raw[RAW_KEEP - 1] = bytes[i];
+        }
+    }
+}
+
 [[noreturn]] void rx_task(void *)
 {
     Parser parser;
@@ -166,6 +187,9 @@ const KeyFrame &frame_for(Move direction)
 
     for (;;) {
         const int read = uart_read_bytes(UART, buf.data(), buf.size(), pdMS_TO_TICKS(10));
+        if (read > 0) {
+            keep_raw(buf.data(), read);
+        }
         if (read > 0) {
             s_bytes_received.fetch_add(static_cast<std::uint32_t>(read), std::memory_order_relaxed);
         }
@@ -197,14 +221,18 @@ esp_err_t init_wake_gpio()
     if constexpr (CONFIG_LOCTEK_WAKE_GPIO < 0) {
         return ESP_OK;
     } else {
-        const gpio_config_t cfg = {
-            .pin_bit_mask  = 1ULL << CONFIG_LOCTEK_WAKE_GPIO,
-            .mode          = GPIO_MODE_OUTPUT,
-            .pull_up_en    = GPIO_PULLUP_DISABLE,
-            .pull_down_en  = GPIO_PULLDOWN_DISABLE,
-            .intr_type     = GPIO_INTR_DISABLE,
-            .hys_ctrl_mode = GPIO_HYS_SOFT_DISABLE,
-        };
+        // Field by field rather than a designated initialiser: the hysteresis
+        // control only exists on the parts that have it, and this driver now
+        // builds for the panel and for the box that proxies it.
+        gpio_config_t cfg{};
+        cfg.pin_bit_mask = 1ULL << CONFIG_LOCTEK_WAKE_GPIO;
+        cfg.mode         = GPIO_MODE_OUTPUT;
+        cfg.pull_up_en   = GPIO_PULLUP_DISABLE;
+        cfg.pull_down_en = GPIO_PULLDOWN_DISABLE;
+        cfg.intr_type    = GPIO_INTR_DISABLE;
+#if SOC_GPIO_SUPPORT_PIN_HYS_FILTER
+        cfg.hys_ctrl_mode = GPIO_HYS_SOFT_DISABLE;
+#endif
         ESP_RETURN_ON_ERROR(gpio_config(&cfg), TAG, "wake gpio");
         return gpio_set_level(static_cast<gpio_num_t>(CONFIG_LOCTEK_WAKE_GPIO), 0);
     }
@@ -309,6 +337,13 @@ esp_err_t nudge()
     ESP_RETURN_ON_FALSE(s_move_queue != nullptr, ESP_ERR_INVALID_STATE, TAG, "not started");
     ESP_RETURN_ON_ERROR(write_frame(kFrameUp), TAG, "nudge");
     return write_frame(kFrameStop);
+}
+
+int peek_raw(std::uint8_t *out, int capacity)
+{
+    const int count = s_raw_len < capacity ? s_raw_len : capacity;
+    std::memcpy(out, s_raw, static_cast<std::size_t>(count));
+    return count;
 }
 
 Stats stats()

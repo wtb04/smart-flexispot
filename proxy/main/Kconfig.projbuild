@@ -1,0 +1,12 @@
+menu "Desk proxy"
+
+    config LOCTEK_PROXY_DRY_RUN
+        bool "Decode and account for movement commands without sending them"
+        default n
+        help
+            Commands are decoded, the deadman runs and status goes back to the
+            panel, but the frames that would actually move the desk are held
+            back and logged instead. For testing the whole path with the desk
+            standing still.
+
+endmenu
