@@ -118,6 +118,11 @@ std::string state_document(const Telemetry &t)
         cJSON_AddStringToObject(root, "battery_present", "OFF");
     }
 
+    cJSON_AddStringToObject(root, "presence", t.presence ? "ON" : "OFF");
+    // Quantised like the other signal readings, and only meaningful while
+    // present -- -127 stands in for "nothing heard".
+    cJSON_AddNumberToObject(root, "presence_rssi", (t.presence_rssi / 5) * 5);
+
     cJSON_AddNumberToObject(root, "brightness", t.brightness);
     // Likewise rounded: signal strength wanders a dBm at a time, which is
     // noise for an indicator and would defeat publish-on-change entirely.
@@ -222,6 +227,25 @@ std::string discovery_document(const std::string &device_id, const std::string &
     cJSON_AddStringToObject(external, "pl_off", "OFF");
     cJSON_AddStringToObject(external, "dev_cla", "plug");
     cJSON_AddStringToObject(external, "ent_cat", "diagnostic");
+
+    add_entity(cmps, "presence", "binary_sensor", "Presence", device_id + "_presence");
+    cJSON *presence = cJSON_GetObjectItem(cmps, "presence");
+    cJSON_AddStringToObject(presence, "stat_t", topics.state.c_str());
+    cJSON_AddStringToObject(presence, "val_tpl", "{{ value_json.presence | default('OFF') }}");
+    cJSON_AddStringToObject(presence, "pl_on", "ON");
+    cJSON_AddStringToObject(presence, "pl_off", "OFF");
+    cJSON_AddStringToObject(presence, "dev_cla", "presence");
+
+    add_entity(cmps, "presence_rssi", "sensor", "Presence signal",
+               device_id + "_presence_rssi");
+    cJSON *presence_rssi = cJSON_GetObjectItem(cmps, "presence_rssi");
+    cJSON_AddStringToObject(presence_rssi, "stat_t", topics.state.c_str());
+    cJSON_AddStringToObject(presence_rssi, "val_tpl",
+                            "{{ value_json.presence_rssi | default('unknown') }}");
+    cJSON_AddStringToObject(presence_rssi, "unit_of_meas", "dBm");
+    cJSON_AddStringToObject(presence_rssi, "dev_cla", "signal_strength");
+    cJSON_AddStringToObject(presence_rssi, "stat_cla", "measurement");
+    cJSON_AddStringToObject(presence_rssi, "ent_cat", "diagnostic");
 
     add_entity(cmps, "brightness", "number", "Brightness", device_id + "_brightness");
     cJSON *brightness = cJSON_GetObjectItem(cmps, "brightness");

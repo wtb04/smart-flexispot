@@ -22,6 +22,8 @@ struct Telemetry {
     bool  on_battery        = false;
     int   brightness    = 0;
     int   rssi_dbm      = 0;
+    bool  presence          = false;  // the tracked phone is in range
+    int   presence_rssi     = -127;
     std::uint32_t uptime_s   = 0;
     std::uint32_t free_heap  = 0;
     std::string   ip_address;

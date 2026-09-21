@@ -124,3 +124,22 @@ CONFIG_LV_DRAW_THREAD_PRIO=3
 # split across both cores small invalidations are cheap, so match it.
 CONFIG_LV_DEF_REFR_PERIOD=16
 
+# The P4 has no radio of its own: NimBLE runs here and the controller lives on
+# the C6, reached over the same SDIO link Wi-Fi uses. Observer role only --
+# the panel listens for advertisements and never connects to anything.
+CONFIG_BT_ENABLED=y
+CONFIG_BT_CONTROLLER_DISABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
+# Defaults to y whenever the controller is disabled, which both hides the hosted
+# option below and leaves the VHCI transport uncompiled -- the link then fails on
+# ble_transport_to_hs_acl_impl. Our controller is on the C6, not a UART.
+CONFIG_BT_NIMBLE_TRANSPORT_UART=n
+CONFIG_ESP_HOSTED_ENABLE_BT_NIMBLE=y
+CONFIG_ESP_HOSTED_NIMBLE_HCI_VHCI=y
+CONFIG_BT_NIMBLE_ROLE_OBSERVER=y
+CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=n
+CONFIG_BT_NIMBLE_ROLE_BROADCASTER=n
+# Scanning only needs the observer role, but hosted's VHCI driver references
+# ble_transport_to_hs_acl_impl unconditionally, and NimBLE only compiles that
+# when a connecting role is enabled. Central costs some flash we do not use.
+CONFIG_BT_NIMBLE_ROLE_CENTRAL=y

@@ -3,6 +3,7 @@
 #include "board.h"
 #include "desk.h"
 #include "esp_check.h"
+#include "ble.h"
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_timer.h"
@@ -115,6 +116,9 @@ void fill_network(hass::protocol::Telemetry &out)
     ESP_ERROR_CHECK_WITHOUT_ABORT(hass::start(handlers));
     // Not fatal: the desk works without Home Assistant.
     ESP_ERROR_CHECK_WITHOUT_ABORT(hass::ws::start(on_entities));
+    // Shares the SDIO link to the co-processor with Wi-Fi, so it goes up after
+    // the network rather than racing it.
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ble::start());
 
     for (;;) {
         hass::protocol::Telemetry out;
@@ -138,7 +142,16 @@ void fill_network(hass::protocol::Telemetry &out)
             fill_network(out);
         }
 
+        const ble::Stats radio = ble::stats();
+        out.presence = radio.phone_present;
+        // The last reading whenever the phone has ever been heard, not only
+        // while it counts as present: the signal on the way out is exactly what
+        // is worth looking at when the thresholds need moving.
+        out.presence_rssi = radio.ever_seen ? radio.phone_rssi : -127;
+
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_links(wifi::connected(), hass::connected()));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(
+            ui::set_presence(radio.has_key, radio.phone_present, radio.ever_seen));
 
         // Last, so everything gathered above is in the document. Returns an
         // error while the broker is unreachable, which is normal and not worth
