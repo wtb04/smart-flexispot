@@ -1,5 +1,7 @@
 #include "segment_display.h"
 
+#include "theme.h"
+
 #include <algorithm>
 
 namespace ui {
@@ -34,6 +36,7 @@ SegmentDisplay::SegmentDisplay(lv_obj_t *parent)
     for (int d = 0; d < 4; ++d) {
         for (lv_obj_t *&bar : digits_[d].bars) {
             bar = lv_obj_create(root_);
+            theme::fill_accent(bar);
             lv_obj_set_style_border_width(bar, 0, 0);
             lv_obj_set_style_radius(bar, 4, 0);
             lv_obj_set_scrollable(bar, false);
@@ -57,6 +60,8 @@ SegmentDisplay::SegmentDisplay(lv_obj_t *parent)
     }
 
     dot_ = lv_obj_create(root_);
+    theme::fill_accent(dot_);
+    lv_obj_set_style_bg_opa(dot_, LV_OPA_COVER, 0);
     lv_obj_set_pos(dot_, 166, 96);
     lv_obj_set_size(dot_, 10, 10);
     lv_obj_set_style_border_width(dot_, 0, 0);
@@ -64,44 +69,38 @@ SegmentDisplay::SegmentDisplay(lv_obj_t *parent)
     lv_obj_set_scrollable(dot_, false);
 }
 
-void SegmentDisplay::set_digit(int index, int value, std::uint32_t colour)
+void SegmentDisplay::set_digit(int index, int value)
 {
     Digit &digit = digits_[index];
-    if (digit.shown == value && digit.colour == colour) {
+    if (digit.shown == value) {
         return;
     }
-    digit.shown  = value;
-    digit.colour = colour;
+    digit.shown = value;
 
     const std::uint8_t mask = value == DASH             ? DASH_MASK
                               : (value >= 0 && value <= 9) ? DIGIT_MASK[value]
                                                            : 0;
     for (int s = 0; s < 7; ++s) {
-        lv_obj_set_style_bg_color(digit.bars[s], lv_color_hex(colour), 0);
         lv_obj_set_style_bg_opa(digit.bars[s],
                                 (mask & (1u << s)) ? static_cast<lv_opa_t>(LV_OPA_COVER) : OFF_OPACITY, 0);
     }
 }
 
-void SegmentDisplay::set_tenths(int tenths, std::uint32_t colour)
+void SegmentDisplay::set_tenths(int tenths)
 {
     if (tenths < 0) {
         // ---.- reads as "no reading"; a blank panel reads as "switched off".
         for (int d = 0; d < 4; ++d) {
-            set_digit(d, d == 0 ? -1 : DASH, colour);
+            set_digit(d, d == 0 ? -1 : DASH);
         }
-        lv_obj_set_style_bg_opa(dot_, LV_OPA_COVER, 0);
-        lv_obj_set_style_bg_color(dot_, lv_color_hex(colour), 0);
         return;
     }
 
     tenths = std::clamp(tenths, 0, 9999);
-    set_digit(0, tenths >= 1000 ? (tenths / 1000) % 10 : -1, colour);
-    set_digit(1, (tenths / 100) % 10, colour);
-    set_digit(2, (tenths / 10) % 10, colour);
-    set_digit(3, tenths % 10, colour);
-    lv_obj_set_style_bg_color(dot_, lv_color_hex(colour), 0);
-    lv_obj_set_style_bg_opa(dot_, LV_OPA_COVER, 0);
+    set_digit(0, tenths >= 1000 ? (tenths / 1000) % 10 : -1);
+    set_digit(1, (tenths / 100) % 10);
+    set_digit(2, (tenths / 10) % 10);
+    set_digit(3, tenths % 10);
 }
 
 }  // namespace ui

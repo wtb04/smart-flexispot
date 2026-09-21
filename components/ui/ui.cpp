@@ -47,16 +47,28 @@ struct Layout {
     std::int32_t content_x;
     std::int32_t content_w;
     std::int32_t content_h;
+    std::int32_t rail_x;
+    bool         rail_right;
 };
+
+// Which edge the rail is against. Everything placed against it asks the layout
+// rather than assuming the left.
+bool s_rail_right = false;
 
 Layout layout()
 {
     lv_display_t      *disp = lv_display_get_default();
     const std::int32_t w    = lv_display_get_horizontal_resolution(disp);
     const std::int32_t h    = lv_display_get_vertical_resolution(disp);
-    const std::int32_t x      = RAIL_W + GAP;
+    const std::int32_t x      = s_rail_right ? GAP : RAIL_W + GAP;
     const std::int32_t area_h = h - GAP - EDGE_GAP;
-    return Layout{w, h, x, w - x - GAP, area_h - NAV_H - NAV_GAP};
+    return Layout{w,
+                  h,
+                  x,
+                  w - RAIL_W - 2 * GAP,
+                  area_h - NAV_H - NAV_GAP,
+                  s_rail_right ? w - RAIL_W : 0,
+                  s_rail_right};
 }
 
 Handlers s_handlers{};
@@ -76,6 +88,10 @@ void register_desk_control(lv_obj_t *obj)
 int               s_initial_brightness = 80;
 
 std::optional<SegmentDisplay> s_height;
+lv_obj_t *s_rail          = nullptr;
+lv_obj_t *s_content       = nullptr;
+lv_obj_t *s_clock_box     = nullptr;
+lv_obj_t *s_side_buttons[2] = {};
 lv_obj_t *s_wifi_icon     = nullptr;
 lv_obj_t *s_wifi_slash    = nullptr;
 lv_obj_t *s_phone_icon    = nullptr;
@@ -115,12 +131,17 @@ lv_obj_t   *s_notice_title = nullptr;
 lv_obj_t   *s_notice_body  = nullptr;
 lv_timer_t *s_notice_timer = nullptr;
 
-std::uint32_t level_colour(const char *level)
+struct NoticeInk {
+    std::uint32_t colour;
+    bool          accent;
+};
+
+NoticeInk notice_ink(const char *level)
 {
-    if (std::strcmp(level, "error") == 0) return theme::red;
-    if (std::strcmp(level, "warning") == 0) return theme::amber;
-    if (std::strcmp(level, "success") == 0) return theme::green;
-    return theme::orange;
+    if (std::strcmp(level, "error") == 0) return {theme::red, false};
+    if (std::strcmp(level, "warning") == 0) return {theme::amber, false};
+    if (std::strcmp(level, "success") == 0) return {theme::green, false};
+    return {theme::primary, true};
 }
 
 void hide_notice()
@@ -144,7 +165,8 @@ void show_next_notice()
     }
     --s_notice_count;
 
-    lv_obj_set_style_bg_color(s_notice_bar, lv_color_hex(level_colour(notice.level)), 0);
+    const NoticeInk ink = notice_ink(notice.level);
+    theme::fill_accent_or(s_notice_bar, ink.accent, ink.colour);
     // A message with no title reads better promoted into the heading.
     if (notice.title[0] != '\0') {
         lv_label_set_text(s_notice_title, notice.title);
@@ -177,7 +199,7 @@ void create_notice_card()
     // Covers the page and the navigation under it, so there is no navigating out from under a
     // notification. The rail stays live, so the desk can still be driven while a message is up.
     s_notice_scrim = lv_obj_create(lv_layer_top());
-    lv_obj_set_pos(s_notice_scrim, RAIL_W, 0);
+    lv_obj_set_pos(s_notice_scrim, l.rail_right ? 0 : RAIL_W, 0);
     lv_obj_set_size(s_notice_scrim, l.screen_w - RAIL_W, l.screen_h);
     theme::style_panel(s_notice_scrim, theme::background, 0);
     lv_obj_set_style_bg_opa(s_notice_scrim, LV_OPA_70, 0);
@@ -256,7 +278,11 @@ lv_obj_t *icon_bar(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int32_
     lv_obj_t *bar = lv_obj_create(parent);
     lv_obj_set_pos(bar, x, y);
     lv_obj_set_size(bar, w, h);
-    theme::style_panel(bar, theme::orange, 2);
+    theme::style_panel(bar, theme::panel, 2);
+    theme::fill_accent(bar);
+    // White while the preset it belongs to is the one the desk stands at, the
+    // same way it goes white under a finger.
+    lv_obj_set_style_bg_color(bar, lv_color_hex(theme::text), LV_STATE_CHECKED);
     lv_obj_set_style_bg_color(bar, lv_color_hex(theme::text), LV_STATE_PRESSED);
     lv_obj_set_clickable(bar, false);
     return bar;
@@ -280,10 +306,24 @@ void add_desk_icon(lv_obj_t *button, bool high)
     icon_bar(icon, 40, 49, 14, 5);
 }
 
+// The clock keeps the corner furthest from the content, so moving the rail
+// mirrors the strip rather than leaving the time stranded in the middle.
+void place_strip()
+{
+    const bool right = s_rail_right;
+    theme::align(s_clock_box, right ? LV_ALIGN_RIGHT_MID : LV_ALIGN_LEFT_MID, 0, 0);
+    theme::align(s_wifi_icon, right ? LV_ALIGN_LEFT_MID : LV_ALIGN_RIGHT_MID, 0, 0);
+    theme::align(s_phone_icon, right ? LV_ALIGN_LEFT_MID : LV_ALIGN_RIGHT_MID, right ? 44 : -44,
+                 0);
+    lv_obj_align_to(s_wifi_slash, s_wifi_icon, LV_ALIGN_CENTER, 0, -2);
+    lv_obj_align_to(s_phone_slash, s_phone_icon, LV_ALIGN_CENTER, 0, -2);
+}
+
 lv_obj_t *make_rail_button(lv_obj_t *parent, const char *text)
 {
     lv_obj_t *btn = theme::make_button(parent, text);
     lv_obj_set_size(btn, RAIL_W - 2 * PANEL_PAD, RAIL_BTN_H);
+    theme::fill_accent(btn, LV_STATE_CHECKED);
     register_desk_control(btn);
     return btn;
 }
@@ -327,7 +367,8 @@ void create_rail(lv_obj_t *parent)
     const Layout l = layout();
 
     lv_obj_t *rail = lv_obj_create(parent);
-    lv_obj_set_pos(rail, 0, 0);
+    s_rail         = rail;
+    lv_obj_set_pos(rail, l.rail_x, 0);
     lv_obj_set_size(rail, RAIL_W, l.screen_h);
     theme::style_panel(rail);
     lv_obj_set_style_radius(rail, 0, 0);
@@ -347,11 +388,11 @@ void create_rail(lv_obj_t *parent)
     // swapping it for a space would reflow the digits, because the glyphs are
     // not the same width. Fading it in place leaves them still.
     lv_obj_t *clock = lv_obj_create(strip);
+    s_clock_box     = clock;
     lv_obj_set_size(clock, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     theme::style_panel(clock, theme::panel, 0);
     lv_obj_set_style_bg_opa(clock, LV_OPA_TRANSP, 0);
     lv_obj_set_clickable(clock, false);
-    lv_obj_align(clock, LV_ALIGN_LEFT_MID, 0, 0);
     lv_obj_set_flex_flow(clock, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(clock, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(clock, 0, 0);
@@ -368,11 +409,9 @@ void create_rail(lv_obj_t *parent)
     lv_timer_create(clock_blink, 1000, nullptr);
 
     s_wifi_icon = theme::make_label(strip, LV_SYMBOL_WIFI, theme::text, fonts::size_22());
-    lv_obj_align(s_wifi_icon, LV_ALIGN_RIGHT_MID, 0, 0);
 
     // A slash over the glyph: LVGL has no wifi-off symbol.
     s_wifi_slash = theme::make_label(strip, "/", theme::text, fonts::size_32());
-    lv_obj_align_to(s_wifi_slash, s_wifi_icon, LV_ALIGN_CENTER, 0, -2);
 
     // Drawn rather than taken from the font: LVGL's phone symbol is a corded handset. The colour
     // never changes -- the slash is the state.
@@ -380,7 +419,6 @@ void create_rail(lv_obj_t *parent)
     lv_obj_set_size(s_phone_icon, 18, 26);
     theme::style_panel(s_phone_icon, theme::text, 4);
     lv_obj_set_clickable(s_phone_icon, false);
-    lv_obj_align(s_phone_icon, LV_ALIGN_RIGHT_MID, -44, 0);
 
     lv_obj_t *phone_screen = lv_obj_create(s_phone_icon);
     lv_obj_set_size(phone_screen, 13, 18);
@@ -389,7 +427,7 @@ void create_rail(lv_obj_t *parent)
     lv_obj_set_clickable(phone_screen, false);
 
     s_phone_slash = theme::make_label(strip, "/", theme::text, fonts::size_32());
-    lv_obj_align_to(s_phone_slash, s_phone_icon, LV_ALIGN_CENTER, 0, -2);
+    place_strip();
 
     // The status strip stays where it was, under the bezel; everything below it
     // reads better carried a little further down.
@@ -407,7 +445,7 @@ void create_rail(lv_obj_t *parent)
     lv_obj_set_style_pad_bottom(readout, 18, 0);
 
     s_height.emplace(readout);
-    s_height->set_tenths(-1, theme::orange);
+    s_height->set_tenths(-1);
 
     theme::make_label(readout, "CM", theme::secondary, fonts::size_22());
 
@@ -426,7 +464,8 @@ void create_rail(lv_obj_t *parent)
     s_drawer_toggle = theme::make_button(rail, LV_SYMBOL_RIGHT);
     lv_obj_set_size(s_drawer_toggle, 84, 64);
     lv_obj_set_ignore_layout(s_drawer_toggle, true);
-    lv_obj_align(s_drawer_toggle, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+    lv_obj_align(s_drawer_toggle, l.rail_right ? LV_ALIGN_BOTTOM_LEFT : LV_ALIGN_BOTTOM_RIGHT, 0,
+                 0);
     lv_obj_add_event_cb(s_drawer_toggle, manual_clicked_cb, LV_EVENT_CLICKED, nullptr);
 }
 
@@ -434,10 +473,16 @@ void create_rail(lv_obj_t *parent)
 constexpr std::int32_t DRAWER_W  = 340;
 constexpr std::uint32_t DRAWER_MS = 200;
 
-void drawer_width_cb(void *target, std::int32_t value)
+// With the rail on the right the drawer opens towards the content, so its left
+// edge travels as it widens.
+void place_drawer(std::int32_t width)
 {
-    lv_obj_set_width(static_cast<lv_obj_t *>(target), value);
+    const Layout l = layout();
+    lv_obj_set_width(s_drawer, width);
+    lv_obj_set_x(s_drawer, l.rail_right ? l.screen_w - RAIL_W - width : RAIL_W);
 }
+
+void drawer_width_cb(void *, std::int32_t value) { place_drawer(value); }
 
 void animate_drawer(bool open)
 {
@@ -445,7 +490,7 @@ void animate_drawer(bool open)
     // The arrow points the way the drawer will go.
     if (s_drawer_toggle != nullptr) {
         theme::set_text(lv_obj_get_child(s_drawer_toggle, 0),
-                        open ? LV_SYMBOL_LEFT : LV_SYMBOL_RIGHT);
+                        open != s_rail_right ? LV_SYMBOL_LEFT : LV_SYMBOL_RIGHT);
     }
     lv_anim_t anim;
     lv_anim_init(&anim);
@@ -464,8 +509,9 @@ void create_drawer(lv_obj_t *parent)
     const Layout l = layout();
 
     s_drawer = lv_obj_create(parent);
-    lv_obj_set_pos(s_drawer, RAIL_W, 0);
-    lv_obj_set_size(s_drawer, 0, l.screen_h);
+    lv_obj_set_y(s_drawer, 0);
+    lv_obj_set_height(s_drawer, l.screen_h);
+    place_drawer(0);
     theme::style_panel(s_drawer, theme::panel, 0);
     // Children are clipped to the object, so at zero width the buttons are simply not drawn.
     lv_obj_set_style_pad_all(s_drawer, PANEL_PAD, 0);
@@ -482,9 +528,43 @@ void create_drawer(lv_obj_t *parent)
         std::snprintf(label, sizeof(label), "PRESET %d", index + 1);
         lv_obj_t *btn = theme::make_button(s_drawer, label);
         lv_obj_set_size(btn, DRAWER_W - 2 * PANEL_PAD, RAIL_BTN_H);
+        theme::fill_accent(btn, LV_STATE_CHECKED);
         bind_preset(btn, index);
         register_desk_control(btn);
     }
+}
+
+void place_for_side()
+{
+    const Layout l = layout();
+    lv_obj_set_pos(s_rail, l.rail_x, 0);
+    lv_obj_set_pos(s_content, l.content_x, GAP);
+    theme::align(s_drawer_toggle,
+                 l.rail_right ? LV_ALIGN_BOTTOM_LEFT : LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+    theme::set_text(lv_obj_get_child(s_drawer_toggle, 0),
+                    s_drawer_open != l.rail_right ? LV_SYMBOL_LEFT : LV_SYMBOL_RIGHT);
+    place_strip();
+    place_drawer(lv_obj_get_width(s_drawer));
+    lv_obj_set_pos(s_notice_scrim, l.rail_right ? 0 : RAIL_W, 0);
+    lv_obj_align(s_notice_card, LV_ALIGN_CENTER, l.content_x + l.content_w / 2 - l.screen_w / 2,
+                 GAP + l.content_h / 2 - l.screen_h / 2);
+}
+
+void paint_side_buttons()
+{
+    for (int i = 0; i < 2; ++i) {
+        const bool chosen = s_rail_right == (i == 1);
+        lv_obj_set_state(s_side_buttons[i], LV_STATE_CHECKED, chosen);
+        theme::set_text_color(lv_obj_get_child(s_side_buttons[i], 0),
+                              chosen ? theme::text : theme::secondary);
+    }
+}
+
+void apply_rail_side(bool right)
+{
+    s_rail_right = right;
+    place_for_side();
+    paint_side_buttons();
 }
 
 // The arc carries an integer, so everything is scaled to tenths of a degree and divided back
@@ -596,8 +676,8 @@ void build_thermostat(lv_obj_t *parent, std::int32_t y, std::int32_t w, std::int
     lv_obj_set_style_arc_width(s_dial, 24, LV_PART_MAIN);
     lv_obj_set_style_arc_color(s_dial, lv_color_hex(theme::panel), LV_PART_MAIN);
     lv_obj_set_style_arc_width(s_dial, 24, LV_PART_INDICATOR);
-    lv_obj_set_style_arc_color(s_dial, lv_color_hex(theme::orange), LV_PART_INDICATOR);
-    lv_obj_set_style_bg_color(s_dial, lv_color_hex(theme::orange), LV_PART_KNOB);
+    theme::arc_accent(s_dial, LV_PART_INDICATOR);
+    theme::fill_accent(s_dial, LV_PART_KNOB);
     lv_obj_set_style_pad_all(s_dial, 10, LV_PART_KNOB);
 
     lv_obj_add_event_cb(s_dial, arc_changed_cb, LV_EVENT_VALUE_CHANGED, nullptr);
@@ -611,13 +691,14 @@ void build_thermostat(lv_obj_t *parent, std::int32_t y, std::int32_t w, std::int
     lv_obj_align(s_dial_current, LV_ALIGN_TOP_MID, 0, centre - 58);
     lv_obj_align(theme::make_label(card, "TARGET", theme::secondary, fonts::size_16()),
                  LV_ALIGN_TOP_MID, 0, centre + 24);
-    s_dial_target = theme::make_label(card, "--", theme::orange, fonts::temp_34());
+    s_dial_target = theme::make_accent_label(card, "--", fonts::temp_34());
     lv_obj_align(s_dial_target, LV_ALIGN_TOP_MID, 0, centre + 46);
 
     // After the arc, so these are on top of it and take their own presses.
     for (int i = 0; i < kDialToggleCount; ++i) {
         lv_obj_t *chip = theme::make_button(card, "", theme::panel, fonts::size_16());
         lv_obj_set_size(chip, DIAL_CHIP, DIAL_CHIP);
+        theme::fill_accent(chip, LV_STATE_CHECKED);
         lv_obj_set_style_radius(chip, DIAL_CHIP / 2, 0);
         lv_obj_set_pos(chip, inner - DIAL_CHIP - i * (DIAL_CHIP + DIAL_CHIP_GAP), 0);
         lv_obj_add_event_cb(chip, dial_toggle_cb, LV_EVENT_CLICKED,
@@ -632,9 +713,26 @@ void build_thermostat(lv_obj_t *parent, std::int32_t y, std::int32_t w, std::int
     const std::int32_t mode_h = 68;
     s_dial_mode               = theme::make_button(card, "OFF", theme::panel);
     lv_obj_set_size(s_dial_mode, mode_w, mode_h);
+    theme::fill_accent(s_dial_mode, LV_STATE_CHECKED);
     lv_obj_set_style_radius(s_dial_mode, mode_h / 2, 0);
     lv_obj_align(s_dial_mode, LV_ALIGN_TOP_MID, 0, ring_y + ring - mode_h + 4);
     lv_obj_add_event_cb(s_dial_mode, mode_clicked_cb, LV_EVENT_CLICKED, nullptr);
+}
+
+// Heating takes the accent, and moving a shared style on or off invalidates,
+// so the dial is repainted when the mode changes rather than on every report.
+Hvac s_dial_shown = Hvac::Heating;  // what build_thermostat leaves on screen
+
+void paint_dial(Hvac state)
+{
+    if (state == s_dial_shown) {
+        return;
+    }
+    s_dial_shown             = state;
+    const bool          heat = state == Hvac::Heating;
+    const std::uint32_t ink  = state == Hvac::Idle ? theme::amber : theme::secondary;
+    theme::arc_accent_or(s_dial, heat, ink, LV_PART_INDICATOR);
+    theme::fill_accent_or(s_dial, heat, ink, LV_PART_KNOB);
 }
 
 constexpr std::int32_t PILL_H = 60;
@@ -759,6 +857,18 @@ struct LightButton {
 };
 LightButton s_lights[kLightCount];
 
+// Two independent things decide a bulb's colour: whether that light is on, and
+// whether the button it is drawn on has lit up -- a lit bulb on a lit button
+// would otherwise be the accent on the accent. Both are object states, so the
+// four colours are four selectors rather than a pair worked out here.
+void bulb_states(lv_obj_t *part)
+{
+    theme::fill_accent(part, LV_STATE_CHECKED);
+    theme::fill_dim_accent(part, LV_STATE_USER_1);
+    lv_obj_set_style_bg_color(part, lv_color_hex(theme::text),
+                              LV_STATE_CHECKED | LV_STATE_USER_1);
+}
+
 lv_obj_t *make_bulb(lv_obj_t *parent)
 {
     lv_obj_t *bulb = lv_obj_create(parent);
@@ -771,34 +881,35 @@ lv_obj_t *make_bulb(lv_obj_t *parent)
     lv_obj_set_size(glass, BULB_W, BULB_W);
     lv_obj_set_pos(glass, 0, 0);
     theme::style_panel(glass, theme::disabled_ink, BULB_W / 2);
+    bulb_states(glass);
     lv_obj_set_clickable(glass, false);
 
     lv_obj_t *base = lv_obj_create(bulb);
     lv_obj_set_size(base, 16, BULB_H - BULB_W - 3);
     lv_obj_set_pos(base, (BULB_W - 16) / 2, BULB_W + 3);
     theme::style_panel(base, theme::disabled_ink, 3);
+    bulb_states(base);
     lv_obj_set_clickable(base, false);
     return bulb;
 }
 
-// The pair of colours flips with the button's own fill, or a lit bulb would be orange on orange.
 void paint_bulbs()
 {
-    const std::uint32_t lit   = s_lights_on ? theme::text : theme::orange;
-    const std::uint32_t unlit = s_lights_on ? theme::orange_dim : theme::disabled_ink;
     for (int i = 0; i < kLightCount; ++i) {
         if (s_bulbs[i] == nullptr) {
             continue;
         }
-        const std::uint32_t ink = s_light_on[i] ? lit : unlit;
-        theme::set_bg_color(lv_obj_get_child(s_bulbs[i], 0), ink);
-        theme::set_bg_color(lv_obj_get_child(s_bulbs[i], 1), ink);
+        for (int part = 0; part < 2; ++part) {
+            lv_obj_t *obj = lv_obj_get_child(s_bulbs[i], part);
+            lv_obj_set_state(obj, LV_STATE_CHECKED, s_light_on[i]);
+            lv_obj_set_state(obj, LV_STATE_USER_1, s_lights_on);
+        }
     }
 }
 
 void paint_light(lv_obj_t *root, lv_obj_t *name, lv_obj_t *state, bool on)
 {
-    theme::set_bg_color(root, on ? theme::orange : theme::panel_light);
+    lv_obj_set_state(root, LV_STATE_CHECKED, on);
     theme::set_text_color(name, on ? theme::text : theme::secondary);
     theme::set_text_color(state, theme::text);
 }
@@ -835,6 +946,7 @@ void build_lights_button(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::
     lv_obj_set_pos(s_lights_button, x, y);
     lv_obj_set_size(s_lights_button, w, h);
     theme::style_button(s_lights_button, theme::panel_light);
+    theme::fill_accent(s_lights_button, LV_STATE_CHECKED);
     lv_obj_set_style_pad_all(s_lights_button, 28, 0);
     lv_obj_add_event_cb(s_lights_button, lights_event_cb, LV_EVENT_CLICKED, nullptr);
     lv_obj_add_event_cb(s_lights_button, lights_event_cb, LV_EVENT_LONG_PRESSED, nullptr);
@@ -877,7 +989,7 @@ void build_light_picker(lv_obj_t *parent)
     lv_obj_t *card = s_light_picker->content();
     lv_obj_set_style_pad_all(card, PAD, 0);
 
-    lv_obj_t *title = theme::make_label(card, "LIGHTS", theme::orange, fonts::size_22());
+    lv_obj_t *title = theme::make_accent_label(card, "LIGHTS", fonts::size_22());
     lv_obj_align(title, LV_ALIGN_TOP_LEFT, 0, 0);
 
     lv_obj_t *grid = lv_obj_create(card);
@@ -894,6 +1006,7 @@ void build_light_picker(lv_obj_t *parent)
         lv_obj_t *btn = lv_button_create(grid);
         lv_obj_set_size(btn, BTN_W, BTN_H);
         theme::style_button(btn, theme::panel_light);
+        theme::fill_accent(btn, LV_STATE_CHECKED);
         lv_obj_set_style_pad_all(btn, 20, 0);
         lv_obj_add_event_cb(btn, light_clicked_cb, LV_EVENT_CLICKED,
                             reinterpret_cast<void *>(static_cast<std::intptr_t>(i)));
@@ -1218,7 +1331,7 @@ void build_media_panel(lv_obj_t *parent)
     s_panel_progress = lv_bar_create(card);
     lv_obj_set_size(s_panel_progress, text_w, 8);
     theme::style_panel(s_panel_progress, theme::panel_light, 4);
-    lv_obj_set_style_bg_color(s_panel_progress, lv_color_hex(theme::orange), LV_PART_INDICATOR);
+    theme::fill_accent(s_panel_progress, LV_PART_INDICATOR);
     lv_obj_set_style_radius(s_panel_progress, 4, LV_PART_INDICATOR);
 
     s_panel_elapsed = theme::make_label(card, "0:00", theme::secondary, fonts::size_16());
@@ -1243,7 +1356,7 @@ void build_media_panel(lv_obj_t *parent)
 
     s_panel_play = media_button(card, LV_SYMBOL_PLAY, MediaAction::PlayPause, PLAY_W, BTN_H);
     lv_obj_align(s_panel_play, LV_ALIGN_TOP_LEFT, row_x + SIDE_W + GAP, row_y);
-    lv_obj_set_style_bg_color(s_panel_play, lv_color_hex(theme::orange), 0);
+    theme::fill_accent(s_panel_play);
 
     lv_obj_t *next = media_button(card, LV_SYMBOL_NEXT, MediaAction::Next, SIDE_W, BTN_H);
     lv_obj_align(next, LV_ALIGN_TOP_LEFT, row_x + SIDE_W + PLAY_W + 2 * GAP, row_y);
@@ -1371,15 +1484,17 @@ void select_page(int index)
     if (index == SETUP_PAGE && s_handlers.diagnostics != nullptr) {
         s_handlers.diagnostics();
     }
+    if (index == RADAR_PAGE) {
+        radar_page_opened();
+    }
     if (s_handlers.radar != nullptr) {
         s_handlers.radar(index == RADAR_PAGE, page_available(RADAR_PAGE));
     }
     for (int i = 0; i < PAGE_COUNT; ++i) {
         lv_obj_set_hidden(s_nav_tabs[i], !page_available(i));
         lv_obj_set_hidden(s_pages[i], i != index);
-        const bool          active = (i == index);
-        lv_obj_set_style_bg_color(s_nav_tabs[i],
-                                  lv_color_hex(active ? theme::orange : theme::panel_light), 0);
+        const bool active = (i == index);
+        lv_obj_set_state(s_nav_tabs[i], LV_STATE_CHECKED, active);
         const std::uint32_t ink = active ? theme::text : theme::secondary;
         theme::set_text_color(lv_obj_get_child(s_nav_tabs[i], 0), ink);
         theme::set_text_color(lv_obj_get_child(s_nav_tabs[i], 1), ink);
@@ -1497,8 +1612,6 @@ static_assert(INFO_CARD_COUNT == static_cast<int>(Subsystem::Count), "a tile per
 constexpr int SETTING_COUNT = static_cast<int>(Setting::Count);
 
 constexpr std::int32_t ROW_CARD_H   = 88;
-constexpr std::int32_t DIAG_TILE_H  = 200;
-constexpr std::int32_t RESTART_H    = 140;
 constexpr std::int32_t DIAG_HEADER_H = 56;
 // The log card is one size whatever it holds; the state card is only as tall
 // as the subsystem it is showing.
@@ -1644,7 +1757,7 @@ void apply_setting(int index, bool on)
     s_setting_on[index] = on;
     if (s_setting_value[index] != nullptr) {
         theme::set_text(s_setting_value[index], on ? "On" : "Off");
-        theme::set_text_color(s_setting_value[index], on ? theme::orange : theme::secondary);
+        theme::ink_accent_or(s_setting_value[index], on, theme::secondary);
     }
     if (static_cast<Setting>(index) == Setting::PresenceGate) {
         s_presence_gate = on;
@@ -1692,7 +1805,7 @@ lv_obj_t *build_tile(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int3
     theme::style_button(tile, theme::panel_light);
     lv_obj_set_style_pad_all(tile, 20, 0);
 
-    lv_obj_t *glyph = theme::make_label(tile, icon, theme::orange, fonts::size_28());
+    lv_obj_t *glyph = theme::make_accent_label(tile, icon, fonts::size_28());
     lv_obj_align(glyph, LV_ALIGN_TOP_LEFT, 0, 0);
 
     lv_obj_t *caption = theme::make_label(tile, title, theme::secondary, fonts::size_22());
@@ -1778,7 +1891,7 @@ void build_detail_overlay(lv_obj_t *parent)
     lv_obj_t *card = s_diagnostics->content();
     lv_obj_set_style_pad_all(card, DETAIL_PAD, 0);
 
-    s_detail_title = theme::make_label(card, "", theme::orange, fonts::size_28());
+    s_detail_title = theme::make_accent_label(card, "", fonts::size_28());
     lv_obj_align(s_detail_title, LV_ALIGN_TOP_LEFT, 0, 6);
 
     const std::int32_t width  = DETAIL_W - 2 * DETAIL_PAD;
@@ -1836,7 +1949,7 @@ void build_log_overlay(lv_obj_t *parent)
     lv_obj_t *card = s_log_modal->content();
     lv_obj_set_style_pad_all(card, DETAIL_PAD, 0);
 
-    s_log_title = theme::make_label(card, "", theme::orange, fonts::size_28());
+    s_log_title = theme::make_accent_label(card, "", fonts::size_28());
     lv_obj_align(s_log_title, LV_ALIGN_TOP_LEFT, 0, 6);
 
     const std::int32_t width  = LOG_W - 2 * DETAIL_PAD;
@@ -1872,7 +1985,7 @@ lv_obj_t *build_slider_card(lv_obj_t *parent, std::int32_t y, std::int32_t w, co
     lv_obj_set_flex_align(root, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(root, 18, 0);
 
-    theme::make_label(root, icon, theme::orange, fonts::size_28());
+    theme::make_accent_label(root, icon, fonts::size_28());
 
     lv_obj_t *caption = theme::make_label(root, title, theme::secondary, fonts::size_22());
     lv_obj_set_width(caption, 210);
@@ -1886,8 +1999,8 @@ lv_obj_t *build_slider_card(lv_obj_t *parent, std::int32_t y, std::int32_t w, co
     lv_slider_set_range(slider, low, 100);
     lv_slider_set_value(slider, value, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(slider, lv_color_hex(theme::panel), LV_PART_MAIN);
-    lv_obj_set_style_bg_color(slider, lv_color_hex(theme::orange), LV_PART_INDICATOR);
-    lv_obj_set_style_bg_color(slider, lv_color_hex(theme::orange), LV_PART_KNOB);
+    theme::fill_accent(slider, LV_PART_INDICATOR);
+    theme::fill_accent(slider, LV_PART_KNOB);
     lv_obj_set_style_pad_all(slider, 10, LV_PART_KNOB);
     lv_obj_add_event_cb(slider, changed, LV_EVENT_VALUE_CHANGED, nullptr);
     lv_obj_add_event_cb(slider, changed, LV_EVENT_RELEASED, nullptr);
@@ -1898,6 +2011,155 @@ lv_obj_t *build_slider_card(lv_obj_t *parent, std::int32_t y, std::int32_t w, co
     lv_obj_set_width(*out_value, 64);
     lv_obj_set_style_text_align(*out_value, LV_TEXT_ALIGN_RIGHT, 0);
     return slider;
+}
+
+constexpr std::int32_t SWATCH      = 128;
+constexpr int          SWATCH_COLS = 5;
+constexpr std::int32_t ACCENT_DOT  = 44;
+constexpr std::int32_t SIDE_BTN_W  = 150;
+constexpr std::int32_t SIDE_BTN_H  = 60;
+
+std::optional<ModalOverlay> s_colour_picker;
+lv_obj_t                   *s_swatch_tick[theme::primaries.size()] = {};
+
+void apply_primary(std::uint32_t colour)
+{
+    theme::set_primary(colour);
+    for (std::size_t i = 0; i < theme::primaries.size(); ++i) {
+        lv_obj_set_hidden(s_swatch_tick[i], theme::primaries[i] != colour);
+    }
+}
+
+void swatch_clicked_cb(lv_event_t *e)
+{
+    const auto index =
+        static_cast<std::size_t>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e)));
+    apply_primary(theme::primaries[index]);
+    if (s_colour_picker.has_value()) {
+        s_colour_picker->close();
+    }
+    if (s_handlers.primary != nullptr) {
+        s_handlers.primary(theme::primaries[index]);
+    }
+}
+
+void accent_card_cb(lv_event_t *)
+{
+    if (s_colour_picker.has_value()) {
+        s_colour_picker->open();
+    }
+}
+
+void side_clicked_cb(lv_event_t *e)
+{
+    const bool right = lv_event_get_user_data(e) != nullptr;
+    if (right == s_rail_right) {
+        return;
+    }
+    apply_rail_side(right);
+    if (s_handlers.rail_side != nullptr) {
+        s_handlers.rail_side(right);
+    }
+}
+
+// The same shell as a slider card: icon, caption, then whatever the setting is
+// operated with. A handler makes it a button, so the whole row is the target.
+lv_obj_t *build_row_card(lv_obj_t *parent, std::int32_t y, std::int32_t w, const char *icon,
+                         const char *title, lv_event_cb_t clicked)
+{
+    lv_obj_t *root = clicked != nullptr ? lv_button_create(parent) : lv_obj_create(parent);
+    lv_obj_set_pos(root, 0, y);
+    lv_obj_set_size(root, w, ROW_CARD_H);
+    if (clicked != nullptr) {
+        theme::style_button(root, theme::panel_light);
+        lv_obj_add_event_cb(root, clicked, LV_EVENT_CLICKED, nullptr);
+    } else {
+        theme::style_panel(root, theme::panel_light, 14);
+    }
+    lv_obj_set_style_pad_hor(root, 22, 0);
+    lv_obj_set_flex_flow(root, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(root, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(root, 18, 0);
+
+    theme::make_accent_label(root, icon, fonts::size_28());
+    lv_obj_set_flex_grow(theme::make_label(root, title, theme::secondary, fonts::size_22()), 1);
+    return root;
+}
+
+void build_accent_card(lv_obj_t *parent, std::int32_t y, std::int32_t w)
+{
+    lv_obj_t *root = build_row_card(parent, y, w, LV_SYMBOL_TINT, "Accent colour", accent_card_cb);
+
+    lv_obj_t *dot = lv_obj_create(root);
+    lv_obj_set_size(dot, ACCENT_DOT, ACCENT_DOT);
+    theme::style_panel(dot, theme::panel, ACCENT_DOT / 2);
+    theme::fill_accent(dot);
+    lv_obj_set_clickable(dot, false);
+
+    theme::make_label(root, LV_SYMBOL_RIGHT, theme::secondary, fonts::size_28());
+}
+
+void build_side_card(lv_obj_t *parent, std::int32_t y, std::int32_t w)
+{
+    lv_obj_t *root = build_row_card(parent, y, w, LV_SYMBOL_BARS, "Sidebar", nullptr);
+    for (int i = 0; i < 2; ++i) {
+        lv_obj_t *btn =
+            theme::make_button(root, i == 0 ? "LEFT" : "RIGHT", theme::panel, fonts::size_22());
+        lv_obj_set_size(btn, SIDE_BTN_W, SIDE_BTN_H);
+        theme::fill_accent(btn, LV_STATE_CHECKED);
+        lv_obj_add_event_cb(btn, side_clicked_cb, LV_EVENT_CLICKED,
+                            reinterpret_cast<void *>(static_cast<std::intptr_t>(i)));
+        s_side_buttons[i] = btn;
+    }
+    paint_side_buttons();
+}
+
+// Swatches, not sliders: a hue is chosen by eye, and the target has to be found
+// by a fingertip on a wall panel.
+void build_colour_picker(lv_obj_t *parent)
+{
+    const int rows = (static_cast<int>(theme::primaries.size()) + SWATCH_COLS - 1) / SWATCH_COLS;
+    const std::int32_t body_y = ModalOverlay::header_height() + HEADER_GAP;
+    const std::int32_t card_w =
+        SWATCH_COLS * SWATCH + (SWATCH_COLS - 1) * BUTTON_GAP + 2 * DETAIL_PAD;
+    const std::int32_t card_h = body_y + rows * SWATCH + (rows - 1) * BUTTON_GAP + 2 * DETAIL_PAD;
+
+    s_colour_picker.emplace(parent, card_w, card_h);
+    lv_obj_t *card = s_colour_picker->content();
+    lv_obj_set_style_pad_all(card, DETAIL_PAD, 0);
+
+    lv_obj_t *title = theme::make_accent_label(card, "Accent colour", fonts::size_28());
+    lv_obj_align(title, LV_ALIGN_TOP_LEFT, 0, 6);
+
+    lv_obj_t *grid = lv_obj_create(card);
+    lv_obj_set_pos(grid, 0, body_y);
+    lv_obj_set_size(grid, card_w - 2 * DETAIL_PAD, card_h - 2 * DETAIL_PAD - body_y);
+    theme::style_panel(grid, theme::panel, 0);
+    lv_obj_set_style_bg_opa(grid, LV_OPA_TRANSP, 0);
+    lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
+    lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_set_style_pad_row(grid, BUTTON_GAP, 0);
+    lv_obj_set_style_pad_column(grid, BUTTON_GAP, 0);
+
+    for (std::size_t i = 0; i < theme::primaries.size(); ++i) {
+        const std::uint32_t colour = theme::primaries[i];
+        lv_obj_t           *btn    = lv_button_create(grid);
+        lv_obj_set_size(btn, SWATCH, SWATCH);
+        theme::style_button(btn, colour);
+        lv_obj_set_style_radius(btn, 18, 0);
+        // Its own colour darkened rather than the accent's: pressing a swatch
+        // must not flash the colour it is about to replace.
+        lv_obj_set_style_bg_color(btn, lv_color_hex(theme::dim_of(colour)), LV_STATE_PRESSED);
+        lv_obj_add_event_cb(btn, swatch_clicked_cb, LV_EVENT_CLICKED,
+                            reinterpret_cast<void *>(static_cast<std::intptr_t>(i)));
+
+        lv_obj_t *tick = theme::make_label(btn, LV_SYMBOL_OK, theme::background, fonts::size_32());
+        lv_obj_center(tick);
+        lv_obj_set_hidden(tick, colour != theme::primary);
+        s_swatch_tick[i] = tick;
+    }
+
+    s_colour_picker->add_close_button();
 }
 
 void build_settings_view(lv_obj_t *parent, std::int32_t w, std::int32_t h)
@@ -1914,19 +2176,28 @@ void build_settings_view(lv_obj_t *parent, std::int32_t w, std::int32_t h)
                                         "Notification volume", 0, 0, volume_changed_cb,
                                         &s_volume_value);
 
-    const std::int32_t diag_y = 2 * (ROW_CARD_H + BUTTON_GAP);
-    lv_obj_t *diag = build_tile(view, 0, diag_y, w, DIAG_TILE_H, LV_SYMBOL_LIST, "Diagnostics");
+    build_accent_card(view, 2 * (ROW_CARD_H + BUTTON_GAP), w);
+    build_side_card(view, 3 * (ROW_CARD_H + BUTTON_GAP), w);
+
+    // Side by side and as tall as the rows above leave them: the page is full,
+    // and stacked they no longer fit.
+    const std::int32_t tiles_y = 4 * (ROW_CARD_H + BUTTON_GAP);
+    const std::int32_t tiles_h = h - tiles_y;
+    const std::int32_t diag_w  = (w - BUTTON_GAP) * 5 / 8;
+    const std::int32_t rest_w  = w - diag_w - BUTTON_GAP;
+
+    lv_obj_t *diag = build_tile(view, 0, tiles_y, diag_w, tiles_h, LV_SYMBOL_LIST, "Diagnostics");
     lv_obj_add_event_cb(diag, show_diagnostics_cb, LV_EVENT_CLICKED, nullptr);
-    s_diag_summary = tile_value(diag, w, "");
+    s_diag_summary = tile_value(diag, diag_w, "");
     theme::set_text_color(s_diag_summary, theme::secondary);
     lv_obj_t *chevron = theme::make_label(diag, LV_SYMBOL_RIGHT, theme::secondary,
                                           fonts::size_28());
     lv_obj_align(chevron, LV_ALIGN_RIGHT_MID, 0, 0);
 
-    lv_obj_t *restart = build_tile(view, 0, diag_y + DIAG_TILE_H + BUTTON_GAP, w, RESTART_H,
+    lv_obj_t *restart = build_tile(view, diag_w + BUTTON_GAP, tiles_y, rest_w, tiles_h,
                                    LV_SYMBOL_POWER, "Restart panel");
     lv_obj_add_event_cb(restart, restart_held_cb, LV_EVENT_LONG_PRESSED, nullptr);
-    theme::set_text_color(tile_value(restart, w, "Hold to restart"), theme::secondary);
+    theme::set_text_color(tile_value(restart, rest_w, "Hold to restart"), theme::secondary);
 
     s_settings_view = view;
 }
@@ -1979,6 +2250,7 @@ void build_settings_page(lv_obj_t *page)
     build_diagnostics_view(page, inner_w, inner_h);
     build_detail_overlay(page);
     build_log_overlay(page);
+    build_colour_picker(page);
     refresh_diag_summary();
 }
 
@@ -1989,6 +2261,7 @@ void create_content(lv_obj_t *parent)
     const Layout l = layout();
 
     lv_obj_t *area = lv_obj_create(parent);
+    s_content      = area;
     lv_obj_set_pos(area, l.content_x, GAP);
     lv_obj_set_size(area, l.content_w, l.screen_h - GAP - EDGE_GAP);
     lv_obj_set_style_bg_opa(area, LV_OPA_TRANSP, 0);
@@ -2013,6 +2286,7 @@ void create_content(lv_obj_t *parent)
         lv_obj_t *tab = lv_button_create(nav);
         lv_obj_set_size(tab, tab_w, NAV_H - 2 * (PANEL_PAD / 2));
         theme::style_button(tab, theme::panel_light);
+        theme::fill_accent(tab, LV_STATE_CHECKED);
         lv_obj_add_event_cb(tab, nav_event_cb, LV_EVENT_CLICKED,
                             reinterpret_cast<void *>(static_cast<std::intptr_t>(i)));
 
@@ -2175,7 +2449,8 @@ void build_splash()
     s_splash_leg[0] = splash_bar(desk, 34, 0, DESK_BAR, 10, theme::panel_light);
     s_splash_leg[1] = splash_bar(desk, DESK_W - 34 - DESK_BAR, 0, DESK_BAR, 10,
                                  theme::panel_light);
-    s_splash_top = splash_bar(desk, 0, 0, DESK_W, DESK_BAR, theme::orange);
+    s_splash_top = splash_bar(desk, 0, 0, DESK_W, DESK_BAR, theme::panel_light);
+    theme::fill_accent(s_splash_top);
 
     lv_obj_align(theme::make_label(s_splash, "SMART FLEXISPOT", theme::text, fonts::size_48()),
                  LV_ALIGN_CENTER, 0, 40);
@@ -2187,7 +2462,7 @@ void build_splash()
     lv_obj_set_size(s_splash_bar, 360, 6);
     lv_obj_align(s_splash_bar, LV_ALIGN_CENTER, 0, 138);
     theme::style_panel(s_splash_bar, theme::panel_light, 3);
-    lv_obj_set_style_bg_color(s_splash_bar, lv_color_hex(theme::orange), LV_PART_INDICATOR);
+    theme::fill_accent(s_splash_bar, LV_PART_INDICATOR);
     lv_obj_set_style_radius(s_splash_bar, 3, LV_PART_INDICATOR);
     lv_bar_set_range(s_splash_bar, 0, SPLASH_FULL);
 
@@ -2269,11 +2544,19 @@ esp_err_t splash_done()
     return ESP_OK;
 }
 
-esp_err_t init(const Handlers &handlers, int initial_brightness)
+esp_err_t init(const Handlers &handlers, int initial_brightness, std::uint32_t accent,
+               bool rail_right)
 {
     ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
     // Before any label exists: the fonts carry the fallback Montserrat lacks.
     fonts::init();
+    // Both before anything is built, so nothing is ever drawn in last week's
+    // colour or on the wrong side and then moved.
+    theme::init_accents();
+    if (accent != 0) {
+        theme::set_primary(accent);
+    }
+    s_rail_right         = rail_right;
     s_handlers           = handlers;
     s_initial_brightness = initial_brightness;
     build_screen();
@@ -2297,13 +2580,12 @@ esp_err_t set_preset_active(int index, bool active)
 
     s_preset_active[index] = active;
     lv_obj_t *button       = s_preset_buttons[index];
-    theme::set_bg_color(button, active ? theme::orange : theme::panel_light);
+    lv_obj_set_state(button, LV_STATE_CHECKED, active);
     for (std::uint32_t i = 0; i < lv_obj_get_child_count(button); ++i) {
         lv_obj_t *child = lv_obj_get_child(button, i);
         theme::set_text_color(child, theme::text);
         for (std::uint32_t j = 0; j < lv_obj_get_child_count(child); ++j) {
-            theme::set_bg_color(lv_obj_get_child(child, j),
-                                active ? theme::text : theme::orange);
+            lv_obj_set_state(lv_obj_get_child(child, j), LV_STATE_CHECKED, active);
         }
     }
     lvgl_port_unlock();
@@ -2314,7 +2596,7 @@ esp_err_t set_height(int height_mm)
 {
     ESP_RETURN_ON_FALSE(s_height.has_value(), ESP_ERR_INVALID_STATE, TAG, "not initialised");
     ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
-    s_height->set_tenths(height_mm, theme::orange);
+    s_height->set_tenths(height_mm);
     lvgl_port_unlock();
     return ESP_OK;
 }
@@ -2533,7 +2815,7 @@ esp_err_t set_dial_toggle(int index, const char *label, bool on)
     if (!empty) {
         lv_obj_t *text = lv_obj_get_child(chip, 0);
         theme::set_text(text, label);
-        theme::set_bg_color(chip, on ? theme::orange : theme::panel);
+        lv_obj_set_state(chip, LV_STATE_CHECKED, on);
         theme::set_text_color(text, on ? theme::text : theme::secondary);
     }
     lvgl_port_unlock();
@@ -2564,17 +2846,9 @@ esp_err_t set_thermostat(float current_c, float target_c, const char *mode, Hvac
         }
     }
 
-    std::uint32_t ink = theme::secondary;
-    switch (state) {
-        case Hvac::Heating: ink = theme::orange; break;
-        case Hvac::Idle:    ink = theme::amber;  break;
-        case Hvac::Off:     break;
-    }
-    theme::set_arc_color(s_dial, ink, LV_PART_INDICATOR);
-    theme::set_bg_color(s_dial, ink, LV_PART_KNOB);
+    paint_dial(state);
 
-    const bool on = state != Hvac::Off;
-    theme::set_bg_color(s_dial_mode, on ? theme::orange : theme::panel);
+    lv_obj_set_state(s_dial_mode, LV_STATE_CHECKED, state != Hvac::Off);
     lv_obj_t *mode_text = lv_obj_get_child(s_dial_mode, 0);
     theme::set_text(mode_text, mode != nullptr ? mode : "--");
     theme::set_text_color(mode_text, theme::text);

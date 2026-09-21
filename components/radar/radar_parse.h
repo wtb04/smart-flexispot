@@ -16,6 +16,7 @@ struct Aircraft {
     char  type[kTypeLen];      // ICAO type, "A320" and the like
     char  reg[kRegLen];        // tail number
     char  desc[kDescLen];      // "BOEING 737-800" and the like
+    char  category[4];         // ADS-B emitter class, "A3" and the like
     int   squawk;              // -1 when not reported
     float lat;
     float lon;

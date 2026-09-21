@@ -63,6 +63,16 @@ void on_volume(int percent, bool preview)
     }
 }
 
+void on_primary(std::uint32_t colour)
+{
+    settings::set(settings::Key::Accent, static_cast<int>(colour));
+}
+
+void on_rail_side(bool right)
+{
+    settings::set(settings::Key::RailSide, right);
+}
+
 void on_radar_page(bool showing, bool reachable)
 {
     radar::set_enabled(reachable);
@@ -99,9 +109,12 @@ extern "C" void app_main(void)
                                 room::on_media,     room::on_setpoint,    room::on_mode,
                                 room::on_lights,    room::on_light,       room::on_dial_toggle,
                                 diagnostics::refresh, on_setting,         on_volume,
-                                on_restart,           on_radar_page,      diagnostics::logs};
+                                on_restart,           on_radar_page,      diagnostics::logs,
+                                on_primary,           on_rail_side};
     const int brightness = settings::get(settings::Key::Brightness);
-    ESP_ERROR_CHECK(ui::init(handlers, brightness));
+    ESP_ERROR_CHECK(ui::init(handlers, brightness,
+                             static_cast<std::uint32_t>(settings::get(settings::Key::Accent)),
+                             settings::enabled(settings::Key::RailSide)));
     // Through the same path a change takes, so the panel, the backlight and
     // what gets published all start out agreeing.
     on_brightness_changed(brightness);

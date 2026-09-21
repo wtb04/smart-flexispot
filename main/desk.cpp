@@ -67,9 +67,10 @@ constexpr char NVS_NAMESPACE[] = "desk";
 // height a preset was pressed *from*, so anything stored under it is wrong.
 constexpr char NVS_PRESETS[]   = "presets2";
 
-// The box stops within a few millimetres of where it was asked to, and the
-// readout moves in whole millimetres, so this is about matching intent.
-constexpr int PRESET_TOLERANCE_MM = 8;
+// Whether the desk has actually set off, rather than whether a height matches
+// a preset: the highlight has to come down the moment it starts moving, and a
+// millimetre of jitter in the readout is not moving.
+constexpr int DEPARTED_MM = 8;
 
 // Long enough to be sure the desk has finished, because recording the wrong
 // height teaches the preset something wrong and it persists.
@@ -150,8 +151,10 @@ void publish_active(int height_mm, bool linked, bool moving)
 {
     int standing_at = -1;
     for (int i = 0; i < ui::kPresetCount; ++i) {
-        const bool active = linked && !moving && height_mm >= 0 && s_preset_mm[i] >= 0 &&
-                            std::abs(height_mm - s_preset_mm[i]) <= PRESET_TOLERANCE_MM;
+        // Exactly, with no tolerance: the box puts the desk back on the same
+        // millimetre it was asked for, so anything else is a different height.
+        const bool active =
+            linked && !moving && height_mm >= 0 && height_mm == s_preset_mm[i];
         if (active) {
             standing_at = i;
         }
@@ -359,7 +362,7 @@ const char *link_status(const loctek::Stats &stats, bool link_up, int wake_attem
         const bool commanded = s_commanded_at != 0;
         if (commanded) {
             const bool left = height >= 0 && s_commanded_from >= 0 &&
-                              std::abs(height - s_commanded_from) > PRESET_TOLERANCE_MM;
+                              std::abs(height - s_commanded_from) > DEPARTED_MM;
             if (left || now - s_commanded_at > COMMAND_GRACE) {
                 s_commanded_at = 0;
             }

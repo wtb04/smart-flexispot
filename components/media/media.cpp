@@ -124,6 +124,17 @@ int decoded_stride(const jpeg_decode_picture_info_t &info)
     return (static_cast<int>(info.width) + mcu_w - 1) / mcu_w * mcu_w;
 }
 
+// A single-component jpeg is the one thing the engine will not give back as
+// RGB565: asked for colour it answers ESP_ERR_NOT_SUPPORTED and says the
+// picture is a gray style picture. Black and white covers and black and white
+// aircraft photographs are both ordinary things to come across, so the grey
+// plane is taken as it comes and widened here. Built arithmetically, so unlike
+// the engine's own output it needs no byte swap.
+inline std::uint16_t grey_to_rgb565(std::uint8_t level)
+{
+    return static_cast<std::uint16_t>(((level >> 3) << 11) | ((level >> 2) << 5) | (level >> 3));
+}
+
 /** Nearest neighbour: a box filter would read every source pixel, not one in 16. */
 void shrink(const std::uint16_t *src, int side, int stride, std::uint16_t *dst)
 {
@@ -132,6 +143,17 @@ void shrink(const std::uint16_t *src, int side, int stride, std::uint16_t *dst)
         std::uint16_t       *out = dst + static_cast<std::size_t>(y) * kArtSize;
         for (int x = 0; x < kArtSize; ++x) {
             out[x] = row[x * side / kArtSize];
+        }
+    }
+}
+
+void shrink_grey(const std::uint8_t *src, int side, int stride, std::uint16_t *dst)
+{
+    for (int y = 0; y < kArtSize; ++y) {
+        const std::uint8_t *row = src + static_cast<std::size_t>(y * side / kArtSize) * stride;
+        std::uint16_t      *out = dst + static_cast<std::size_t>(y) * kArtSize;
+        for (int x = 0; x < kArtSize; ++x) {
+            out[x] = grey_to_rgb565(row[x * side / kArtSize]);
         }
     }
 }
@@ -148,8 +170,10 @@ bool decode_locked(std::size_t bytes)
         return false;
     }
 
+    const bool grey = info.sample_method == JPEG_DOWN_SAMPLING_GRAY;
+
     jpeg_decode_cfg_t cfg{};
-    cfg.output_format = JPEG_DECODE_OUT_FORMAT_RGB565;
+    cfg.output_format = grey ? JPEG_DECODE_OUT_FORMAT_GRAY : JPEG_DECODE_OUT_FORMAT_RGB565;
     // Despite the name this picks the byte order of the RGB565 word, not the
     // channel order. _RGB writes it big-endian; LVGL reads it as a native
     // little-endian uint16, which mangles red and blue into each other and
@@ -166,15 +190,19 @@ bool decode_locked(std::size_t bytes)
     }
 
     std::uint16_t *art = s_art[s_next];
-    shrink(reinterpret_cast<const std::uint16_t *>(s_full), static_cast<int>(info.width),
-           decoded_stride(info), art);
+    if (grey) {
+        shrink_grey(s_full, static_cast<int>(info.width), decoded_stride(info), art);
+    } else {
+        shrink(reinterpret_cast<const std::uint16_t *>(s_full), static_cast<int>(info.width),
+               decoded_stride(info), art);
+    }
     s_next = 1 - s_next;
 
     if (s_on_art != nullptr) {
         s_on_art(Art::Ready, art);
     }
-    ESP_LOGI(TAG, "cover %ux%u stride %d -> %d", info.width, info.height, decoded_stride(info),
-             kArtSize);
+    ESP_LOGI(TAG, "cover %ux%u%s stride %d -> %d", info.width, info.height,
+             grey ? " grey" : "", decoded_stride(info), kArtSize);
     return true;
 }
 
@@ -254,21 +282,30 @@ bool decode_image(const void *jpeg, std::size_t length, std::uint16_t *out, int 
         static_cast<int>(info.width) <= max_w && static_cast<int>(info.height) <= max_h &&
         static_cast<int>(info.width) <= MAX_DECODE_SIDE &&
         static_cast<int>(info.height) <= MAX_DECODE_SIDE) {
+        const bool grey = info.sample_method == JPEG_DOWN_SAMPLING_GRAY;
+
         jpeg_decode_cfg_t cfg{};
-        cfg.output_format = JPEG_DECODE_OUT_FORMAT_RGB565;
+        cfg.output_format = grey ? JPEG_DECODE_OUT_FORMAT_GRAY : JPEG_DECODE_OUT_FORMAT_RGB565;
         cfg.rgb_order     = JPEG_DEC_RGB_ELEMENT_ORDER_BGR;
 
         std::uint32_t produced = 0;
         if (jpeg_decoder_process(s_decoder, &cfg, s_jpeg, length, s_full,
                                  MAX_DECODE_SIDE * MAX_DECODE_SIDE * 2, &produced) == ESP_OK) {
-            const auto *src    = reinterpret_cast<const std::uint16_t *>(s_full);
-            const int   stride = decoded_stride(info);
-            out_w              = static_cast<int>(info.width);
-            out_h              = static_cast<int>(info.height);
+            const int stride = decoded_stride(info);
+            out_w            = static_cast<int>(info.width);
+            out_h            = static_cast<int>(info.height);
             for (int y = 0; y < out_h; ++y) {
-                std::memcpy(out + static_cast<std::size_t>(y) * out_w,
-                            src + static_cast<std::size_t>(y) * stride,
-                            static_cast<std::size_t>(out_w) * 2);
+                std::uint16_t *row = out + static_cast<std::size_t>(y) * out_w;
+                if (grey) {
+                    const std::uint8_t *src = s_full + static_cast<std::size_t>(y) * stride;
+                    for (int x = 0; x < out_w; ++x) {
+                        row[x] = grey_to_rgb565(src[x]);
+                    }
+                } else {
+                    const auto *src = reinterpret_cast<const std::uint16_t *>(s_full);
+                    std::memcpy(row, src + static_cast<std::size_t>(y) * stride,
+                                static_cast<std::size_t>(out_w) * 2);
+                }
             }
             ok = true;
         }

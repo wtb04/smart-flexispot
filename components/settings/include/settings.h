@@ -12,6 +12,8 @@ enum class Key : std::uint8_t {
     Volume,
     PresenceGate,
     DeskBluetooth,
+    Accent,
+    RailSide,
     Count,
 };
 

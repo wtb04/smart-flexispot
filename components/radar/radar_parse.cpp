@@ -194,6 +194,15 @@ bool read_aircraft(Scanner &in, Aircraft &out, bool &usable)
                 return false;
             }
             copy_trimmed(out.desc, sizeof(out.desc), text, length);
+        } else if (key_is(key, key_len, "category") && in.peek('"')) {
+            // The emitter class the aircraft broadcasts about itself, which is
+            // what decides the shape it gets drawn as.
+            const char *text   = nullptr;
+            std::size_t length = 0;
+            if (!in.string(text, length)) {
+                return false;
+            }
+            copy_trimmed(out.category, sizeof(out.category), text, length);
         } else if (key_is(key, key_len, "squawk") && in.peek('"')) {
             // Four octal digits, sent as a string.
             const char *text   = nullptr;
