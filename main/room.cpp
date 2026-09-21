@@ -1,6 +1,7 @@
 #include "room.h"
 
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "ha_ws.h"
 #include "media.h"
 #include "ui.h"
@@ -160,6 +161,23 @@ std::atomic<bool> s_toggle_on[TOGGLE_COUNT];
 std::atomic<bool> s_muted{false};
 std::atomic<int>  s_volume_pct{-1};  // negative until the speaker reports one
 
+// Home Assistant echoes the volume a moment after it is set, and while presses
+// are still coming that echo is of the step before last. Its word is ignored
+// until they stop.
+constexpr std::int64_t     VOLUME_SETTLE_US = 1500000;
+constexpr std::int64_t     MEDIA_GONE_US    = 3000000;
+
+// The speaker is reached over HomeKit, which will not take a run of volume_set
+// calls: the later ones come back refused and the player reports itself
+// unavailable in between, which is what threw the cover away. Presses are
+// coalesced into one call a quarter of a second after the last of them, which
+// the panel does not wait for -- the number on screen has already moved.
+constexpr std::int64_t     VOLUME_COALESCE_US = 250000;
+std::atomic<int>           s_volume_pending{-1};
+esp_timer_handle_t         s_volume_timer = nullptr;
+std::atomic<std::int64_t>  s_volume_set_us{0};
+std::atomic<int>  s_entity_count{0};
+
 std::string attribute(const hass::ws::Entity &entity, const char *key)
 {
     const auto it = entity.attributes.find(key);
@@ -247,6 +265,30 @@ void render_thermostat(const hass::ws::EntityStore &store)
 void render_media(const hass::ws::EntityStore &store)
 {
     const hass::ws::Entity *player = store.find(MEDIA_ENTITY);
+
+    // Setting the volume several times quickly makes Home Assistant report the
+    // player unavailable between calls. Blanking the card and throwing the
+    // cover away for that reads as a fault, so a gap has to last before it is
+    // believed. Any entity event brings us back here, so a real outage still
+    // shows within a moment of the window passing.
+    // Unavailable is one way a player goes missing mid-command; keeping its
+    // state and losing its title is the other.
+    const bool bare = known(player) && player->state != "off" && player->state != "idle" &&
+                      attribute(*player, "media_title").empty();
+
+    static std::int64_t s_gone_us = 0;
+    if (!known(player) || bare) {
+        const std::int64_t now = esp_timer_get_time();
+        if (s_gone_us == 0) {
+            s_gone_us = now;
+        }
+        if (now - s_gone_us < MEDIA_GONE_US) {
+            return;
+        }
+    } else {
+        s_gone_us = 0;
+    }
+
     if (player == nullptr) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media("SPEAKER", "", "", "--", false));
         media::set_art_path("");
@@ -287,8 +329,10 @@ void render_media(const hass::ws::EntityStore &store)
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_progress(elapsed, duration, playing));
     }
 
-    const float level = attribute_number(*player, "volume_level");
-    if (level >= 0.0f) {
+    const float level   = attribute_number(*player, "volume_level");
+    const bool  settled = esp_timer_get_time() -
+                              s_volume_set_us.load(std::memory_order_relaxed) > VOLUME_SETTLE_US;
+    if (level >= 0.0f && settled) {
         const int percent = static_cast<int>(level * 100.0f + 0.5f);
         s_volume_pct.store(percent, std::memory_order_relaxed);
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_volume(percent));
@@ -296,8 +340,30 @@ void render_media(const hass::ws::EntityStore &store)
 
     // The local proxy rather than entity_picture: Home Assistant serves that over
     // plain HTTP with a token in the path.
-    media::set_art_path(title.empty() ? ""
-                                      : attribute(*player, "entity_picture_local").c_str());
+    //
+    // A player mid-command drops attributes for an event or two while keeping
+    // its state, and clearing the cover on that meant fetching it again a
+    // moment later. The picture is only acted on when the track has changed or
+    // there is actually one to show; a track that genuinely has no cover still
+    // clears it, because the title changed with it.
+    static std::string s_art_title;
+    const std::string  picture = attribute(*player, "entity_picture_local");
+    if (title != s_art_title || !picture.empty()) {
+        s_art_title = title;
+        media::set_art_path(title.empty() ? "" : picture.c_str());
+    }
+}
+
+void send_volume(void *)
+{
+    const int percent = s_volume_pending.exchange(-1, std::memory_order_relaxed);
+    if (percent < 0) {
+        return;
+    }
+    char value[16];
+    std::snprintf(value, sizeof(value), "%.2f", static_cast<double>(percent) / 100.0);
+    ESP_ERROR_CHECK_WITHOUT_ABORT(hass::ws::call_service_with("media_player", "volume_set",
+                                                              MEDIA_ENTITY, "volume_level", value));
 }
 
 }  // namespace
@@ -316,14 +382,21 @@ void nudge_volume(float delta)
     const int percent = static_cast<int>(wanted * 100.0f + 0.5f);
     ESP_LOGI(TAG, "volume %d%%", percent);
 
+    // The step just taken becomes what the next press steps from. Without this
+    // every press in a quick run read the same stale figure back and asked for
+    // the same level again, so only the first one moved anything.
+    s_volume_pct.store(percent, std::memory_order_relaxed);
+    s_volume_set_us.store(esp_timer_get_time(), std::memory_order_relaxed);
+
     // Shown before the round trip, like every other control here: if the call is
     // refused, the next update corrects it within a moment.
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_volume(percent));
 
-    char value[16];
-    std::snprintf(value, sizeof(value), "%.2f", static_cast<double>(wanted));
-    ESP_ERROR_CHECK_WITHOUT_ABORT(hass::ws::call_service_with("media_player", "volume_set",
-                                                              MEDIA_ENTITY, "volume_level", value));
+    s_volume_pending.store(percent, std::memory_order_relaxed);
+    if (s_volume_timer != nullptr) {
+        esp_timer_stop(s_volume_timer);  // not running yet is not an error worth reporting
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_timer_start_once(s_volume_timer, VOLUME_COALESCE_US));
+    }
 }
 
 void on_media(ui::MediaAction action)
@@ -356,6 +429,15 @@ void on_media(ui::MediaAction action)
 
 void init()
 {
+    const esp_timer_create_args_t volume_timer = {
+        .callback              = send_volume,
+        .arg                   = nullptr,
+        .dispatch_method       = ESP_TIMER_TASK,
+        .name                  = "volume",
+        .skip_unhandled_events = true,
+    };
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_timer_create(&volume_timer, &s_volume_timer));
+
     for (int i = 0; i < PILL_COUNT; ++i) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(
             ui::set_pill(i, PILLS[i].label, "--", ui::Level::Neutral));
@@ -373,6 +455,8 @@ void init()
 
 void render(const hass::ws::EntityStore &store)
 {
+    s_entity_count.store(static_cast<int>(store.size()), std::memory_order_relaxed);
+
     render_thermostat(store);
 
     for (int i = 0; i < PILL_COUNT; ++i) {
@@ -470,6 +554,11 @@ void on_dial_toggle(int index)
         ui::set_dial_toggle(index, toggle_label(TOGGLES[index], !currently_on), !currently_on));
     ESP_ERROR_CHECK_WITHOUT_ABORT(
         hass::ws::call_service("input_boolean", "toggle", TOGGLES[index].entity));
+}
+
+int entity_count()
+{
+    return s_entity_count.load(std::memory_order_relaxed);
 }
 
 }  // namespace room

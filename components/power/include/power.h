@@ -29,4 +29,8 @@ void reassert_charging();
 /** Safe from any task once init() has returned. */
 esp_err_t read(State &out);
 
+/** The most recent successful read, without touching the bus. False if there
+ *  has not been one. */
+bool last(State &out);
+
 }  // namespace power

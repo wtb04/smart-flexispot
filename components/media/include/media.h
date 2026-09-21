@@ -13,7 +13,13 @@ inline constexpr int kArtSize = 200;
  * RGB565, kArtSize squared, called from the fetch task. The buffer is valid
  * until the cover after next replaces it; null means there is no art.
  */
-using ArtHandler = void (*)(const void *pixels);
+enum class Art : std::uint8_t {
+    None,    // nothing is playing, or the track has no cover
+    Ready,   // pixels point at kArtSize squared of RGB565
+    Failed,  // there was a cover and it could not be had
+};
+
+using ArtHandler = void (*)(Art state, const void *pixels);
 
 /** Requires the network to be up. */
 esp_err_t start(ArtHandler on_art);

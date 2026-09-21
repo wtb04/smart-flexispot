@@ -4,6 +4,9 @@
 #include "driver/i2c_master.h"
 #include "esp_check.h"
 #include "esp_log.h"
+#include "esp_timer.h"
+#include "freertos/semphr.h"
+#include "freertos/FreeRTOS.h"
 
 #include <algorithm>
 #include <array>
@@ -61,6 +64,16 @@ constexpr int CELLS_IN_SERIES = 2;
 // per cell, so anything under this is no pack rather than a dead one.
 constexpr float PACK_PRESENT_VOLTS = 4.0f;
 
+// Terminal voltage is not open-circuit voltage: the pack sags under load and is
+// pushed up while charging, which walked the percentage by ten points or more
+// depending on nothing but whether the charger happened to be running.
+// Measured on this pack: enabling the charger moved it 0.085 V at 357 mA.
+constexpr float PACK_RESISTANCE_OHMS = 0.24f;
+
+// What is left after the compensation is conversion noise and the curve's own
+// steps, so the reported figure follows slowly.
+constexpr float PERCENT_TAU_S = 30.0f;
+
 // CHG_EN sits on bit 7 of the second IO expander (0x44), left clear by M5's own
 // bring-up.
 constexpr esp_io_expander_pin_num_t CHARGE_ENABLE_PIN = IO_EXPANDER_PIN_NUM_7;
@@ -80,6 +93,21 @@ constexpr esp_io_expander_pin_num_t CHARGE_QC_PIN = IO_EXPANDER_PIN_NUM_5;
 
 i2c_master_dev_handle_t s_dev = nullptr;
 bool                    s_charging_wanted = false;
+
+// Read by tasks that want a number without taking the bus the touchscreen
+// shares. The spinlock is for the struct, not the hardware.
+portMUX_TYPE s_last_lock = portMUX_INITIALIZER_UNLOCKED;
+State        s_last{};
+bool         s_have_last = false;
+
+// Serialises read(): two tasks sharing one device handle would otherwise
+// interleave transactions, and the smoothing below is not reentrant either.
+SemaphoreHandle_t s_read_lock = nullptr;
+StaticSemaphore_t s_read_lock_ctrl;
+
+float        s_percent  = 0.0f;
+bool         s_smoothed = false;
+std::int64_t s_percent_us = 0;
 
 esp_err_t read_register(std::uint8_t reg, std::uint16_t &out)
 {
@@ -116,6 +144,48 @@ int percent_for(float pack_volts)
     return 0;
 }
 
+esp_err_t read_locked(State &out)
+{
+    std::uint16_t raw_bus = 0;
+    std::uint16_t raw_current = 0;
+    std::uint16_t raw_shunt = 0;
+    ESP_RETURN_ON_ERROR(read_register(REG_BUS_VOLTAGE, raw_bus), TAG, "bus voltage");
+    ESP_RETURN_ON_ERROR(read_register(REG_CURRENT, raw_current), TAG, "current");
+    ESP_RETURN_ON_ERROR(read_register(REG_SHUNT_VOLTAGE, raw_shunt), TAG, "shunt voltage");
+    out.shunt_millivolts = static_cast<std::int16_t>(raw_shunt) * 0.0025f;
+
+    out.bus_volts    = static_cast<std::int16_t>(raw_bus) * BUS_VOLTAGE_LSB;
+    out.current_amps = static_cast<std::int16_t>(raw_current) * CURRENT_LSB;
+    out.present      = out.bus_volts >= PACK_PRESENT_VOLTS;
+    out.on_battery   = out.present && out.current_amps > CURRENT_DEADBAND_A;
+    out.charging     = out.present && out.current_amps < -CURRENT_DEADBAND_A;
+
+    // Current is positive on discharge, so this both lifts a sagging pack and
+    // takes the charger's push back off.
+    const float open_circuit = out.bus_volts + out.current_amps * PACK_RESISTANCE_OHMS;
+    const int   measured     = out.present ? percent_for(open_circuit) : 0;
+
+    const std::int64_t now = esp_timer_get_time();
+    if (!out.present) {
+        s_smoothed = false;
+    } else if (!s_smoothed) {
+        s_percent  = static_cast<float>(measured);
+        s_smoothed = true;
+    } else {
+        const float elapsed = static_cast<float>(now - s_percent_us) / 1000000.0f;
+        s_percent += (static_cast<float>(measured) - s_percent) *
+                     (1.0f - std::exp(-elapsed / PERCENT_TAU_S));
+    }
+    s_percent_us = now;
+    out.percent  = out.present ? static_cast<int>(std::lround(s_percent)) : 0;
+
+    portENTER_CRITICAL(&s_last_lock);
+    s_last      = out;
+    s_have_last = true;
+    portEXIT_CRITICAL(&s_last_lock);
+    return ESP_OK;
+}
+
 }  // namespace
 
 esp_err_t init()
@@ -132,6 +202,9 @@ esp_err_t init()
         .scl_wait_us     = 0,
         .flags           = {},
     };
+    s_read_lock = xSemaphoreCreateMutexStatic(&s_read_lock_ctrl);
+    ESP_RETURN_ON_FALSE(s_read_lock != nullptr, ESP_ERR_NO_MEM, TAG, "read lock");
+
     ESP_RETURN_ON_ERROR(i2c_master_bus_add_device(bus, &cfg, &s_dev), TAG, "add device");
 
     std::uint16_t manufacturer = 0;
@@ -156,28 +229,40 @@ esp_err_t init()
 
     State probe{};
     ESP_RETURN_ON_ERROR(read(probe), TAG, "first read");
-    if (probe.bus_volts >= CHARGE_SAFE_VOLTS) {
-        ESP_RETURN_ON_ERROR(set_charging(true), TAG, "charger");
-    } else {
-        ESP_LOGW(TAG, "pack at %.2f V, below the %.1f V floor - charger left off",
-                 probe.bus_volts, CHARGE_SAFE_VOLTS);
-    }
     return ESP_OK;
 }
 
 esp_err_t set_charging(bool enable)
 {
+    State state{};
+    if (enable && last(state) && state.bus_volts < CHARGE_SAFE_VOLTS) {
+        ESP_LOGW(TAG, "pack at %.2f V, below the %.1f V floor - charger left off", state.bus_volts,
+                 CHARGE_SAFE_VOLTS);
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    // Recorded before it is attempted, so a transient I2C failure here is
+    // retried by reassert_charging rather than leaving the charger off for the
+    // whole uptime.
+    s_charging_wanted = enable;
+
     esp_io_expander_handle_t expander = bsp_io_expander1_init();
     ESP_RETURN_ON_FALSE(expander != nullptr, ESP_ERR_INVALID_STATE, TAG, "io expander");
 
     ESP_RETURN_ON_ERROR(esp_io_expander_set_dir(expander, CHARGE_ENABLE_PIN | CHARGE_QC_PIN,
                                                 IO_EXPANDER_OUTPUT),
                         TAG, "charge pin dir");
+    // The PI4IOE5V6408 resets with every pin high-impedance, so a direction and
+    // a level leave the pin floating and the charger off however often they are
+    // written. This is the register that actually connects the driver.
+    ESP_RETURN_ON_ERROR(esp_io_expander_set_output_mode(expander,
+                                                        CHARGE_ENABLE_PIN | CHARGE_QC_PIN,
+                                                        IO_EXPANDER_OUTPUT_MODE_PUSH_PULL),
+                        TAG, "charge pin drive");
     ESP_RETURN_ON_ERROR(esp_io_expander_set_level(expander, CHARGE_QC_PIN, enable ? 0 : 1), TAG,
                         "charge current");
     ESP_RETURN_ON_ERROR(esp_io_expander_set_level(expander, CHARGE_ENABLE_PIN, enable ? 1 : 0),
                         TAG, "charge pin level");
-    s_charging_wanted = enable;
     ESP_LOGI(TAG, "charger %s", enable ? "enabled (fast)" : "disabled");
     return ESP_OK;
 }
@@ -196,6 +281,8 @@ void reassert_charging()
         return;
     }
     esp_io_expander_set_dir(expander, CHARGE_ENABLE_PIN | CHARGE_QC_PIN, IO_EXPANDER_OUTPUT);
+    esp_io_expander_set_output_mode(expander, CHARGE_ENABLE_PIN | CHARGE_QC_PIN,
+                                    IO_EXPANDER_OUTPUT_MODE_PUSH_PULL);
     esp_io_expander_set_level(expander, CHARGE_QC_PIN, 0);
     esp_io_expander_set_level(expander, CHARGE_ENABLE_PIN, 1);
 }
@@ -203,22 +290,20 @@ void reassert_charging()
 esp_err_t read(State &out)
 {
     ESP_RETURN_ON_FALSE(s_dev != nullptr, ESP_ERR_INVALID_STATE, TAG, "not started");
+    xSemaphoreTake(s_read_lock, portMAX_DELAY);
+    const esp_err_t err = read_locked(out);
+    xSemaphoreGive(s_read_lock);
+    return err;
+}
 
-    std::uint16_t raw_bus = 0;
-    std::uint16_t raw_current = 0;
-    std::uint16_t raw_shunt = 0;
-    ESP_RETURN_ON_ERROR(read_register(REG_BUS_VOLTAGE, raw_bus), TAG, "bus voltage");
-    ESP_RETURN_ON_ERROR(read_register(REG_CURRENT, raw_current), TAG, "current");
-    ESP_RETURN_ON_ERROR(read_register(REG_SHUNT_VOLTAGE, raw_shunt), TAG, "shunt voltage");
-    out.shunt_millivolts = static_cast<std::int16_t>(raw_shunt) * 0.0025f;
 
-    out.bus_volts    = static_cast<std::int16_t>(raw_bus) * BUS_VOLTAGE_LSB;
-    out.current_amps = static_cast<std::int16_t>(raw_current) * CURRENT_LSB;
-    out.present      = out.bus_volts >= PACK_PRESENT_VOLTS;
-    out.percent      = out.present ? percent_for(out.bus_volts) : 0;
-    out.on_battery   = out.present && out.current_amps > CURRENT_DEADBAND_A;
-    out.charging     = out.present && out.current_amps < -CURRENT_DEADBAND_A;
-    return ESP_OK;
+bool last(State &out)
+{
+    portENTER_CRITICAL(&s_last_lock);
+    const bool have = s_have_last;
+    out             = s_last;
+    portEXIT_CRITICAL(&s_last_lock);
+    return have;
 }
 
 }  // namespace power

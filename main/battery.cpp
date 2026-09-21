@@ -5,6 +5,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "power.h"
+#include "settings.h"
 #include "ui.h"
 
 #include <cmath>
@@ -46,6 +47,9 @@ StackType_t  s_task_stack[TASK_STACK];
 esp_err_t start()
 {
     ESP_RETURN_ON_ERROR(power::init(), TAG, "power monitor");
+    // init() only reads; whether the charger runs is the stored setting, and
+    // set_charging refuses a pack too flat to take it.
+    ESP_ERROR_CHECK_WITHOUT_ABORT(power::set_charging(settings::enabled(settings::Key::Charging)));
 
     TaskHandle_t task = xTaskCreateStaticPinnedToCore(battery_task, "battery", TASK_STACK, nullptr,
                                                       TASK_PRIORITY, s_task_stack, &s_task_ctrl,

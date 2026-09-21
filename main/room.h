@@ -12,6 +12,9 @@ void init();
 /** Runs on the WebSocket task. */
 void render(const hass::ws::EntityStore &store);
 
+/** How many entities the WebSocket store holds. */
+int entity_count();
+
 void on_media(ui::MediaAction action);
 
 

@@ -15,6 +15,7 @@
 #include "hass.h"
 #include "power.h"
 #include "room.h"
+#include "settings.h"
 #include "sound.h"
 #include "ui.h"
 #include "wifi.h"
@@ -61,6 +62,7 @@ void on_brightness(int percent)
     ESP_LOGI(TAG, "brightness %d%% requested", percent);
     s_brightness.store(percent, std::memory_order_relaxed);
     board::set_brightness_percent(percent);
+    settings::set(settings::Key::Brightness, percent);
 }
 
 // Until the screens that use these exist, say what arrived so the entity ids
@@ -108,9 +110,9 @@ void fill_network(hass::protocol::Telemetry &out)
     }
 }
 
-void on_album_art(const void *pixels)
+void on_album_art(media::Art state, const void *pixels)
 {
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_album_art(pixels));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_album_art(pixels, state == media::Art::Failed));
 }
 
 [[noreturn]] void telemetry_task(void *)

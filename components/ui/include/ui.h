@@ -2,6 +2,7 @@
 
 #include "esp_err.h"
 
+#include <cstddef>
 #include <cstdint>
 
 namespace ui {
@@ -63,6 +64,40 @@ using LightHandler = void (*)(int index);
 
 using DialToggleHandler = void (*)(int index);
 
+/** Called when the Setup page comes up, so its readouts can be filled at once. */
+using DiagnosticsHandler = void (*)();
+
+// Settings that belong to a subsystem live in that subsystem's page rather
+// than in a list of their own.
+enum class Setting : std::uint8_t {
+    Charging,
+    PresenceGate,
+    Count,
+};
+
+/** The panel has already applied and redrawn it; this is for storing it. */
+using SettingHandler = void (*)(Setting setting, bool on);
+
+/** preview is set when the slider is let go, which is the moment to play
+ *  something at the chosen level. */
+using VolumeHandler = void (*)(int percent, bool preview);
+
+using RestartHandler = void (*)();
+
+enum class Subsystem : std::uint8_t {
+    Network,
+    HomeAssistant,
+    Phone,
+    Power,
+    Desk,
+    System,
+    Count,
+};
+
+/** Fills `out` with recent log lines for the named subsystem. Runs on the LVGL
+ *  task, so it must not block. */
+using LogHandler = void (*)(const char *subsystem, char *out, std::size_t size);
+
 // Every setter here takes the LVGL lock, so any task may call them.
 
 /** An empty title means nothing is playing; the card then shows the state. Strings are copied. */
@@ -70,7 +105,10 @@ esp_err_t set_media(const char *source, const char *title, const char *artist, c
                     bool playing);
 
 /** RGB565, media::kArtSize square. Null hides the art; the buffer must live until it is replaced. */
-esp_err_t set_album_art(const void *pixels);
+// Null with placeholder set leaves an empty frame where the cover would be,
+// for a cover that exists but could not be fetched; null without it gives the
+// space back to the text.
+esp_err_t set_album_art(const void *pixels, bool placeholder);
 
 /** The position is carried forward while playing; a duration of zero hides the bar. */
 esp_err_t set_media_progress(int position_s, int duration_s, bool playing);
@@ -103,7 +141,12 @@ struct Handlers {
     ModeHandler       mode;
     LightsHandler     lights;
     LightHandler      light;
-    DialToggleHandler dial_toggle;
+    DialToggleHandler  dial_toggle;
+    DiagnosticsHandler diagnostics;
+    SettingHandler     setting;
+    VolumeHandler      volume;
+    RestartHandler     restart;
+    LogHandler         log;
 };
 
 /** Requires the LVGL port to be running. */
@@ -134,6 +177,59 @@ esp_err_t set_links(bool wifi, bool mqtt);
 esp_err_t set_presence(bool has_key, bool present, bool ever_seen);
 
 esp_err_t set_battery(bool present, int percent, bool charging);
+
+// One labelled row on the Setup page. Whatever knows a value pushes it here and
+// the page decides where it lands, so a new readout is a row in the tables in
+// ui.cpp plus one call, not a layout change.
+enum class Info : std::uint8_t {
+    WifiState,
+    WifiSsid,
+    WifiIp,
+    WifiMac,
+    WifiSignal,
+    WifiChannel,
+    HaBroker,
+    HaSocket,
+    HaEntities,
+    PhoneRadio,
+    PhoneKey,
+    PhoneState,
+    PhoneSignal,
+    PowerSource,
+    PowerCharge,
+    PowerVolts,
+    PowerCurrent,
+    PowerStatus,
+    DeskLink,
+    DeskHeight,
+    DeskActive,
+    DeskStand,
+    DeskSit,
+    DeskOne,
+    DeskTwo,
+    SysFirmware,
+    SysBuilt,
+    SysUptime,
+    SysRam,
+    SysPsram,
+    SysRamLow,
+    Count,
+};
+
+/** Strings are copied. The level colours the value; a null value clears the row. */
+esp_err_t set_info(Info field, const char *value, Level level = Level::Neutral);
+
+/** True while the Setup page is showing. Nothing needs pushing when it is not. */
+bool diagnostics_open();
+
+/** Shows a setting's position, and applies the ones the panel owns itself. */
+esp_err_t set_setting(Setting setting, bool on);
+
+esp_err_t set_notification_volume(int percent);
+
+/** Whether the subsystem is doing its job, which is not the same as whether it
+ *  is reporting what you hoped: a phone correctly seen to be away is healthy. */
+esp_err_t set_health(Subsystem which, Level level);
 
 /** Queued rather than shown at once: they arrive in bursts. A full queue drops the oldest. */
 esp_err_t notify(const char *title, const char *message, const char *level, int timeout_ms);

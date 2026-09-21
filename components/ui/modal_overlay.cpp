@@ -6,9 +6,15 @@ namespace ui {
 namespace {
 
 constexpr lv_opa_t     SCRIM_OPA = LV_OPA_70;
-constexpr std::int32_t SLIDE     = 56;
-constexpr std::uint32_t OPEN_MS  = 220;
-constexpr std::uint32_t CLOSE_MS = 150;
+// Moving the card repaints every label on it once per frame, and these cards
+// carry a lot of text; a long travel is what made the motion stutter. A short
+// one over few frames reads as a card arriving without asking the renderer to
+// redraw it twenty times.
+constexpr std::int32_t  SLIDE    = 18;
+constexpr std::uint32_t OPEN_MS  = 130;
+constexpr std::uint32_t CLOSE_MS = 100;
+
+constexpr std::int32_t CLOSE_SIZE = 48;
 
 constexpr std::int32_t PROGRESS_MAX = 255;
 
@@ -35,6 +41,40 @@ ModalOverlay::ModalOverlay(lv_obj_t *parent, std::int32_t width, std::int32_t he
     theme::style_panel(card_, theme::panel, 24);
     // Without this a tap on the card bubbles to the scrim and closes it.
     lv_obj_set_clickable(card_, true);
+}
+
+void ModalOverlay::add_close_button()
+{
+    lv_obj_t *close = lv_button_create(card_);
+    lv_obj_set_size(close, CLOSE_SIZE, CLOSE_SIZE);
+    // Sits in the card's own header band. Nudging it downwards put it over the
+    // first row of whatever the card holds.
+    lv_obj_set_align(close, LV_ALIGN_TOP_RIGHT);
+    // Up into the card's padding: sitting at the top of the content box put it
+    // right on the shoulder of the first row.
+    lv_obj_set_pos(close, 0, -8);
+    theme::style_button(close, theme::panel_light);
+    lv_obj_center(theme::make_label(close, LV_SYMBOL_CLOSE, theme::text, fonts::size_22()));
+    lv_obj_add_event_cb(close, close_clicked, LV_EVENT_CLICKED, this);
+    // Anything added to the card afterwards would otherwise sit over it.
+    lv_obj_move_foreground(close);
+}
+
+void ModalOverlay::resize(std::int32_t width, std::int32_t height)
+{
+    width_  = width;
+    height_ = height;
+    lv_obj_set_size(card_, width_, height_);
+}
+
+std::int32_t ModalOverlay::header_height()
+{
+    return CLOSE_SIZE;
+}
+
+void ModalOverlay::close_clicked(lv_event_t *event)
+{
+    static_cast<ModalOverlay *>(lv_event_get_user_data(event))->close();
 }
 
 void ModalOverlay::open(lv_obj_t *)

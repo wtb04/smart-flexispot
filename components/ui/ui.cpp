@@ -11,9 +11,11 @@
 #include "theme.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <cmath>
+#include <iterator>
 #include <optional>
 #include <utility>
 
@@ -357,7 +359,9 @@ void create_rail(lv_obj_t *parent)
     s_clock_colon   = theme::make_label(clock, ":", theme::text, fonts::size_28());
     // The colon's own side bearings are not symmetric, so the gap is set on it
     // rather than on the row.
-    lv_obj_set_style_pad_left(s_clock_colon, 2, 0);
+    // The colon glyph carries more bearing on its right than its left, so equal
+    // padding does not look equal; the hours need the wider gap to balance it.
+    lv_obj_set_style_pad_left(s_clock_colon, 4, 0);
     lv_obj_set_style_pad_right(s_clock_colon, 4, 0);
     s_clock_minutes = theme::make_label(clock, "--", theme::text, fonts::size_28());
     lv_timer_create(clock_blink, 1000, nullptr);
@@ -900,6 +904,8 @@ void build_light_picker(lv_obj_t *parent)
         s_lights[i] = LightButton{btn, name, state};
         lv_obj_set_hidden(btn, true);
     }
+
+    s_light_picker->add_close_button();
 }
 
 lv_obj_t *s_media_card   = nullptr;
@@ -1064,11 +1070,58 @@ void progress_tick(lv_timer_t *)
     write_clock(s_panel_elapsed, tenths / PROGRESS_SCALE);
 }
 
+// Skipping a track takes the player through paused or idle on the way to the
+// next one, and flashing the cover grey for a moment each time reads as a
+// glitch. A short wait tells a real pause from a gap between tracks.
+constexpr std::uint32_t PAUSE_SETTLE_MS = 1500;
+
+lv_timer_t *s_pause_timer     = nullptr;
+bool        s_playing_shown   = false;
+bool        s_has_track_shown = false;
+
+void apply_playing(bool playing)
+{
+    s_playing_shown = playing;
+    theme::set_text(lv_obj_get_child(s_panel_play, 0), playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
+
+    // Compared first: neither setter checks, so writing this unconditionally
+    // repainted both covers -- one 200 pixels square out of PSRAM -- on every
+    // entity update.
+    const lv_opa_t dim = s_has_track_shown && !playing ? LV_OPA_50 : LV_OPA_TRANSP;
+    for (lv_obj_t *art : {s_media_art, s_panel_art}) {
+        if (lv_obj_get_style_image_recolor_opa(art, LV_PART_MAIN) != dim) {
+            lv_obj_set_style_image_recolor(art, lv_color_hex(theme::background), 0);
+            lv_obj_set_style_image_recolor_opa(art, dim, 0);
+        }
+    }
+}
+
+void cancel_pause_settle()
+{
+    if (s_pause_timer != nullptr) {
+        lv_timer_delete(s_pause_timer);
+        s_pause_timer = nullptr;
+    }
+}
+
+void pause_settled(lv_timer_t *)
+{
+    cancel_pause_settle();
+    apply_playing(false);
+}
+
 void media_action_cb(lv_event_t *e)
 {
+    const auto action =
+        static_cast<MediaAction>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e)));
+    // Same as pressing the card: a deliberate pause shows at once rather than
+    // waiting out the delay that exists for track changes.
+    if (action == MediaAction::PlayPause) {
+        cancel_pause_settle();
+        apply_playing(!s_playing_shown);
+    }
     if (s_handlers.media != nullptr) {
-        s_handlers.media(
-            static_cast<MediaAction>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e))));
+        s_handlers.media(action);
     }
 }
 
@@ -1100,6 +1153,10 @@ void media_card_cb(lv_event_t *e)
     if (std::exchange(s_media_long, false) || std::exchange(s_media_swiped, false)) {
         return;
     }
+    // Pressing pause here is not a gap between tracks, so it shows at once --
+    // the wait is only there to ride out what a player does while skipping.
+    cancel_pause_settle();
+    apply_playing(!s_playing_shown);
     if (s_handlers.media != nullptr) {
         s_handlers.media(MediaAction::PlayPause);
     }
@@ -1187,6 +1244,8 @@ void build_media_panel(lv_obj_t *parent)
     lv_obj_align(next, LV_ALIGN_TOP_LEFT, row_x + SIDE_W + PLAY_W + 2 * GAP, row_y);
 
     s_progress_timer = lv_timer_create(progress_tick, PROGRESS_TICK_MS, nullptr);
+
+    s_media_panel->add_close_button();
 }
 
 void build_media_card(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int32_t w,
@@ -1283,9 +1342,17 @@ bool s_presence_known = false;
 bool s_present        = false;
 int  s_page           = 0;
 
+constexpr int SETUP_PAGE = 4;
+// Read from the diagnostics task, which does no work at all while the page it
+// fills is not the one on screen.
+std::atomic<bool> s_setup_visible{false};
+
+// Off by setting, and ignored until the phone has been recognised once.
+bool s_presence_gate = true;
+
 bool page_available(int index)
 {
-    return !NAV_ITEMS[index].needs_presence || !s_presence_known || s_present;
+    return !NAV_ITEMS[index].needs_presence || !s_presence_gate || !s_presence_known || s_present;
 }
 
 void select_page(int index)
@@ -1294,6 +1361,10 @@ void select_page(int index)
         index = 0;
     }
     s_page = index;
+    s_setup_visible.store(index == SETUP_PAGE, std::memory_order_relaxed);
+    if (index == SETUP_PAGE && s_handlers.diagnostics != nullptr) {
+        s_handlers.diagnostics();
+    }
     for (int i = 0; i < PAGE_COUNT; ++i) {
         lv_obj_set_hidden(s_nav_tabs[i], !page_available(i));
         lv_obj_set_hidden(s_pages[i], i != index);
@@ -1311,13 +1382,20 @@ void nav_event_cb(lv_event_t *e)
     select_page(static_cast<int>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e))));
 }
 
+lv_obj_t *s_brightness_value = nullptr;
+
 void brightness_event_cb(lv_event_t *e)
 {
-    if (s_handlers.brightness == nullptr) {
-        return;
+    auto      *slider  = static_cast<lv_obj_t *>(lv_event_get_target(e));
+    const int  percent = static_cast<int>(lv_slider_get_value(slider));
+
+    char text[8];
+    std::snprintf(text, sizeof(text), "%d%%", percent);
+    theme::set_text(s_brightness_value, text);
+
+    if (s_handlers.brightness != nullptr) {
+        s_handlers.brightness(percent);
     }
-    auto *slider = static_cast<lv_obj_t *>(lv_event_get_target(e));
-    s_handlers.brightness(static_cast<int>(lv_slider_get_value(slider)));
 }
 
 void build_placeholder_page(lv_obj_t *page, const char *title, const char *blurb)
@@ -1329,32 +1407,561 @@ void build_placeholder_page(lv_obj_t *page, const char *title, const char *blurb
     theme::make_label(page, blurb, theme::secondary, fonts::size_20());
 }
 
-void build_settings_page(lv_obj_t *page)
+constexpr int INFO_COUNT = static_cast<int>(Info::Count);
+lv_obj_t     *s_info[INFO_COUNT] = {};
+
+struct InfoRow {
+    Info        field;
+    const char *label;
+};
+
+// summary is the row the tile shows, so a subsystem says something useful
+// before it is opened. setting is the one control that belongs to it, if any.
+struct InfoCard {
+    const char *title;
+    const char *icon;
+    const InfoRow *rows;
+    int            count;
+    Info           summary;
+    bool           has_setting;
+    Setting        setting;
+    const char    *setting_label;
+};
+
+constexpr InfoRow NETWORK_ROWS[] = {
+    {Info::WifiState, "Wi-Fi"},   {Info::WifiSsid, "Network"},  {Info::WifiIp, "Address"},
+    {Info::WifiMac, "MAC"},       {Info::WifiSignal, "Signal"}, {Info::WifiChannel, "Channel"},
+};
+constexpr InfoRow HASS_ROWS[] = {
+    {Info::HaBroker, "Broker"},
+    {Info::HaSocket, "Socket"},
+    {Info::HaEntities, "Entities"},
+};
+constexpr InfoRow PHONE_ROWS[] = {
+    {Info::PhoneRadio, "Bluetooth"},
+    {Info::PhoneKey, "Key"},
+    {Info::PhoneState, "Phone"},
+    {Info::PhoneSignal, "Signal"},
+};
+constexpr InfoRow POWER_ROWS[] = {
+    {Info::PowerSource, "Source"},   {Info::PowerCharge, "Charge"},
+    {Info::PowerVolts, "Voltage"},   {Info::PowerCurrent, "Current"},
+    {Info::PowerStatus, "State"},
+};
+constexpr InfoRow DESK_ROWS[] = {
+    {Info::DeskLink, "Controller"}, {Info::DeskHeight, "Height"}, {Info::DeskActive, "Standing at"},
+    {Info::DeskStand, "Stand"},     {Info::DeskSit, "Sit"},       {Info::DeskOne, "Preset 1"},
+    {Info::DeskTwo, "Preset 2"},
+};
+constexpr InfoRow SYSTEM_ROWS[] = {
+    {Info::SysFirmware, "Firmware"}, {Info::SysBuilt, "Built"},  {Info::SysUptime, "Uptime"},
+    {Info::SysRam, "Internal free"}, {Info::SysPsram, "PSRAM free"},
+    {Info::SysRamLow, "Low mark"},
+};
+
+constexpr InfoCard INFO_CARDS[] = {
+    {"Network", LV_SYMBOL_WIFI, NETWORK_ROWS, static_cast<int>(std::size(NETWORK_ROWS)),
+     Info::WifiState, false, Setting::Charging, nullptr},
+    {"Home Assistant", LV_SYMBOL_HOME, HASS_ROWS, static_cast<int>(std::size(HASS_ROWS)),
+     Info::HaSocket, false, Setting::Charging, nullptr},
+    {"Phone", LV_SYMBOL_BLUETOOTH, PHONE_ROWS, static_cast<int>(std::size(PHONE_ROWS)),
+     Info::PhoneState, true, Setting::PresenceGate, "Hide pages while away"},
+    {"Power", LV_SYMBOL_BATTERY_FULL, POWER_ROWS, static_cast<int>(std::size(POWER_ROWS)),
+     Info::PowerCharge, true, Setting::Charging, "Charge the battery"},
+    {"Desk", LV_SYMBOL_UP, DESK_ROWS, static_cast<int>(std::size(DESK_ROWS)), Info::DeskLink,
+     false, Setting::Charging, nullptr},
+    {"System", LV_SYMBOL_SETTINGS, SYSTEM_ROWS, static_cast<int>(std::size(SYSTEM_ROWS)),
+     Info::SysUptime, false, Setting::Charging, nullptr},
+};
+constexpr int INFO_CARD_COUNT = static_cast<int>(std::size(INFO_CARDS));
+static_assert(INFO_CARD_COUNT == static_cast<int>(Subsystem::Count), "a tile per subsystem");
+
+constexpr int SETTING_COUNT = static_cast<int>(Setting::Count);
+
+constexpr std::int32_t ROW_CARD_H   = 88;
+constexpr std::int32_t DIAG_TILE_H  = 200;
+constexpr std::int32_t RESTART_H    = 140;
+constexpr std::int32_t DIAG_HEADER_H = 56;
+// The log card is one size whatever it holds; the state card is only as tall
+// as the subsystem it is showing.
+constexpr std::int32_t LOG_W        = 800;
+constexpr std::int32_t LOG_H        = 520;
+constexpr std::int32_t DETAIL_W     = 660;
+constexpr std::int32_t DETAIL_ROW_GAP = 2;
+constexpr std::int32_t DETAIL_SET_TOP = 14;
+constexpr std::int32_t DETAIL_SET_H   = 56;
+// Clear air under the title and the close button before the content starts.
+constexpr std::int32_t HEADER_GAP   = 22;
+// Past this the card would crowd the page, so it scrolls instead. Everything
+// the panel reports fits well inside it.
+constexpr std::int32_t DETAIL_MAX_FRAC = 80;
+constexpr std::int32_t DETAIL_PAD   = 24;
+constexpr std::int32_t DETAIL_ROW_H = 30;
+constexpr std::int32_t TILE_DOT     = 14;
+constexpr std::size_t  LOG_TEXT_MAX = 4096;
+
+lv_obj_t *s_settings_view = nullptr;
+lv_obj_t *s_diag_view     = nullptr;
+lv_obj_t *s_diag_summary  = nullptr;
+lv_obj_t *s_volume_value  = nullptr;
+lv_obj_t *s_volume_slider = nullptr;
+
+lv_obj_t *s_tile_value[INFO_CARD_COUNT] = {};
+lv_obj_t *s_tile_dot[INFO_CARD_COUNT]   = {};
+lv_obj_t *s_detail[INFO_CARD_COUNT]     = {};
+Level     s_card_level[INFO_CARD_COUNT] = {};
+lv_obj_t *s_detail_title                = nullptr;
+int       s_detail_shown                = -1;
+std::int32_t s_detail_height[INFO_CARD_COUNT] = {};
+// A long press is followed by a click on release, which would drop the state
+// card straight on top of the log that was just opened.
+bool s_tile_long = false;
+
+lv_obj_t *s_setting_value[SETTING_COUNT] = {};
+bool      s_setting_on[SETTING_COUNT]    = {};
+
+// Which tile mirrors this row, or -1. Saves the summary needing its own setter.
+int s_summary_card[INFO_COUNT] = {};
+
+std::optional<ModalOverlay> s_diagnostics;
+std::optional<ModalOverlay> s_log_modal;
+lv_obj_t                   *s_log_title = nullptr;
+lv_obj_t                   *s_log_text  = nullptr;
+int                         s_log_shown = -1;
+lv_timer_t                 *s_log_timer = nullptr;
+
+std::uint32_t info_ink(Level level)
 {
-    lv_obj_set_flex_flow(page, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(page, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_row(page, 20, 0);
+    switch (level) {
+        case Level::Good: return theme::green;
+        case Level::Warn: return theme::amber;
+        case Level::Bad:  return theme::red;
+        default:          return theme::text;
+    }
+}
 
-    lv_obj_t *caption = lv_label_create(page);
-    lv_label_set_text_static(caption, "Brightness");
-    lv_obj_set_style_text_color(caption, lv_color_hex(theme::secondary), 0);
-    lv_obj_set_style_text_font(caption, fonts::size_28(), 0);
+void refresh_diag_summary()
+{
+    int poor = 0;
+    for (Level level : s_card_level) {
+        if (level == Level::Warn || level == Level::Bad) {
+            ++poor;
+        }
+    }
+    char text[48];
+    if (poor == 0) {
+        std::snprintf(text, sizeof(text), "%d subsystems, all healthy", INFO_CARD_COUNT);
+    } else {
+        std::snprintf(text, sizeof(text), "%d of %d need attention", poor, INFO_CARD_COUNT);
+    }
+    theme::set_text(s_diag_summary, text);
+    theme::set_text_color(s_diag_summary, poor == 0 ? theme::secondary : theme::amber);
+}
 
-    lv_obj_t *slider = lv_slider_create(page);
-    lv_obj_set_width(slider, 480);
-    // Starts at the lowest the panel honours: a slider whose bottom third does nothing reads
-    // as broken.
-    lv_slider_set_range(slider, board::kMinBrightness, 100);
-    lv_slider_set_value(slider, s_initial_brightness, LV_ANIM_OFF);
-    lv_obj_set_style_bg_color(slider, lv_color_hex(theme::panel_light), LV_PART_MAIN);
+void refresh_log()
+{
+    if (s_log_shown < 0 || s_handlers.log == nullptr) {
+        return;
+    }
+    static char text[LOG_TEXT_MAX];
+    s_handlers.log(INFO_CARDS[s_log_shown].title, text, sizeof(text));
+    theme::set_text(s_log_text, text[0] != '\0' ? text : "Nothing logged yet");
+}
+
+// Deliberately does not scroll: new lines arrive under whatever is being read,
+// and yanking the view back to the bottom every second made it unreadable.
+void log_tick(lv_timer_t *)
+{
+    if (s_log_modal.has_value() && s_log_modal->visible()) {
+        refresh_log();
+    }
+}
+
+void detail_clicked_cb(lv_event_t *e)
+{
+    const int index = static_cast<int>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e)));
+    if (!s_diagnostics.has_value() || std::exchange(s_tile_long, false)) {
+        return;
+    }
+    for (int i = 0; i < INFO_CARD_COUNT; ++i) {
+        lv_obj_set_hidden(s_detail[i], i != index);
+    }
+    s_detail_shown = index;
+    theme::set_text(s_detail_title, INFO_CARDS[index].title);
+    lv_obj_scroll_to_y(s_detail[index], 0, LV_ANIM_OFF);
+    s_diagnostics->resize(DETAIL_W, s_detail_height[index]);
+    s_diagnostics->open();
+}
+
+void log_held_cb(lv_event_t *e)
+{
+    const int index = static_cast<int>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e)));
+    if (!s_log_modal.has_value()) {
+        return;
+    }
+    s_tile_long = true;
+    s_log_shown = index;
+    char title[48];
+    std::snprintf(title, sizeof(title), "%s log", INFO_CARDS[index].title);
+    theme::set_text(s_log_title, title);
+    refresh_log();
+    lv_obj_scroll_to_y(lv_obj_get_parent(s_log_text), 0, LV_ANIM_OFF);
+    s_log_modal->open();
+}
+
+void show_diagnostics_cb(lv_event_t *)
+{
+    lv_obj_set_hidden(s_settings_view, true);
+    lv_obj_set_hidden(s_diag_view, false);
+}
+
+void show_settings_cb(lv_event_t *)
+{
+    lv_obj_set_hidden(s_diag_view, true);
+    lv_obj_set_hidden(s_settings_view, false);
+}
+
+void apply_setting(int index, bool on)
+{
+    s_setting_on[index] = on;
+    if (s_setting_value[index] != nullptr) {
+        theme::set_text(s_setting_value[index], on ? "On" : "Off");
+        theme::set_text_color(s_setting_value[index], on ? theme::orange : theme::secondary);
+    }
+    if (static_cast<Setting>(index) == Setting::PresenceGate) {
+        s_presence_gate = on;
+        select_page(s_page);
+    }
+}
+
+void setting_clicked_cb(lv_event_t *e)
+{
+    const int index = static_cast<int>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e)));
+    const bool next = !s_setting_on[index];
+    apply_setting(index, next);
+    if (s_handlers.setting != nullptr) {
+        s_handlers.setting(static_cast<Setting>(index), next);
+    }
+}
+
+void restart_held_cb(lv_event_t *)
+{
+    if (s_handlers.restart != nullptr) {
+        s_handlers.restart();
+    }
+}
+
+void volume_changed_cb(lv_event_t *e)
+{
+    auto     *slider  = static_cast<lv_obj_t *>(lv_event_get_target(e));
+    const int percent = static_cast<int>(lv_slider_get_value(slider));
+
+    char text[8];
+    std::snprintf(text, sizeof(text), "%d%%", percent);
+    theme::set_text(s_volume_value, text);
+
+    if (s_handlers.volume != nullptr) {
+        s_handlers.volume(percent, lv_event_get_code(e) == LV_EVENT_RELEASED);
+    }
+}
+
+lv_obj_t *build_tile(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int32_t w,
+                     std::int32_t h, const char *icon, const char *title)
+{
+    lv_obj_t *tile = lv_button_create(parent);
+    lv_obj_set_pos(tile, x, y);
+    lv_obj_set_size(tile, w, h);
+    theme::style_button(tile, theme::panel_light);
+    lv_obj_set_style_pad_all(tile, 20, 0);
+
+    lv_obj_t *glyph = theme::make_label(tile, icon, theme::orange, fonts::size_28());
+    lv_obj_align(glyph, LV_ALIGN_TOP_LEFT, 0, 0);
+
+    lv_obj_t *caption = theme::make_label(tile, title, theme::secondary, fonts::size_22());
+    lv_obj_align(caption, LV_ALIGN_TOP_LEFT, 44, 4);
+    lv_obj_set_width(caption, w - 96);
+    lv_obj_set_height(caption, fonts::size_22()->line_height);
+    lv_label_set_long_mode(caption, LV_LABEL_LONG_MODE_DOTS);
+    return tile;
+}
+
+lv_obj_t *tile_value(lv_obj_t *tile, std::int32_t w, const char *initial)
+{
+    lv_obj_t *value = theme::make_label(tile, initial, theme::text, fonts::size_32());
+    lv_obj_align(value, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    lv_obj_set_width(value, w - 40);
+    lv_obj_set_height(value, fonts::size_32()->line_height);
+    lv_label_set_long_mode(value, LV_LABEL_LONG_MODE_DOTS);
+    return value;
+}
+
+lv_obj_t *build_info_row(lv_obj_t *parent, const char *label, const lv_font_t *font,
+                         std::int32_t height)
+{
+    lv_obj_t *row = lv_obj_create(parent);
+    lv_obj_set_size(row, LV_PCT(100), height);
+    theme::style_panel(row, theme::panel, 0);
+    lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
+    lv_obj_set_clickable(row, false);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(row, 12, 0);
+
+    theme::make_label(row, label, theme::secondary, font);
+
+    lv_obj_t *value = theme::make_label(row, "--", theme::text, font);
+    lv_obj_set_flex_grow(value, 1);
+    // DOTS needs a bounded box in both directions, so the height is pinned to
+    // one line as well as the width coming from the grow.
+    lv_obj_set_height(value, font->line_height);
+    lv_obj_set_style_text_align(value, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_label_set_long_mode(value, LV_LABEL_LONG_MODE_DOTS);
+    return value;
+}
+
+void build_info_tile(lv_obj_t *parent, int index, std::int32_t x, std::int32_t y, std::int32_t w,
+                     std::int32_t h)
+{
+    lv_obj_t *tile =
+        build_tile(parent, x, y, w, h, INFO_CARDS[index].icon, INFO_CARDS[index].title);
+    lv_obj_add_event_cb(tile, detail_clicked_cb, LV_EVENT_CLICKED,
+                        reinterpret_cast<void *>(static_cast<std::intptr_t>(index)));
+    lv_obj_add_event_cb(tile, log_held_cb, LV_EVENT_LONG_PRESSED,
+                        reinterpret_cast<void *>(static_cast<std::intptr_t>(index)));
+
+    lv_obj_t *dot = lv_obj_create(tile);
+    lv_obj_set_size(dot, TILE_DOT, TILE_DOT);
+    theme::style_panel(dot, theme::secondary, TILE_DOT / 2);
+    lv_obj_align(dot, LV_ALIGN_TOP_RIGHT, 0, 8);
+    lv_obj_set_clickable(dot, false);
+
+    s_tile_value[index] = tile_value(tile, w, "--");
+    s_tile_dot[index]   = dot;
+    s_summary_card[static_cast<int>(INFO_CARDS[index].summary)] = index;
+}
+
+std::int32_t detail_height(const InfoCard &card)
+{
+    // Every gap the flex column puts between the rows counts, and leaving them
+    // out is what left every card a few pixels short and therefore scrolling.
+    std::int32_t body = card.count * DETAIL_ROW_H + (card.count - 1) * DETAIL_ROW_GAP;
+    if (card.has_setting) {
+        body += DETAIL_ROW_GAP + DETAIL_SET_TOP + DETAIL_SET_H;
+    }
+
+    const Layout       l   = layout();
+    const std::int32_t cap = std::min(l.screen_h * DETAIL_MAX_FRAC / 100, l.content_h - 2 * GAP);
+    return std::min(2 * DETAIL_PAD + ModalOverlay::header_height() + HEADER_GAP + body, cap);
+}
+
+void build_detail_overlay(lv_obj_t *parent)
+{
+    s_diagnostics.emplace(parent, DETAIL_W, detail_height(INFO_CARDS[0]));
+    lv_obj_t *card = s_diagnostics->content();
+    lv_obj_set_style_pad_all(card, DETAIL_PAD, 0);
+
+    s_detail_title = theme::make_label(card, "", theme::orange, fonts::size_28());
+    lv_obj_align(s_detail_title, LV_ALIGN_TOP_LEFT, 0, 6);
+
+    const std::int32_t width  = DETAIL_W - 2 * DETAIL_PAD;
+    const std::int32_t body_y = ModalOverlay::header_height() + HEADER_GAP;
+
+    for (int i = 0; i < INFO_CARD_COUNT; ++i) {
+        s_detail_height[i]        = detail_height(INFO_CARDS[i]);
+        const std::int32_t height = s_detail_height[i] - 2 * DETAIL_PAD - body_y;
+        lv_obj_t *panel = lv_obj_create(card);
+        lv_obj_set_pos(panel, 0, body_y);
+        lv_obj_set_size(panel, width, height);
+        theme::style_panel(panel, theme::panel, 0);
+        lv_obj_set_style_bg_opa(panel, LV_OPA_TRANSP, 0);
+        lv_obj_set_hidden(panel, true);
+        lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_style_pad_row(panel, DETAIL_ROW_GAP, 0);
+        lv_obj_set_scrollable(panel, true);
+        lv_obj_set_scroll_dir(panel, LV_DIR_VER);
+
+        for (int r = 0; r < INFO_CARDS[i].count; ++r) {
+            const InfoRow &row = INFO_CARDS[i].rows[r];
+            s_info[static_cast<int>(row.field)] =
+                build_info_row(panel, row.label, fonts::size_20(), DETAIL_ROW_H);
+        }
+
+        if (INFO_CARDS[i].has_setting) {
+            const int index  = static_cast<int>(INFO_CARDS[i].setting);
+            lv_obj_t *button = lv_button_create(panel);
+            lv_obj_set_size(button, LV_PCT(100), DETAIL_SET_H);
+            lv_obj_set_style_margin_top(button, DETAIL_SET_TOP, 0);
+            theme::style_button(button, theme::panel_light);
+            lv_obj_set_style_pad_hor(button, 16, 0);
+            lv_obj_set_flex_flow(button, LV_FLEX_FLOW_ROW);
+            lv_obj_set_flex_align(button, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
+                                  LV_FLEX_ALIGN_CENTER);
+            lv_obj_add_event_cb(button, setting_clicked_cb, LV_EVENT_CLICKED,
+                                reinterpret_cast<void *>(static_cast<std::intptr_t>(index)));
+
+            theme::make_label(button, INFO_CARDS[i].setting_label, theme::text, fonts::size_20());
+            s_setting_value[index] =
+                theme::make_label(button, "Off", theme::secondary, fonts::size_20());
+        }
+
+        s_detail[i] = panel;
+    }
+
+    s_diagnostics->add_close_button();
+}
+
+// Its own card, because a log wants the whole surface and its own dark ground
+// rather than a strip under a table.
+void build_log_overlay(lv_obj_t *parent)
+{
+    s_log_modal.emplace(parent, LOG_W, LOG_H);
+    lv_obj_t *card = s_log_modal->content();
+    lv_obj_set_style_pad_all(card, DETAIL_PAD, 0);
+
+    s_log_title = theme::make_label(card, "", theme::orange, fonts::size_28());
+    lv_obj_align(s_log_title, LV_ALIGN_TOP_LEFT, 0, 6);
+
+    const std::int32_t width  = LOG_W - 2 * DETAIL_PAD;
+    const std::int32_t body_y = ModalOverlay::header_height() + HEADER_GAP;
+    const std::int32_t height = LOG_H - 2 * DETAIL_PAD - body_y;
+
+    lv_obj_t *pane = lv_obj_create(card);
+    lv_obj_set_pos(pane, 0, body_y);
+    lv_obj_set_size(pane, width, height);
+    theme::style_panel(pane, theme::background, 12);
+    lv_obj_set_style_pad_all(pane, 14, 0);
+    lv_obj_set_scrollable(pane, true);
+    lv_obj_set_scroll_dir(pane, LV_DIR_VER);
+
+    s_log_text = theme::make_label(pane, "", theme::secondary, fonts::size_16());
+    lv_obj_set_width(s_log_text, width - 28);
+    lv_label_set_long_mode(s_log_text, LV_LABEL_LONG_MODE_WRAP);
+
+    s_log_modal->add_close_button();
+    s_log_timer = lv_timer_create(log_tick, 1000, nullptr);
+}
+
+lv_obj_t *build_slider_card(lv_obj_t *parent, std::int32_t y, std::int32_t w, const char *icon,
+                            const char *title, int value, int low, lv_event_cb_t changed,
+                            lv_obj_t **out_value)
+{
+    lv_obj_t *root = lv_obj_create(parent);
+    lv_obj_set_pos(root, 0, y);
+    lv_obj_set_size(root, w, ROW_CARD_H);
+    theme::style_panel(root, theme::panel_light, 14);
+    lv_obj_set_style_pad_hor(root, 22, 0);
+    lv_obj_set_flex_flow(root, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(root, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(root, 18, 0);
+
+    theme::make_label(root, icon, theme::orange, fonts::size_28());
+
+    lv_obj_t *caption = theme::make_label(root, title, theme::secondary, fonts::size_22());
+    lv_obj_set_width(caption, 210);
+
+    lv_obj_t *slider = lv_slider_create(root);
+    lv_obj_set_flex_grow(slider, 1);
+    lv_obj_set_height(slider, 18);
+    // The bar is the whole hit area otherwise, and a finger rarely lands inside
+    // eighteen pixels of it.
+    lv_obj_set_ext_click_area(slider, 26);
+    lv_slider_set_range(slider, low, 100);
+    lv_slider_set_value(slider, value, LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(slider, lv_color_hex(theme::panel), LV_PART_MAIN);
     lv_obj_set_style_bg_color(slider, lv_color_hex(theme::orange), LV_PART_INDICATOR);
     lv_obj_set_style_bg_color(slider, lv_color_hex(theme::orange), LV_PART_KNOB);
-    lv_obj_add_event_cb(slider, brightness_event_cb, LV_EVENT_VALUE_CHANGED, nullptr);
+    lv_obj_set_style_pad_all(slider, 10, LV_PART_KNOB);
+    lv_obj_add_event_cb(slider, changed, LV_EVENT_VALUE_CHANGED, nullptr);
+    lv_obj_add_event_cb(slider, changed, LV_EVENT_RELEASED, nullptr);
 
-    lv_obj_t *hint = lv_label_create(page);
-    lv_label_set_text_static(hint, "Tap a preset to go there, hold to save it");
-    lv_obj_set_style_text_color(hint, lv_color_hex(theme::secondary), 0);
+    char text[8];
+    std::snprintf(text, sizeof(text), "%d%%", value);
+    *out_value = theme::make_label(root, text, theme::text, fonts::size_22());
+    lv_obj_set_width(*out_value, 64);
+    lv_obj_set_style_text_align(*out_value, LV_TEXT_ALIGN_RIGHT, 0);
+    return slider;
+}
 
+void build_settings_view(lv_obj_t *parent, std::int32_t w, std::int32_t h)
+{
+    lv_obj_t *view = lv_obj_create(parent);
+    lv_obj_set_pos(view, 0, 0);
+    lv_obj_set_size(view, w, h);
+    theme::style_panel(view, theme::panel, 0);
+    lv_obj_set_style_bg_opa(view, LV_OPA_TRANSP, 0);
+
+    build_slider_card(view, 0, w, LV_SYMBOL_EYE_OPEN, "Brightness", s_initial_brightness,
+                      board::kMinBrightness, brightness_event_cb, &s_brightness_value);
+    s_volume_slider = build_slider_card(view, ROW_CARD_H + BUTTON_GAP, w, LV_SYMBOL_VOLUME_MAX,
+                                        "Notification volume", 0, 0, volume_changed_cb,
+                                        &s_volume_value);
+
+    const std::int32_t diag_y = 2 * (ROW_CARD_H + BUTTON_GAP);
+    lv_obj_t *diag = build_tile(view, 0, diag_y, w, DIAG_TILE_H, LV_SYMBOL_LIST, "Diagnostics");
+    lv_obj_add_event_cb(diag, show_diagnostics_cb, LV_EVENT_CLICKED, nullptr);
+    s_diag_summary = tile_value(diag, w, "");
+    theme::set_text_color(s_diag_summary, theme::secondary);
+    lv_obj_t *chevron = theme::make_label(diag, LV_SYMBOL_RIGHT, theme::secondary,
+                                          fonts::size_28());
+    lv_obj_align(chevron, LV_ALIGN_RIGHT_MID, 0, 0);
+
+    lv_obj_t *restart = build_tile(view, 0, diag_y + DIAG_TILE_H + BUTTON_GAP, w, RESTART_H,
+                                   LV_SYMBOL_POWER, "Restart panel");
+    lv_obj_add_event_cb(restart, restart_held_cb, LV_EVENT_LONG_PRESSED, nullptr);
+    theme::set_text_color(tile_value(restart, w, "Hold to restart"), theme::secondary);
+
+    s_settings_view = view;
+}
+
+void build_diagnostics_view(lv_obj_t *parent, std::int32_t w, std::int32_t h)
+{
+    lv_obj_t *view = lv_obj_create(parent);
+    lv_obj_set_pos(view, 0, 0);
+    lv_obj_set_size(view, w, h);
+    theme::style_panel(view, theme::panel, 0);
+    lv_obj_set_style_bg_opa(view, LV_OPA_TRANSP, 0);
+    lv_obj_set_hidden(view, true);
+
+    lv_obj_t *back = lv_button_create(view);
+    lv_obj_set_pos(back, 0, 0);
+    lv_obj_set_size(back, 120, DIAG_HEADER_H);
+    theme::style_button(back, theme::panel_light);
+    lv_obj_center(theme::make_label(back, LV_SYMBOL_LEFT, theme::text, fonts::size_28()));
+    lv_obj_add_event_cb(back, show_settings_cb, LV_EVENT_CLICKED, nullptr);
+
+    lv_obj_t *title = theme::make_label(view, "Diagnostics", theme::text, fonts::size_28());
+    lv_obj_set_pos(title, 140, 12);
+
+    const std::int32_t grid_y = DIAG_HEADER_H + BUTTON_GAP;
+    const int          rows   = (INFO_CARD_COUNT + 2) / 3;
+    const std::int32_t tile_w = (w - 2 * BUTTON_GAP) / 3;
+    const std::int32_t tile_h = (h - grid_y - (rows - 1) * BUTTON_GAP) / rows;
+
+    for (int i = 0; i < INFO_CARD_COUNT; ++i) {
+        build_info_tile(view, i, (i % 3) * (tile_w + BUTTON_GAP),
+                        grid_y + (i / 3) * (tile_h + BUTTON_GAP), tile_w, tile_h);
+    }
+
+    s_diag_view = view;
+}
+
+void build_settings_page(lv_obj_t *page)
+{
+    const Layout l = layout();
+
+    lv_obj_set_style_pad_all(page, PANEL_PAD, 0);
+    const std::int32_t inner_w = l.content_w - 2 * PANEL_PAD;
+    const std::int32_t inner_h = l.content_h - 2 * PANEL_PAD;
+
+    for (int &card : s_summary_card) {
+        card = -1;
+    }
+
+    build_settings_view(page, inner_w, inner_h);
+    build_diagnostics_view(page, inner_w, inner_h);
+    build_detail_overlay(page);
+    build_log_overlay(page);
+    refresh_diag_summary();
 }
 
 void create_content(lv_obj_t *parent)
@@ -1648,6 +2255,9 @@ esp_err_t init(const Handlers &handlers, int initial_brightness)
     s_handlers           = handlers;
     s_initial_brightness = initial_brightness;
     build_screen();
+    // Draw before returning: the caller lights the backlight next, and what is
+    // on the panel until the first flush is whatever it powered up holding.
+    lv_refr_now(nullptr);
     lvgl_port_unlock();
     return ESP_OK;
 }
@@ -1724,17 +2334,15 @@ esp_err_t set_media(const char *source, const char *title, const char *artist, c
     theme::set_text(s_panel_title, has_track ? title : (state != nullptr ? state : "--"));
     theme::set_text(s_panel_artist, has_track && artist != nullptr ? artist : "");
     layout_media_text();
-    theme::set_text(lv_obj_get_child(s_panel_play, 0), playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
 
-    // Paused reads from the cover going flat. Compared first: neither setter checks, so writing
-    // this unconditionally repainted both covers -- one 200 pixels square out of PSRAM -- on
-    // every entity update.
-    const lv_opa_t dim = has_track && !playing ? LV_OPA_50 : LV_OPA_TRANSP;
-    for (lv_obj_t *art : {s_media_art, s_panel_art}) {
-        if (lv_obj_get_style_image_recolor_opa(art, LV_PART_MAIN) != dim) {
-            lv_obj_set_style_image_recolor(art, lv_color_hex(theme::background), 0);
-            lv_obj_set_style_image_recolor_opa(art, dim, 0);
-        }
+    s_has_track_shown = has_track;
+    if (playing || !has_track) {
+        cancel_pause_settle();
+        apply_playing(playing);
+    } else if (!s_playing_shown) {
+        apply_playing(false);
+    } else if (s_pause_timer == nullptr) {
+        s_pause_timer = lv_timer_create(pause_settled, PAUSE_SETTLE_MS, nullptr);
     }
 
     lvgl_port_unlock();
@@ -1778,24 +2386,27 @@ esp_err_t set_media_volume(int percent)
     return ESP_OK;
 }
 
-esp_err_t set_album_art(const void *pixels)
+esp_err_t set_album_art(const void *pixels, bool placeholder)
 {
     ESP_RETURN_ON_FALSE(s_media_art != nullptr, ESP_ERR_INVALID_STATE, TAG, "not initialised");
     ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
 
     const bool has_art = pixels != nullptr;
-    lv_obj_set_hidden(s_media_frame, !has_art);
-    lv_obj_set_hidden(s_panel_frame, !has_art);
+    const bool framed  = has_art || placeholder;
+    lv_obj_set_hidden(s_media_frame, !framed);
+    lv_obj_set_hidden(s_panel_frame, !framed);
+    lv_obj_set_hidden(s_media_art, !has_art);
+    lv_obj_set_hidden(s_panel_art, !has_art);
 
-    const TextBox card  = has_art ? s_card_with_art : s_card_bare;
-    const TextBox panel = has_art ? s_panel_with_art : s_panel_bare;
+    const TextBox card  = framed ? s_card_with_art : s_card_bare;
+    const TextBox panel = framed ? s_panel_with_art : s_panel_bare;
     theme::align(s_media_source, LV_ALIGN_TOP_LEFT, card.x, 0);
     theme::align(s_media_title, LV_ALIGN_TOP_LEFT, card.x, 28);
     lv_obj_set_width(s_media_title, card.w);
     lv_obj_set_width(s_media_artist, card.w);
 
     theme::align(s_panel_title, LV_ALIGN_TOP_LEFT, panel.x, 0);
-    s_has_art = has_art;
+    s_has_art = framed;
     lv_obj_set_width(s_panel_title, panel.w);
     lv_obj_set_width(s_panel_artist, panel.w);
     lv_obj_set_width(s_panel_progress, panel.w);
@@ -2014,6 +2625,81 @@ esp_err_t set_battery(bool present, int percent, bool charging)
     (void)percent;
     (void)charging;
     return ESP_OK;
+}
+
+esp_err_t set_info(Info field, const char *value, Level level)
+{
+    const int index = static_cast<int>(field);
+    ESP_RETURN_ON_FALSE(index >= 0 && index < INFO_COUNT, ESP_ERR_INVALID_ARG, TAG, "info %d",
+                        index);
+    ESP_RETURN_ON_FALSE(s_info[index] != nullptr, ESP_ERR_INVALID_STATE, TAG, "not initialised");
+    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
+
+    const char *text = value != nullptr && value[0] != '\0' ? value : "--";
+    theme::set_text(s_info[index], text);
+    theme::set_text_color(s_info[index], info_ink(level));
+
+    // The tile shows the value but takes its colour from the subsystem's health,
+    // not from this row: a phone correctly reported as away is not a fault.
+    const int card = s_summary_card[index];
+    if (card >= 0) {
+        theme::set_text(s_tile_value[card], text);
+    }
+
+    lvgl_port_unlock();
+    return ESP_OK;
+}
+
+esp_err_t set_health(Subsystem which, Level level)
+{
+    const int card = static_cast<int>(which);
+    ESP_RETURN_ON_FALSE(card >= 0 && card < INFO_CARD_COUNT, ESP_ERR_INVALID_ARG, TAG,
+                        "subsystem %d", card);
+    ESP_RETURN_ON_FALSE(s_tile_dot[card] != nullptr, ESP_ERR_INVALID_STATE, TAG,
+                        "not initialised");
+    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
+
+    theme::set_bg_color(s_tile_dot[card], level_ink(level));
+    theme::set_text_color(s_tile_value[card], info_ink(level));
+    if (s_card_level[card] != level) {
+        s_card_level[card] = level;
+        refresh_diag_summary();
+    }
+
+    lvgl_port_unlock();
+    return ESP_OK;
+}
+
+esp_err_t set_notification_volume(int percent)
+{
+    ESP_RETURN_ON_FALSE(s_volume_slider != nullptr, ESP_ERR_INVALID_STATE, TAG, "not initialised");
+    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
+
+    lv_slider_set_value(s_volume_slider, percent, LV_ANIM_OFF);
+    char text[8];
+    std::snprintf(text, sizeof(text), "%d%%", percent);
+    theme::set_text(s_volume_value, text);
+
+    lvgl_port_unlock();
+    return ESP_OK;
+}
+
+esp_err_t set_setting(Setting setting, bool on)
+{
+    const int index = static_cast<int>(setting);
+    ESP_RETURN_ON_FALSE(index >= 0 && index < SETTING_COUNT, ESP_ERR_INVALID_ARG, TAG, "setting %d",
+                        index);
+    ESP_RETURN_ON_FALSE(s_setting_value[index] != nullptr, ESP_ERR_INVALID_STATE, TAG,
+                        "not initialised");
+    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
+    apply_setting(index, on);
+    lvgl_port_unlock();
+    return ESP_OK;
+}
+
+bool diagnostics_open()
+{
+    return s_setup_visible.load(std::memory_order_relaxed);
 }
 
 esp_err_t notify(const char *title, const char *message, const char *level, int timeout_ms)

@@ -106,11 +106,24 @@ std::size_t download(const char *path)
     return total;
 }
 
+// The decoder writes whole MCUs, so a cover whose width is not a multiple of
+// the MCU width comes out with padding on the end of every row. Reading it back
+// at the picture width slid each row a little further left than the one above,
+// which shears the image into diagonal streaks of colour.
+int decoded_stride(const jpeg_decode_picture_info_t &info)
+{
+    const int mcu_w = info.sample_method == JPEG_DOWN_SAMPLING_YUV422 ||
+                              info.sample_method == JPEG_DOWN_SAMPLING_YUV420
+                          ? 16
+                          : 8;
+    return (static_cast<int>(info.width) + mcu_w - 1) / mcu_w * mcu_w;
+}
+
 /** Nearest neighbour: a box filter would read every source pixel, not one in 16. */
-void shrink(const std::uint16_t *src, int side, std::uint16_t *dst)
+void shrink(const std::uint16_t *src, int side, int stride, std::uint16_t *dst)
 {
     for (int y = 0; y < kArtSize; ++y) {
-        const std::uint16_t *row = src + static_cast<std::size_t>(y * side / kArtSize) * side;
+        const std::uint16_t *row = src + static_cast<std::size_t>(y * side / kArtSize) * stride;
         std::uint16_t       *out = dst + static_cast<std::size_t>(y) * kArtSize;
         for (int x = 0; x < kArtSize; ++x) {
             out[x] = row[x * side / kArtSize];
@@ -132,7 +145,12 @@ bool decode(std::size_t bytes)
 
     jpeg_decode_cfg_t cfg{};
     cfg.output_format = JPEG_DECODE_OUT_FORMAT_RGB565;
-    cfg.rgb_order     = JPEG_DEC_RGB_ELEMENT_ORDER_RGB;
+    // Despite the name this picks the byte order of the RGB565 word, not the
+    // channel order. _RGB writes it big-endian; LVGL reads it as a native
+    // little-endian uint16, which mangles red and blue into each other and
+    // splits green. Greys survive that, which is why it looked plausible until
+    // a colourful cover turned up.
+    cfg.rgb_order     = JPEG_DEC_RGB_ELEMENT_ORDER_BGR;
 
     std::uint32_t out_size = 0;
     const esp_err_t err = jpeg_decoder_process(s_decoder, &cfg, s_jpeg, bytes, s_full,
@@ -143,13 +161,15 @@ bool decode(std::size_t bytes)
     }
 
     std::uint16_t *art = s_art[s_next];
-    shrink(reinterpret_cast<const std::uint16_t *>(s_full), static_cast<int>(info.width), art);
+    shrink(reinterpret_cast<const std::uint16_t *>(s_full), static_cast<int>(info.width),
+           decoded_stride(info), art);
     s_next = 1 - s_next;
 
     if (s_on_art != nullptr) {
-        s_on_art(art);
+        s_on_art(Art::Ready, art);
     }
-    ESP_LOGI(TAG, "cover %ux%u -> %d", info.width, info.height, kArtSize);
+    ESP_LOGI(TAG, "cover %ux%u stride %d -> %d", info.width, info.height, decoded_stride(info),
+             kArtSize);
     return true;
 }
 
@@ -171,15 +191,22 @@ bool decode(std::size_t bytes)
         if (wanted[0] == '\0') {
             std::strcpy(s_loaded, "");
             if (s_on_art != nullptr) {
-                s_on_art(nullptr);
+                s_on_art(Art::None, nullptr);
             }
             continue;
         }
 
         const std::size_t bytes = download(wanted);
-        if (bytes > 0 && decode(bytes)) {
-            std::strncpy(s_loaded, wanted, sizeof(s_loaded));
-            s_loaded[sizeof(s_loaded) - 1] = '\0';
+        const bool        got   = bytes > 0 && decode(bytes);
+
+        // Recorded either way. Leaving it unrecorded meant a cover that could
+        // not be fetched was retried every ten seconds for the whole track,
+        // and the previous track's cover stayed on screen the entire time --
+        // which is worse than showing nothing, because it is wrong.
+        std::strncpy(s_loaded, wanted, sizeof(s_loaded));
+        s_loaded[sizeof(s_loaded) - 1] = '\0';
+        if (!got && s_on_art != nullptr) {
+            s_on_art(Art::Failed, nullptr);
         }
     }
 }

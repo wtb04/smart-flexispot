@@ -14,6 +14,15 @@ esp_err_t set_brightness(int percent);
 /** Shaped for ui::BrightnessHandler, which cannot report errors. */
 void set_brightness_percent(int percent);
 
+/** Lights the backlight. Kept out of init() so the panel stays dark until
+ *  there is something on it worth seeing. */
+esp_err_t display_on(int percent);
+
+/** Backlight off and the panel asleep. The panel goes on scanning out whatever
+ *  the MIPI link last left it, so anything that ends the program -- a restart,
+ *  above all -- has to put it to sleep rather than only dim it. */
+esp_err_t display_off();
+
 inline constexpr int kDefaultBrightness = 80;
 
 /** Below this the panel does not get any dimmer, so offering the range is just a

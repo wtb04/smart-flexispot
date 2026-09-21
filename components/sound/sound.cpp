@@ -7,6 +7,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <vector>
@@ -36,6 +38,7 @@ StackType_t  s_task_stack[TASK_STACK];
 TaskHandle_t s_task = nullptr;
 
 esp_codec_dev_handle_t s_speaker = nullptr;
+std::atomic<int>       s_volume{VOLUME};
 std::vector<std::int16_t> s_chime;
 
 void build_chime()
@@ -66,6 +69,7 @@ void build_chime()
         // queueing a stack of overlapping beeps.
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         if (s_speaker != nullptr && !s_chime.empty()) {
+            esp_codec_dev_set_out_vol(s_speaker, s_volume.load(std::memory_order_relaxed));
             esp_codec_dev_write(s_speaker, s_chime.data(),
                                 static_cast<int>(s_chime.size() * sizeof(std::int16_t)));
         }
@@ -87,7 +91,7 @@ esp_err_t init()
     fs.channel_mask    = 0;
     fs.sample_rate     = SAMPLE_RATE;
     ESP_RETURN_ON_FALSE(esp_codec_dev_open(s_speaker, &fs) == 0, ESP_FAIL, TAG, "codec open");
-    esp_codec_dev_set_out_vol(s_speaker, VOLUME);
+    esp_codec_dev_set_out_vol(s_speaker, s_volume.load(std::memory_order_relaxed));
 
     build_chime();
     std::vector<std::int16_t> stereo;
@@ -105,8 +109,16 @@ esp_err_t init()
     return ESP_OK;
 }
 
+void set_volume(int percent)
+{
+    s_volume.store(std::clamp(percent, 0, 100), std::memory_order_relaxed);
+}
+
 void ding()
 {
+    if (s_volume.load(std::memory_order_relaxed) <= 0) {
+        return;
+    }
     if (s_task != nullptr) {
         xTaskNotifyGive(s_task);
     }

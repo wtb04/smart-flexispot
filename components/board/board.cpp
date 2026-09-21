@@ -81,8 +81,9 @@ esp_err_t init()
     // Panel is natively 720x1280 portrait; the Tab5 is used landscape.
     bsp_display_rotate(disp, LV_DISPLAY_ROTATION_90);
 
-    ESP_RETURN_ON_ERROR(bsp_display_backlight_on(), TAG, "backlight");
-    ESP_RETURN_ON_ERROR(set_brightness(kDefaultBrightness), TAG, "brightness");
+    // Backlight stays off until display_on(): the panel powers up showing
+    // whatever was in it, and lighting that is the blue flash at boot.
+    ESP_RETURN_ON_ERROR(bsp_display_backlight_off(), TAG, "backlight");
     return ESP_OK;
 }
 
@@ -94,6 +95,19 @@ esp_err_t set_brightness(int percent)
 void set_brightness_percent(int percent)
 {
     ESP_ERROR_CHECK_WITHOUT_ABORT(set_brightness(percent));
+}
+
+esp_err_t display_on(int percent)
+{
+    return set_brightness(percent);
+}
+
+esp_err_t display_off()
+{
+    // Dark first, so the sleep command is not something you watch happen.
+    ESP_RETURN_ON_ERROR(bsp_display_backlight_off(), TAG, "backlight");
+    vTaskDelay(pdMS_TO_TICKS(40));
+    return bsp_display_enter_sleep();
 }
 
 }  // namespace board
