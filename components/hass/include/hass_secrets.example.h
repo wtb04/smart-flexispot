@@ -1,26 +1,19 @@
 #pragma once
 
-// Copy to hass_secrets.h (git-ignored) and fill in your broker. Compiled into
-// the firmware, so anyone with a flash dump can read them.
-//
-// An empty URI builds an image that never connects.
+// Copy to hass_secrets.h (git-ignored) and fill in. These end up in the
+// firmware image, so a flash dump reveals them. An empty URI never connects.
 
 #define HASS_MQTT_URI      "mqtt://192.168.1.10:1883"
 #define HASS_MQTT_USER     ""
 #define HASS_MQTT_PASSWORD ""
 
-// Prefixes every topic and identifies the device in Home Assistant. Changing
-// it after the fact leaves the old entities behind as ghosts.
+// Prefixes every topic. Changing it later leaves the old entities as ghosts.
 #define HASS_DEVICE_ID "tab5_desk"
 
-// Home Assistant WebSocket API, for reading other entities and calling
-// services. Leave the URL empty to skip it entirely.
-//
-// The token is a long-lived access token: Home Assistant -> your profile ->
-// Security -> Long-lived access tokens.
+// WebSocket API, for reading other entities and calling services; an empty URL
+// skips it. Token: your profile -> Security -> Long-lived access tokens.
 #define HASS_WS_URI   "ws://homeassistant.local:8123/api/websocket"
 #define HASS_WS_TOKEN ""
 
-// Comma separated. An empty list subscribes to nothing rather than to
-// everything, which is what omitting it would do.
+// Comma separated. Empty subscribes to nothing, not to everything.
 #define HASS_WS_ENTITIES ""

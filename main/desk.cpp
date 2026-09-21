@@ -19,21 +19,20 @@ constexpr char kAsleep[]    = "desk display asleep";
 constexpr char kNoReply[]   = "disconnected";
 constexpr char kWaking[]    = "waking desk";
 
-// A sleeping control box is silent, so at startup "nothing on the wire" is the
-// normal state rather than a fault. Only call it a wiring problem once we have
-// pulsed the wake line a few times and still heard nothing.
+// A sleeping control box is silent, so "nothing on the wire" is normal at
+// startup. Only a wiring fault once the wake line has been pulsed this often.
 constexpr int WIRING_FAULT_AFTER_WAKES = 3;
 
 constexpr TickType_t SUPERVISE_TICK = pdMS_TO_TICKS(500);
-// The box streams in bursts with gaps of a second or so between them, and the
-// wake line is held high so it should not be sleeping at all. Only a longer
-// silence than that means the link has actually dropped.
+// The box streams in bursts with gaps of a second or so between them, so only a
+// longer silence than that means the link has dropped.
 constexpr TickType_t LINK_TIMEOUT = pdMS_TO_TICKS(3000);
-// How often to re-pulse the wake line while waiting for the first reading. One
-// pulse can be missed; without a retry the height never appears at all.
+// One wake pulse can be missed, and without a retry the height never appears.
 constexpr TickType_t WAKE_RETRY = pdMS_TO_TICKS(5000);
 
-constexpr std::uint32_t TASK_STACK    = 3072;
+// This task puts notifications on screen: it copies a Notice onto its stack and
+// then walks LVGL's label and layout paths.
+constexpr std::uint32_t TASK_STACK    = 6144;
 constexpr UBaseType_t   TASK_PRIORITY = 3;
 constexpr BaseType_t    TASK_CORE     = 0;
 
@@ -41,7 +40,7 @@ StaticTask_t s_task_ctrl;
 StackType_t  s_task_stack[TASK_STACK];
 
 // Preset work cannot run in the LVGL callback: storing one blocks for the gap
-// between the M key and the preset key. The supervisor task does it instead.
+// between the M key and the preset key, so the supervisor task does it.
 struct PresetCommand {
     int  index;
     bool store;
@@ -71,9 +70,8 @@ std::atomic<int>  s_height_mm{-1};
 std::atomic<bool> s_linked{false};
 std::atomic<int>  s_motion{0};  // -1 down, 0 idle, +1 up
 
-// Straight from the wire. Repaints only when the value actually changes: the
-// box streams frames far faster than the display needs, and redrawing a label
-// that already reads correctly just steals time from the LVGL task.
+// Repaints only on a change: the box streams frames far faster than the display
+// needs, and redrawing an already-correct label just costs the LVGL task time.
 void on_height(int height_mm)
 {
     if (s_height_mm.exchange(height_mm, std::memory_order_relaxed) != height_mm) {
@@ -81,15 +79,11 @@ void on_height(int height_mm)
     }
 }
 
-// The wake line is held high, so the box should stream continuously. Anything
-// else is a fault worth naming precisely: nothing on the wire, bytes that never
-// form frames, or a link that has gone quiet.
 const char *link_status(const loctek::Stats &stats, bool link_up, int wake_attempts)
 {
     if (link_up) {
         // Height frames with nothing readable in them mean the box has blanked
-        // its display. Only interesting before the first reading: afterwards
-        // the last height stands.
+        // its display.
         const bool never_read = s_height_mm.load(std::memory_order_relaxed) < 0;
         if (never_read && stats.height_frames > 0 && stats.heights_decoded == 0) {
             return kAsleep;
@@ -106,8 +100,6 @@ const char *link_status(const loctek::Stats &stats, bool link_up, int wake_attem
     return kNoReply;
 }
 
-// Reporting the state of the link is most of the battle when wiring a control
-// box up for the first time.
 [[noreturn]] void supervisor_task(void *)
 {
     const char   *shown      = nullptr;
@@ -137,27 +129,22 @@ const char *link_status(const loctek::Stats &stats, bool link_up, int wake_attem
             const bool linked = status == kConnected;
             s_linked.store(linked, std::memory_order_relaxed);
             ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_desk_available(linked));
-            // Push the reading again on every transition: on_height only fires
-            // when the value changes, so coming back from a dropout would
-            // otherwise leave the readout showing dashes until the desk moved.
+            // Pushed again on every transition: on_height only fires on a
+            // change, so a dropout would leave dashes until the desk next moved.
             ESP_ERROR_CHECK_WITHOUT_ABORT(
                 ui::set_height(linked ? s_height_mm.load(std::memory_order_relaxed) : -1));
             ESP_LOGI(TAG, "%s", status);
 #if CONFIG_LOCTEK_NUDGE_WAKE
             if (status == kAsleep) {
-                // Only ever reached before the first reading, so the desk takes
-                // one step at startup and none after. Nudging on every sleep
+                // Only reached before the first reading: nudging on every sleep
                 // cycle would creep the desk upward all day.
                 ESP_ERROR_CHECK_WITHOUT_ABORT(loctek::nudge());
             }
 #endif
-
-            // The last known height stays on screen; only the status changes.
         }
-        // Only until the first reading lands. After that the last known height
-        // stands and the box is left to sleep; loctek wakes it again by itself
-        // when a move is asked for. A fully asleep box transmits nothing at
-        // all, so this must not be gated on hearing anything from it.
+        // Only until the first reading lands; after that the box is left to
+        // sleep. A fully asleep box transmits nothing, so this must not be gated
+        // on hearing anything from it.
         const bool never_read = s_height_mm.load(std::memory_order_relaxed) < 0;
         if (never_read && status != kConnected && (last_wake == 0 || now - last_wake > WAKE_RETRY)) {
             last_wake = now;

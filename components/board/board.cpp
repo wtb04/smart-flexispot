@@ -24,9 +24,8 @@ constexpr int LVGL_TICK_PERIOD_MS = 5;
 constexpr int LVGL_MAX_SLEEP_MS   = 500;
 
 // bsp_display_start() tells the two Tab5 display revisions apart by probing the
-// touch controller, and an ST7123 only answers once the LCD rail has been up
-// for a while -- otherwise detection asserts with "Unsupported board version!".
-// Raising the rails here first is idempotent. See espressif/esp-bsp#829.
+// touch controller, and an ST7123 only answers once the LCD rail has been up for
+// a while. Raising the rails here first is idempotent. See espressif/esp-bsp#829.
 esp_err_t power_up_panel()
 {
     ESP_RETURN_ON_ERROR(bsp_i2c_init(), TAG, "i2c");
@@ -48,22 +47,18 @@ esp_err_t start_display(lv_display_t **out_disp)
             .task_stack_caps  = MALLOC_CAP_INTERNAL | MALLOC_CAP_DEFAULT,
             .timer_period_ms  = LVGL_TICK_PERIOD_MS,
         },
-        // A whole frame, not a strip. LVGL renders only what is invalid either
-        // way, but it can only do so in one pass if the buffer is big enough to
-        // hold it -- otherwise a page change is rendered and flushed in bands
-        // and you watch the screen fill downwards. The port forbids
-        // full_refresh and direct_mode alongside sw_rotate, which the portrait
-        // panel needs, so the capacity is the lever.
+        // A whole frame, not a strip: LVGL redraws an invalidated area in one
+        // pass only if the buffer holds it, and otherwise flushes in bands you
+        // watch fill downwards. full_refresh and direct_mode are forbidden
+        // alongside the sw_rotate the portrait panel needs, so capacity is the
+        // only lever.
         .buffer_size   = BSP_LCD_H_RES * BSP_LCD_V_RES,
         .double_buffer = true,
         .flags = {
-            // In PSRAM, because the buffer wanted to be far larger than the
-            // internal DMA pool can spare: at 50 lines a full-screen change
-            // took 26 render-and-flush passes and filled in visible bands.
+            // A full frame is far larger than the internal DMA pool can spare.
             .buff_dma    = false,
             .buff_spiram = true,
-            // Rotation off the CPU: the port routes this through the P4's PPA
-            // when CONFIG_LVGL_PORT_ENABLE_PPA is set.
+            // Routed through the P4's PPA when CONFIG_LVGL_PORT_ENABLE_PPA is set.
             .sw_rotate   = true,
         },
     };

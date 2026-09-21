@@ -18,8 +18,8 @@ constexpr char TAG[] = "clock";
 
 constexpr TickType_t TICK = pdMS_TO_TICKS(1000);
 
-// An unsynced device comes up in 1970. Anything past this is a real time
-// rather than the epoch, without needing to ask SNTP whether it finished.
+// An unsynced device comes up in 1970, so anything past this is a real time
+// without having to ask SNTP whether it finished.
 constexpr int PLAUSIBLE_YEAR = 2024;
 
 constexpr std::uint32_t TASK_STACK    = 3072;
@@ -46,7 +46,6 @@ std::atomic<bool> s_synced{false};
             if (!s_synced.exchange(true, std::memory_order_relaxed)) {
                 ESP_LOGI(TAG, "time set: %s", text);
             }
-            // Only repaint on the minute rolling over, not every second.
             if (std::strncmp(text, last, sizeof(text)) != 0) {
                 std::snprintf(last, sizeof(last), "%s", text);
                 ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_time(text));

@@ -11,7 +11,7 @@
 //
 // `len` counts from itself through crc_lo, so a frame is len + 2 bytes. The
 // checksum is CRC-16/MODBUS over [len .. last payload byte], high byte first --
-// note that byte order is the opposite of real Modbus RTU.
+// the opposite byte order to real Modbus RTU.
 namespace loctek {
 
 inline constexpr std::uint8_t kStart    = 0x9b;
@@ -38,7 +38,7 @@ enum class Key : std::uint16_t {
     Sit     = 0x0100,
 };
 
-/** The four memory positions, in the order the handset labels them. */
+/** In the order the handset labels them. */
 enum class Preset : std::uint8_t { One, Two, Three, Four };
 
 constexpr Key key_for(Preset preset)
@@ -93,10 +93,12 @@ public:
     FrameType type() const { return static_cast<FrameType>(bytes_[2]); }
     std::size_t size() const { return len_; }
 
-    /** The bytes between the type and the checksum. */
     std::span<const std::uint8_t> payload() const
     {
-        return std::span<const std::uint8_t>(bytes_).subspan(3, len_ - kMinFrame + 1);
+        // Start, length, type, two CRC bytes and end are the six bytes that are
+        // not payload. Counting one more handed the CRC high byte to the decoder
+        // as data, defeating the "at least three digits" guard.
+        return std::span<const std::uint8_t>(bytes_).subspan(3, len_ - kMinFrame);
     }
 
 private:
@@ -104,13 +106,8 @@ private:
     std::uint8_t                        len_ = 0;
 };
 
-/**
- * @brief Byte-stream frame reassembler.
- *
- * Frames arrive back to back in a single UART read, so this consumes one byte
- * at a time rather than parsing a read buffer. Frames failing the CRC are
- * dropped and the parser resynchronises on the next start byte.
- */
+/** Frames arrive back to back in a single UART read, so this consumes one byte
+ *  at a time rather than parsing a read buffer. */
 class Parser {
 public:
     std::optional<Frame> push(std::uint8_t byte);
@@ -122,14 +119,9 @@ private:
     std::uint8_t                        expected_ = 0;
 };
 
-/**
- * @brief Decodes a Height frame into millimetres.
- *
- * The payload is three 7-segment patterns driving the panel display, with bit 7
- * of the middle digit as the decimal point. Returns nothing for a blank display
- * (box asleep), for the hyphen the panel shows while programming presets
- * ("S-1"), and for error codes such as "E01".
- */
+/** The payload is three 7-segment patterns driving the panel display, with bit 7
+ *  of the middle digit as the decimal point. Nothing for a blank display (box
+ *  asleep), the "S-1" hyphen, or an error code such as "E01". */
 std::optional<int> decode_height_mm(const Frame &frame);
 
 }  // namespace loctek

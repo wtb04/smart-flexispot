@@ -7,13 +7,8 @@
 
 namespace ui {
 
-/**
- * @brief Four seven-segment digits drawn from plain rectangles.
- *
- * Unlit segments are left faintly visible rather than hidden, which is what
- * makes a real segment display readable as one -- you can see the shape of the
- * digits that are not on.
- */
+// Unlit segments are left faintly visible rather than hidden: that is what makes a real segment
+// display readable as one.
 class SegmentDisplay {
 public:
     explicit SegmentDisplay(lv_obj_t *parent);
@@ -26,9 +21,7 @@ public:
 private:
     struct Digit {
         std::array<lv_obj_t *, 7> bars{};
-        // Restyling a bar invalidates it, and there are 28 of them. Remember
-        // what each digit is showing so a height update only redraws the
-        // segments that actually changed -- usually one or two.
+        // Restyling a bar invalidates it and there are 28 of them, so only redraw what changed.
         int           shown  = -2;
         std::uint32_t colour = 0;
     };

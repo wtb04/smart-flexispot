@@ -29,7 +29,6 @@ std::string field(const cJSON *object, const char *key)
     return cJSON_IsString(item) && item->valuestring != nullptr ? item->valuestring : "";
 }
 
-/** Attributes arrive as any JSON type; the panel only ever displays them. */
 std::string as_text(const cJSON *item)
 {
     if (cJSON_IsString(item) && item->valuestring != nullptr) {
@@ -51,7 +50,7 @@ std::string as_text(const cJSON *item)
     return "";
 }
 
-/** Two attributes are mirrored onto the entity, so they must stay in step. */
+/** Mirrored onto the entity; keep in step with unhoist(). */
 void hoist(Entity &entity, const std::string &key, const std::string &value)
 {
     if (key == ATTR_FRIENDLY_NAME) {
@@ -119,8 +118,7 @@ std::string auth_message(const std::string &token)
 std::string subscribe_entities_message(int id, const std::vector<std::string> &entity_ids)
 {
     if (entity_ids.empty()) {
-        // Omitting the list would subscribe to everything, which is not what an
-        // empty list means to the caller.
+        // Omitting entity_ids subscribes to the whole state machine.
         return "";
     }
     cJSON *root = cJSON_CreateObject();
@@ -234,9 +232,8 @@ bool EntityStore::apply_event(const cJSON *event)
                 }
             }
 
-            // "-": attributes Home Assistant has dropped, as a list of names.
-            // Without this they linger forever -- a light keeps a brightness it
-            // no longer has, a sensor keeps a unit it stopped reporting.
+            // "-": attributes Home Assistant has dropped, by name; without this
+            // they linger forever.
             const cJSON *removals = cJSON_GetObjectItemCaseSensitive(item, KEY_REMOVALS);
             if (cJSON_IsObject(removals)) {
                 const cJSON *gone = cJSON_GetObjectItemCaseSensitive(removals, KEY_ATTRIBUTES);

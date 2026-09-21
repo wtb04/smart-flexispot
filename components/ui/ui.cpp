@@ -1,6 +1,7 @@
 #include "ui.h"
 
 #include "board.h"
+#include "media.h"
 #include "esp_check.h"
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
@@ -21,35 +22,28 @@ namespace {
 
 constexpr char TAG[] = "ui";
 
-// Generous, because every setter here is called from a task that is not the
-// UI: 100 ms was short enough that a push landing during the first full-screen
-// render simply gave up, and that slot kept whatever it had.
+// Generous: at 100 ms a push landing during the first full-screen render simply gave up.
 constexpr std::uint32_t LOCK_TIMEOUT_MS = 500;
 
-// Everything is sized from the real display rather than with percentages:
-// LV_PCT() returns an encoded sentinel, so LV_PCT(100) - something is not a
-// width, it is nonsense that silently lays out wrong.
+// Sized from the real display rather than with percentages: LV_PCT() returns an encoded
+// sentinel, so LV_PCT(100) - something is not a width, it is nonsense that lays out wrong.
 constexpr std::int32_t RAIL_W      = 330;
 constexpr std::int32_t NAV_H       = 92;
 constexpr std::int32_t RAIL_BTN_H  = 124;
 constexpr std::int32_t GAP        = 16;
 constexpr std::int32_t EDGE_GAP   = 0;   // navigation sits on the bottom edge
-// Matches the gap above the page, so the content sits centred between the top
-// edge and the navigation bar rather than crowding the buttons.
+// Matches the gap above the page, so the content sits centred rather than crowding the buttons.
 constexpr std::int32_t NAV_GAP    = GAP;
 
-// One inset and one gap used by every group of controls, so the rail, the
-// drawer and the navigation bar space their buttons identically instead of
-// each carrying its own hand-picked number.
 constexpr std::int32_t PANEL_PAD  = 16;
 constexpr std::int32_t BUTTON_GAP = 16;
 
 struct Layout {
     std::int32_t screen_w;
     std::int32_t screen_h;
-    std::int32_t content_x;  // left edge of everything right of the rail
+    std::int32_t content_x;
     std::int32_t content_w;
-    std::int32_t content_h;  // above the navigation bar
+    std::int32_t content_h;
 };
 
 Layout layout()
@@ -64,8 +58,7 @@ Layout layout()
 
 Handlers s_handlers{};
 
-// Everything that commands the desk, so it can be dimmed as a group when the
-// control box is not answering.
+// Dimmed as a group when the control box is not answering.
 constexpr int DESK_CONTROL_MAX = 8;
 lv_obj_t     *s_desk_controls[DESK_CONTROL_MAX] = {};
 int           s_desk_control_count              = 0;
@@ -85,10 +78,6 @@ lv_obj_t *s_wifi_slash    = nullptr;
 lv_obj_t *s_phone_icon    = nullptr;
 lv_obj_t *s_phone_slash   = nullptr;
 lv_obj_t *s_clock_label   = nullptr;
-
-// --- small helpers ---------------------------------------------------------
-
-// --- notifications ---------------------------------------------------------
 
 constexpr int          NOTIFY_QUEUE_LEN  = 4;
 constexpr int          NOTIFY_DEFAULT_MS = 8000;
@@ -141,8 +130,7 @@ void show_next_notice()
     --s_notice_count;
 
     lv_obj_set_style_bg_color(s_notice_bar, lv_color_hex(level_colour(notice.level)), 0);
-    // A message with no title reads better promoted into the heading than set
-    // as small print under an empty one.
+    // A message with no title reads better promoted into the heading.
     if (notice.title[0] != '\0') {
         lv_label_set_text(s_notice_title, notice.title);
         lv_label_set_text(s_notice_body, notice.message);
@@ -167,16 +155,12 @@ void show_next_notice()
 void notice_timeout_cb(lv_timer_t *) { show_next_notice(); }
 void notice_tapped_cb(lv_event_t *) { show_next_notice(); }
 
-// On the top layer so no page layout can cover or displace it.
 void create_notice_card()
 {
     const Layout l = layout();
 
-    // Everything right of the rail: the page and the navigation under it. A
-    // notification has nothing to do with the page it happens to land on, so it
-    // should not be possible to navigate out from under one -- the scrim
-    // swallows every tap and dismisses, the way the card itself does. The rail
-    // stays lit and live, so the desk can still be driven while a message is up.
+    // Covers the page and the navigation under it, so there is no navigating out from under a
+    // notification. The rail stays live, so the desk can still be driven while a message is up.
     s_notice_scrim = lv_obj_create(lv_layer_top());
     lv_obj_set_pos(s_notice_scrim, RAIL_W, 0);
     lv_obj_set_size(s_notice_scrim, l.screen_w - RAIL_W, l.screen_h);
@@ -188,9 +172,8 @@ void create_notice_card()
 
     s_notice_card = lv_obj_create(lv_layer_top());
     lv_obj_set_size(s_notice_card, NOTIFY_W, NOTIFY_H);
-    // On the top layer so no page can cover it, but centred over the content
-    // area rather than the whole screen: centring it over everything puts it
-    // half behind the rail.
+    // On the top layer so no page can cover it, but centred over the content area rather than
+    // the screen, which would put it half behind the rail.
     lv_obj_align(s_notice_card, LV_ALIGN_CENTER,
                  l.content_x + l.content_w / 2 - l.screen_w / 2,
                  GAP + l.content_h / 2 - l.screen_h / 2);
@@ -225,8 +208,6 @@ void create_notice_card()
     lv_timer_pause(s_notice_timer);
 }
 
-// --- controls --------------------------------------------------------------
-
 void move_event_cb(lv_event_t *e)
 {
     if (s_handlers.move == nullptr) {
@@ -237,14 +218,11 @@ void move_event_cb(lv_event_t *e)
     s_handlers.move(lv_event_get_code(e) == LV_EVENT_PRESSED ? direction : Move::Stop);
 }
 
-// Press starts the motion, release stops it. PRESS_LOST matters as much as
-// RELEASED: a finger sliding off must not leave the desk travelling.
+// PRESS_LOST matters as much as RELEASED: a finger sliding off must not leave the desk moving.
 void create_move_button(lv_obj_t *parent, const char *symbol, Move direction, std::int32_t w,
                         std::int32_t h)
 {
-    // Through the shared helper rather than styled by hand: doing it manually
-    // left LVGL's default shadow in place, which showed as a ring under the
-    // button.
+    // Via the shared helper: styling by hand left LVGL's default shadow showing as a ring.
     lv_obj_t *btn = theme::make_button(parent, symbol, theme::panel_light,
                                        fonts::size_48());
     lv_obj_set_size(btn, w, h);
@@ -264,12 +242,12 @@ lv_obj_t *icon_bar(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int32_
     lv_obj_set_pos(bar, x, y);
     lv_obj_set_size(bar, w, h);
     theme::style_panel(bar, theme::orange, 2);
+    lv_obj_set_style_bg_color(bar, lv_color_hex(theme::text), LV_STATE_PRESSED);
     lv_obj_set_clickable(bar, false);
     return bar;
 }
 
-// A desk drawn from five rectangles: top, two legs, two feet. The legs get
-// shorter for the sit variant, which is the whole point of the icon.
+// Five bars: top, two legs, two feet. The legs get shorter for the sit variant.
 void add_desk_icon(lv_obj_t *button, bool high)
 {
     lv_obj_t *icon = lv_obj_create(button);
@@ -322,8 +300,6 @@ void create_rail(lv_obj_t *parent)
     lv_obj_set_flex_align(rail, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_row(rail, BUTTON_GAP, 0);
 
-    // Clock and the three link glyphs share one strip, so the rail carries all
-    // the ambient state and the rest of the screen is free for pages.
     lv_obj_t *strip = lv_obj_create(rail);
     lv_obj_set_size(strip, RAIL_W - 2 * PANEL_PAD, 44);
     lv_obj_set_style_bg_opa(strip, LV_OPA_TRANSP, 0);
@@ -337,23 +313,21 @@ void create_rail(lv_obj_t *parent)
     s_wifi_icon = theme::make_label(strip, LV_SYMBOL_WIFI, theme::text, fonts::size_22());
     lv_obj_align(s_wifi_icon, LV_ALIGN_RIGHT_MID, 0, 0);
 
-    // A slash over the glyph, rather than a second icon: LVGL has no
-    // wifi-off symbol and this reads instantly.
+    // A slash over the glyph: LVGL has no wifi-off symbol.
     s_wifi_slash = theme::make_label(strip, "/", theme::text, fonts::size_32());
     lv_obj_align_to(s_wifi_slash, s_wifi_icon, LV_ALIGN_CENTER, 0, -2);
 
-    // Presence, in the same language as the link glyphs. Drawn rather than set
-    // from the font: LVGL's phone symbol is a corded handset, which is not what
-    // is being tracked. The colour never changes -- the slash is the state.
+    // Drawn rather than taken from the font: LVGL's phone symbol is a corded handset. The colour
+    // never changes -- the slash is the state.
     s_phone_icon = lv_obj_create(strip);
-    lv_obj_set_size(s_phone_icon, 22, 32);
-    theme::style_panel(s_phone_icon, theme::text, 5);
+    lv_obj_set_size(s_phone_icon, 18, 26);
+    theme::style_panel(s_phone_icon, theme::text, 4);
     lv_obj_set_clickable(s_phone_icon, false);
-    lv_obj_align(s_phone_icon, LV_ALIGN_RIGHT_MID, -46, 0);
+    lv_obj_align(s_phone_icon, LV_ALIGN_RIGHT_MID, -44, 0);
 
     lv_obj_t *phone_screen = lv_obj_create(s_phone_icon);
-    lv_obj_set_size(phone_screen, 16, 22);
-    lv_obj_align(phone_screen, LV_ALIGN_TOP_MID, 0, 4);
+    lv_obj_set_size(phone_screen, 13, 18);
+    lv_obj_align(phone_screen, LV_ALIGN_TOP_MID, 0, 3);
     theme::style_panel(phone_screen, theme::panel, 2);
     lv_obj_set_clickable(phone_screen, false);
 
@@ -367,22 +341,17 @@ void create_rail(lv_obj_t *parent)
     theme::style_panel(readout, theme::panel, 0);
     lv_obj_set_style_bg_opa(readout, LV_OPA_TRANSP, 0);
     lv_obj_set_flex_flow(readout, LV_FLEX_FLOW_COLUMN);
-    // END on the cross axis right-aligns the unit under the digits, so it sits
-    // at the bottom-right corner of the readout rather than beside it.
+    // END on the cross axis right-aligns the unit under the digits rather than beside them.
     lv_obj_set_flex_align(readout, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_START);
     lv_obj_set_style_pad_bottom(readout, 18, 0);
 
     s_height.emplace(readout);
     s_height->set_tenths(-1, theme::orange);
 
-    // Outside the flex flow and pinned to the right edge, level with the
-    // bottom of the digits -- a unit label reads as part of the number, not as
-    // another row under it. The dashes already say "no reading", so there is
-    // no status line here either.
     theme::make_label(readout, "CM", theme::secondary, fonts::size_22());
 
-    // Presets 3 and 4 are the two anyone actually uses, so they get names and
-    // the space. The rest live behind Manual.
+    // Presets 3 and 4 are the two anyone uses, so they get names and the space; the rest
+    // live behind Manual.
     lv_obj_t *stand = make_rail_button(rail, "STAND");
     add_desk_icon(stand, true);
     lv_obj_align(lv_obj_get_child(stand, 0), LV_ALIGN_CENTER, 34, 0);
@@ -399,8 +368,6 @@ void create_rail(lv_obj_t *parent)
     lv_obj_add_event_cb(sit, preset_clicked_cb, LV_EVENT_LONG_PRESSED,
                         reinterpret_cast<void *>(static_cast<std::intptr_t>(3)));
 
-    // Small and out of the way: the extra controls are occasional, and a
-    // full-width button for them competed with STAND and SIT.
     s_drawer_toggle = theme::make_button(rail, LV_SYMBOL_RIGHT);
     lv_obj_set_size(s_drawer_toggle, 84, 64);
     lv_obj_set_ignore_layout(s_drawer_toggle, true);
@@ -408,9 +375,7 @@ void create_rail(lv_obj_t *parent)
     lv_obj_add_event_cb(s_drawer_toggle, manual_clicked_cb, LV_EVENT_CLICKED, nullptr);
 }
 
-// The sidebar widens instead of a card appearing over the middle of the
-// screen: the extra controls belong to the rail, so they should look like part
-// of it sliding out, not like a separate thing floating on top.
+// The rail widens rather than a card floating over the page: these controls belong to the rail.
 constexpr std::int32_t DRAWER_W  = 340;
 constexpr std::uint32_t DRAWER_MS = 200;
 
@@ -422,8 +387,7 @@ void drawer_width_cb(void *target, std::int32_t value)
 void animate_drawer(bool open)
 {
     s_drawer_open = open;
-    // The arrow points the way the drawer will go, so the control says what it
-    // is about to do rather than what state it is in.
+    // The arrow points the way the drawer will go.
     if (s_drawer_toggle != nullptr) {
         theme::set_text(lv_obj_get_child(s_drawer_toggle, 0),
                         open ? LV_SYMBOL_LEFT : LV_SYMBOL_RIGHT);
@@ -448,16 +412,13 @@ void create_drawer(lv_obj_t *parent)
     lv_obj_set_pos(s_drawer, RAIL_W, 0);
     lv_obj_set_size(s_drawer, 0, l.screen_h);
     theme::style_panel(s_drawer, theme::panel, 0);
-    // Children are clipped to the object, so at zero width the buttons are
-    // simply not drawn and the drawer reads as closed.
+    // Children are clipped to the object, so at zero width the buttons are simply not drawn.
     lv_obj_set_style_pad_all(s_drawer, PANEL_PAD, 0);
     lv_obj_set_flex_flow(s_drawer, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(s_drawer, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
                           LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_row(s_drawer, BUTTON_GAP, 0);
 
-    // Same size and style as STAND and SIT, so the drawer looks like more of
-    // the same rail rather than a different control set.
     create_move_button(s_drawer, LV_SYMBOL_UP, Move::Up, DRAWER_W - 2 * PANEL_PAD, RAIL_BTN_H);
     create_move_button(s_drawer, LV_SYMBOL_DOWN, Move::Down, DRAWER_W - 2 * PANEL_PAD, RAIL_BTN_H);
 
@@ -474,19 +435,16 @@ void create_drawer(lv_obj_t *parent)
     }
 }
 
-// --- thermostat ------------------------------------------------------------
-
-// The arc carries an integer, so everything is scaled to tenths of a degree
-// and divided back out. Without that a 0.5 step is not representable.
+// The arc carries an integer, so everything is scaled to tenths of a degree and divided back
+// out; without that a 0.5 step is not representable.
 constexpr int   DIAL_SCALE     = 10;
 constexpr float DEFAULT_MIN_C  = 15.0f;
 constexpr float DEFAULT_MAX_C  = 30.0f;
 constexpr float DEFAULT_STEP_C = 0.5f;
 
 constexpr std::int32_t DIAL_CARD_W = 480;
-// The ring is this much narrower than the card, which leaves a square of empty
-// space in the top corners. That is where the toggles go: on the card, clear of
-// the arc, so a tap on one is never read as a drag of the setpoint.
+// Leaves a square of space in the top corners for the toggles, clear of the arc, so a tap on
+// one is never read as a drag of the setpoint.
 constexpr std::int32_t DIAL_INSET    = 100;
 constexpr std::int32_t DIAL_CHIP     = 56;
 constexpr std::int32_t DIAL_CHIP_GAP = 10;
@@ -498,8 +456,7 @@ lv_obj_t *s_dial_mode    = nullptr;
 lv_obj_t *s_dial_toggles[kDialToggleCount] = {};
 
 float s_dial_step = DEFAULT_STEP_C;
-// Incoming updates are ignored while a finger is down, or the dial fights the
-// drag and the setpoint jumps back under the thumb.
+// Updates are ignored while a finger is down, or the setpoint jumps back under the thumb.
 bool s_dial_dragging = false;
 
 float dial_value_c()
@@ -540,8 +497,7 @@ void arc_released_cb(lv_event_t *)
         return;
     }
     s_dial_dragging = false;
-    // Sent on release rather than on every step of the drag: a thermostat does
-    // not want thirty setpoints on the way to the one you meant.
+    // On release, not on every step of the drag: one setpoint, not thirty on the way to it.
     if (s_handlers.setpoint != nullptr) {
         s_handlers.setpoint(snap(dial_value_c()));
     }
@@ -572,8 +528,7 @@ void build_thermostat(lv_obj_t *parent, std::int32_t y, std::int32_t w, std::int
 
     const std::int32_t inner   = w - 2 * PANEL_PAD;
     const std::int32_t inner_h = h - 2 * PANEL_PAD;
-    // Centred in the card, not in what is left under the toggles: reserving
-    // space for those pushed the ring down and left it visibly low.
+    // Centred in the card, not in what is left under the toggles: that left the ring visibly low.
     const std::int32_t ring   = std::min(w - DIAL_INSET, inner_h);
     const std::int32_t ring_y = (inner_h - ring) / 2;
 
@@ -597,12 +552,7 @@ void build_thermostat(lv_obj_t *parent, std::int32_t y, std::int32_t w, std::int
     lv_obj_add_event_cb(s_dial, arc_released_cb, LV_EVENT_RELEASED, nullptr);
     lv_obj_add_event_cb(s_dial, arc_released_cb, LV_EVENT_PRESS_LOST, nullptr);
 
-    // Against the ring's centre rather than the card's, so they stay put
-    // whatever the card gains underneath them.
     const std::int32_t centre = ring_y + ring / 2;
-    // Captioned: two temperatures stacked with nothing to tell them apart is
-    // only readable once you already know which is which. Offsets put the
-    // whole block symmetrically about the ring's centre.
     lv_obj_align(theme::make_label(card, "CURRENT", theme::secondary, fonts::size_16()),
                  LV_ALIGN_TOP_MID, 0, centre - 80);
     s_dial_current = theme::make_label(card, "--", theme::text, fonts::temp_64());
@@ -624,9 +574,8 @@ void build_thermostat(lv_obj_t *parent, std::int32_t y, std::int32_t w, std::int
         lv_obj_set_hidden(chip, true);
     }
 
-    // Inside the ring's own gap rather than under the card. Kept narrow enough
-    // that its top corners stay within the 90 degrees the arc does not draw,
-    // and clear of where the knob parks at either end of the range.
+    // Sits in the ring's own gap: narrow enough that its corners stay within the 90 degrees the
+    // arc does not draw, and clear of where the knob parks at either end.
     const std::int32_t mode_w = ring * 11 / 20;
     const std::int32_t mode_h = 68;
     s_dial_mode               = theme::make_button(card, "OFF", theme::panel);
@@ -636,10 +585,6 @@ void build_thermostat(lv_obj_t *parent, std::int32_t y, std::int32_t w, std::int
     lv_obj_add_event_cb(s_dial_mode, mode_clicked_cb, LV_EVENT_CLICKED, nullptr);
 }
 
-// --- sensor pills ----------------------------------------------------------
-
-// Tall enough that the stacked label and value are not pressed against the
-// rounded edge above and below them, without turning the strip into a band.
 constexpr std::int32_t PILL_H = 60;
 constexpr std::int32_t DOT    = 14;
 
@@ -656,9 +601,8 @@ std::int32_t s_pill_row_w = 0;
 
 constexpr std::int32_t PILL_PAD = 22;
 
-// Fixed widths, shared out across the strip. Sizing each pill to its own text
-// made the whole row shuffle sideways every time a reading gained or lost a
-// digit, which is exactly when you are looking at it.
+// Fixed widths, shared out: sizing each pill to its text shuffled the whole row sideways
+// whenever a reading gained or lost a digit.
 void reflow_pills()
 {
     int visible = 0;
@@ -691,8 +635,6 @@ std::uint32_t level_ink(Level level)
     }
 }
 
-// Readings only: nothing here is pressable, so they are rounded all the way
-// and sit above the controls rather than among them.
 void build_pills(lv_obj_t *parent, std::int32_t w)
 {
     s_pill_row_w = w;
@@ -716,15 +658,11 @@ void build_pills(lv_obj_t *parent, std::int32_t w)
                               LV_FLEX_ALIGN_CENTER);
         lv_obj_set_style_pad_column(pill, 10, 0);
 
-        // A reading on its own says nothing unless you already know what good
-        // looks like. The dot is the whole point of showing it on a wall.
         lv_obj_t *dot = lv_obj_create(pill);
         lv_obj_set_size(dot, DOT, DOT);
         theme::style_panel(dot, theme::secondary, DOT / 2);
         lv_obj_set_clickable(dot, false);
 
-        // Stacked rather than side by side: four readings across one strip do
-        // not fit on a single line once each carries a name and a unit.
         lv_obj_t *column = lv_obj_create(pill);
         lv_obj_set_size(column, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
         lv_obj_set_flex_grow(column, 1);
@@ -734,14 +672,12 @@ void build_pills(lv_obj_t *parent, std::int32_t w)
         lv_obj_set_flex_flow(column, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_flex_align(column, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START,
                               LV_FLEX_ALIGN_START);
-        // Pulls the name and the reading together without touching the pill's
-        // own size, so the outer spacing stays as it is. The labels are all
-        // upper case, so the tightened rows have no descenders to clip.
-        lv_obj_set_style_pad_row(column, -2, 0);
+        // Tightens the two rows without touching the pill's size. All upper case, so nothing
+        // descends far enough to clip.
+        lv_obj_set_style_pad_row(column, -1, 0);
 
         lv_obj_t *label = theme::make_label(column, "", theme::secondary, fonts::size_16());
         lv_obj_t *value = theme::make_label(column, "", theme::text, fonts::size_22());
-        // Dots rather than a pill that grows: the safe area is the promise.
         lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_DOTS);
         lv_label_set_long_mode(value, LV_LABEL_LONG_MODE_DOTS);
 
@@ -749,8 +685,6 @@ void build_pills(lv_obj_t *parent, std::int32_t w)
         lv_obj_set_hidden(pill, true);
     }
 }
-
-// --- lights ----------------------------------------------------------------
 
 constexpr std::int32_t BULB_W = 34;
 constexpr std::int32_t BULB_H = 48;
@@ -761,8 +695,8 @@ lv_obj_t *s_lights_state  = nullptr;
 lv_obj_t *s_bulbs[kLightCount]   = {};
 bool      s_light_on[kLightCount] = {};
 bool      s_lights_on             = false;
-// A long press fires LONG_PRESSED and then CLICKED on release. Without this the
-// picker would open and the lights would toggle from the same gesture.
+// A long press fires LONG_PRESSED and then CLICKED on release, so without this one gesture
+// would both open the picker and toggle the lights.
 bool s_lights_long = false;
 
 std::optional<ModalOverlay> s_light_picker;
@@ -773,8 +707,6 @@ struct LightButton {
 };
 LightButton s_lights[kLightCount];
 
-// A bulb from a round glass and a flat base. At this size anything more
-// detailed reads as a smudge.
 lv_obj_t *make_bulb(lv_obj_t *parent)
 {
     lv_obj_t *bulb = lv_obj_create(parent);
@@ -797,12 +729,10 @@ lv_obj_t *make_bulb(lv_obj_t *parent)
     return bulb;
 }
 
-// Which lamps are on, drawn on the button that controls all of them. The pair
-// of colours flips with the button's own fill, or a lit bulb would be orange
-// on orange the moment everything is on.
+// The pair of colours flips with the button's own fill, or a lit bulb would be orange on orange.
 void paint_bulbs()
 {
-    const std::uint32_t lit   = s_lights_on ? theme::background : theme::orange;
+    const std::uint32_t lit   = s_lights_on ? theme::text : theme::orange;
     const std::uint32_t unlit = s_lights_on ? theme::orange_dim : theme::disabled_ink;
     for (int i = 0; i < kLightCount; ++i) {
         if (s_bulbs[i] == nullptr) {
@@ -817,8 +747,8 @@ void paint_bulbs()
 void paint_light(lv_obj_t *root, lv_obj_t *name, lv_obj_t *state, bool on)
 {
     theme::set_bg_color(root, on ? theme::orange : theme::panel_light);
-    theme::set_text_color(name, on ? theme::background : theme::secondary);
-    theme::set_text_color(state, on ? theme::background : theme::text);
+    theme::set_text_color(name, on ? theme::text : theme::secondary);
+    theme::set_text_color(state, theme::text);
 }
 
 void lights_event_cb(lv_event_t *e)
@@ -880,8 +810,6 @@ void build_lights_button(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::
     }
 }
 
-// Full-size buttons in a grid rather than the usual list of thin rows: this is
-// reached for across a room, not read from a desk chair.
 void build_light_picker(lv_obj_t *parent)
 {
     constexpr std::int32_t COLUMNS  = 2;
@@ -931,44 +859,334 @@ void build_light_picker(lv_obj_t *parent)
     }
 }
 
-// --- home screen tiles -----------------------------------------------------
+lv_obj_t *s_media_card   = nullptr;
+lv_obj_t *s_media_frame  = nullptr;
+lv_obj_t *s_media_art    = nullptr;
+lv_obj_t *s_media_source = nullptr;
+lv_obj_t *s_media_title  = nullptr;
+lv_obj_t *s_media_artist = nullptr;
+// Alternated with the two pixel buffers behind them, so a new cover never arrives under a
+// source pointer LVGL has already seen.
+lv_image_dsc_t s_art_dsc[2]{};
+int            s_art_slot = 0;
+bool           s_media_long   = false;
+bool           s_media_swiped = false;
 
-struct Tile {
-    lv_obj_t *root  = nullptr;
-    lv_obj_t *label = nullptr;
-    lv_obj_t *value = nullptr;
-    bool      shown = false;
+std::optional<ModalOverlay> s_media_panel;
+lv_obj_t *s_panel_frame    = nullptr;
+lv_obj_t *s_panel_art      = nullptr;
+lv_obj_t *s_panel_title    = nullptr;
+lv_obj_t *s_panel_artist   = nullptr;
+lv_obj_t *s_panel_play     = nullptr;
+lv_obj_t *s_panel_progress = nullptr;
+lv_obj_t *s_panel_elapsed  = nullptr;
+lv_obj_t *s_panel_total    = nullptr;
+lv_obj_t *s_panel_quieter  = nullptr;
+lv_obj_t *s_panel_louder   = nullptr;
+lv_obj_t *s_panel_volume_pct  = nullptr;
+lv_obj_t *s_panel_volume_icon = nullptr;
+lv_timer_t *s_progress_timer = nullptr;
+
+struct TextBox {
+    std::int32_t x;
+    std::int32_t w;
 };
-Tile         s_tiles[kTileCount];
-std::int32_t s_tile_row_w = 0;
+TextBox s_card_with_art{}, s_card_bare{};
+TextBox s_panel_with_art{}, s_panel_bare{};
+bool    s_has_art = false;
 
-// The tiles share one row, so their width depends on how many are in use.
-// Fixed widths would leave a single tile sitting in a quarter of the space.
-void reflow_tiles()
+constexpr std::int32_t CARD_TITLE_Y = 28;
+constexpr std::int32_t VOL_W        = 88;
+constexpr std::int32_t VOL_H        = 60;
+
+std::int32_t s_card_inner_h  = 0;
+std::int32_t s_panel_inner_h = 0;
+std::int32_t s_panel_below   = 0;  // what the rows under the artist need
+
+std::int32_t artist_height(const lv_font_t *font, std::int32_t available)
 {
-    int visible = 0;
-    for (const Tile &tile : s_tiles) {
-        visible += tile.shown ? 1 : 0;
+    const std::int32_t line = lv_font_get_line_height(font);
+    return available >= 2 * line ? 2 * line : line;
+}
+
+// The label keeps a fixed height so DOTS truncates rather than grows, so whatever sits under it
+// has to be told where the text actually ended.
+std::int32_t title_height(const char *text, const lv_font_t *font, std::int32_t width)
+{
+    const std::int32_t line = lv_font_get_line_height(font);
+    if (text == nullptr || text[0] == '\0') {
+        return line;
     }
-    if (visible == 0) {
+    lv_point_t size{};
+    lv_text_get_size(&size, text, font, 0, 0, width, LV_TEXT_FLAG_NONE);
+    return size.y > line ? 2 * line : line;
+}
+
+// From where the title really ends: fixed offsets left a line-sized gap under any one-line title.
+void layout_media_text()
+{
+    const TextBox card  = s_has_art ? s_card_with_art : s_card_bare;
+    const TextBox panel = s_has_art ? s_panel_with_art : s_panel_bare;
+
+    const std::int32_t card_title =
+        title_height(lv_label_get_text(s_media_title), fonts::size_20(), card.w);
+    const std::int32_t card_artist_y = CARD_TITLE_Y + card_title + 6;
+    const std::int32_t card_artist_h =
+        artist_height(fonts::size_16(), s_card_inner_h - card_artist_y);
+    lv_obj_set_height(s_media_artist, card_artist_h);
+    theme::align(s_media_artist, LV_ALIGN_TOP_LEFT, card.x, card_artist_y);
+
+    std::int32_t y = title_height(lv_label_get_text(s_panel_title), fonts::size_28(), panel.w) + 6;
+    const std::int32_t panel_artist_h =
+        artist_height(fonts::size_22(), s_panel_inner_h - s_panel_below - y);
+    lv_obj_set_height(s_panel_artist, panel_artist_h);
+    theme::align(s_panel_artist, LV_ALIGN_TOP_LEFT, panel.x, y);
+
+    y += panel_artist_h + 20;
+    theme::align(s_panel_progress, LV_ALIGN_TOP_LEFT, panel.x, y);
+
+    y += 14;
+    theme::align(s_panel_elapsed, LV_ALIGN_TOP_LEFT, panel.x, y);
+    theme::align(s_panel_total, LV_ALIGN_TOP_RIGHT, 0, y);
+
+    y += lv_font_get_line_height(fonts::size_16()) + 20;
+    const std::int32_t text_dy = (VOL_H - lv_font_get_line_height(fonts::size_20())) / 2;
+    theme::align(s_panel_volume_icon, LV_ALIGN_TOP_LEFT, panel.x, y + text_dy);
+    theme::align(s_panel_volume_pct, LV_ALIGN_TOP_LEFT, panel.x + 34, y + text_dy);
+    theme::align(s_panel_quieter, LV_ALIGN_TOP_RIGHT, -(VOL_W + 12), y);
+    theme::align(s_panel_louder, LV_ALIGN_TOP_RIGHT, 0, y);
+}
+
+// The last position reported and when we heard it, so the bar keeps moving between updates.
+int        s_position_s   = 0;
+int        s_duration_s   = 0;
+bool       s_media_playing = false;
+TickType_t s_position_at  = 0;
+
+// LV_LABEL_LONG_MODE_DOTS only truncates once the text exceeds the label's height, and a label
+// left at content height simply grows -- which is how a long title ended up over the artist.
+void one_line(lv_obj_t *label, const lv_font_t *font, std::int32_t width)
+{
+    lv_obj_set_width(label, width);
+    lv_obj_set_height(label, lv_font_get_line_height(font));
+    lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_DOTS);
+}
+
+void two_lines(lv_obj_t *label, const lv_font_t *font, std::int32_t width)
+{
+    lv_obj_set_width(label, width);
+    lv_obj_set_height(label, 2 * lv_font_get_line_height(font));
+    lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_DOTS);
+}
+
+// A radius on an image widget does nothing: clipping happens on a parent, so the cover goes in
+// a container that carries the radius and clips what it holds.
+lv_obj_t *rounded_frame(lv_obj_t *parent, std::int32_t side, std::int32_t radius)
+{
+    lv_obj_t *frame = lv_obj_create(parent);
+    lv_obj_set_size(frame, side, side);
+    theme::style_panel(frame, theme::panel, radius);
+    lv_obj_set_style_clip_corner(frame, true, 0);
+    lv_obj_set_clickable(frame, false);
+    return frame;
+}
+
+void write_clock(lv_obj_t *label, int seconds)
+{
+    if (seconds < 0) {
+        seconds = 0;
+    }
+    char text[16];
+    std::snprintf(text, sizeof(text), "%d:%02d", seconds / 60, seconds % 60);
+    theme::set_text(label, text);
+}
+
+// Tenths of a second, not whole ones: a second is a visible step across a bar this wide.
+constexpr int PROGRESS_TICK_MS = 200;
+constexpr int PROGRESS_SCALE   = 10;  // bar units per second
+
+void progress_tick(lv_timer_t *)
+{
+    if (!s_media_panel.has_value() || !s_media_panel->visible() || s_duration_s <= 0) {
         return;
     }
-    const std::int32_t w = (s_tile_row_w - (visible - 1) * BUTTON_GAP) / visible;
-    for (const Tile &tile : s_tiles) {
-        if (!tile.shown) {
-            continue;
-        }
-        lv_obj_set_width(tile.root, w);
-        lv_obj_set_width(tile.label, w - 28);
-        lv_obj_set_width(tile.value, w - 28);
+    int tenths = s_position_s * PROGRESS_SCALE;
+    if (s_media_playing) {
+        const TickType_t since = xTaskGetTickCount() - s_position_at;
+        tenths += static_cast<int>(since * PROGRESS_SCALE / configTICK_RATE_HZ);
+    }
+    const int limit = s_duration_s * PROGRESS_SCALE;
+    tenths          = tenths > limit ? limit : tenths;
+    lv_bar_set_value(s_panel_progress, tenths, LV_ANIM_OFF);
+    write_clock(s_panel_elapsed, tenths / PROGRESS_SCALE);
+}
+
+void media_action_cb(lv_event_t *e)
+{
+    if (s_handlers.media != nullptr) {
+        s_handlers.media(
+            static_cast<MediaAction>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e))));
     }
 }
 
-void tile_clicked_cb(lv_event_t *e)
+void media_card_cb(lv_event_t *e)
 {
-    if (s_handlers.tile != nullptr) {
-        s_handlers.tile(static_cast<int>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e))));
+    const lv_event_code_t code = lv_event_get_code(e);
+
+    // A gesture still ends in a release over the card, so it has to be remembered and the click
+    // that follows dropped, or every skip would also toggle play.
+    if (code == LV_EVENT_GESTURE) {
+        const lv_dir_t direction = lv_indev_get_gesture_dir(lv_indev_active());
+        if (direction != LV_DIR_LEFT && direction != LV_DIR_RIGHT) {
+            return;
+        }
+        s_media_swiped = true;
+        if (s_handlers.media != nullptr) {
+            s_handlers.media(direction == LV_DIR_LEFT ? MediaAction::Next : MediaAction::Previous);
+        }
+        return;
     }
+
+    if (code == LV_EVENT_LONG_PRESSED) {
+        s_media_long = true;
+        if (s_media_panel.has_value()) {
+            s_media_panel->open(s_media_card);
+        }
+        return;
+    }
+    if (std::exchange(s_media_long, false) || std::exchange(s_media_swiped, false)) {
+        return;
+    }
+    if (s_handlers.media != nullptr) {
+        s_handlers.media(MediaAction::PlayPause);
+    }
+}
+
+lv_obj_t *media_button(lv_obj_t *parent, const char *symbol, MediaAction action, std::int32_t w,
+                       std::int32_t h)
+{
+    lv_obj_t *button = theme::make_button(parent, symbol, theme::panel_light, fonts::size_32());
+    lv_obj_set_size(button, w, h);
+    lv_obj_add_event_cb(button, media_action_cb, LV_EVENT_CLICKED,
+                        reinterpret_cast<void *>(static_cast<std::intptr_t>(action)));
+    return button;
+}
+
+void build_media_panel(lv_obj_t *parent)
+{
+    constexpr std::int32_t PAD    = 24;
+    constexpr std::int32_t ART    = 200;
+    constexpr std::int32_t BTN_H  = 92;
+    constexpr std::int32_t CARD_W = 700;
+    constexpr std::int32_t CARD_H = 408;
+
+    s_media_panel.emplace(parent, CARD_W, CARD_H);
+    lv_obj_t *card = s_media_panel->content();
+    lv_obj_set_style_pad_all(card, PAD, 0);
+
+    const std::int32_t inner_w = CARD_W - 2 * PAD;
+    const std::int32_t inner_h = CARD_H - 2 * PAD;
+    s_panel_inner_h            = inner_h;
+    // What the artist has to leave room for: the bar, the clocks, the volume row and the transport.
+    s_panel_below = 20 + 8 + 14 + lv_font_get_line_height(fonts::size_16()) + 20 + VOL_H + 16 +
+                    BTN_H;
+
+    s_panel_frame = rounded_frame(card, ART, 18);
+    lv_obj_align(s_panel_frame, LV_ALIGN_TOP_LEFT, 0, 0);
+    s_panel_art = lv_image_create(s_panel_frame);
+    lv_obj_set_size(s_panel_art, ART, ART);
+    lv_obj_center(s_panel_art);
+    lv_image_set_inner_align(s_panel_art, LV_IMAGE_ALIGN_STRETCH);
+
+    s_panel_with_art = {ART + PAD, inner_w - ART - PAD};
+    s_panel_bare     = {0, inner_w};
+    const std::int32_t text_x = s_panel_with_art.x;
+    const std::int32_t text_w = s_panel_with_art.w;
+
+    s_panel_title = theme::make_label(card, "--", theme::text, fonts::size_28());
+    two_lines(s_panel_title, fonts::size_28(), text_w);
+    lv_obj_align(s_panel_title, LV_ALIGN_TOP_LEFT, text_x, 0);
+
+    s_panel_artist = theme::make_label(card, "", theme::secondary, fonts::size_22());
+    one_line(s_panel_artist, fonts::size_22(), text_w);
+
+    s_panel_progress = lv_bar_create(card);
+    lv_obj_set_size(s_panel_progress, text_w, 8);
+    theme::style_panel(s_panel_progress, theme::panel_light, 4);
+    lv_obj_set_style_bg_color(s_panel_progress, lv_color_hex(theme::orange), LV_PART_INDICATOR);
+    lv_obj_set_style_radius(s_panel_progress, 4, LV_PART_INDICATOR);
+
+    s_panel_elapsed = theme::make_label(card, "0:00", theme::secondary, fonts::size_16());
+    s_panel_total   = theme::make_label(card, "0:00", theme::secondary, fonts::size_16());
+
+    s_panel_volume_icon =
+        theme::make_label(card, LV_SYMBOL_VOLUME_MAX, theme::secondary, fonts::size_20());
+    s_panel_volume_pct = theme::make_label(card, "--", theme::text, fonts::size_20());
+
+    s_panel_quieter = media_button(card, LV_SYMBOL_MINUS, MediaAction::VolumeDown, VOL_W, VOL_H);
+    s_panel_louder  = media_button(card, LV_SYMBOL_PLUS, MediaAction::VolumeUp, VOL_W, VOL_H);
+
+    constexpr std::int32_t SIDE_W = 150;
+    constexpr std::int32_t PLAY_W = 200;
+    constexpr std::int32_t GAP    = 16;
+    const std::int32_t     row_w  = 2 * SIDE_W + PLAY_W + 2 * GAP;
+    const std::int32_t     row_x  = (inner_w - row_w) / 2;
+    const std::int32_t     row_y  = inner_h - BTN_H;
+
+    lv_obj_t *previous = media_button(card, LV_SYMBOL_PREV, MediaAction::Previous, SIDE_W, BTN_H);
+    lv_obj_align(previous, LV_ALIGN_TOP_LEFT, row_x, row_y);
+
+    s_panel_play = media_button(card, LV_SYMBOL_PLAY, MediaAction::PlayPause, PLAY_W, BTN_H);
+    lv_obj_align(s_panel_play, LV_ALIGN_TOP_LEFT, row_x + SIDE_W + GAP, row_y);
+    lv_obj_set_style_bg_color(s_panel_play, lv_color_hex(theme::orange), 0);
+
+    lv_obj_t *next = media_button(card, LV_SYMBOL_NEXT, MediaAction::Next, SIDE_W, BTN_H);
+    lv_obj_align(next, LV_ALIGN_TOP_LEFT, row_x + SIDE_W + PLAY_W + 2 * GAP, row_y);
+
+    s_progress_timer = lv_timer_create(progress_tick, PROGRESS_TICK_MS, nullptr);
+}
+
+void build_media_card(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int32_t w,
+                      std::int32_t h)
+{
+    s_media_card = lv_button_create(parent);
+    lv_obj_set_pos(s_media_card, x, y);
+    lv_obj_set_size(s_media_card, w, h);
+    theme::style_button(s_media_card, theme::panel_light);
+    lv_obj_set_style_pad_all(s_media_card, 18, 0);
+    lv_obj_add_event_cb(s_media_card, media_card_cb, LV_EVENT_CLICKED, nullptr);
+    lv_obj_add_event_cb(s_media_card, media_card_cb, LV_EVENT_LONG_PRESSED, nullptr);
+    lv_obj_add_event_cb(s_media_card, media_card_cb, LV_EVENT_GESTURE, nullptr);
+    // Gestures bubble by default, so LVGL walks past the card to the screen and a handler here
+    // never runs. Claim them.
+    lv_obj_remove_flag(s_media_card, LV_OBJ_FLAG_GESTURE_BUBBLE);
+
+    // Smaller than the card allows: a square filling the height left a third of the width for
+    // the title.
+    const std::int32_t art = h - 61;
+    s_media_frame          = rounded_frame(s_media_card, art, 14);
+    lv_obj_align(s_media_frame, LV_ALIGN_LEFT_MID, 0, 0);
+    s_media_art = lv_image_create(s_media_frame);
+    lv_obj_set_size(s_media_art, art, art);
+    lv_obj_center(s_media_art);
+    lv_image_set_inner_align(s_media_art, LV_IMAGE_ALIGN_STRETCH);
+    lv_obj_set_hidden(s_media_frame, true);
+
+    s_card_inner_h  = h - 36;
+    s_card_with_art = {art + 18, w - 36 - art - 18};
+    s_card_bare     = {0, w - 36};
+    const std::int32_t text_x = s_card_bare.x;
+    const std::int32_t text_w = s_card_bare.w;
+
+    s_media_source = theme::make_label(s_media_card, "SPEAKER", theme::secondary, fonts::size_16());
+    lv_obj_align(s_media_source, LV_ALIGN_TOP_LEFT, text_x, 0);
+
+    s_media_title = theme::make_label(s_media_card, "--", theme::text, fonts::size_20());
+    two_lines(s_media_title, fonts::size_20(), text_w);
+    lv_obj_align(s_media_title, LV_ALIGN_TOP_LEFT, text_x, 28);
+
+    s_media_artist = theme::make_label(s_media_card, "", theme::secondary, fonts::size_16());
+    one_line(s_media_artist, fonts::size_16(), text_w);
 }
 
 void build_home_page(lv_obj_t *page)
@@ -985,65 +1203,29 @@ void build_home_page(lv_obj_t *page)
     const std::int32_t body_h = inner_h - body_y;
     build_thermostat(page, body_y, DIAL_CARD_W, body_h);
 
-    // Everything else lives in the column beside the dial. Letting it wrap
-    // across the whole page is what put the tiles on top of the thermostat.
+    // Letting this column wrap across the page is what put the tiles on top of the thermostat.
     const std::int32_t col_x    = DIAL_CARD_W + BUTTON_GAP;
     const std::int32_t col_w    = inner_w - col_x;
     const std::int32_t lights_h = body_h * 5 / 9;
     build_lights_button(page, col_x, body_y, col_w, lights_h);
 
-    const std::int32_t tiles_y = body_y + lights_h + BUTTON_GAP;
-    const std::int32_t tiles_h = inner_h - tiles_y;
-    s_tile_row_w               = col_w;
+    const std::int32_t media_y = body_y + lights_h + BUTTON_GAP;
+    build_media_card(page, col_x, media_y, col_w, inner_h - media_y);
 
-    lv_obj_t *row = lv_obj_create(page);
-    lv_obj_set_pos(row, col_x, tiles_y);
-    lv_obj_set_size(row, col_w, tiles_h);
-    theme::style_panel(row, theme::background, 0);
-    lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
-    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_set_style_pad_column(row, BUTTON_GAP, 0);
-
-    for (int i = 0; i < kTileCount; ++i) {
-        lv_obj_t *tile = lv_button_create(row);
-        lv_obj_set_size(tile, col_w, tiles_h);
-        theme::style_button(tile, theme::panel_light);
-        lv_obj_set_style_pad_all(tile, 18, 0);
-        lv_obj_add_event_cb(tile, tile_clicked_cb, LV_EVENT_CLICKED,
-                            reinterpret_cast<void *>(static_cast<std::intptr_t>(i)));
-
-        lv_obj_t *label = theme::make_label(tile, "", theme::secondary, fonts::size_16());
-        lv_obj_align(label, LV_ALIGN_TOP_LEFT, 0, 0);
-        lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_DOTS);
-
-        lv_obj_t *value = theme::make_label(tile, "", theme::text, fonts::size_28());
-        lv_obj_align(value, LV_ALIGN_BOTTOM_LEFT, 0, 0);
-        lv_label_set_long_mode(value, LV_LABEL_LONG_MODE_DOTS);
-
-        s_tiles[i] = Tile{tile, label, value, false};
-        lv_obj_set_hidden(tile, true);
-    }
-
-    // Last, so the overlay covers the page rather than being covered by it.
+    // Last, so the overlays cover the page rather than being covered by it.
     build_light_picker(page);
+    build_media_panel(page);
 }
-
-// --- pages and navigation --------------------------------------------------
 
 constexpr int PAGE_COUNT = 5;
 lv_obj_t *s_pages[PAGE_COUNT]    = {};
 lv_obj_t *s_nav_tabs[PAGE_COUNT] = {};
 
-// Icon plus a short caption: icons alone are a guessing game, and full words
-// eat the width we want for more destinations later.
 struct NavItem {
     const char *icon;
     const char *caption;
-    // Hidden from the navigation while the tracked phone is away. Home stays
-    // because the desk has to be usable by anyone, and Setup stays because it
-    // is where the presence readout lives -- gating that would hide the one
-    // screen that explains why everything else vanished.
+    // Hidden while the tracked phone is away. Home stays because the desk has to work for
+    // anyone, and Setup stays because it is where the presence readout explains the rest.
     bool        needs_presence;
 };
 constexpr NavItem NAV_ITEMS[PAGE_COUNT] = {
@@ -1052,9 +1234,8 @@ constexpr NavItem NAV_ITEMS[PAGE_COUNT] = {
     {LV_SYMBOL_SETTINGS, "Setup", false},
 };
 
-// Nothing is hidden until the phone has actually been recognised once. A panel
-// that hides half its pages because the key is wrong, or because Bluetooth
-// never came up, is worse than one that does not gate at all.
+// Nothing is gated until the phone has been recognised once: hiding half the panel because a
+// key is wrong, or because Bluetooth never came up, is worse than not gating at all.
 bool s_presence_known = false;
 bool s_present        = false;
 int  s_page           = 0;
@@ -1076,7 +1257,7 @@ void select_page(int index)
         const bool          active = (i == index);
         lv_obj_set_style_bg_color(s_nav_tabs[i],
                                   lv_color_hex(active ? theme::orange : theme::panel_light), 0);
-        const std::uint32_t ink = active ? theme::background : theme::secondary;
+        const std::uint32_t ink = active ? theme::text : theme::secondary;
         theme::set_text_color(lv_obj_get_child(s_nav_tabs[i], 0), ink);
         theme::set_text_color(lv_obj_get_child(s_nav_tabs[i], 1), ink);
     }
@@ -1096,8 +1277,6 @@ void brightness_event_cb(lv_event_t *e)
     s_handlers.brightness(static_cast<int>(lv_slider_get_value(slider)));
 }
 
-// Stand-ins, so the navigation can be seen working before the screens behind
-// it exist. Each says what it is for rather than pretending to hold data.
 void build_placeholder_page(lv_obj_t *page, const char *title, const char *blurb)
 {
     lv_obj_set_flex_flow(page, LV_FLEX_FLOW_COLUMN);
@@ -1120,8 +1299,8 @@ void build_settings_page(lv_obj_t *page)
 
     lv_obj_t *slider = lv_slider_create(page);
     lv_obj_set_width(slider, 480);
-    // Starts at the lowest the panel honours: a slider whose bottom third does
-    // nothing reads as broken.
+    // Starts at the lowest the panel honours: a slider whose bottom third does nothing reads
+    // as broken.
     lv_slider_set_range(slider, board::kMinBrightness, 100);
     lv_slider_set_value(slider, s_initial_brightness, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(slider, lv_color_hex(theme::panel_light), LV_PART_MAIN);
@@ -1212,8 +1391,7 @@ void build_screen()
 esp_err_t init(const Handlers &handlers, int initial_brightness)
 {
     ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
-    // Before any label exists: the fonts carry the fallback that supplies the
-    // characters Montserrat does not have.
+    // Before any label exists: the fonts carry the fallback Montserrat lacks.
     fonts::init();
     s_handlers           = handlers;
     s_initial_brightness = initial_brightness;
@@ -1239,49 +1417,132 @@ esp_err_t set_desk_available(bool available)
     s_desk_available = available;
     for (int i = 0; i < s_desk_control_count; ++i) {
         lv_obj_t *obj = s_desk_controls[i];
-        // The state drives the styling, so the button keeps a background and
-        // simply changes colour. Labels inherit the state's text colour, but
-        // only if they have not been given one of their own.
+        // Labels inherit the state's text colour only if they were not given one of their own.
         lv_obj_set_state(obj, LV_STATE_DISABLED, !available);
         lv_obj_t *label = lv_obj_get_child(obj, 0);
         if (label != nullptr) {
             theme::set_text_color(label, available ? theme::text : theme::disabled_ink);
         }
-        // Not merely dimmed: a press that cannot reach the desk should do
-        // nothing rather than appear to work.
+        // A press that cannot reach the desk should do nothing rather than appear to work.
         lv_obj_set_clickable(obj, available);
     }
-    // The readout is not touched here: what it shows is the caller's business,
-    // and blanking it from two places is how it ended up stuck empty.
+    // The readout is left alone: blanking it from two places is how it ended up stuck empty.
     lvgl_port_unlock();
     return ESP_OK;
 }
 
-esp_err_t set_tile(int index, const char *label, const char *value, bool on, bool actionable)
+esp_err_t set_media(const char *source, const char *title, const char *artist, const char *state,
+                    bool playing)
 {
-    ESP_RETURN_ON_FALSE(index >= 0 && index < kTileCount, ESP_ERR_INVALID_ARG, TAG, "tile %d",
-                        index);
-    ESP_RETURN_ON_FALSE(s_tiles[index].root != nullptr, ESP_ERR_INVALID_STATE, TAG,
+    ESP_RETURN_ON_FALSE(s_media_card != nullptr, ESP_ERR_INVALID_STATE, TAG, "not initialised");
+    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
+
+    const bool has_track = title != nullptr && title[0] != '\0';
+    theme::set_text(s_media_source, source != nullptr && source[0] != '\0' ? source : "SPEAKER");
+    theme::set_text(s_media_title, has_track ? title : (state != nullptr ? state : "--"));
+    theme::set_text(s_media_artist, has_track && artist != nullptr ? artist : "");
+    theme::set_text_color(s_media_title, has_track ? theme::text : theme::secondary);
+
+    theme::set_text(s_panel_title, has_track ? title : (state != nullptr ? state : "--"));
+    theme::set_text(s_panel_artist, has_track && artist != nullptr ? artist : "");
+    layout_media_text();
+    theme::set_text(lv_obj_get_child(s_panel_play, 0), playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
+
+    // Paused reads from the cover going flat. Compared first: neither setter checks, so writing
+    // this unconditionally repainted both covers -- one 200 pixels square out of PSRAM -- on
+    // every entity update.
+    const lv_opa_t dim = has_track && !playing ? LV_OPA_50 : LV_OPA_TRANSP;
+    for (lv_obj_t *art : {s_media_art, s_panel_art}) {
+        if (lv_obj_get_style_image_recolor_opa(art, LV_PART_MAIN) != dim) {
+            lv_obj_set_style_image_recolor(art, lv_color_hex(theme::background), 0);
+            lv_obj_set_style_image_recolor_opa(art, dim, 0);
+        }
+    }
+
+    lvgl_port_unlock();
+    return ESP_OK;
+}
+
+esp_err_t set_media_progress(int position_s, int duration_s, bool playing)
+{
+    ESP_RETURN_ON_FALSE(s_panel_progress != nullptr, ESP_ERR_INVALID_STATE, TAG, "not initialised");
+    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
+
+    s_position_s    = position_s;
+    s_duration_s    = duration_s;
+    s_media_playing = playing;
+    s_position_at   = xTaskGetTickCount();
+
+    const bool known = duration_s > 0;
+    lv_obj_set_hidden(s_panel_progress, !known);
+    lv_obj_set_hidden(s_panel_elapsed, !known);
+    lv_obj_set_hidden(s_panel_total, !known);
+    if (known) {
+        lv_bar_set_range(s_panel_progress, 0, duration_s * PROGRESS_SCALE);
+        lv_bar_set_value(s_panel_progress, position_s * PROGRESS_SCALE, LV_ANIM_OFF);
+        write_clock(s_panel_elapsed, position_s);
+        write_clock(s_panel_total, duration_s);
+    }
+    lvgl_port_unlock();
+    return ESP_OK;
+}
+
+esp_err_t set_media_volume(int percent)
+{
+    ESP_RETURN_ON_FALSE(s_panel_volume_pct != nullptr, ESP_ERR_INVALID_STATE, TAG,
                         "not initialised");
     ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
 
-    Tile      &tile  = s_tiles[index];
-    const bool empty = label == nullptr || label[0] == '\0';
-    lv_obj_set_hidden(tile.root, empty);
-    if (tile.shown == empty) {
-        tile.shown = !empty;
-        reflow_tiles();
+    char text[8];
+    std::snprintf(text, sizeof(text), "%d%%", percent);
+    theme::set_text(s_panel_volume_pct, text);
+    lvgl_port_unlock();
+    return ESP_OK;
+}
+
+esp_err_t set_album_art(const void *pixels)
+{
+    ESP_RETURN_ON_FALSE(s_media_art != nullptr, ESP_ERR_INVALID_STATE, TAG, "not initialised");
+    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
+
+    const bool has_art = pixels != nullptr;
+    lv_obj_set_hidden(s_media_frame, !has_art);
+    lv_obj_set_hidden(s_panel_frame, !has_art);
+
+    const TextBox card  = has_art ? s_card_with_art : s_card_bare;
+    const TextBox panel = has_art ? s_panel_with_art : s_panel_bare;
+    theme::align(s_media_source, LV_ALIGN_TOP_LEFT, card.x, 0);
+    theme::align(s_media_title, LV_ALIGN_TOP_LEFT, card.x, 28);
+    lv_obj_set_width(s_media_title, card.w);
+    lv_obj_set_width(s_media_artist, card.w);
+
+    theme::align(s_panel_title, LV_ALIGN_TOP_LEFT, panel.x, 0);
+    s_has_art = has_art;
+    lv_obj_set_width(s_panel_title, panel.w);
+    lv_obj_set_width(s_panel_artist, panel.w);
+    lv_obj_set_width(s_panel_progress, panel.w);
+    layout_media_text();
+
+    if (!has_art) {
+        lvgl_port_unlock();
+        return ESP_OK;
     }
-    if (!empty) {
-        theme::set_text(tile.label, label);
-        theme::set_text(tile.value, value != nullptr ? value : "");
-        // Tint rather than a separate indicator: at a glance across a room the
-        // colour is what reads, not a small dot.
-        theme::set_bg_color(tile.root, on ? theme::orange : theme::panel_light);
-        theme::set_text_color(tile.value, on ? theme::background : theme::text);
-        theme::set_text_color(tile.label, on ? theme::background : theme::secondary);
-        lv_obj_set_clickable(tile.root, actionable);
-    }
+
+    lv_image_dsc_t &dsc = s_art_dsc[s_art_slot];
+    s_art_slot          = 1 - s_art_slot;
+
+    dsc.header.magic  = LV_IMAGE_HEADER_MAGIC;
+    dsc.header.cf     = LV_COLOR_FORMAT_RGB565;
+    dsc.header.w      = media::kArtSize;
+    dsc.header.h      = media::kArtSize;
+    dsc.header.stride = media::kArtSize * 2;
+    dsc.data_size     = media::kArtSize * media::kArtSize * 2;
+    dsc.data          = static_cast<const std::uint8_t *>(pixels);
+
+    lv_image_set_src(s_media_art, &dsc);
+    lv_image_set_src(s_panel_art, &dsc);
+    lv_obj_invalidate(s_media_art);
+    lv_obj_invalidate(s_panel_art);
     lvgl_port_unlock();
     return ESP_OK;
 }
@@ -1362,7 +1623,7 @@ esp_err_t set_dial_toggle(int index, const char *label, bool on)
         lv_obj_t *text = lv_obj_get_child(chip, 0);
         theme::set_text(text, label);
         theme::set_bg_color(chip, on ? theme::orange : theme::panel);
-        theme::set_text_color(text, on ? theme::background : theme::secondary);
+        theme::set_text_color(text, on ? theme::text : theme::secondary);
     }
     lvgl_port_unlock();
     return ESP_OK;
@@ -1372,8 +1633,6 @@ esp_err_t set_thermostat_range(float min_c, float max_c, float step_c)
 {
     ESP_RETURN_ON_FALSE(s_dial != nullptr, ESP_ERR_INVALID_STATE, TAG, "not initialised");
     ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
-    // Bounds come from the entity, so a thermostat reconfigured in Home
-    // Assistant is followed rather than clamped to something stale.
     lv_arc_set_range(s_dial, static_cast<int>(min_c * DIAL_SCALE),
                      static_cast<int>(max_c * DIAL_SCALE));
     s_dial_step = step_c > 0.0f ? step_c : DEFAULT_STEP_C;
@@ -1394,9 +1653,6 @@ esp_err_t set_thermostat(float current_c, float target_c, const char *mode, Hvac
         }
     }
 
-    // The ring carries the state: the same orange every other live control on
-    // the panel uses while the boiler runs, amber when it is on but coasting,
-    // grey when it is off altogether.
     std::uint32_t ink = theme::secondary;
     switch (state) {
         case Hvac::Heating: ink = theme::orange; break;
@@ -1406,12 +1662,11 @@ esp_err_t set_thermostat(float current_c, float target_c, const char *mode, Hvac
     theme::set_arc_color(s_dial, ink, LV_PART_INDICATOR);
     theme::set_bg_color(s_dial, ink, LV_PART_KNOB);
 
-    // And the switch reads like every other thing that is on.
     const bool on = state != Hvac::Off;
     theme::set_bg_color(s_dial_mode, on ? theme::orange : theme::panel);
     lv_obj_t *mode_text = lv_obj_get_child(s_dial_mode, 0);
     theme::set_text(mode_text, mode != nullptr ? mode : "--");
-    theme::set_text_color(mode_text, on ? theme::background : theme::text);
+    theme::set_text_color(mode_text, theme::text);
     lvgl_port_unlock();
     return ESP_OK;
 }
@@ -1424,9 +1679,6 @@ esp_err_t set_presence(bool has_key, bool present, bool ever_seen)
     const bool here = has_key && present;
     lv_obj_set_hidden(s_phone_slash, here);
 
-    // Only gate pages once the phone has actually been recognised at least
-    // once this boot. Hiding half the panel because a key is wrong, or because
-    // Bluetooth never came up, is worse than not gating at all.
     const bool known = has_key && ever_seen;
     if (known != s_presence_known || here != s_present) {
         s_presence_known = known;
@@ -1456,15 +1708,13 @@ esp_err_t set_links(bool wifi, bool mqtt)
 {
     (void)mqtt;  // the broker has its own indicator in Home Assistant
     ESP_RETURN_ON_FALSE(s_wifi_icon != nullptr, ESP_ERR_INVALID_STATE, TAG, "not initialised");
-    // Called on a timer, so it is almost always a no-op. Restyling anyway
-    // would invalidate the icon every couple of seconds for nothing.
+    // Called on a timer, so restyling anyway would invalidate the icon every couple of seconds.
     static int last = -1;
     if (last == (wifi ? 1 : 0)) {
         return ESP_OK;
     }
     last = wifi ? 1 : 0;
     ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
-    // White either way; the slash is what says "not connected".
     lv_obj_set_hidden(s_wifi_slash, wifi);
 
     lvgl_port_unlock();
@@ -1473,8 +1723,7 @@ esp_err_t set_links(bool wifi, bool mqtt)
 
 esp_err_t set_battery(bool present, int percent, bool charging)
 {
-    // Nothing on screen shows battery any more -- it lives in Home Assistant.
-    // Kept so callers need not care, and so re-adding an indicator is local.
+    // Nothing on screen shows battery any more; kept so callers need not care.
     (void)present;
     (void)percent;
     (void)charging;
@@ -1487,7 +1736,6 @@ esp_err_t notify(const char *title, const char *message, const char *level, int 
     ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
 
     if (s_notice_count == NOTIFY_QUEUE_LEN) {
-        // Drop the oldest and say so, rather than losing one silently.
         ESP_LOGW(TAG, "notification queue full, dropping oldest");
         for (int i = 1; i < NOTIFY_QUEUE_LEN; ++i) {
             s_notice_queue[i - 1] = s_notice_queue[i];

@@ -9,7 +9,7 @@ namespace {
 constexpr std::uint8_t DIGIT_MASK[10] = {0x3f, 0x06, 0x5b, 0x4f, 0x66,
                                          0x6d, 0x7d, 0x07, 0x7f, 0x6f};
 
-// The middle bar alone, for the "no reading yet" dashes.
+// The middle bar alone.
 constexpr std::uint8_t DASH_MASK = 0x40;
 constexpr int          DASH      = -2;
 
@@ -86,8 +86,7 @@ void SegmentDisplay::set_digit(int index, int value, std::uint32_t colour)
 void SegmentDisplay::set_tenths(int tenths, std::uint32_t colour)
 {
     if (tenths < 0) {
-        // ---.- rather than a blank panel: it reads as "no reading", where an
-        // empty display reads as "switched off".
+        // ---.- reads as "no reading"; a blank panel reads as "switched off".
         for (int d = 0; d < 4; ++d) {
             set_digit(d, d == 0 ? -1 : DASH, colour);
         }
@@ -97,7 +96,6 @@ void SegmentDisplay::set_tenths(int tenths, std::uint32_t colour)
     }
 
     tenths = std::clamp(tenths, 0, 9999);
-    // Leading zero blanked, the way a real panel does it.
     set_digit(0, tenths >= 1000 ? (tenths / 1000) % 10 : -1, colour);
     set_digit(1, (tenths / 100) % 10, colour);
     set_digit(2, (tenths / 10) % 10, colour);

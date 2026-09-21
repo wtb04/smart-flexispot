@@ -22,7 +22,7 @@
 #if __has_include("wifi_secrets.h")
 #include "wifi_secrets.h"
 #endif
-// Builds without the secrets header still run; they just never join.
+// A build without the secrets header runs; it just never joins.
 #ifndef TAB5_WIFI_SSID
 #define TAB5_WIFI_SSID ""
 #define TAB5_WIFI_PASS ""
@@ -35,15 +35,13 @@ constexpr char TAG[] = "wifi";
 
 std::atomic<bool> s_connected{false};
 
-// So callers can wait for the network rather than starting doomed clients and
-// relying on their retries.
 constexpr EventBits_t GOT_IP_BIT = BIT0;
 StaticEventGroup_t    s_events_ctrl;
 EventGroupHandle_t    s_events = nullptr;
 bool              s_sntp_started = false;
 
-// A POSIX TZ string rather than a zone name: there is no timezone database on
-// the device. This one is Europe/Amsterdam including the DST rules.
+// A POSIX TZ string, as there is no timezone database on the device:
+// Europe/Amsterdam with its DST rules.
 constexpr char TIMEZONE[] = "CET-1CEST,M3.5.0,M10.5.0/3";
 
 void start_time_sync()
@@ -79,8 +77,7 @@ void on_wifi_event(void *, esp_event_base_t base, std::int32_t id, void *data)
         }
         ESP_LOGW(TAG, "disconnected from '%s' (reason %d), retrying", TAB5_WIFI_SSID,
                  event->reason);
-        // Retry forever rather than giving up: this is a wall panel, and the
-        // router may simply be rebooting.
+        // Retry forever: this is a wall panel and the router may be rebooting.
         esp_wifi_connect();
         return;
     }
@@ -109,8 +106,7 @@ esp_err_t init_nvs()
 
 esp_err_t start()
 {
-    // Before anything reads a clock: an unset TZ makes every local time wrong
-    // by the UTC offset, and the error only shows up once something formats it.
+    // Before anything reads a clock: an unset TZ silently offsets every local time.
     setenv("TZ", TIMEZONE, 1);
     tzset();
 
@@ -121,8 +117,8 @@ esp_err_t start()
         return ESP_OK;
     }
 
-    // The C6 co-processor sits behind a power gate on the IO expander. Without
-    // this it never answers on SDIO and esp_hosted dies trying.
+    // The C6 co-processor sits behind a power gate on the IO expander; without
+    // this it never answers on SDIO.
     ESP_RETURN_ON_ERROR(bsp_feature_enable(BSP_FEATURE_WIFI, true), TAG, "wifi power");
     vTaskDelay(pdMS_TO_TICKS(100));
 
@@ -164,7 +160,7 @@ bool connected()
 bool wait_for_ip(int timeout_ms)
 {
     if (s_events == nullptr) {
-        return false;  // start() was never called, or there is no SSID
+        return false;
     }
     const EventBits_t bits =
         xEventGroupWaitBits(s_events, GOT_IP_BIT, pdFALSE, pdTRUE, pdMS_TO_TICKS(timeout_ms));

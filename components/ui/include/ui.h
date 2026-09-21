@@ -12,54 +12,44 @@ enum class Move : std::int8_t {
     Down = -1,
 };
 
-/**
- * @brief Invoked from the LVGL task when a button is pressed or released.
- *
- * Fires Move::Up / Move::Down on press and Move::Stop on release. Must not
- * block: it runs with the LVGL lock held.
- */
+/** Up/Down on press, Stop on release. Must not block: it runs with the LVGL lock held. */
 using MoveHandler = void (*)(Move direction);
 
-/**
- * @brief Invoked from the LVGL task when a preset button is used.
- *
- * A tap sends the desk to that preset; a long press stores the current height
- * there. Must not block: it runs with the LVGL lock held.
- */
+/** A tap sends the desk to that preset; a long press stores the current height there. */
 using PresetHandler = void (*)(int index, bool store);
 
-/** Invoked from the LVGL task as the brightness slider moves. */
 using BrightnessHandler = void (*)(int percent);
 
-/** Invoked when the thermostat dial is released, with the chosen setpoint. */
 using SetpointHandler = void (*)(float celsius);
 
-/** Invoked when the thermostat's mode button is pressed. */
 using ModeHandler = void (*)();
 
-/** Number of preset buttons on screen. */
 inline constexpr int kPresetCount = 4;
 
-/** Free-form slots in the row under the lights button. */
-inline constexpr int kTileCount = 4;
+enum class MediaAction : std::uint8_t {
+    PlayPause,
+    Previous,
+    Next,
+    VolumeDown,
+    VolumeUp,
+    Mute,
+};
 
-/** Read-only chips along the top of the home screen. */
+using MediaHandler = void (*)(MediaAction action);
+
+
 inline constexpr int kPillCount = 4;
 
-/** Individual lights behind the lights button's long press. */
 inline constexpr int kLightCount = 4;
 
-/** Round toggles in the thermostat card's top corner. */
 inline constexpr int kDialToggleCount = 2;
 
-/** What the thermostat is actually doing, as opposed to what it is set to. */
 enum class Hvac : std::uint8_t {
     Off,
     Idle,     // on, but the setpoint is already met
-    Heating,  // the boiler is running
+    Heating,
 };
 
-/** How a reading compares with what the room should be sitting at. */
 enum class Level : std::uint8_t {
     Neutral,  // no threshold, or nothing reported
     Good,
@@ -67,74 +57,48 @@ enum class Level : std::uint8_t {
     Bad,
 };
 
-/** Invoked from the LVGL task when a tile that can act is tapped. */
-using TileHandler = void (*)(int index);
-
-/** Invoked when the lights button is tapped: everything on, or everything off. */
 using LightsHandler = void (*)();
 
-/** Invoked when one light in the long-press picker is tapped. */
 using LightHandler = void (*)(int index);
 
-/** Invoked when one of the thermostat card's corner toggles is tapped. */
 using DialToggleHandler = void (*)(int index);
 
-/**
- * @brief Fills one home-screen tile. Thread-safe.
- *
- * A tile with an empty label is hidden, so a screen can use fewer than all of
- * them. `on` tints it, and `actionable` decides whether tapping does anything.
- */
-esp_err_t set_tile(int index, const char *label, const char *value, bool on, bool actionable);
+// Every setter here takes the LVGL lock, so any task may call them.
 
-/**
- * @brief One reading chip along the top. Thread-safe.
- *
- * An empty label hides it, and the remaining chips close up the gap.
- */
+/** An empty title means nothing is playing; the card then shows the state. Strings are copied. */
+esp_err_t set_media(const char *source, const char *title, const char *artist, const char *state,
+                    bool playing);
+
+/** RGB565, media::kArtSize square. Null hides the art; the buffer must live until it is replaced. */
+esp_err_t set_album_art(const void *pixels);
+
+/** The position is carried forward while playing; a duration of zero hides the bar. */
+esp_err_t set_media_progress(int position_s, int duration_s, bool playing);
+
+esp_err_t set_media_volume(int percent);
+
+/** An empty label hides the chip, and the remaining ones close up the gap. */
 esp_err_t set_pill(int index, const char *label, const char *value, Level level);
 
-/**
- * @brief The single large lights button. Thread-safe.
- *
- * The bulbs drawn on it come from set_light(), so both have to be pushed for
- * the button to tell the whole story.
- */
+/** The bulbs drawn on the button come from set_light(), so both have to be pushed. */
 esp_err_t set_lights(const char *label, const char *state, bool on);
 
-/**
- * @brief One light in the long-press picker. Thread-safe.
- *
- * An empty name hides that button, so fewer lights than slots is fine.
- */
+/** An empty name hides that button, so fewer lights than slots is fine. */
 esp_err_t set_light(int index, const char *name, const char *state, bool on);
 
-/** One corner toggle on the thermostat card; an empty label hides it. Thread-safe. */
+/** An empty label hides the toggle. */
 esp_err_t set_dial_toggle(int index, const char *label, bool on);
 
-/**
- * @brief The thermostat dial on the home screen. Thread-safe.
- *
- * Pass a negative target to show it as unavailable.
- */
-/** Bounds and step come from the entity, so a reconfigured thermostat follows. */
 esp_err_t set_thermostat_range(float min_c, float max_c, float step_c);
 
-/**
- * @brief The dial's readings. Thread-safe.
- *
- * Ignored while a finger is on the dial, so an update mid-drag does not yank
- * the setpoint out from under it.
- */
+/** Ignored while a finger is on the dial. A negative target shows as unavailable. */
 esp_err_t set_thermostat(float current_c, float target_c, const char *mode, Hvac state);
 
-/** Builds the screen. Requires the LVGL port to be running. */
-/** Everything the screen calls back into. */
 struct Handlers {
     MoveHandler       move;
     PresetHandler     preset;
     BrightnessHandler brightness;
-    TileHandler       tile;
+    MediaHandler      media;
     SetpointHandler   setpoint;
     ModeHandler       mode;
     LightsHandler     lights;
@@ -142,43 +106,26 @@ struct Handlers {
     DialToggleHandler dial_toggle;
 };
 
+/** Requires the LVGL port to be running. */
 esp_err_t init(const Handlers &handlers, int initial_brightness);
 
-/** Height in millimetres, or negative for "unknown". Thread-safe. */
+/** Height in millimetres, or negative for "unknown". */
 esp_err_t set_height(int height_mm);
 
-/**
- * @brief Whether the control box is talking to us. Thread-safe.
- *
- * Unavailable dims every desk control and blanks the readout, so the panel
- * cannot be pressed in the belief it will do something.
- */
+/** Unavailable dims and disables every desk control, so nothing can be pressed in vain. */
 esp_err_t set_desk_available(bool available);
 
-/** Clock in the top bar. Pass nullptr while the time is unknown. Thread-safe. */
+/** Pass nullptr while the time is unknown. */
 esp_err_t set_time(const char *text);
 
-/** Network and broker indicators. Thread-safe. */
 esp_err_t set_links(bool wifi, bool mqtt);
 
-/**
- * @brief Presence of the tracked phone. Thread-safe.
- *
- * Drives the phone glyph in the rail and, once the phone has been recognised
- * at least once, which pages the navigation offers.
- */
+/** Once the phone has been recognised at least once, this also gates which pages appear. */
 esp_err_t set_presence(bool has_key, bool present, bool ever_seen);
 
-/** Battery indicator: an icon only, coloured by level. Thread-safe. */
 esp_err_t set_battery(bool present, int percent, bool charging);
 
-/**
- * @brief Queues a notification popup. Thread-safe; text is copied.
- *
- * Queued rather than shown immediately: notifications arrive in bursts, and
- * replacing the visible one loses whatever it said. A full queue drops the
- * oldest.
- */
+/** Queued rather than shown at once: they arrive in bursts. A full queue drops the oldest. */
 esp_err_t notify(const char *title, const char *message, const char *level, int timeout_ms);
 
 }  // namespace ui

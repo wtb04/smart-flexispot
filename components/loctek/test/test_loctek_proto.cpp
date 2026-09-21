@@ -148,6 +148,24 @@ void test_stream()
     }
 }
 
+void test_payload_bounds()
+{
+    // The payload is everything between the type byte and the checksum, and
+    // nothing else: counting the CRC high byte as data let a short frame pass
+    // the "three digits" guard and decode a checksum byte as a segment
+    // pattern, which can read out as a plausible height.
+    const std::vector<Frame> height =
+        feed(bytes({0x9b, 0x07, 0x12, 0x07, 0xe6, 0x06, 0x1b, 0xef, 0x9d}));
+    check(height.size() == 1 && height[0].payload().size() == 3,
+          "height frame carries exactly three payload bytes");
+
+    const std::vector<Frame> heartbeat = feed(bytes({0x9b, 0x04, 0x11, 0x7c, 0xc3, 0x9d}));
+    check(heartbeat.size() == 1 && heartbeat[0].payload().size() == 0,
+          "heartbeat carries no payload");
+    check(heartbeat.size() == 1 && !decode_height_mm(heartbeat[0]).has_value(),
+          "a payloadless frame decodes to no height");
+}
+
 void test_rejects()
 {
     check(feed(bytes({0x9b, 0x07, 0x12, 0x07, 0xe6, 0x06, 0x00, 0x00, 0x9d})).empty(),
@@ -173,6 +191,7 @@ int main()
     test_presets();
     test_height_decode();
     test_stream();
+    test_payload_bounds();
     test_rejects();
     std::printf("\n%s\n", g_failures == 0 ? "ALL PASS" : "FAILURES");
     return g_failures == 0 ? 0 : 1;

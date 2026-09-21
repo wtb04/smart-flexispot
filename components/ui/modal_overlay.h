@@ -6,18 +6,13 @@
 
 namespace ui {
 
-/**
- * @brief A dimmed overlay with a card that slides up into the page.
- *
- * Callers put their widgets in content() and drive it with open()/close().
- */
 class ModalOverlay {
 public:
     ModalOverlay(lv_obj_t *parent, std::int32_t width, std::int32_t height);
 
     lv_obj_t *content() const { return card_; }
 
-    /** @param origin Kept for callers; the card slides rather than growing from it. */
+    /** origin is ignored: the card slides rather than growing out of it. */
     void open(lv_obj_t *origin = nullptr);
     void close();
     bool visible() const { return visible_; }
@@ -33,7 +28,7 @@ private:
     lv_obj_t    *card_  = nullptr;
     std::int32_t width_;
     std::int32_t height_;
-    std::int32_t rest_y_  = 0;  // where the card sits once it has arrived
+    std::int32_t rest_y_  = 0;
     bool         visible_ = false;
 };
 

@@ -3,12 +3,8 @@
 #include <cstdint>
 #include <string>
 
-// Everything here is transport-free and testable on a host: topic layout,
-// discovery payload, the state document, and parsing of what comes back.
 namespace hass::protocol {
 
-/** Everything the panel knows about itself. Only real measurements belong here. */
-/** What the desk is doing, as published and as commanded. */
 enum class Move { Stop, Up, Down, Unknown };
 
 struct Telemetry {
@@ -22,7 +18,7 @@ struct Telemetry {
     bool  on_battery        = false;
     int   brightness    = 0;
     int   rssi_dbm      = 0;
-    bool  presence          = false;  // the tracked phone is in range
+    bool  presence          = false;
     int   presence_rssi     = -127;
     std::uint32_t uptime_s   = 0;
     std::uint32_t free_heap  = 0;
@@ -30,9 +26,9 @@ struct Telemetry {
 };
 
 struct Topics {
-    std::string availability;  // retained "online"/"offline", also the LWT
-    std::string state;         // retained JSON document
-    std::string discovery;     // retained device-based discovery payload
+    std::string availability;  // also the last will
+    std::string state;
+    std::string discovery;
     std::string command;       // wildcard subscription
     std::string cmd_preset;
     std::string cmd_brightness;
@@ -42,19 +38,15 @@ struct Topics {
 
 Topics topics_for(const std::string &device_id);
 
-/** The single retained JSON document every entity reads through a template. */
 std::string state_document(const Telemetry &telemetry);
 
 /**
- * @brief Device-based discovery payload: one retained message, all entities.
- *
- * Home Assistant 2024.11 and later. Deliberately does not emit `object_id`,
- * which was deprecated in 2025.10 and removed in 2026.4 -- a stale one is
- * ignored silently and entity ids drift.
+ * One retained message for all entities; Home Assistant 2024.11 and later.
+ * Emits no `object_id`: deprecated in 2025.10, removed in 2026.4.
  */
 std::string discovery_document(const std::string &device_id, const std::string &sw_version);
 
-/** Shown on screen. Everything here is attacker-controlled text; treat as data. */
+/** Shown on screen. Attacker-controlled text; treat as data. */
 struct Notification {
     bool        valid = false;
     std::string title;
@@ -63,22 +55,15 @@ struct Notification {
     int         timeout_ms = 0;
 };
 
-/**
- * @brief Parses an inbound notification payload.
- *
- * Accepts plain text or a JSON object. Rejects anything that looks like JSON
- * but does not parse, and anything carrying control bytes, rather than
- * rendering it verbatim. Truncates without splitting a UTF-8 sequence.
- */
+/** Accepts plain text or a JSON object; rejects broken JSON and control bytes. */
 Notification parse_notification(const std::string &payload);
 
-/** Returns the requested direction, or Move::Unknown for anything else. */
 Move parse_move(const std::string &payload);
 
-/** Returns 1-4 for a preset command, or 0 if the payload names no preset. */
+/** 0 when the payload names no preset. */
 int parse_preset(const std::string &payload);
 
-/** Returns the requested brightness, or -1 if the payload is not a number in range. */
+/** -1 when the payload is not a number in 0-100. */
 int parse_brightness(const std::string &payload);
 
 }  // namespace hass::protocol

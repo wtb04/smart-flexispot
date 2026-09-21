@@ -15,7 +15,6 @@ constexpr std::size_t MAX_MESSAGE = 400;
 constexpr int MIN_TIMEOUT_MS = 1000;
 constexpr int MAX_TIMEOUT_MS = 120000;
 
-/** Cuts to at most `limit` bytes without splitting a UTF-8 sequence in half. */
 std::string truncate_utf8(const std::string &text, std::size_t limit)
 {
     if (text.size() <= limit) {
@@ -28,7 +27,6 @@ std::string truncate_utf8(const std::string &text, std::size_t limit)
     return text.substr(0, end);
 }
 
-/** Control bytes mean a garbled or binary payload, not a message for a human. */
 bool has_control_bytes(const std::string &text)
 {
     return std::any_of(text.begin(), text.end(), [](char c) {
@@ -54,8 +52,7 @@ std::string normalise_level(const std::string &level)
 std::string string_field(const cJSON *object, const char *key)
 {
     const cJSON *item = cJSON_GetObjectItemCaseSensitive(object, key);
-    // Checked rather than assumed: a hand-written automation sending
-    // {"message": 42} must not take the whole notification down.
+    // An automation sending {"message": 42} must not take the notification down.
     return cJSON_IsString(item) && item->valuestring != nullptr ? item->valuestring : "";
 }
 
@@ -95,8 +92,8 @@ std::string state_document(const Telemetry &t)
 
     if (t.height_mm >= 0) {
         cJSON_AddNumberToObject(root, "height_mm", t.height_mm);
-        // Rounded in double: doing this in float and letting serialisation
-        // promote turns 72.8 into 72.80000305175781.
+        // In double: rounding in float and letting serialisation promote turns
+        // 72.8 into 72.80000305175781.
         const double cm = static_cast<double>(t.height_mm) / 10.0;
         cJSON_AddNumberToObject(root, "height_cm", cm);
     }
@@ -107,29 +104,23 @@ std::string state_document(const Telemetry &t)
         cJSON_AddNumberToObject(root, "battery_pct", t.battery_percent);
         cJSON_AddNumberToObject(root, "battery_v",
                                 static_cast<int>(t.battery_volts * 100.0f + 0.5f) / 100.0);
-        // Quantised: the raw reading jitters between 0 and 1 mA, and the
-        // change detector below would then republish every single tick.
+        // Quantised: the raw reading jitters by a milliamp, which would republish
+        // on every tick.
         cJSON_AddNumberToObject(root, "battery_ma", (t.battery_milliamps / 10) * 10);
         cJSON_AddStringToObject(root, "battery_present", "ON");
         cJSON_AddStringToObject(root, "charging", t.charging ? "ON" : "OFF");
-        // Running from the pack means nothing is feeding the panel externally.
         cJSON_AddStringToObject(root, "external_power", t.on_battery ? "OFF" : "ON");
     } else {
         cJSON_AddStringToObject(root, "battery_present", "OFF");
     }
 
     cJSON_AddStringToObject(root, "presence", t.presence ? "ON" : "OFF");
-    // Quantised like the other signal readings, and only meaningful while
-    // present -- -127 stands in for "nothing heard".
+    // Quantised; -127 stands in for "nothing heard".
     cJSON_AddNumberToObject(root, "presence_rssi", (t.presence_rssi / 5) * 5);
 
     cJSON_AddNumberToObject(root, "brightness", t.brightness);
-    // Likewise rounded: signal strength wanders a dBm at a time, which is
-    // noise for an indicator and would defeat publish-on-change entirely.
     cJSON_AddNumberToObject(root, "rssi", (t.rssi_dbm / 5) * 5);
-    // Minutes, not seconds: a value that ticks every second changes the
-    // document on every publish, so nothing is ever suppressed and the broker
-    // gets a message whether or not anything happened. Same for heap, in KiB.
+    // Minutes and KiB: a value ticking every second would defeat publish-on-change.
     cJSON_AddNumberToObject(root, "uptime_min", t.uptime_s / 60);
     cJSON_AddNumberToObject(root, "free_heap_kb", t.free_heap / 1024);
     if (!t.ip_address.empty()) {
@@ -345,8 +336,6 @@ Notification parse_notification(const std::string &payload)
     }
 
     cJSON *root = cJSON_Parse(payload.c_str());
-    // Looked like JSON and was not: rendering it raw would show braces to the
-    // user and hide whatever the automation meant to say.
     if (root == nullptr || !cJSON_IsObject(root)) {
         cJSON_Delete(root);
         return out;
@@ -367,7 +356,6 @@ Notification parse_notification(const std::string &payload)
         out.timeout_ms = std::clamp(out.timeout_ms, MIN_TIMEOUT_MS, MAX_TIMEOUT_MS);
     }
 
-    // A title on its own is worth showing; neither is not.
     out.valid = !out.message.empty() || !out.title.empty();
     cJSON_Delete(root);
     return out;

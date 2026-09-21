@@ -12,8 +12,8 @@
 namespace {
 constexpr char TAG[] = "tab5";
 
-// The panel's own slider and Home Assistant both set brightness, so the value
-// has to go back into what gets published either way.
+// Both the panel's slider and Home Assistant land here, so the published value
+// stays right either way.
 void on_brightness_changed(int percent)
 {
     board::set_brightness_percent(percent);
@@ -25,17 +25,15 @@ extern "C" void app_main(void)
 {
     ESP_ERROR_CHECK(board::init());
     const ui::Handlers handlers{desk::on_move,   desk::on_preset,   on_brightness_changed,
-                                room::on_tile,   room::on_setpoint, room::on_mode,
+                                room::on_media,  room::on_setpoint, room::on_mode,
                                 room::on_lights, room::on_light,    room::on_dial_toggle};
     ESP_ERROR_CHECK(ui::init(handlers, board::kDefaultBrightness));
     room::init();
-    ESP_ERROR_CHECK(desk::start());
-    ESP_ERROR_CHECK(battery::start());
-    // Not fatal: no chime is better than no panel.
+    // Neither is fatal: panicking here put the panel in a boot loop over a
+    // peripheral it can perfectly well run without.
+    ESP_ERROR_CHECK_WITHOUT_ABORT(desk::start());
+    ESP_ERROR_CHECK_WITHOUT_ABORT(battery::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(sound::init());
-    // Not fatal: a desk controller that cannot reach the network is still a
-    // desk controller, and the SDIO link to the co-processor is one more thing
-    // that can be unplugged.
     ESP_ERROR_CHECK_WITHOUT_ABORT(wifi::start());
     ESP_ERROR_CHECK(wallclock::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(telemetry::start());

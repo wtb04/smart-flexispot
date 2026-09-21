@@ -6,24 +6,19 @@
 
 namespace ble {
 
-/** Whether the tracked phone is in the room. */
 struct Stats {
-    bool ready         = false;  // controller up and scanning
-    bool has_key       = false;  // an identity key is configured at all
+    bool ready         = false;
+    bool has_key       = false;
     bool phone_present = false;  // recognised, recently, and close enough
-    bool ever_seen     = false;  // recognised at least once since boot
+    bool ever_seen     = false;
     int  phone_rssi    = -127;   // smoothed, which is what the thresholds act on
 };
 
-/**
- * @brief Starts the BLE observer. Call once.
- *
- * The ESP32-P4 has no radio: the controller lives on the C6 co-processor and
- * this drives it over the same SDIO link Wi-Fi uses, so Wi-Fi must be up first.
- */
+/** Call once, after Wi-Fi: the P4 has no radio, so the controller lives on the
+ *  C6 and is driven over the same SDIO link Wi-Fi uses. */
 esp_err_t start();
 
-/** A snapshot of the tracked phone. Thread-safe. */
+/** Thread-safe. */
 Stats stats();
 
 }  // namespace ble

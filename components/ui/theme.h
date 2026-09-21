@@ -6,15 +6,13 @@
 #include <cstdint>
 #include <cstring>
 
-// Orange on near-black, carried over from the earlier panel so the two read as
-// the same product.
+// Orange on near-black, carried over from the earlier panel.
 namespace ui::theme {
 
 inline constexpr std::uint32_t background  = 0x15110f;
 inline constexpr std::uint32_t panel       = 0x241c18;
 inline constexpr std::uint32_t panel_light = 0x382820;
-// Between the panel and a live button: a disabled control has to still read as
-// a control, so it cannot simply take the background colour and vanish.
+// A disabled control still has to read as a control, so it cannot take the background colour.
 inline constexpr std::uint32_t disabled     = 0x1b1512;
 inline constexpr std::uint32_t disabled_ink = 0x5c4d43;
 inline constexpr std::uint32_t text        = 0xfff3ea;
@@ -26,9 +24,8 @@ inline constexpr std::uint32_t green       = 0x8bcb78;
 inline constexpr std::uint32_t amber       = 0xffc15a;
 inline constexpr std::uint32_t red         = 0xff6666;
 
-// Writing a label invalidates its area whether or not the text changed, and
-// these are driven from timers. Comparing first means a screen that is not
-// changing costs the renderer nothing.
+// lv_label_set_text invalidates whether or not the text changed, and these are driven from
+// timers, so a screen that is not changing would cost the renderer a repaint per tick.
 inline void set_text(lv_obj_t *label, const char *value)
 {
     if (label == nullptr || value == nullptr) {
@@ -41,8 +38,7 @@ inline void set_text(lv_obj_t *label, const char *value)
     lv_label_set_text(label, value);
 }
 
-// Same reasoning: setting a style marks the object dirty even when the value
-// is identical to what is already there.
+// Same for styles: a write marks the object dirty even when the value is identical.
 inline void set_text_color(lv_obj_t *obj, std::uint32_t colour)
 {
     if (obj == nullptr) {
@@ -55,10 +51,7 @@ inline void set_text_color(lv_obj_t *obj, std::uint32_t colour)
     lv_obj_set_style_text_color(obj, next, 0);
 }
 
-// Same again for fills. These are driven from Home Assistant updates, which
-// arrive far more often than they change anything, and writing a style marks
-// the object dirty whether or not the value differs -- so without this the
-// panel was repainting tiles on every sensor report.
+// Without this the panel repainted tiles on every sensor report.
 inline void set_bg_color(lv_obj_t *obj, std::uint32_t colour, lv_part_t part = LV_PART_MAIN)
 {
     if (obj == nullptr) {
@@ -83,6 +76,21 @@ inline void set_arc_color(lv_obj_t *obj, std::uint32_t colour, lv_part_t part)
     lv_obj_set_style_arc_color(obj, next, part);
 }
 
+// lv_obj_align always writes the align style, and that invalidates the object and dirties its
+// parent's layout -- unlike set_pos, set_width and set_height, which all compare first.
+inline void align(lv_obj_t *obj, lv_align_t alignment, std::int32_t x, std::int32_t y)
+{
+    if (obj == nullptr) {
+        return;
+    }
+    lv_style_value_t current;
+    if (lv_obj_get_local_style_prop(obj, LV_STYLE_ALIGN, &current, 0) != LV_STYLE_RES_FOUND ||
+        current.num != static_cast<std::int32_t>(alignment)) {
+        lv_obj_set_style_align(obj, alignment, 0);
+    }
+    lv_obj_set_pos(obj, x, y);
+}
+
 inline void style_panel(lv_obj_t *obj, std::uint32_t colour = panel, int radius = 16)
 {
     lv_obj_set_style_bg_color(obj, lv_color_hex(colour), 0);
@@ -93,12 +101,40 @@ inline void style_panel(lv_obj_t *obj, std::uint32_t colour = panel, int radius 
     lv_obj_set_scrollable(obj, false);
 }
 
+// LVGL does not hand a button's pressed state to its children, so a label with its own ink sits
+// unchanged on a fill that just lit up. Two levels deep covers an icon and the parts it is built from.
+inline void hand_down_press(lv_event_t *event)
+{
+    lv_obj_t  *button  = lv_event_get_current_target_obj(event);
+    const bool pressed = lv_event_get_code(event) == LV_EVENT_PRESSED;
+    for (std::uint32_t i = 0; i < lv_obj_get_child_count(button); ++i) {
+        lv_obj_t *child = lv_obj_get_child(button, i);
+        if (pressed) {
+            lv_obj_add_state(child, LV_STATE_PRESSED);
+        } else {
+            lv_obj_remove_state(child, LV_STATE_PRESSED);
+        }
+        for (std::uint32_t j = 0; j < lv_obj_get_child_count(child); ++j) {
+            lv_obj_t *part = lv_obj_get_child(child, j);
+            if (pressed) {
+                lv_obj_add_state(part, LV_STATE_PRESSED);
+            } else {
+                lv_obj_remove_state(part, LV_STATE_PRESSED);
+            }
+        }
+    }
+}
+
 inline void style_button(lv_obj_t *button, std::uint32_t colour = panel_light)
 {
     style_panel(button, colour, 14);
-    lv_obj_set_style_bg_color(button, lv_color_hex(orange), LV_STATE_PRESSED);
-    // LVGL's default button style carries a shadow and an outline that fight a
-    // flat panel look; without clearing them the buttons read as embossed.
+    // Darker than an active control's own colour, so holding something already on still changes.
+    lv_obj_set_style_bg_color(button, lv_color_hex(orange_dim), LV_STATE_PRESSED);
+    lv_obj_set_style_text_color(button, lv_color_hex(text), LV_STATE_PRESSED);
+    lv_obj_add_event_cb(button, hand_down_press, LV_EVENT_PRESSED, nullptr);
+    lv_obj_add_event_cb(button, hand_down_press, LV_EVENT_RELEASED, nullptr);
+    lv_obj_add_event_cb(button, hand_down_press, LV_EVENT_PRESS_LOST, nullptr);
+    // LVGL's default button style carries a shadow and an outline, which read as embossed.
     lv_obj_set_style_shadow_width(button, 0, 0);
     lv_obj_set_style_shadow_width(button, 0, LV_STATE_PRESSED);
     lv_obj_set_style_outline_width(button, 0, 0);
@@ -106,9 +142,8 @@ inline void style_button(lv_obj_t *button, std::uint32_t colour = panel_light)
     lv_obj_set_style_border_width(button, 0, LV_STATE_PRESSED);
     // Pressed state changes colour only, with no shift in geometry.
     lv_obj_set_style_translate_y(button, 0, LV_STATE_PRESSED);
-    // Disabled is a real LVGL state with its own theme styling, so it has to
-    // be given a colour explicitly or the default theme decides -- which is
-    // how a dimmed button ended up with no background at all.
+    // Disabled is a real LVGL state with its own theme styling, which is how a dimmed button
+    // ended up with no background at all.
     lv_obj_set_style_bg_color(button, lv_color_hex(disabled), LV_STATE_DISABLED);
     lv_obj_set_style_bg_opa(button, LV_OPA_COVER, LV_STATE_DISABLED);
     lv_obj_set_style_shadow_width(button, 0, LV_STATE_DISABLED);
@@ -123,6 +158,8 @@ inline lv_obj_t *make_label(lv_obj_t *parent, const char *value, std::uint32_t c
     lv_obj_t *label = lv_label_create(parent);
     set_text(label, value);
     lv_obj_set_style_text_color(label, lv_color_hex(colour), 0);
+    // Only ever reached inside a button, and only because style_button hands its state down.
+    lv_obj_set_style_text_color(label, lv_color_hex(text), LV_STATE_PRESSED);
     lv_obj_set_style_text_font(label, font != nullptr ? font : fonts::size_20(), 0);
     return label;
 }
@@ -137,7 +174,6 @@ inline lv_obj_t *make_button(lv_obj_t *parent, const char *value,
     return button;
 }
 
-// Page chrome, so every screen lines up identically.
 inline lv_obj_t *make_page_title(lv_obj_t *parent, const char *value)
 {
     lv_obj_t *label = make_label(parent, value, text, &lv_font_montserrat_32);

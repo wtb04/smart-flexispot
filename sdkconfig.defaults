@@ -143,3 +143,18 @@ CONFIG_BT_NIMBLE_ROLE_BROADCASTER=n
 # ble_transport_to_hs_acl_impl unconditionally, and NimBLE only compiles that
 # when a connecting role is enabled. Central costs some flash we do not use.
 CONFIG_BT_NIMBLE_ROLE_CENTRAL=y
+
+# app_main builds the whole LVGL object tree before handing off, and the
+# default is not sized for that.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
+# The NimBLE host runs our advertisement callback, which does an AES pass and
+# can log a presence transition, underneath its own HCI frames.
+CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=6144
+
+# LVGL's on-screen monitors rewrite a label every refresh period, so the
+# rendering pipeline never reaches an idle frame and task_max_sleep_ms can
+# never take effect. On a wall panel whose content changes once a minute that
+# is continuous CPU and power for two debug labels.
+CONFIG_LV_USE_SYSMON=n
+CONFIG_LV_USE_PERF_MONITOR=n
+CONFIG_LV_USE_MEM_MONITOR=n

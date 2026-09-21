@@ -4,6 +4,7 @@
 #include "desk.h"
 #include "esp_check.h"
 #include "ble.h"
+#include "media.h"
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_timer.h"
@@ -34,7 +35,11 @@ constexpr TickType_t PUBLISH_INTERVAL = pdMS_TO_TICKS(2000);
 // network may simply be late.
 constexpr int NETWORK_WAIT_MS = 30000;
 
-constexpr std::uint32_t TASK_STACK    = 4096;
+// Generous because of what this task does on the way through: it brings up
+// MQTT, the WebSocket, BLE and the JPEG decoder at startup, and every tick it
+// builds the state document with cJSON, which formats floats through full
+// newlib printf -- well over a kilobyte of stack on its own.
+constexpr std::uint32_t TASK_STACK    = 8192;
 constexpr UBaseType_t   TASK_PRIORITY = 2;
 constexpr BaseType_t    TASK_CORE     = 0;
 
@@ -103,6 +108,11 @@ void fill_network(hass::protocol::Telemetry &out)
     }
 }
 
+void on_album_art(const void *pixels)
+{
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_album_art(pixels));
+}
+
 [[noreturn]] void telemetry_task(void *)
 {
     // Neither client can do anything without an address, and starting them
@@ -119,6 +129,9 @@ void fill_network(hass::protocol::Telemetry &out)
     // Shares the SDIO link to the co-processor with Wi-Fi, so it goes up after
     // the network rather than racing it.
     ESP_ERROR_CHECK_WITHOUT_ABORT(ble::start());
+    // Album art is fetched over plain HTTP from Home Assistant, so it needs the
+    // network but nothing else.
+    ESP_ERROR_CHECK_WITHOUT_ABORT(media::start(on_album_art));
 
     for (;;) {
         hass::protocol::Telemetry out;
@@ -149,7 +162,11 @@ void fill_network(hass::protocol::Telemetry &out)
         // is worth looking at when the thresholds need moving.
         out.presence_rssi = radio.ever_seen ? radio.phone_rssi : -127;
 
-        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_links(wifi::connected(), hass::connected()));
+        // Both, because the room page is fed by the WebSocket: a healthy
+        // broker with a dead socket left stale temperatures and lights on
+        // screen behind an icon saying everything was fine.
+        ESP_ERROR_CHECK_WITHOUT_ABORT(
+            ui::set_links(wifi::connected(), hass::connected() && hass::ws::connected()));
         ESP_ERROR_CHECK_WITHOUT_ABORT(
             ui::set_presence(radio.has_key, radio.phone_present, radio.ever_seen));
 

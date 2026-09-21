@@ -14,11 +14,11 @@ namespace {
 
 constexpr char TAG[] = "battery";
 
-// Nothing on screen shows more than a charge icon now, and the pack moves
-// slowly, so this is as often as it is worth taking the shared I2C bus.
+// As often as a charge icon is worth taking the shared I2C bus for.
 constexpr TickType_t POLL_INTERVAL = pdMS_TO_TICKS(30000);
 
-constexpr std::uint32_t TASK_STACK    = 3072;
+// Logs a float, which goes through full newlib printf.
+constexpr std::uint32_t TASK_STACK    = 4096;
 constexpr UBaseType_t   TASK_PRIORITY = 2;
 constexpr BaseType_t    TASK_CORE     = 0;
 

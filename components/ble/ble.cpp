@@ -21,36 +21,29 @@ namespace {
 
 constexpr char TAG[] = "ble";
 
-// Long enough that a phone which advertises slowly is not forgotten between
-// packets, short enough that walking out of the room shows up promptly.
+// Long enough not to forget a slowly advertising phone between packets.
 constexpr TickType_t SEEN_TIMEOUT = pdMS_TO_TICKS(30000);
 
-// Presence is about the room, not the building: the phone resolves from well
-// outside it, so distance has to come into it. Two thresholds rather than one,
-// because a single line makes the state flap every time the signal wanders
-// across it -- it has to be this strong to count as arriving, and stays
-// counted until it falls clearly below that.
+// The phone resolves from well outside the room, so distance has to come into
+// it. Two thresholds, or the state flaps as the signal wanders across the line.
 constexpr int RSSI_ENTER = -70;
 constexpr int RSSI_EXIT  = -76;
 
-// Smoothed before either threshold sees it. Individual packets swing ten dB or
-// more as the phone moves or a body gets in the way, and deciding on raw
-// packets would flap regardless of how far apart the thresholds are.
+// Packets swing ten dB as a body gets in the way, so the thresholds see this
+// smoothed.
 constexpr int RSSI_SMOOTHING = 3;  // of 10, weight given to the newest packet
 
-// Scanning is continuous but not greedy. A phone advertises many times a
-// second, so listening a tenth of the time still hears it within a second or
-// two -- far inside the presence timeout -- while leaving the SDIO link it
-// shares with Wi-Fi alone for the other ninety percent.
+// A phone advertises many times a second, so listening a tenth of the time hears
+// it well inside the presence timeout and leaves the SDIO link Wi-Fi shares
+// alone for the rest.
 constexpr std::uint16_t SCAN_INTERVAL_MS = 1000;
 constexpr std::uint16_t SCAN_WINDOW_MS   = 100;
 
 std::atomic<bool> s_ready{false};
 
-// The identity key, and what it has told us. Two copies of the key: as given
-// and reversed. Hex from Home Assistant and base64 from the Apple side are the
-// same key but not always the same way round, and a key the wrong way round
-// never matches -- which looks exactly like the phone being absent.
+// Two copies of the key, as given and reversed: hex from Home Assistant and
+// base64 from the Apple side are not always the same way round, and a key the
+// wrong way round never matches, which looks exactly like an absent phone.
 std::uint8_t s_irk[16]{};
 std::uint8_t s_irk_reversed[16]{};
 bool         s_have_irk     = false;
@@ -70,13 +63,7 @@ int hex_value(char c)
     return -1;
 }
 
-/**
- * @brief Reads the identity key into 16 bytes, hex or base64.
- *
- * Both turn up in the wild for the same key -- 32 hex characters from Home
- * Assistant, 24 base64 ones from the Apple side -- so either is accepted
- * rather than making anybody convert between them by hand.
- */
+/** 32 hex characters or 24 base64 ones; both turn up for the same key. */
 bool parse_irk(const char *text, std::uint8_t out[16])
 {
     if (text == nullptr) {
@@ -86,7 +73,7 @@ bool parse_irk(const char *text, std::uint8_t out[16])
     std::size_t len = 0;
     for (const char *c = text; *c != '\0'; ++c) {
         if (*c == ':' || *c == ' ' || *c == '-') {
-            continue;  // tolerate the separators people paste with
+            continue;
         }
         if (len >= sizeof(stripped)) {
             return false;
@@ -117,13 +104,8 @@ bool parse_irk(const char *text, std::uint8_t out[16])
     return false;
 }
 
-/**
- * @brief True for the addresses a phone rotates through.
- *
- * A random address carries its kind in the top two bits of the last byte:
- * 0b01 is a resolvable private address, which is what iOS and Android
- * broadcast to avoid being tracked by address alone.
- */
+/** A random address carries its kind in the top two bits of the last byte; 0b01
+ *  is the resolvable private address a phone rotates through. */
 bool is_resolvable_private(const ble_addr_t &addr)
 {
     return addr.type == BLE_ADDR_RANDOM && (addr.val[5] & 0xC0) == 0x40;
@@ -131,9 +113,8 @@ bool is_resolvable_private(const ble_addr_t &addr)
 
 bool hash_matches(const std::uint8_t key[16], const std::uint8_t val[6])
 {
-    // Plaintext is thirteen zero bytes then prand, most significant octet
-    // first; prand is the top half of the address and NimBLE hands the address
-    // over least significant octet first, hence the reversal.
+    // Plaintext is thirteen zero bytes then prand, most significant octet first;
+    // NimBLE hands the address over least significant octet first.
     std::uint8_t block[16]{};
     block[13] = val[5];
     block[14] = val[4];
@@ -148,8 +129,7 @@ bool hash_matches(const std::uint8_t key[16], const std::uint8_t val[6])
     if (!ok) {
         return false;
     }
-    // The bottom three octets of the result are the hash, against the bottom
-    // half of the address.
+    // The bottom three octets of the result are the hash.
     return out[13] == val[2] && out[14] == val[1] && out[15] == val[0];
 }
 
@@ -158,7 +138,6 @@ bool matches_irk(const std::uint8_t val[6])
     if (!s_have_irk) {
         return false;
     }
-    // Once one orientation has answered, stop paying for the other.
     if (s_order_known) {
         return hash_matches(s_use_reversed ? s_irk_reversed : s_irk, val);
     }
@@ -204,8 +183,6 @@ int on_gap_event(ble_gap_event *event, void *)
             on_resolved(event->disc.rssi);
         }
     } else if (event->type == BLE_GAP_EVENT_DISC_COMPLETE) {
-        // Only reached if a duration was set; flagged so a stray stop cannot
-        // pass for a working scan.
         ESP_LOGW(TAG, "scan ended (%d)", event->disc_complete.reason);
         s_ready.store(false, std::memory_order_relaxed);
     }
@@ -217,7 +194,7 @@ void start_scanning()
     ble_gap_disc_params params{};
     params.itvl              = SCAN_INTERVAL_MS * 1000 / 625;  // units of 0.625 ms
     params.window            = SCAN_WINDOW_MS * 1000 / 625;
-    params.passive           = 1;  // never ask for scan responses; the address is enough
+    params.passive           = 1;  // no scan responses; the address is enough
     params.filter_duplicates = 0;  // duplicates carry a fresh RSSI, which is the point
     params.limited           = 0;
     params.filter_policy     = BLE_HCI_SCAN_FILT_NO_WL;
@@ -275,9 +252,8 @@ Stats stats()
     out.ever_seen  = s_ever.load(std::memory_order_relaxed);
     out.phone_rssi = s_rssi.load(std::memory_order_relaxed);
 
-    // Heard recently AND close enough. Going quiet counts as leaving even if
-    // the last packet was strong -- a phone in a pocket walking out does not
-    // fade, it just stops being heard.
+    // Heard recently AND close enough: a phone walking out does not fade, it
+    // just stops being heard.
     const TickType_t seen = s_seen.load(std::memory_order_relaxed);
     const bool heard = seen != 0 && (xTaskGetTickCount() - seen) <= SEEN_TIMEOUT;
     if (!heard) {

@@ -27,67 +27,55 @@ constexpr std::uint8_t REG_SHUNT_VOLTAGE = 0x01;
 constexpr std::uint8_t REG_MANUFACTURER  = 0xfe;
 constexpr std::uint8_t REG_DIE_ID        = 0xff;
 
-// The audio ADC also answers in this address range, so confirm what we are
-// talking to rather than trusting the address.
+// The audio ADC also answers in this address range, so the address alone is not
+// enough to go on.
 constexpr std::uint16_t MANUFACTURER_TI = 0x5449;  // "TI"
 constexpr std::uint16_t DIE_INA226      = 0x2260;
 
 // 16 averages, 1.1 ms conversions, shunt and bus continuous.
 constexpr std::uint16_t CONFIG_VALUE = (0b010 << 9) | (0b100 << 6) | (0b100 << 3) | 0b111;
 
-// 5 mohm shunt. 2 A full scale rather than 8.192 A: the panel never draws
-// anywhere near 8 A, and the lower range gives four times the current
-// resolution, which is what the charge/discharge deadband depends on. This
-// matches M5Unified's own configuration.
+// 2 A full scale rather than 8.192 A: the panel never draws near 8 A, and the
+// lower range gives four times the current resolution, which is what the
+// charge/discharge deadband depends on. Matches M5Unified.
 constexpr float SHUNT_OHMS       = 0.005f;
 constexpr float MAX_CURRENT_AMPS = 2.0f;
 constexpr float CURRENT_LSB      = MAX_CURRENT_AMPS / 32768.0f;
 constexpr float BUS_VOLTAGE_LSB  = 0.00125f;
 
-// Lithium cells sag in a curve, not a line, so a straight interpolation between
-// empty and full reads badly wrong through the middle. This is the usual
-// discharge shape, per cell; the Tab5 pack is two in series. Approximate by
-// nature: it says nothing about pack age, temperature or load.
 struct CellPoint {
     float volts;
     int   percent;
 };
-// Anchored to what this pack actually does rather than to a generic cell:
-// M5 document it as full at 8.23 V and shutting the panel down at 6.0 V, so
-// those are 100% and 0% here (4.115 and 3.0 per cell). The shape in between
-// is the usual lithium discharge curve, which is why this disagrees by a few
-// percent with M5Unified's own reading -- theirs is a straight line from
-// 3.30 to 4.10 V per cell, so it reports fuller than this in the mid range.
+// Lithium cells sag in a curve, so interpolating a straight line between empty
+// and full reads badly wrong through the middle. Anchored to this pack: M5
+// document it full at 8.23 V and shutting down at 6.0 V, so 4.115 and 3.0 per
+// cell are 100% and 0%. Approximate, and per cell -- the pack is two in series.
 constexpr std::array<CellPoint, 11> CELL_CURVE{{
     {4.115f, 100}, {4.05f, 90}, {3.98f, 80}, {3.89f, 70}, {3.79f, 60}, {3.70f, 45},
     {3.60f, 30},   {3.50f, 15}, {3.40f, 7},  {3.20f, 2},  {3.00f, 0},
 }};
 constexpr int CELLS_IN_SERIES = 2;
 
-// An empty socket floats around 1.9 V. A flat pack still reads far higher than
-// that, because its protection circuit disconnects near 2.75 V per cell, so
-// anything under this is no pack rather than a dead one.
+// An empty socket floats around 1.9 V and a flat pack disconnects near 2.75 V
+// per cell, so anything under this is no pack rather than a dead one.
 constexpr float PACK_PRESENT_VOLTS = 4.0f;
 
-// CHG_EN sits on bit 7 of the second IO expander (0x44). M5's own bring-up
-// leaves it clear, with the enabling value commented out beside it.
+// CHG_EN sits on bit 7 of the second IO expander (0x44), left clear by M5's own
+// bring-up.
 constexpr esp_io_expander_pin_num_t CHARGE_ENABLE_PIN = IO_EXPANDER_PIN_NUM_7;
 
-// Sign convention, measured here and matching M5Unified: the shunt reads
-// positive on discharge and negative on charge. The deadband is theirs too --
-// at 2 A full scale the noise floor is far below this.
+// The shunt reads positive on discharge and negative on charge. At 2 A full
+// scale the noise floor is far below this deadband.
 constexpr float CURRENT_DEADBAND_A = 0.01f;
 
-// The charger must not be switched on into a collapsed or absent pack. M5's
-// own firmware gates it on the same threshold, and the Tab5 docs say a pack
-// below 6 V has to be removed and refitted before it will charge.
+// The charger must not be switched on into a collapsed or absent pack: a Tab5
+// pack below 6 V has to be removed and refitted before it will charge.
 constexpr float CHARGE_SAFE_VOLTS = 6.0f;
 
-// Active low, and nothing to do with USB quick-charge despite the name. It
-// gates a resistor in parallel with the charger's NTC pin: released, the pin
-// sits in the "normal temperature" band and the IP2326 charges at its full
-// programmed ~1 A; asserted high it reads as "warm" and the chip halves the
-// current. The Tab5 has no actual battery thermistor.
+// Active low, and nothing to do with USB quick-charge despite the name: it
+// gates a resistor across the charger's NTC pin. Released, the IP2326 charges at
+// its full ~1 A; asserted, the pin reads "warm" and the chip halves the current.
 constexpr esp_io_expander_pin_num_t CHARGE_QC_PIN = IO_EXPANDER_PIN_NUM_5;
 
 i2c_master_dev_handle_t s_dev = nullptr;
@@ -161,8 +149,11 @@ esp_err_t init()
         static_cast<std::uint16_t>(0.00512f / (CURRENT_LSB * SHUNT_OHMS));
     ESP_RETURN_ON_ERROR(write_register(REG_CALIBRATION, calibration), TAG, "calibration");
 
-    // Read once before deciding: switching the charger on into a pack that is
-    // not there, or is too far gone, is the one case worth avoiding.
+    // The config write restarts conversion, and sixteen averaged samples take
+    // about 35 ms. Reading straight away returns zero volts, which reads as "no
+    // pack" and leaves the charger off for the whole uptime.
+    vTaskDelay(pdMS_TO_TICKS(60));
+
     State probe{};
     ESP_RETURN_ON_ERROR(read(probe), TAG, "first read");
     if (probe.bus_volts >= CHARGE_SAFE_VOLTS) {
@@ -191,14 +182,10 @@ esp_err_t set_charging(bool enable)
     return ESP_OK;
 }
 
-// Anything that re-initialises the 0x44 expander resets it to power-on
-// defaults, which clears CHG_EN -- and the BSP does that when it enables
-// Wi-Fi, which runs after us at startup. Rather than depend on call order,
-// write the pin again periodically.
-//
-// Unconditionally, without reading first: esp_io_expander_get_level() returns
-// the input register, which reads low for a pin driven as an output, so a
-// read-back cannot tell a cleared pin from a set one.
+// Re-initialising the 0x44 expander resets it to power-on defaults, clearing
+// CHG_EN, and the BSP does that when it enables Wi-Fi. Written unconditionally:
+// esp_io_expander_get_level() returns the input register, which reads low for a
+// pin driven as an output, so a read-back cannot tell cleared from set.
 void reassert_charging()
 {
     if (!s_charging_wanted) {

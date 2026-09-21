@@ -8,16 +8,16 @@ constexpr std::uint8_t kSegPoint = 0x80;
 
 // Common-cathode 7-segment patterns, bit 0 = segment a .. bit 6 = segment g.
 constexpr std::array<std::uint8_t, 10> kDigitSegments{
-    0x3f,  // 0
-    0x06,  // 1
-    0x5b,  // 2
-    0x4f,  // 3
-    0x66,  // 4
-    0x6d,  // 5
-    0x7d,  // 6
-    0x07,  // 7
-    0x7f,  // 8
-    0x6f,  // 9
+    0x3f,
+    0x06,
+    0x5b,
+    0x4f,
+    0x66,
+    0x6d,
+    0x7d,
+    0x07,
+    0x7f,
+    0x6f,
 };
 
 // A reading outside this is an error code, not a height.
@@ -43,7 +43,7 @@ std::optional<Frame> Parser::push(std::uint8_t byte)
         if (byte == kStart) {
             buf_[len_++] = byte;
         }
-        return std::nullopt;  // resynchronising
+        return std::nullopt;
     }
 
     buf_[len_++] = byte;
