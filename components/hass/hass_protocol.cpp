@@ -114,6 +114,7 @@ std::string state_document(const Telemetry &t)
         cJSON_AddStringToObject(root, "battery_present", "OFF");
     }
 
+    cJSON_AddStringToObject(root, "preset", t.preset);
     cJSON_AddStringToObject(root, "presence", t.presence ? "ON" : "OFF");
     // Quantised; -127 stands in for "nothing heard".
     cJSON_AddNumberToObject(root, "presence_rssi", (t.presence_rssi / 5) * 5);
@@ -218,6 +219,16 @@ std::string discovery_document(const std::string &device_id, const std::string &
     cJSON_AddStringToObject(external, "pl_off", "OFF");
     cJSON_AddStringToObject(external, "dev_cla", "plug");
     cJSON_AddStringToObject(external, "ent_cat", "diagnostic");
+
+    add_entity(cmps, "preset", "sensor", "Active preset", device_id + "_preset");
+    cJSON *preset = cJSON_GetObjectItem(cmps, "preset");
+    cJSON_AddStringToObject(preset, "stat_t", topics.state.c_str());
+    cJSON_AddStringToObject(preset, "val_tpl", "{{ value_json.preset | default('none') }}");
+    cJSON_AddStringToObject(preset, "dev_cla", "enum");
+    cJSON *preset_options = cJSON_AddArrayToObject(preset, "options");
+    for (const char *option : {"stand", "sit", "preset_1", "preset_2", "none"}) {
+        cJSON_AddItemToArray(preset_options, cJSON_CreateString(option));
+    }
 
     add_entity(cmps, "presence", "binary_sensor", "Presence", device_id + "_presence");
     cJSON *presence = cJSON_GetObjectItem(cmps, "presence");

@@ -77,7 +77,19 @@ lv_obj_t *s_wifi_icon     = nullptr;
 lv_obj_t *s_wifi_slash    = nullptr;
 lv_obj_t *s_phone_icon    = nullptr;
 lv_obj_t *s_phone_slash   = nullptr;
-lv_obj_t *s_clock_label   = nullptr;
+lv_obj_t *s_clock_hours   = nullptr;
+lv_obj_t *s_clock_colon   = nullptr;
+lv_obj_t *s_clock_minutes = nullptr;
+bool      s_clock_known   = false;
+
+void clock_blink(lv_timer_t *)
+{
+    if (!s_clock_known) {
+        return;
+    }
+    const lv_opa_t now = lv_obj_get_style_opa(s_clock_colon, LV_PART_MAIN);
+    lv_obj_set_style_opa(s_clock_colon, now == LV_OPA_COVER ? LV_OPA_TRANSP : LV_OPA_COVER, 0);
+}
 
 constexpr int          NOTIFY_QUEUE_LEN  = 4;
 constexpr int          NOTIFY_DEFAULT_MS = 8000;
@@ -273,8 +285,29 @@ lv_obj_t *make_rail_button(lv_obj_t *parent, const char *text)
     return btn;
 }
 
+void preset_clicked_cb(lv_event_t *e);
+
+lv_obj_t *s_preset_buttons[kPresetCount] = {};
+bool      s_preset_active[kPresetCount]  = {};
+
+void bind_preset(lv_obj_t *button, int index)
+{
+    s_preset_buttons[index] = button;
+    lv_obj_add_event_cb(button, preset_clicked_cb, LV_EVENT_SHORT_CLICKED,
+                        reinterpret_cast<void *>(static_cast<std::intptr_t>(index)));
+    lv_obj_add_event_cb(button, preset_clicked_cb, LV_EVENT_LONG_PRESSED,
+                        reinterpret_cast<void *>(static_cast<std::intptr_t>(index)));
+}
+
 void preset_clicked_cb(lv_event_t *e)
 {
+    const int index = static_cast<int>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e)));
+    const bool store = lv_event_get_code(e) == LV_EVENT_LONG_PRESSED;
+    // Already there: travelling to where you are is nothing but a jolt. Storing
+    // still works, since that is about this height, not about moving to it.
+    if (!store && index >= 0 && index < kPresetCount && s_preset_active[index]) {
+        return;
+    }
     if (s_handlers.preset != nullptr) {
         s_handlers.preset(static_cast<int>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e))),
                     lv_event_get_code(e) == LV_EVENT_LONG_PRESSED);
@@ -307,8 +340,27 @@ void create_rail(lv_obj_t *parent)
     lv_obj_set_style_pad_all(strip, 0, 0);
     lv_obj_set_scrollable(strip, false);
 
-    s_clock_label = theme::make_label(strip, "--:--", theme::text, fonts::size_28());
-    lv_obj_align(s_clock_label, LV_ALIGN_LEFT_MID, 0, 0);
+    // Three labels in a row rather than one string: blinking the separator by
+    // swapping it for a space would reflow the digits, because the glyphs are
+    // not the same width. Fading it in place leaves them still.
+    lv_obj_t *clock = lv_obj_create(strip);
+    lv_obj_set_size(clock, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    theme::style_panel(clock, theme::panel, 0);
+    lv_obj_set_style_bg_opa(clock, LV_OPA_TRANSP, 0);
+    lv_obj_set_clickable(clock, false);
+    lv_obj_align(clock, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_set_flex_flow(clock, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(clock, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(clock, 0, 0);
+
+    s_clock_hours   = theme::make_label(clock, "--", theme::text, fonts::size_28());
+    s_clock_colon   = theme::make_label(clock, ":", theme::text, fonts::size_28());
+    // The colon's own side bearings are not symmetric, so the gap is set on it
+    // rather than on the row.
+    lv_obj_set_style_pad_left(s_clock_colon, 2, 0);
+    lv_obj_set_style_pad_right(s_clock_colon, 4, 0);
+    s_clock_minutes = theme::make_label(clock, "--", theme::text, fonts::size_28());
+    lv_timer_create(clock_blink, 1000, nullptr);
 
     s_wifi_icon = theme::make_label(strip, LV_SYMBOL_WIFI, theme::text, fonts::size_22());
     lv_obj_align(s_wifi_icon, LV_ALIGN_RIGHT_MID, 0, 0);
@@ -355,18 +407,12 @@ void create_rail(lv_obj_t *parent)
     lv_obj_t *stand = make_rail_button(rail, "STAND");
     add_desk_icon(stand, true);
     lv_obj_align(lv_obj_get_child(stand, 0), LV_ALIGN_CENTER, 34, 0);
-    lv_obj_add_event_cb(stand, preset_clicked_cb, LV_EVENT_SHORT_CLICKED,
-                        reinterpret_cast<void *>(static_cast<std::intptr_t>(2)));
-    lv_obj_add_event_cb(stand, preset_clicked_cb, LV_EVENT_LONG_PRESSED,
-                        reinterpret_cast<void *>(static_cast<std::intptr_t>(2)));
+    bind_preset(stand, 2);
 
     lv_obj_t *sit = make_rail_button(rail, "SIT");
     add_desk_icon(sit, false);
     lv_obj_align(lv_obj_get_child(sit, 0), LV_ALIGN_CENTER, 34, 0);
-    lv_obj_add_event_cb(sit, preset_clicked_cb, LV_EVENT_SHORT_CLICKED,
-                        reinterpret_cast<void *>(static_cast<std::intptr_t>(3)));
-    lv_obj_add_event_cb(sit, preset_clicked_cb, LV_EVENT_LONG_PRESSED,
-                        reinterpret_cast<void *>(static_cast<std::intptr_t>(3)));
+    bind_preset(sit, 3);
 
     s_drawer_toggle = theme::make_button(rail, LV_SYMBOL_RIGHT);
     lv_obj_set_size(s_drawer_toggle, 84, 64);
@@ -427,10 +473,7 @@ void create_drawer(lv_obj_t *parent)
         std::snprintf(label, sizeof(label), "PRESET %d", index + 1);
         lv_obj_t *btn = theme::make_button(s_drawer, label);
         lv_obj_set_size(btn, DRAWER_W - 2 * PANEL_PAD, RAIL_BTN_H);
-        lv_obj_add_event_cb(btn, preset_clicked_cb, LV_EVENT_SHORT_CLICKED,
-                            reinterpret_cast<void *>(static_cast<std::intptr_t>(index)));
-        lv_obj_add_event_cb(btn, preset_clicked_cb, LV_EVENT_LONG_PRESSED,
-                            reinterpret_cast<void *>(static_cast<std::intptr_t>(index)));
+        bind_preset(btn, index);
         register_desk_control(btn);
     }
 }
@@ -1609,6 +1652,32 @@ esp_err_t init(const Handlers &handlers, int initial_brightness)
     return ESP_OK;
 }
 
+esp_err_t set_preset_active(int index, bool active)
+{
+    ESP_RETURN_ON_FALSE(index >= 0 && index < kPresetCount, ESP_ERR_INVALID_ARG, TAG, "preset %d",
+                        index);
+    ESP_RETURN_ON_FALSE(s_preset_buttons[index] != nullptr, ESP_ERR_INVALID_STATE, TAG,
+                        "not initialised");
+    if (s_preset_active[index] == active) {
+        return ESP_OK;
+    }
+    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
+
+    s_preset_active[index] = active;
+    lv_obj_t *button       = s_preset_buttons[index];
+    theme::set_bg_color(button, active ? theme::orange : theme::panel_light);
+    for (std::uint32_t i = 0; i < lv_obj_get_child_count(button); ++i) {
+        lv_obj_t *child = lv_obj_get_child(button, i);
+        theme::set_text_color(child, theme::text);
+        for (std::uint32_t j = 0; j < lv_obj_get_child_count(child); ++j) {
+            theme::set_bg_color(lv_obj_get_child(child, j),
+                                active ? theme::text : theme::orange);
+        }
+    }
+    lvgl_port_unlock();
+    return ESP_OK;
+}
+
 esp_err_t set_height(int height_mm)
 {
     ESP_RETURN_ON_FALSE(s_height.has_value(), ESP_ERR_INVALID_STATE, TAG, "not initialised");
@@ -1901,14 +1970,22 @@ esp_err_t set_presence(bool has_key, bool present, bool ever_seen)
 
 esp_err_t set_time(const char *text)
 {
-    ESP_RETURN_ON_FALSE(s_clock_label != nullptr, ESP_ERR_INVALID_STATE, TAG, "not initialised");
-    static char last[8] = {};
-    if (text != nullptr && std::strncmp(text, last, sizeof(last)) == 0) {
-        return ESP_OK;
-    }
-    std::snprintf(last, sizeof(last), "%s", text != nullptr ? text : "");
+    ESP_RETURN_ON_FALSE(s_clock_hours != nullptr, ESP_ERR_INVALID_STATE, TAG, "not initialised");
     ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
-    lv_label_set_text(s_clock_label, text != nullptr ? text : "--:--");
+
+    char hours[4] = "--";
+    char minutes[4] = "--";
+    const char *colon = text != nullptr ? std::strchr(text, ':') : nullptr;
+    s_clock_known = colon != nullptr;
+    if (s_clock_known) {
+        const std::size_t count = static_cast<std::size_t>(colon - text);
+        std::snprintf(hours, sizeof(hours), "%.*s", static_cast<int>(count), text);
+        std::snprintf(minutes, sizeof(minutes), "%s", colon + 1);
+    } else {
+        lv_obj_set_style_opa(s_clock_colon, LV_OPA_COVER, 0);
+    }
+    theme::set_text(s_clock_hours, hours);
+    theme::set_text(s_clock_minutes, minutes);
     lvgl_port_unlock();
     return ESP_OK;
 }

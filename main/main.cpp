@@ -2,6 +2,7 @@
 #include "board.h"
 #include "desk.h"
 #include "esp_log.h"
+#include "nvs_flash.h"
 #include "sound.h"
 #include "room.h"
 #include "telemetry.h"
@@ -23,6 +24,14 @@ void on_brightness_changed(int percent)
 
 extern "C" void app_main(void)
 {
+    // Before anything that stores settings: the desk keeps its learned preset
+    // heights here, and Wi-Fi its calibration data.
+    if (esp_err_t err = nvs_flash_init();
+        err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(nvs_flash_erase());
+        ESP_ERROR_CHECK_WITHOUT_ABORT(nvs_flash_init());
+    }
+
     ESP_ERROR_CHECK(board::init());
     const ui::Handlers handlers{desk::on_move,   desk::on_preset,   on_brightness_changed,
                                 room::on_media,  room::on_setpoint, room::on_mode,

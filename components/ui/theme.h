@@ -39,13 +39,27 @@ inline void set_text(lv_obj_t *label, const char *value)
 }
 
 // Same for styles: a write marks the object dirty even when the value is identical.
+// Against the object's own default-state value, not the one its current state
+// resolves to. Buttons and their labels carry pressed and disabled variants,
+// so comparing the resolved colour skipped the write whenever the target
+// happened to equal the state colour -- and the default was then never
+// updated, so the control snapped back to the old colour when the state
+// cleared. That is why a desk icon stayed orange on a highlighted preset.
+inline bool has_local_color(lv_obj_t *obj, lv_style_prop_t prop, lv_style_selector_t selector,
+                            lv_color_t next)
+{
+    lv_style_value_t current;
+    return lv_obj_get_local_style_prop(obj, prop, &current, selector) == LV_STYLE_RES_FOUND &&
+           lv_color_eq(current.color, next);
+}
+
 inline void set_text_color(lv_obj_t *obj, std::uint32_t colour)
 {
     if (obj == nullptr) {
         return;
     }
     const lv_color_t next = lv_color_hex(colour);
-    if (lv_color_eq(lv_obj_get_style_text_color(obj, LV_PART_MAIN), next)) {
+    if (has_local_color(obj, LV_STYLE_TEXT_COLOR, 0, next)) {
         return;
     }
     lv_obj_set_style_text_color(obj, next, 0);
@@ -58,7 +72,7 @@ inline void set_bg_color(lv_obj_t *obj, std::uint32_t colour, lv_part_t part = L
         return;
     }
     const lv_color_t next = lv_color_hex(colour);
-    if (lv_color_eq(lv_obj_get_style_bg_color(obj, part), next)) {
+    if (has_local_color(obj, LV_STYLE_BG_COLOR, part, next)) {
         return;
     }
     lv_obj_set_style_bg_color(obj, next, part);
@@ -70,7 +84,7 @@ inline void set_arc_color(lv_obj_t *obj, std::uint32_t colour, lv_part_t part)
         return;
     }
     const lv_color_t next = lv_color_hex(colour);
-    if (lv_color_eq(lv_obj_get_style_arc_color(obj, part), next)) {
+    if (has_local_color(obj, LV_STYLE_ARC_COLOR, part, next)) {
         return;
     }
     lv_obj_set_style_arc_color(obj, next, part);

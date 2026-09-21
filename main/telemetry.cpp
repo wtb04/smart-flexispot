@@ -138,6 +138,7 @@ void on_album_art(const void *pixels)
         out.height_mm      = desk::height_mm();
         out.desk_connected = desk::linked();
         out.motion         = desk::motion();
+        out.preset         = desk::active_preset();
         out.brightness     = s_brightness.load(std::memory_order_relaxed);
         out.uptime_s       = static_cast<std::uint32_t>(esp_timer_get_time() / 1000000);
         out.free_heap      = static_cast<std::uint32_t>(esp_get_free_heap_size());

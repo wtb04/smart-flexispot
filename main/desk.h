@@ -20,4 +20,11 @@ bool linked();
 /** "idle", "moving_up" or "moving_down", as last commanded. */
 const char *motion();
 
+// Which preset the desk is standing at: stand, sit, preset_1, preset_2 or none.
+const char *active_preset();
+
+// The learned height of a preset in millimetres, or negative if not yet known.
+int preset_height_mm(int index);
+
+
 }  // namespace desk

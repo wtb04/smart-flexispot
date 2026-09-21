@@ -18,6 +18,7 @@ struct Telemetry {
     bool  on_battery        = false;
     int   brightness    = 0;
     int   rssi_dbm      = 0;
+    const char *preset      = "none";
     bool  presence          = false;
     int   presence_rssi     = -127;
     std::uint32_t uptime_s   = 0;

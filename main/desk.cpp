@@ -5,8 +5,12 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "loctek.h"
+#include "nvs.h"
+#include "nvs_flash.h"
 
 #include <atomic>
+#include <cstdlib>
+#include <ctime>
 
 #include "freertos/queue.h"
 
@@ -23,7 +27,7 @@ constexpr char kWaking[]    = "waking desk";
 // startup. Only a wiring fault once the wake line has been pulsed this often.
 constexpr int WIRING_FAULT_AFTER_WAKES = 3;
 
-constexpr TickType_t SUPERVISE_TICK = pdMS_TO_TICKS(500);
+constexpr TickType_t SUPERVISE_TICK = pdMS_TO_TICKS(200);
 // The box streams in bursts with gaps of a second or so between them, so only a
 // longer silence than that means the link has dropped.
 constexpr TickType_t LINK_TIMEOUT = pdMS_TO_TICKS(3000);
@@ -51,6 +55,113 @@ StaticQueue_t s_preset_queue_ctrl;
 PresetCommand s_preset_queue_storage[PRESET_QUEUE_LEN];
 QueueHandle_t s_preset_queue = nullptr;
 
+// The control box never reports what a preset is set to, so the panel learns:
+// a height stored to a preset is that preset's height, and so is wherever the
+// desk comes to rest after being sent to one. Kept in NVS because a desk that
+// has not moved since the last boot is still standing at a preset.
+constexpr char NVS_NAMESPACE[] = "desk";
+// Bumped when the learning changes meaning: the first version recorded the
+// height a preset was pressed *from*, so anything stored under it is wrong.
+constexpr char NVS_PRESETS[]   = "presets2";
+
+// The box stops within a few millimetres of where it was asked to, and the
+// readout moves in whole millimetres, so this is about matching intent.
+constexpr int PRESET_TOLERANCE_MM = 8;
+
+// Long enough to be sure the desk has finished, because recording the wrong
+// height teaches the preset something wrong and it persists.
+constexpr TickType_t SETTLE_TIME = pdMS_TO_TICKS(1500);
+// Short, because this only decides whether to light a button: the box reports
+// a new height several times a second while travelling, so a brief quiet
+// period already means it has stopped.
+constexpr TickType_t STILL_TIME = pdMS_TO_TICKS(350);
+
+constexpr TickType_t LEARN_TIMEOUT = pdMS_TO_TICKS(45000);
+
+int  s_preset_mm[ui::kPresetCount] = {-1, -1, -1, -1};
+int  s_learning                    = -1;
+int  s_learn_from                  = -1;
+TickType_t s_learn_started         = 0;
+bool s_presets_dirty               = false;
+std::atomic<int> s_active_preset{-1};
+
+const char *preset_name(int index)
+{
+    switch (index) {
+        case 0:  return "preset_1";
+        case 1:  return "preset_2";
+        case 2:  return "stand";
+        case 3:  return "sit";
+        default: return "none";
+    }
+}
+
+void load_presets()
+{
+    nvs_handle_t handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle) != ESP_OK) {
+        return;
+    }
+    std::size_t size = sizeof(s_preset_mm);
+    if (nvs_get_blob(handle, NVS_PRESETS, s_preset_mm, &size) != ESP_OK ||
+        size != sizeof(s_preset_mm)) {
+        for (int &mm : s_preset_mm) {
+            mm = -1;
+        }
+    }
+    nvs_close(handle);
+}
+
+void save_presets()
+{
+    nvs_handle_t handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle) != ESP_OK) {
+        return;
+    }
+    if (nvs_set_blob(handle, NVS_PRESETS, s_preset_mm, sizeof(s_preset_mm)) == ESP_OK) {
+        nvs_commit(handle);
+    }
+    nvs_close(handle);
+}
+
+void remember_preset(int index, int height_mm)
+{
+    if (index < 0 || index >= ui::kPresetCount || height_mm < 0 ||
+        s_preset_mm[index] == height_mm) {
+        return;
+    }
+    s_preset_mm[index] = height_mm;
+    s_presets_dirty    = true;
+    ESP_LOGI(TAG, "preset %d is %d mm", index + 1, height_mm);
+}
+
+void publish_active(int height_mm, bool linked, bool moving)
+{
+    int standing_at = -1;
+    for (int i = 0; i < ui::kPresetCount; ++i) {
+        const bool active = linked && !moving && height_mm >= 0 && s_preset_mm[i] >= 0 &&
+                            std::abs(height_mm - s_preset_mm[i]) <= PRESET_TOLERANCE_MM;
+        if (active) {
+            standing_at = i;
+        }
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_preset_active(i, active));
+    }
+    s_active_preset.store(standing_at, std::memory_order_relaxed);
+}
+
+// The moment the desk is asked to move, standing at a preset stops being true.
+// Waiting for the supervisor's next tick, or for the height to leave the
+// tolerance, would leave the highlight up while the desk was already moving.
+void clear_active()
+{
+    s_active_preset.store(-1, std::memory_order_relaxed);
+    for (int i = 0; i < ui::kPresetCount; ++i) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_preset_active(i, false));
+    }
+}
+
+std::atomic<int>  s_height_mm{-1};
+
 void run_preset(const PresetCommand &cmd)
 {
     if (cmd.index < 0 || cmd.index >= ui::kPresetCount) {
@@ -59,14 +170,18 @@ void run_preset(const PresetCommand &cmd)
     const auto preset = static_cast<loctek::Preset>(cmd.index);
     if (cmd.store) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(loctek::store_preset(preset));
+        remember_preset(cmd.index, s_height_mm.load(std::memory_order_relaxed));
         ESP_ERROR_CHECK_WITHOUT_ABORT(
             ui::notify("", "Preset saved", "success", 2500));
     } else {
+        clear_active();
         ESP_ERROR_CHECK_WITHOUT_ABORT(loctek::goto_preset(preset));
+        s_learning      = cmd.index;
+        s_learn_from    = s_height_mm.load(std::memory_order_relaxed);
+        s_learn_started = xTaskGetTickCount();
     }
 }
 
-std::atomic<int>  s_height_mm{-1};
 std::atomic<bool> s_linked{false};
 std::atomic<int>  s_motion{0};  // -1 down, 0 idle, +1 up
 
@@ -107,6 +222,8 @@ const char *link_status(const loctek::Stats &stats, bool link_up, int wake_attem
     TickType_t    last_wake     = 0;
     TickType_t    last_frame    = 0;
     int           wake_attempts = 0;
+    int           settled_at    = -1;
+    TickType_t    settled_since = 0;
 
     for (;;) {
         PresetCommand cmd;
@@ -122,6 +239,37 @@ const char *link_status(const loctek::Stats &stats, bool link_up, int wake_attem
         previous = stats;
 
         const bool  link_up = last_frame != 0 && (now - last_frame) < LINK_TIMEOUT;
+
+        const int height = s_height_mm.load(std::memory_order_relaxed);
+        if (height != settled_at) {
+            settled_at    = height;
+            settled_since = now;
+        }
+        if (s_learning >= 0) {
+            // The desk has not started moving yet when the preset is pressed,
+            // so the height is already long settled. Recording it then taught
+            // the preset whatever height it was sent from -- which is how SIT
+            // came to be stored as STAND's height. Wait for it to actually
+            // move, and give up if it never does.
+            if (now - s_learn_started > LEARN_TIMEOUT) {
+                s_learning = -1;
+            } else if (height >= 0 && height != s_learn_from &&
+                       now - settled_since > SETTLE_TIME) {
+                remember_preset(s_learning, height);
+                s_learning = -1;
+            }
+        }
+        if (s_presets_dirty) {
+            s_presets_dirty = false;
+            save_presets();
+        }
+        // Tied to the height going quiet rather than to the learning, which
+        // waits far longer on purpose and was holding the highlight back for
+        // a second and a half after the desk had visibly stopped.
+        const bool moving =
+            s_motion.load(std::memory_order_relaxed) != 0 || now - settled_since < STILL_TIME;
+        publish_active(height, link_up, moving);
+
         const char *status  = link_status(stats, link_up, wake_attempts);
 
         if (status != shown) {
@@ -166,6 +314,7 @@ esp_err_t start()
     ESP_RETURN_ON_FALSE(presets != nullptr, ESP_ERR_NO_MEM, TAG, "preset queue");
     s_preset_queue = presets;
 
+    load_presets();
     ESP_RETURN_ON_ERROR(loctek::start(on_height), TAG, "loctek");
 
     TaskHandle_t task = xTaskCreateStaticPinnedToCore(supervisor_task, "desk", TASK_STACK, nullptr,
@@ -195,6 +344,16 @@ bool linked()
     return s_linked.load(std::memory_order_relaxed);
 }
 
+const char *active_preset()
+{
+    return preset_name(s_active_preset.load(std::memory_order_relaxed));
+}
+
+int preset_height_mm(int index)
+{
+    return index >= 0 && index < ui::kPresetCount ? s_preset_mm[index] : -1;
+}
+
 const char *motion()
 {
     switch (s_motion.load(std::memory_order_relaxed)) {
@@ -214,6 +373,9 @@ void on_move(ui::Move direction)
         case ui::Move::Stop: move = loctek::Move::Stop; motion = 0;  break;
     }
     s_motion.store(motion, std::memory_order_relaxed);
+    if (motion != 0) {
+        clear_active();
+    }
     ESP_ERROR_CHECK_WITHOUT_ABORT(loctek::request_move(move));
 }
 

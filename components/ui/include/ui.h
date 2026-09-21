@@ -118,6 +118,10 @@ esp_err_t splash_done();
 /** Height in millimetres, or negative for "unknown". */
 esp_err_t set_height(int height_mm);
 
+// Highlights the preset the desk is currently standing at; a tap on it does
+// nothing, though holding to store still works.
+esp_err_t set_preset_active(int index, bool active);
+
 /** Unavailable dims and disables every desk control, so nothing can be pressed in vain. */
 esp_err_t set_desk_available(bool available);
 
