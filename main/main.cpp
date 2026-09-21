@@ -7,6 +7,7 @@
 #include "logbuf.h"
 #include "nvs_flash.h"
 #include "power.h"
+#include "radar.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "settings.h"
@@ -58,6 +59,12 @@ void on_volume(int percent, bool preview)
     }
 }
 
+void on_radar_page(bool showing, bool reachable)
+{
+    radar::set_enabled(reachable);
+    radar::set_active(showing);
+}
+
 void on_restart()
 {
     ESP_LOGI(TAG, "restart requested from the panel");
@@ -88,7 +95,7 @@ extern "C" void app_main(void)
                                 room::on_media,     room::on_setpoint,    room::on_mode,
                                 room::on_lights,    room::on_light,       room::on_dial_toggle,
                                 diagnostics::refresh, on_setting,         on_volume,
-                                on_restart,           diagnostics::logs};
+                                on_restart,           on_radar_page,      diagnostics::logs};
     const int brightness = settings::get(settings::Key::Brightness);
     ESP_ERROR_CHECK(ui::init(handlers, brightness));
     // Through the same path a change takes, so the panel, the backlight and

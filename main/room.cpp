@@ -4,6 +4,7 @@
 #include "esp_timer.h"
 #include "ha_ws.h"
 #include "media.h"
+#include "radar.h"
 #include "ui.h"
 
 #include <cstdio>
@@ -456,6 +457,16 @@ void init()
 void render(const hass::ws::EntityStore &store)
 {
     s_entity_count.store(static_cast<int>(store.size()), std::memory_order_relaxed);
+
+    // The radar centres itself on wherever Home Assistant says home is, so the
+    // panel is not told its own coordinates a second time.
+    if (const hass::ws::Entity *home = store.find("zone.home"); home != nullptr) {
+        const float lat = attribute_number(*home, "latitude");
+        const float lon = attribute_number(*home, "longitude");
+        if (lat != -1.0f && lon != -1.0f) {
+            radar::set_home(lat, lon);
+        }
+    }
 
     render_thermostat(store);
 

@@ -16,4 +16,7 @@
 #define HASS_WS_TOKEN ""
 
 // Comma separated. Empty subscribes to nothing, not to everything.
+//
+// Include zone.home if you want the radar page: it takes the centre of its
+// scope from there rather than being told where it is a second time.
 #define HASS_WS_ENTITIES ""

@@ -76,6 +76,14 @@ constexpr TickType_t SETTLE_TIME = pdMS_TO_TICKS(1500);
 // period already means it has stopped.
 constexpr TickType_t STILL_TIME = pdMS_TO_TICKS(350);
 
+// A preset takes a moment to get the desk going, and for that moment the height
+// is exactly where it has been sitting -- which read as still standing at the
+// preset that was lit, so the highlight came back on and went off again as the
+// desk finally moved. Motion is assumed from the command until the height
+// proves it, or until this runs out and the desk evidently is not going
+// anywhere, which is the case when it was already there.
+constexpr TickType_t COMMAND_GRACE = pdMS_TO_TICKS(4000);
+
 constexpr TickType_t LEARN_TIMEOUT = pdMS_TO_TICKS(45000);
 
 int  s_preset_mm[ui::kPresetCount] = {-1, -1, -1, -1};
@@ -162,6 +170,9 @@ void clear_active()
 
 std::atomic<int>  s_height_mm{-1};
 
+TickType_t s_commanded_at   = 0;  // zero when nothing is expected to move
+int        s_commanded_from = -1;
+
 void run_preset(const PresetCommand &cmd)
 {
     if (cmd.index < 0 || cmd.index >= ui::kPresetCount) {
@@ -176,9 +187,11 @@ void run_preset(const PresetCommand &cmd)
     } else {
         clear_active();
         ESP_ERROR_CHECK_WITHOUT_ABORT(loctek::goto_preset(preset));
-        s_learning      = cmd.index;
-        s_learn_from    = s_height_mm.load(std::memory_order_relaxed);
-        s_learn_started = xTaskGetTickCount();
+        s_learning        = cmd.index;
+        s_learn_from      = s_height_mm.load(std::memory_order_relaxed);
+        s_learn_started   = xTaskGetTickCount();
+        s_commanded_from  = s_learn_from;
+        s_commanded_at    = s_learn_started;
     }
 }
 
@@ -266,8 +279,16 @@ const char *link_status(const loctek::Stats &stats, bool link_up, int wake_attem
         // Tied to the height going quiet rather than to the learning, which
         // waits far longer on purpose and was holding the highlight back for
         // a second and a half after the desk had visibly stopped.
-        const bool moving =
-            s_motion.load(std::memory_order_relaxed) != 0 || now - settled_since < STILL_TIME;
+        const bool commanded = s_commanded_at != 0;
+        if (commanded) {
+            const bool left = height >= 0 && s_commanded_from >= 0 &&
+                              std::abs(height - s_commanded_from) > PRESET_TOLERANCE_MM;
+            if (left || now - s_commanded_at > COMMAND_GRACE) {
+                s_commanded_at = 0;
+            }
+        }
+        const bool moving = commanded || s_motion.load(std::memory_order_relaxed) != 0 ||
+                            now - settled_since < STILL_TIME;
         publish_active(height, link_up, moving);
 
         const char *status  = link_status(stats, link_up, wake_attempts);

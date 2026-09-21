@@ -147,6 +147,12 @@ esp_err_t start()
     ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_STA), TAG, "sta mode");
     ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_STA, &config), TAG, "sta config");
     ESP_RETURN_ON_ERROR(esp_wifi_start(), TAG, "wifi start");
+    // The default has the station sleep between beacons, and the access point
+    // holds its packets until the next one. Measured on this network: a round
+    // trip alternating between 2 ms and 90 ms, with a worst case of 290 ms.
+    // Nothing here is worth that, and a desk driven over the network is worth
+    // it least of all.
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_ps(WIFI_PS_NONE));
 
     ESP_LOGI(TAG, "joining '%s'", TAB5_WIFI_SSID);
     return ESP_OK;

@@ -7,6 +7,7 @@
 #include "esp_lvgl_port.h"
 #include "lvgl.h"
 #include "modal_overlay.h"
+#include "radar_page.h"
 #include "segment_display.h"
 #include "theme.h"
 
@@ -390,7 +391,11 @@ void create_rail(lv_obj_t *parent)
     s_phone_slash = theme::make_label(strip, "/", theme::text, fonts::size_32());
     lv_obj_align_to(s_phone_slash, s_phone_icon, LV_ALIGN_CENTER, 0, -2);
 
-    theme::make_label(rail, "DESK HEIGHT", theme::secondary, &lv_font_montserrat_18);
+    // The status strip stays where it was, under the bezel; everything below it
+    // reads better carried a little further down.
+    lv_obj_t *heading = theme::make_label(rail, "DESK HEIGHT", theme::secondary,
+                                          &lv_font_montserrat_18);
+    lv_obj_set_style_margin_top(heading, 18, 0);
 
     lv_obj_t *readout = lv_obj_create(rail);
     lv_obj_set_size(readout, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
@@ -1332,7 +1337,7 @@ struct NavItem {
 };
 constexpr NavItem NAV_ITEMS[PAGE_COUNT] = {
     {LV_SYMBOL_HOME, "Home", false},    {LV_SYMBOL_LIST, "Stats", true},
-    {LV_SYMBOL_BELL, "Alerts", true},   {LV_SYMBOL_WIFI, "Network", true},
+    {LV_SYMBOL_BELL, "Alerts", true},   {LV_SYMBOL_GPS, "Radar", true},
     {LV_SYMBOL_SETTINGS, "Setup", false},
 };
 
@@ -1342,6 +1347,7 @@ bool s_presence_known = false;
 bool s_present        = false;
 int  s_page           = 0;
 
+constexpr int RADAR_PAGE = 3;
 constexpr int SETUP_PAGE = 4;
 // Read from the diagnostics task, which does no work at all while the page it
 // fills is not the one on screen.
@@ -1364,6 +1370,9 @@ void select_page(int index)
     s_setup_visible.store(index == SETUP_PAGE, std::memory_order_relaxed);
     if (index == SETUP_PAGE && s_handlers.diagnostics != nullptr) {
         s_handlers.diagnostics();
+    }
+    if (s_handlers.radar != nullptr) {
+        s_handlers.radar(index == RADAR_PAGE, page_available(RADAR_PAGE));
     }
     for (int i = 0; i < PAGE_COUNT; ++i) {
         lv_obj_set_hidden(s_nav_tabs[i], !page_available(i));
@@ -2018,7 +2027,11 @@ void create_content(lv_obj_t *parent)
     build_home_page(s_pages[0]);
     build_placeholder_page(s_pages[1], "Stats", "Height over time, hours stood, that sort of thing.");
     build_placeholder_page(s_pages[2], "Alerts", "Reminders to stand, and whatever Home Assistant sends.");
-    build_placeholder_page(s_pages[3], "Network", "Wi-Fi and broker detail when something is wrong.");
+    {
+        const Layout rl = layout();
+        lv_obj_set_style_pad_all(s_pages[3], PANEL_PAD, 0);
+        build_radar_page(s_pages[3], rl.content_w - 2 * PANEL_PAD, rl.content_h - 2 * PANEL_PAD);
+    }
     build_settings_page(s_pages[4]);
     select_page(0);
 }
@@ -2646,6 +2659,30 @@ esp_err_t set_info(Info field, const char *value, Level level)
         theme::set_text(s_tile_value[card], text);
     }
 
+    lvgl_port_unlock();
+    return ESP_OK;
+}
+
+esp_err_t set_radar(const radar::Snapshot &snapshot)
+{
+    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
+    show_radar(snapshot);
+    lvgl_port_unlock();
+    return ESP_OK;
+}
+
+esp_err_t set_radar_details(const char *hex, const radar::Details &details)
+{
+    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
+    show_radar_details(hex, details);
+    lvgl_port_unlock();
+    return ESP_OK;
+}
+
+esp_err_t set_radar_photo(const char *hex, const void *pixels, int width, int height)
+{
+    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
+    show_radar_photo(hex, pixels, width, height);
     lvgl_port_unlock();
     return ESP_OK;
 }

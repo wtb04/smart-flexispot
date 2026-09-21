@@ -1,6 +1,7 @@
 #pragma once
 
 #include "esp_err.h"
+#include "radar.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -84,6 +85,10 @@ using VolumeHandler = void (*)(int percent, bool preview);
 
 using RestartHandler = void (*)();
 
+/** showing is true while the scope is the page on screen, reachable is false
+ *  once presence gating has hidden it away entirely. */
+using RadarHandler = void (*)(bool showing, bool reachable);
+
 enum class Subsystem : std::uint8_t {
     Network,
     HomeAssistant,
@@ -146,6 +151,7 @@ struct Handlers {
     SettingHandler     setting;
     VolumeHandler      volume;
     RestartHandler     restart;
+    RadarHandler       radar;
     LogHandler         log;
 };
 
@@ -226,6 +232,15 @@ bool diagnostics_open();
 esp_err_t set_setting(Setting setting, bool on);
 
 esp_err_t set_notification_volume(int percent);
+
+/** The scope redraws from this; between readings it is left alone. */
+esp_err_t set_radar(const radar::Snapshot &snapshot);
+
+/** Ignored unless that aircraft is still the one selected. */
+esp_err_t set_radar_details(const char *hex, const radar::Details &details);
+
+/** RGB565. Null clears the frame. Ignored unless still selected. */
+esp_err_t set_radar_photo(const char *hex, const void *pixels, int width, int height);
 
 /** Whether the subsystem is doing its job, which is not the same as whether it
  *  is reporting what you hoped: a phone correctly seen to be away is healthy. */

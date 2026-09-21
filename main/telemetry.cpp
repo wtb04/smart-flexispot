@@ -14,6 +14,7 @@
 #include "ha_ws.h"
 #include "hass.h"
 #include "power.h"
+#include "radar.h"
 #include "room.h"
 #include "settings.h"
 #include "sound.h"
@@ -110,6 +111,21 @@ void fill_network(hass::protocol::Telemetry &out)
     }
 }
 
+void on_radar(const radar::Snapshot &snapshot)
+{
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_radar(snapshot));
+}
+
+void on_radar_details(const char *hex, const radar::Details &details)
+{
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_radar_details(hex, details));
+}
+
+void on_radar_photo(const char *hex, const void *pixels, int width, int height)
+{
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_radar_photo(hex, pixels, width, height));
+}
+
 void on_album_art(media::Art state, const void *pixels)
 {
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_album_art(pixels, state == media::Art::Failed));
@@ -134,6 +150,9 @@ void on_album_art(media::Art state, const void *pixels)
     // Album art is fetched over plain HTTP from Home Assistant, so it needs the
     // network but nothing else.
     ESP_ERROR_CHECK_WITHOUT_ABORT(media::start(on_album_art));
+    // Last: it needs an address and the home position, and the position comes
+    // over the WebSocket once that is subscribed.
+    ESP_ERROR_CHECK_WITHOUT_ABORT(radar::start(on_radar, on_radar_details, on_radar_photo));
 
     for (;;) {
         hass::protocol::Telemetry out;

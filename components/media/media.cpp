@@ -47,6 +47,11 @@ char              s_wanted[320] = {};
 char              s_loaded[320] = {};
 SemaphoreHandle_t s_lock        = nullptr;
 StaticSemaphore_t s_lock_ctrl;
+
+// There is one JPEG engine on the part and one set of buffers behind it, so
+// anything else wanting a picture decoded queues here.
+SemaphoreHandle_t s_decoder_lock = nullptr;
+StaticSemaphore_t s_decoder_lock_ctrl;
 TaskHandle_t      s_task = nullptr;
 
 const char *http_origin()
@@ -131,7 +136,7 @@ void shrink(const std::uint16_t *src, int side, int stride, std::uint16_t *dst)
     }
 }
 
-bool decode(std::size_t bytes)
+bool decode_locked(std::size_t bytes)
 {
     jpeg_decode_picture_info_t info{};
     if (jpeg_decoder_get_info(s_jpeg, bytes, &info) != ESP_OK) {
@@ -171,6 +176,14 @@ bool decode(std::size_t bytes)
     ESP_LOGI(TAG, "cover %ux%u stride %d -> %d", info.width, info.height, decoded_stride(info),
              kArtSize);
     return true;
+}
+
+bool decode(std::size_t bytes)
+{
+    xSemaphoreTake(s_decoder_lock, portMAX_DELAY);
+    const bool ok = decode_locked(bytes);
+    xSemaphoreGive(s_decoder_lock);
+    return ok;
 }
 
 [[noreturn]] void media_task(void *)
@@ -213,11 +226,63 @@ bool decode(std::size_t bytes)
 
 }  // namespace
 
+bool decode_image(const void *jpeg, std::size_t length, std::uint16_t *out, int max_w, int max_h,
+                  int &out_w, int &out_h)
+{
+    if (jpeg == nullptr || out == nullptr || length == 0 || length > MAX_JPEG ||
+        s_decoder == nullptr) {
+        return false;
+    }
+
+    xSemaphoreTake(s_decoder_lock, portMAX_DELAY);
+    bool ok = false;
+
+    // The engine reads over DMA from its own allocation, so the bytes have to
+    // be moved into it rather than decoded where they landed.
+    std::memcpy(s_jpeg, jpeg, length);
+
+    // The engine refuses a picture whose width times height is not a multiple
+    // of eight, and refuses it loudly from inside the driver. Roughly one
+    // aircraft thumbnail in five is such a picture, which is a normal thing to
+    // come across rather than three lines of error.
+    jpeg_decode_picture_info_t info{};
+    if (jpeg_decoder_get_info(s_jpeg, length, &info) == ESP_OK &&
+        (info.width * info.height) % 8 == 0 &&
+        static_cast<int>(info.width) <= max_w && static_cast<int>(info.height) <= max_h &&
+        static_cast<int>(info.width) <= MAX_DECODE_SIDE &&
+        static_cast<int>(info.height) <= MAX_DECODE_SIDE) {
+        jpeg_decode_cfg_t cfg{};
+        cfg.output_format = JPEG_DECODE_OUT_FORMAT_RGB565;
+        cfg.rgb_order     = JPEG_DEC_RGB_ELEMENT_ORDER_BGR;
+
+        std::uint32_t produced = 0;
+        if (jpeg_decoder_process(s_decoder, &cfg, s_jpeg, length, s_full,
+                                 MAX_DECODE_SIDE * MAX_DECODE_SIDE * 2, &produced) == ESP_OK) {
+            const auto *src    = reinterpret_cast<const std::uint16_t *>(s_full);
+            const int   stride = decoded_stride(info);
+            out_w              = static_cast<int>(info.width);
+            out_h              = static_cast<int>(info.height);
+            for (int y = 0; y < out_h; ++y) {
+                std::memcpy(out + static_cast<std::size_t>(y) * out_w,
+                            src + static_cast<std::size_t>(y) * stride,
+                            static_cast<std::size_t>(out_w) * 2);
+            }
+            ok = true;
+        }
+    }
+
+    xSemaphoreGive(s_decoder_lock);
+    return ok;
+}
+
 esp_err_t start(ArtHandler on_art)
 {
     s_on_art = on_art;
     s_lock   = xSemaphoreCreateMutexStatic(&s_lock_ctrl);
     ESP_RETURN_ON_FALSE(s_lock != nullptr, ESP_ERR_NO_MEM, TAG, "lock");
+
+    s_decoder_lock = xSemaphoreCreateMutexStatic(&s_decoder_lock_ctrl);
+    ESP_RETURN_ON_FALSE(s_decoder_lock != nullptr, ESP_ERR_NO_MEM, TAG, "decoder lock");
 
     const jpeg_decode_engine_cfg_t engine{.intr_priority = 0, .timeout_ms = 2000};
     ESP_RETURN_ON_ERROR(jpeg_new_decoder_engine(&engine, &s_decoder), TAG, "decoder");
