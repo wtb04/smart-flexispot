@@ -18,6 +18,13 @@ constexpr char TAG[] = "battery";
 // As often as a charge icon is worth taking the shared I2C bus for.
 constexpr TickType_t POLL_INTERVAL = pdMS_TO_TICKS(30000);
 
+// Where charging starts again after the pack has reported itself full. The
+// charger would otherwise hold it at its setpoint indefinitely, and a pack left
+// sitting at the top of its range is the one that ages fastest. Well below the
+// full threshold on purpose: anything closer and it would relax into a resume,
+// charge for a minute, report full, and do it again for ever.
+constexpr float RESUME_VOLTS = 8.00f;
+
 // Logs a float, which goes through full newlib printf.
 constexpr std::uint32_t TASK_STACK    = 4096;
 constexpr UBaseType_t   TASK_PRIORITY = 2;
@@ -29,6 +36,7 @@ StackType_t  s_task_stack[TASK_STACK];
 [[noreturn]] void battery_task(void *)
 {
     bool charging_on = settings::enabled(settings::Key::Charging);
+    bool topped_off  = false;
 
     for (;;) {
         power::reassert_charging();
@@ -36,8 +44,9 @@ StackType_t  s_task_stack[TASK_STACK];
         power::State state{};
         if (power::read(state) == ESP_OK) {
             if (state.present) {
-                ESP_LOGI(TAG, "%d%% %.2f V %d mA", state.percent, state.bus_volts,
-                         static_cast<int>(std::lround(state.current_amps * 1000.0f)));
+                ESP_LOGI(TAG, "%d%% %.2f V %d mA%s", state.percent, state.bus_volts,
+                         static_cast<int>(std::lround(state.current_amps * 1000.0f)),
+                         state.full ? " full" : "");
             } else {
                 ESP_LOGI(TAG, "no pack (%.2f V)", state.bus_volts);
             }
@@ -47,15 +56,25 @@ StackType_t  s_task_stack[TASK_STACK];
             // No sense driving a charger into an empty socket: that is what
             // makes the sense node swing, and it is what the pack detection has
             // to see through.
-            // Settled rather than inferred: the charger comes off for a moment
-            // and the voltage is asked whether anything is holding it up.
             bool present = false;
             ESP_ERROR_CHECK_WITHOUT_ABORT(power::probe_pack(present));
 
-            const bool wanted = settings::enabled(settings::Key::Charging) && present;
+            // Full latches the charger off and only a real fall clears it, so
+            // the two thresholds are what stops it cycling.
+            if (state.full) {
+                topped_off = true;
+            } else if (state.bus_volts <= RESUME_VOLTS) {
+                topped_off = false;
+            }
+
+            const bool wanted =
+                settings::enabled(settings::Key::Charging) && present && !topped_off;
             if (wanted != charging_on && power::set_charging(wanted) == ESP_OK) {
                 charging_on = wanted;
-                ESP_LOGI(TAG, "charger %s", wanted ? "on" : "off, nothing to charge");
+                ESP_LOGI(TAG, "charger %s", wanted           ? "on"
+                                            : !present       ? "off, nothing to charge"
+                                            : topped_off     ? "off, pack full"
+                                                             : "off");
             }
         }
         vTaskDelay(POLL_INTERVAL);

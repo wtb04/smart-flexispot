@@ -211,12 +211,24 @@ void start_scanning()
 
     const int rc =
         ble_gap_disc(BLE_OWN_ADDR_PUBLIC, BLE_HS_FOREVER, &params, on_gap_event, nullptr);
+    // Already scanning is the state this wants, not a failure. It happens
+    // because scanning is asked for again whenever the desk link connects,
+    // fails to connect or drops, and NimBLE may have resumed it already.
+    if (rc == BLE_HS_EALREADY) {
+        s_ready.store(true, std::memory_order_relaxed);
+        return;
+    }
     if (rc != 0) {
         ESP_LOGE(TAG, "scan start failed (%d)", rc);
         return;
     }
     s_ready.store(true, std::memory_order_relaxed);
-    ESP_LOGI(TAG, "scanning, %u ms window every %u ms", SCAN_WINDOW_MS, SCAN_INTERVAL_MS);
+    // Once, not every time the desk link comes and goes.
+    static bool announced = false;
+    if (!announced) {
+        announced = true;
+        ESP_LOGI(TAG, "scanning, %u ms window every %u ms", SCAN_WINDOW_MS, SCAN_INTERVAL_MS);
+    }
 }
 
 void on_sync()

@@ -12,6 +12,7 @@ struct State {
     float shunt_millivolts;
     bool  charging;
     bool  on_battery;
+    bool  full;          // at the top of its range and taking nothing more
 };
 
 /** Requires bsp_i2c_init() first. */
@@ -30,8 +31,10 @@ void reassert_charging();
 esp_err_t read(State &out);
 
 /** Settles the question by switching the charger off for a moment and seeing
- *  whether the voltage holds: a pack does, an empty socket does not. Blocks for
- *  a few hundred milliseconds and briefly interrupts charging. */
+ *  whether the voltage holds: a pack does, an empty socket does not. Only
+ *  actually needed when the charger is on and no current is flowing, so most
+ *  calls are an ordinary reading and interrupt nothing; that one case blocks
+ *  for a few hundred milliseconds. */
 esp_err_t probe_pack(bool &present);
 
 /** The most recent successful read, without touching the bus. False if there

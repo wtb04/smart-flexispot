@@ -29,7 +29,7 @@ constexpr int   NOTE_MS   = 110;
 constexpr float EDGE_FRACTION = 0.25f;
 constexpr float AMPLITUDE     = 0.22f;
 
-constexpr std::uint32_t TASK_STACK    = 4096;
+constexpr std::uint32_t TASK_STACK    = 2560;  // measured: uses 0.3 KB
 constexpr UBaseType_t   TASK_PRIORITY = 3;
 constexpr BaseType_t    TASK_CORE     = 0;
 

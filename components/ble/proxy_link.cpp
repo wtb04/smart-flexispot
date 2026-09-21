@@ -436,7 +436,7 @@ esp_err_t start()
     if (s_send_lock == nullptr) {
         return ESP_ERR_NO_MEM;
     }
-    return xTaskCreate(hold_task, "blehold", 3072, nullptr, 5, &s_hold_task) == pdPASS
+    return xTaskCreate(hold_task, "blehold", 2048, nullptr, 5, &s_hold_task) == pdPASS
                ? ESP_OK
                : ESP_ERR_NO_MEM;
 }

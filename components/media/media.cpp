@@ -26,7 +26,7 @@ constexpr std::size_t MAX_JPEG = 512 * 1024;
 // decoding, not for the square that ends up on screen. Spotify serves 640.
 constexpr int MAX_DECODE_SIDE = 800;
 
-constexpr std::uint32_t TASK_STACK    = 5120;
+constexpr std::uint32_t TASK_STACK    = 4096;  // measured: uses 2.8 KB
 constexpr UBaseType_t   TASK_PRIORITY = 2;
 constexpr BaseType_t    TASK_CORE     = 0;
 
@@ -201,6 +201,9 @@ bool decode(std::size_t bytes)
         if (std::strcmp(wanted, s_loaded) == 0) {
             continue;
         }
+        // Said once per change, so a cover being fetched repeatedly shows up as
+        // the url churning rather than as mysterious work.
+        ESP_LOGD(TAG, "cover path changed");
         if (wanted[0] == '\0') {
             std::strcpy(s_loaded, "");
             if (s_on_art != nullptr) {

@@ -42,7 +42,7 @@ constexpr int NETWORK_WAIT_MS = 30000;
 // MQTT, the WebSocket, BLE and the JPEG decoder at startup, and every tick it
 // builds the state document with cJSON, which formats floats through full
 // newlib printf -- well over a kilobyte of stack on its own.
-constexpr std::uint32_t TASK_STACK    = 8192;
+constexpr std::uint32_t TASK_STACK    = 6144;  // measured: uses 3.0 KB
 constexpr UBaseType_t   TASK_PRIORITY = 2;
 constexpr BaseType_t    TASK_CORE     = 0;
 
@@ -201,6 +201,20 @@ void on_album_art(media::Art state, const void *pixels)
         // error while the broker is unreachable, which is normal and not worth
         // logging every two seconds.
         hass::publish(out);
+
+        // Said once, when everything that is going to start has started. This is
+        // the number that decides whether a TLS handshake or a Bluetooth packet
+        // can find a buffer, and it is worth knowing without waiting for it to
+        // go wrong.
+        static bool settled = false;
+        if (!settled && esp_timer_get_time() > 40000000) {
+            settled = true;
+            ESP_LOGI(TAG, "memory once up: %u KB dma-capable, %u KB internal, %u KB internal low",
+                     static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_DMA) / 1024),
+                     static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
+                     static_cast<unsigned>(
+                         heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL) / 1024));
+        }
 
         // What ran out when the Bluetooth transport and TLS both wanted DMA
         // memory at once. Reported when it is low rather than all the time, so

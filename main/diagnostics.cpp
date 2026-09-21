@@ -32,7 +32,7 @@ constexpr char TAG[] = "diag";
 // is not and keeps the uptime honest when it is.
 constexpr TickType_t TICK = pdMS_TO_TICKS(1000);
 
-constexpr std::uint32_t TASK_STACK    = 4096;
+constexpr std::uint32_t TASK_STACK    = 3072;  // measured: uses 0.7 KB
 constexpr UBaseType_t   TASK_PRIORITY = 1;
 constexpr BaseType_t    TASK_CORE     = 0;
 
@@ -241,7 +241,10 @@ void update_power()
     std::snprintf(text, sizeof(text), "%d mA", static_cast<int>(battery.current_amps * 1000.0f));
     push(Info::PowerCurrent, text);
 
-    const char *status = battery.charging ? "charging" : battery.on_battery ? "discharging" : "idle";
+    const char *status = battery.charging      ? "charging"
+                         : battery.on_battery ? "discharging"
+                         : battery.full       ? "full"
+                                              : "idle";
     push(Info::PowerStatus, status);
 }
 

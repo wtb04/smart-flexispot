@@ -170,11 +170,17 @@ constexpr std::int64_t     MEDIA_GONE_US    = 3000000;
 
 // The speaker is reached over HomeKit, which will not take a run of volume_set
 // calls: the later ones come back refused and the player reports itself
-// unavailable in between, which is what threw the cover away. Presses are
-// coalesced into one call a quarter of a second after the last of them, which
-// the panel does not wait for -- the number on screen has already moved.
-constexpr std::int64_t     VOLUME_COALESCE_US = 250000;
+// unavailable in between, which is what threw the cover away.
+//
+// So it is rate limited rather than debounced. Debouncing sent one call a
+// quarter second after the last press, which meant the number moved at once
+// and the speaker did not move until you stopped -- pressing + repeatedly felt
+// like nothing was happening. This sends the first press straight away and the
+// last one as soon as the window allows, which is two calls for a burst
+// instead of ten.
+constexpr std::int64_t     VOLUME_MIN_GAP_US = 250000;
 std::atomic<int>           s_volume_pending{-1};
+std::atomic<std::int64_t>  s_volume_sent_us{0};
 esp_timer_handle_t         s_volume_timer = nullptr;
 std::atomic<std::int64_t>  s_volume_set_us{0};
 std::atomic<int>  s_entity_count{0};
@@ -347,10 +353,21 @@ void render_media(const hass::ws::EntityStore &store)
     // moment later. The picture is only acted on when the track has changed or
     // there is actually one to show; a track that genuinely has no cover still
     // clears it, because the title changed with it.
+    // Once per track, not once per event. The cover was being fetched and
+    // decoded again every couple of seconds while the volume was being
+    // pressed, which is an HTTP round trip and a JPEG decode each time and is
+    // what made the volume stop feeling instant. Whatever the picture's url
+    // does between events, the cover belongs to the track.
     static std::string s_art_title;
-    const std::string  picture = attribute(*player, "entity_picture_local");
-    if (title != s_art_title || !picture.empty()) {
+    static bool        s_art_asked = false;
+    const std::string  picture     = attribute(*player, "entity_picture_local");
+
+    if (title != s_art_title) {
         s_art_title = title;
+        s_art_asked = false;
+    }
+    if (!s_art_asked && (!picture.empty() || title.empty())) {
+        s_art_asked = true;
         media::set_art_path(title.empty() ? "" : picture.c_str());
     }
 }
@@ -361,6 +378,7 @@ void send_volume(void *)
     if (percent < 0) {
         return;
     }
+    s_volume_sent_us.store(esp_timer_get_time(), std::memory_order_relaxed);
     char value[16];
     std::snprintf(value, sizeof(value), "%.2f", static_cast<double>(percent) / 100.0);
     ESP_ERROR_CHECK_WITHOUT_ABORT(hass::ws::call_service_with("media_player", "volume_set",
@@ -394,9 +412,17 @@ void nudge_volume(float delta)
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_volume(percent));
 
     s_volume_pending.store(percent, std::memory_order_relaxed);
+
+    const std::int64_t now   = esp_timer_get_time();
+    const std::int64_t since = now - s_volume_sent_us.load(std::memory_order_relaxed);
+    if (since >= VOLUME_MIN_GAP_US) {
+        send_volume(nullptr);
+        return;
+    }
     if (s_volume_timer != nullptr) {
         esp_timer_stop(s_volume_timer);  // not running yet is not an error worth reporting
-        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_timer_start_once(s_volume_timer, VOLUME_COALESCE_US));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(
+            esp_timer_start_once(s_volume_timer, VOLUME_MIN_GAP_US - since));
     }
 }
 

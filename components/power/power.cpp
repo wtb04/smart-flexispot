@@ -71,11 +71,25 @@ constexpr int CELLS_IN_SERIES = 2;
 //
 // Switching the charger off for a moment settles it. A pack holds its voltage,
 // because that is what a battery does; an empty socket has nothing to hold it
-// and collapses. This is a measurement rather than a guess, and it costs one
-// interruption of a few hundred milliseconds per poll.
+// and collapses. This is a measurement rather than a guess.
+//
+// It is only needed when the charger is running and nothing is moving through
+// the shunt, though. Current is the better answer whenever there is any: an
+// empty socket cannot sustain a charge current and cannot supply a discharge
+// one, so either direction proves a pack on its own. That leaves the charger
+// on with no current as the one ambiguous case, which is the only time this
+// has to interrupt anything.
 constexpr float      PACK_MIN_VOLTS = 6.0f;
 constexpr float      PACK_MAX_VOLTS = 8.8f;
 constexpr TickType_t PROBE_SETTLE   = pdMS_TO_TICKS(250);
+
+// Two cells are full at 8.4 V and the charger will hold them there for as long
+// as it is enabled, which is where a lithium cell ages fastest. Once the pack
+// stops taking current at the top of its range there is nothing left to put in.
+// The gap between these two is deliberate: without it the pack would relax a
+// few millivolts, ask for more, and be topped up again for ever.
+constexpr float FULL_VOLTS   = 8.30f;
+constexpr float FULL_TAPER_A = 0.06f;
 
 // Terminal voltage is not open-circuit voltage: the pack sags under load and is
 // pushed up while charging, which walked the percentage by ten points or more
@@ -179,6 +193,8 @@ esp_err_t read_locked(State &out)
     out.present      = s_pack_present.load(std::memory_order_relaxed);
     out.on_battery   = out.present && out.current_amps > CURRENT_DEADBAND_A;
     out.charging     = out.present && out.current_amps < -CURRENT_DEADBAND_A;
+    out.full         = out.present && out.bus_volts >= FULL_VOLTS &&
+                       out.current_amps > -FULL_TAPER_A;
 
     // Current is positive on discharge, so this both lifts a sagging pack and
     // takes the charger's push back off.
@@ -256,20 +272,14 @@ esp_err_t init()
     return ESP_OK;
 }
 
-esp_err_t set_charging(bool enable)
+namespace {
+
+// The pin writes on their own. set_charging says so in the log because it is a
+// decision; the probe moves the same pins for a quarter of a second and saying
+// so twice a poll is how the console filled up with a charger that was not in
+// fact changing its mind.
+esp_err_t apply_charging(bool enable)
 {
-    State state{};
-    if (enable && last(state) && state.bus_volts < CHARGE_SAFE_VOLTS) {
-        ESP_LOGW(TAG, "pack at %.2f V, below the %.1f V floor - charger left off", state.bus_volts,
-                 CHARGE_SAFE_VOLTS);
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    // Recorded before it is attempted, so a transient I2C failure here is
-    // retried by reassert_charging rather than leaving the charger off for the
-    // whole uptime.
-    s_charging_wanted = enable;
-
     esp_io_expander_handle_t expander = bsp_io_expander1_init();
     ESP_RETURN_ON_FALSE(expander != nullptr, ESP_ERR_INVALID_STATE, TAG, "io expander");
 
@@ -287,6 +297,25 @@ esp_err_t set_charging(bool enable)
                         "charge current");
     ESP_RETURN_ON_ERROR(esp_io_expander_set_level(expander, CHARGE_ENABLE_PIN, enable ? 1 : 0),
                         TAG, "charge pin level");
+    return ESP_OK;
+}
+
+}  // namespace
+
+esp_err_t set_charging(bool enable)
+{
+    State state{};
+    if (enable && last(state) && state.bus_volts < CHARGE_SAFE_VOLTS) {
+        ESP_LOGW(TAG, "pack at %.2f V, below the %.1f V floor - charger left off", state.bus_volts,
+                 CHARGE_SAFE_VOLTS);
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    // Recorded before it is attempted, so a transient I2C failure here is
+    // retried by reassert_charging rather than leaving the charger off for the
+    // whole uptime.
+    s_charging_wanted = enable;
+    ESP_RETURN_ON_ERROR(apply_charging(enable), TAG, "charge pins");
     ESP_LOGI(TAG, "charger %s", enable ? "enabled (fast)" : "disabled");
     return ESP_OK;
 }
@@ -323,24 +352,45 @@ esp_err_t read(State &out)
 
 esp_err_t probe_pack(bool &present)
 {
-    const bool charging = s_charging_wanted;
-    if (charging) {
-        ESP_RETURN_ON_ERROR(set_charging(false), TAG, "charger off for probe");
-        vTaskDelay(PROBE_SETTLE);
+    State now{};
+    const esp_err_t err = read(now);
+    if (err != ESP_OK) {
+        present = s_pack_present.load(std::memory_order_relaxed);
+        return err;
     }
 
+    const bool in_range = now.bus_volts >= PACK_MIN_VOLTS && now.bus_volts <= PACK_MAX_VOLTS;
+
+    // Current in either direction could only have come from a pack, and with
+    // the charger off there is nothing propping the voltage up, so in both of
+    // those cases the reading just taken is already as settled as switching the
+    // charger off would make it.
+    if (std::fabs(now.current_amps) > CURRENT_DEADBAND_A || !s_charging_wanted) {
+        present = in_range;
+        s_pack_present.store(present, std::memory_order_relaxed);
+        return ESP_OK;
+    }
+
+    // Charging with nothing moving through the shunt: either a pack that is
+    // full or a socket with nothing in it, and only interrupting tells them
+    // apart.
+    ESP_RETURN_ON_ERROR(apply_charging(false), TAG, "charger off for probe");
+    vTaskDelay(PROBE_SETTLE);
+
     State settled{};
-    const esp_err_t err = read(settled);
-    present = err == ESP_OK && settled.bus_volts >= PACK_MIN_VOLTS &&
+    const esp_err_t settled_err = read(settled);
+    present = settled_err == ESP_OK && settled.bus_volts >= PACK_MIN_VOLTS &&
               settled.bus_volts <= PACK_MAX_VOLTS;
     s_pack_present.store(present, std::memory_order_relaxed);
 
-    // Only back on if something is there to charge. set_charging refuses a pack
-    // below its floor anyway, and an empty socket reads far below it.
-    if (charging && present) {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(set_charging(true));
+    if (present) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(apply_charging(true));
+    } else {
+        // Nothing to charge, and apply_charging does not record that the way
+        // set_charging would, so reassert_charging would put it straight back.
+        s_charging_wanted = false;
     }
-    return err;
+    return settled_err;
 }
 
 bool last(State &out)

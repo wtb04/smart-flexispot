@@ -39,7 +39,7 @@ constexpr TickType_t WAKE_RETRY = pdMS_TO_TICKS(5000);
 
 // This task puts notifications on screen: it copies a Notice onto its stack and
 // then walks LVGL's label and layout paths.
-constexpr std::uint32_t TASK_STACK    = 6144;
+constexpr std::uint32_t TASK_STACK    = 4096;  // measured: uses 1.8 KB
 constexpr UBaseType_t   TASK_PRIORITY = 3;
 constexpr BaseType_t    TASK_CORE     = 0;
 
@@ -223,15 +223,39 @@ std::atomic<int>  s_motion{0};  // -1 down, 0 idle, +1 up
 // needs, and redrawing an already-correct label just costs the LVGL task time.
 void on_height(int height_mm);
 
-// Straight from the link to the screen. Reading it from the supervisor instead
-// sampled what the box reports every fifty-five milliseconds once every two
-// hundred, which is what made the height feel like it was catching up.
+// The status arrives on the Bluetooth host task. Pushing it to the screen from
+// there means taking the LVGL lock on the task that runs the Bluetooth stack:
+// a render in progress would block it for as long as it took, which delays
+// every command including Stop and risks the supervision timeout. So the
+// height is handed to a task of our own and the host task goes back to work.
+std::atomic<int> s_pending_height{-1};
+TaskHandle_t     s_height_pump = nullptr;
+
+constexpr std::uint32_t PUMP_STACK = 2048;  // measured: uses 0.7 KB
+StaticTask_t            s_pump_ctrl;
+StackType_t             s_pump_stack[PUMP_STACK];
+
 void on_proxy_status(int height_mm, bool box_linked, deskproto::Motion motion)
 {
     (void)box_linked;
     (void)motion;
-    if (height_mm >= 0) {
-        on_height(height_mm);
+    if (height_mm < 0) {
+        return;
+    }
+    s_pending_height.store(height_mm, std::memory_order_relaxed);
+    if (s_height_pump != nullptr) {
+        xTaskNotifyGive(s_height_pump);
+    }
+}
+
+[[noreturn]] void height_pump_task(void *)
+{
+    for (;;) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        const int height = s_pending_height.load(std::memory_order_relaxed);
+        if (height >= 0) {
+            on_height(height);
+        }
     }
 }
 
@@ -397,6 +421,9 @@ esp_err_t start()
     s_over_ble = settings::enabled(settings::Key::DeskBluetooth);
     ESP_LOGI(TAG, "driving the desk over %s", s_over_ble ? "bluetooth" : "the local wire");
     if (s_over_ble) {
+        s_height_pump = xTaskCreateStatic(height_pump_task, "deskht", PUMP_STACK, nullptr,
+                                          TASK_PRIORITY, s_pump_stack, &s_pump_ctrl);
+        ESP_RETURN_ON_FALSE(s_height_pump != nullptr, ESP_ERR_NO_MEM, TAG, "height pump");
         ble::desk::on_status(on_proxy_status);
     }
     if (!s_over_ble) {
