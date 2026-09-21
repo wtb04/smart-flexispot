@@ -109,6 +109,12 @@ struct Handlers {
 /** Requires the LVGL port to be running. */
 esp_err_t init(const Handlers &handlers, int initial_brightness);
 
+// Advances the startup screen. Ignored once it has been dismissed.
+esp_err_t splash_step(const char *label, int percent);
+
+// Fades out the startup screen. Safe to call more than once.
+esp_err_t splash_done();
+
 /** Height in millimetres, or negative for "unknown". */
 esp_err_t set_height(int height_mm);
 

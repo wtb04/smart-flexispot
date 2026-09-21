@@ -1373,6 +1373,166 @@ void create_content(lv_obj_t *parent)
     select_page(0);
 }
 
+lv_obj_t   *s_splash       = nullptr;
+lv_obj_t   *s_splash_bar   = nullptr;
+lv_obj_t   *s_splash_step  = nullptr;
+lv_obj_t   *s_splash_top   = nullptr;
+lv_obj_t   *s_splash_leg[2] = {};
+lv_timer_t *s_splash_guard = nullptr;
+bool        s_splash_up    = false;
+lv_timer_t  *s_splash_tick  = nullptr;
+std::int32_t s_splash_shown  = 0;
+std::int32_t s_splash_floor  = 0;
+std::uint32_t s_splash_start = 0;
+bool         s_splash_ready  = false;
+
+// Hundredths of a percent: at whole percent each step moved the bar almost
+// four pixels, which reads as ticking however often it runs.
+constexpr std::int32_t SPLASH_FULL = 10000;
+
+constexpr std::int32_t DESK_W     = 260;
+constexpr std::int32_t DESK_H     = 150;
+constexpr std::int32_t DESK_BAR   = 14;
+constexpr std::int32_t DESK_LOW   = DESK_H - 58;
+constexpr std::int32_t DESK_HIGH  = 6;
+
+void splash_hide(lv_anim_t *)
+{
+    lv_obj_set_hidden(s_splash, true);
+    if (s_splash_tick != nullptr) {
+        lv_timer_delete(s_splash_tick);
+        s_splash_tick = nullptr;
+    }
+}
+
+void splash_opa(void *target, std::int32_t value)
+{
+    lv_obj_set_style_opa(static_cast<lv_obj_t *>(target), static_cast<lv_opa_t>(value), 0);
+}
+
+// The desk stands up as the panel comes up.
+void splash_raise(std::int32_t progress)
+{
+    lv_bar_set_value(s_splash_bar, progress, LV_ANIM_OFF);
+
+    const std::int32_t top = DESK_LOW - (DESK_LOW - DESK_HIGH) * progress / SPLASH_FULL;
+    lv_obj_set_y(s_splash_top, top);
+    for (lv_obj_t *leg : s_splash_leg) {
+        lv_obj_set_y(leg, top + DESK_BAR);
+        lv_obj_set_height(leg, DESK_H - DESK_BAR - 10 - top);
+    }
+}
+
+// Measured on the device: the display wakes at 3.9 s and Home Assistant is
+// authenticated at 12.3 s.
+constexpr std::uint32_t SPLASH_EXPECTED_MS = 8400;
+constexpr std::int32_t  SPLASH_PREDICTED   = 90 * SPLASH_FULL / 100;
+constexpr std::int32_t  SPLASH_TAIL        = 99 * SPLASH_FULL / 100;
+
+// Driven by the clock rather than by the startup steps. The steps are seconds
+// apart and unevenly spaced, so following them meant standing still through
+// the long waits however smoothly each jump was eased. Since how long the
+// whole thing takes is known, the bar runs to its own schedule and eases out
+// as it approaches it; if the panel is not ready by then it keeps going,
+// slower and slower, rather than stopping. A step that lands ahead of
+// schedule pulls it forward.
+void splash_animate(lv_timer_t *)
+{
+    const std::uint32_t elapsed = lv_tick_elaps(s_splash_start);
+
+    std::int32_t target;
+    if (s_splash_ready) {
+        target = SPLASH_FULL;
+    } else if (elapsed < SPLASH_EXPECTED_MS) {
+        const float t = static_cast<float>(elapsed) / SPLASH_EXPECTED_MS;
+        target = static_cast<std::int32_t>(SPLASH_PREDICTED * (1.0f - (1.0f - t) * (1.0f - t)));
+    } else {
+        const float over = static_cast<float>(elapsed - SPLASH_EXPECTED_MS) / 4000.0f;
+        target = SPLASH_PREDICTED +
+                 static_cast<std::int32_t>((SPLASH_TAIL - SPLASH_PREDICTED) *
+                                           (1.0f - std::exp(-over)));
+    }
+    target = target > s_splash_floor ? target : s_splash_floor;
+
+    if (s_splash_shown == target) {
+        return;
+    }
+    const std::int32_t gap  = target - s_splash_shown;
+    const std::int32_t step = gap / 12;
+    s_splash_shown += step != 0 ? step : (gap > 0 ? 1 : -1);
+    splash_raise(s_splash_shown);
+}
+
+void splash_expired(lv_timer_t *)
+{
+    s_splash_guard = nullptr;
+    ESP_ERROR_CHECK_WITHOUT_ABORT(splash_done());
+}
+
+lv_obj_t *splash_bar(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int32_t w,
+                     std::int32_t h, std::uint32_t colour)
+{
+    lv_obj_t *bar = lv_obj_create(parent);
+    lv_obj_set_pos(bar, x, y);
+    lv_obj_set_size(bar, w, h);
+    theme::style_panel(bar, colour, 3);
+    lv_obj_set_clickable(bar, false);
+    return bar;
+}
+
+void build_splash()
+{
+    const Layout l = layout();
+
+    s_splash = lv_obj_create(lv_layer_top());
+    lv_obj_set_pos(s_splash, 0, 0);
+    lv_obj_set_size(s_splash, l.screen_w, l.screen_h);
+    theme::style_panel(s_splash, theme::background, 0);
+    lv_obj_set_clickable(s_splash, true);
+    s_splash_up = true;
+
+    lv_obj_t *desk = lv_obj_create(s_splash);
+    lv_obj_set_size(desk, DESK_W, DESK_H);
+    lv_obj_align(desk, LV_ALIGN_CENTER, 0, -110);
+    theme::style_panel(desk, theme::background, 0);
+    lv_obj_set_style_bg_opa(desk, LV_OPA_TRANSP, 0);
+    lv_obj_set_clickable(desk, false);
+
+    splash_bar(desk, 6, DESK_H - 10, 76, 10, theme::panel_light);
+    splash_bar(desk, DESK_W - 82, DESK_H - 10, 76, 10, theme::panel_light);
+    s_splash_leg[0] = splash_bar(desk, 34, 0, DESK_BAR, 10, theme::panel_light);
+    s_splash_leg[1] = splash_bar(desk, DESK_W - 34 - DESK_BAR, 0, DESK_BAR, 10,
+                                 theme::panel_light);
+    s_splash_top = splash_bar(desk, 0, 0, DESK_W, DESK_BAR, theme::orange);
+
+    lv_obj_align(theme::make_label(s_splash, "SMART FLEXISPOT", theme::text, fonts::size_48()),
+                 LV_ALIGN_CENTER, 0, 40);
+    lv_obj_align(theme::make_label(s_splash, "Wouter ten Brinke", theme::secondary,
+                                   fonts::size_20()),
+                 LV_ALIGN_CENTER, 0, 86);
+
+    s_splash_bar = lv_bar_create(s_splash);
+    lv_obj_set_size(s_splash_bar, 360, 6);
+    lv_obj_align(s_splash_bar, LV_ALIGN_CENTER, 0, 138);
+    theme::style_panel(s_splash_bar, theme::panel_light, 3);
+    lv_obj_set_style_bg_color(s_splash_bar, lv_color_hex(theme::orange), LV_PART_INDICATOR);
+    lv_obj_set_style_radius(s_splash_bar, 3, LV_PART_INDICATOR);
+    lv_bar_set_range(s_splash_bar, 0, SPLASH_FULL);
+
+    s_splash_step = theme::make_label(s_splash, "starting", theme::secondary, fonts::size_16());
+    lv_obj_align(s_splash_step, LV_ALIGN_CENTER, 0, 164);
+
+    splash_raise(0);
+    s_splash_start = lv_tick_get();
+    s_splash_tick  = lv_timer_create(splash_animate, 16, nullptr);
+
+    // Home Assistant is reachable about eight seconds after the display wakes,
+    // so this is the backstop, not the usual path: telemetry dismisses it as
+    // soon as the network, the broker and the socket are all up.
+    s_splash_guard = lv_timer_create(splash_expired, 10000, nullptr);
+    lv_timer_set_repeat_count(s_splash_guard, 1);
+}
+
 void build_screen()
 {
     lv_obj_t *scr = lv_screen_active();
@@ -1384,9 +1544,58 @@ void build_screen()
     create_content(scr);
     create_drawer(scr);  // after the content, so it overlays it when open
     create_notice_card();
+    build_splash();  // last, so it covers everything until startup finishes
 }
 
 }  // namespace
+
+esp_err_t splash_step(const char *label, int percent)
+{
+    ESP_RETURN_ON_FALSE(s_splash != nullptr, ESP_ERR_INVALID_STATE, TAG, "not initialised");
+    if (!s_splash_up) {
+        return ESP_OK;
+    }
+    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
+
+    theme::set_text(s_splash_step, label);
+    const std::int32_t wanted = percent * SPLASH_FULL / 100;
+    if (wanted > s_splash_floor) {
+        s_splash_floor = wanted;
+    }
+    lvgl_port_unlock();
+    return ESP_OK;
+}
+
+esp_err_t splash_done()
+{
+    ESP_RETURN_ON_FALSE(s_splash != nullptr, ESP_ERR_INVALID_STATE, TAG, "not initialised");
+    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
+
+    if (s_splash_up) {
+        s_splash_up = false;
+        s_splash_ready = true;
+        theme::set_text(s_splash_step, "ready");
+
+        // A full-screen blend per frame. Affordable once at boot with nothing
+        // else running; not a pattern to reuse for anything on top of a page.
+        lv_anim_t fade;
+        lv_anim_init(&fade);
+        lv_anim_set_var(&fade, s_splash);
+        lv_anim_set_exec_cb(&fade, splash_opa);
+        lv_anim_set_values(&fade, LV_OPA_COVER, LV_OPA_TRANSP);
+        lv_anim_set_delay(&fade, 500);
+        lv_anim_set_duration(&fade, 380);
+        lv_anim_set_completed_cb(&fade, splash_hide);
+        lv_anim_start(&fade);
+
+        if (s_splash_guard != nullptr) {
+            lv_timer_delete(s_splash_guard);
+            s_splash_guard = nullptr;
+        }
+    }
+    lvgl_port_unlock();
+    return ESP_OK;
+}
 
 esp_err_t init(const Handlers &handlers, int initial_brightness)
 {

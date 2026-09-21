@@ -156,7 +156,7 @@ esp_err_t start(const Handlers &handlers)
     cfg.network.reconnect_timeout_ms = 5000;
     // The discovery payload is several kilobytes; the 1024 default fragments it.
     cfg.buffer.size     = 2048;
-    cfg.buffer.out_size = 4096;
+    cfg.buffer.out_size = 8192;
 
     s_client = esp_mqtt_client_init(&cfg);
     ESP_RETURN_ON_FALSE(s_client != nullptr, ESP_FAIL, TAG, "init");

@@ -32,11 +32,15 @@ extern "C" void app_main(void)
     // Neither is fatal: panicking here put the panel in a boot loop over a
     // peripheral it can perfectly well run without.
     ESP_ERROR_CHECK_WITHOUT_ABORT(desk::start());
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("desk", 25));
     ESP_ERROR_CHECK_WITHOUT_ABORT(battery::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(sound::init());
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("power", 45));
     ESP_ERROR_CHECK_WITHOUT_ABORT(wifi::start());
     ESP_ERROR_CHECK(wallclock::start());
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("network", 70));
     ESP_ERROR_CHECK_WITHOUT_ABORT(telemetry::start());
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("home assistant", 85));
 
     ESP_LOGI(TAG, "up");
     // app_main returns; the LVGL, loctek and supervisor tasks carry on.

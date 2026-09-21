@@ -170,6 +170,10 @@ void on_album_art(const void *pixels)
         ESP_ERROR_CHECK_WITHOUT_ABORT(
             ui::set_presence(radio.has_key, radio.phone_present, radio.ever_seen));
 
+        if (wifi::connected() && hass::connected() && hass::ws::connected()) {
+            ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_done());
+        }
+
         // Last, so everything gathered above is in the document. Returns an
         // error while the broker is unreachable, which is normal and not worth
         // logging every two seconds.
