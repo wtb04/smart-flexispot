@@ -415,7 +415,7 @@ constexpr const char *POWER_TAGS[]     = {"power", "battery"};
 constexpr const char *DESK_TAGS[]      = {"desk", "loctek", "desklink", "deskproxy", "proxy"};
 constexpr const char *RADAR_TAGS[]     = {"radar"};
 constexpr const char *MEDIA_TAGS[]     = {"media", "sound"};
-constexpr const char *CALENDAR_TAGS[]  = {"ical"};
+constexpr const char *CALENDAR_TAGS[]  = {"ical", "travel"};
 constexpr const char *SYSTEM_TAGS[]    = {
     "tab5",  "ui",     "diag",   "clock",     "settings",  "logbuf",   "board",
     "rtc",   "main_task", "cpu_start", "heap_init", "spiram", "esp_psram", "esp_image"};

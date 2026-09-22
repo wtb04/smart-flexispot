@@ -17,6 +17,7 @@
 #include "sound.h"
 #include "room.h"
 #include "telemetry.h"
+#include "travel.h"
 #include "ui.h"
 #include "wallclock.h"
 #include "wifi.h"
@@ -94,6 +95,11 @@ void on_calendar()
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_calendar());
 }
 
+void on_travel()
+{
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_calendar());
+}
+
 void on_restart()
 {
     ESP_LOGI(TAG, "restart requested from the panel");
@@ -151,6 +157,7 @@ extern "C" void app_main(void)
     ESP_ERROR_CHECK_WITHOUT_ABORT(telemetry::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(diagnostics::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(ical::start(on_calendar));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(travel::start(on_travel));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("home assistant", 85));
 
     ESP_LOGI(TAG, "up");

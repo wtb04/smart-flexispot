@@ -3,6 +3,7 @@
 #include "fonts/units_font.h"
 #include "ical.h"
 #include "theme.h"
+#include "travel.h"
 
 #include <cstdio>
 #include <ctime>
@@ -38,6 +39,7 @@ lv_obj_t *s_hero_when  = nullptr;
 lv_obj_t *s_hero_title = nullptr;
 lv_obj_t *s_hero_where = nullptr;
 lv_obj_t *s_hero_in    = nullptr;
+lv_obj_t *s_hero_travel = nullptr;
 Row       s_row[ROWS];
 
 std::uint32_t feed_ink(std::uint8_t feed)
@@ -86,6 +88,40 @@ Row make_row(lv_obj_t *parent, std::int32_t width)
     return row;
 }
 
+// One line under the hero: when to leave, and what to take.
+void show_travel(std::int64_t start, std::int64_t now)
+{
+    if (s_hero_travel == nullptr) {
+        return;
+    }
+    static travel::Option options[travel::kOptionsMax];
+    const int found = start == 0 ? 0 : travel::options(options, travel::kOptionsMax);
+
+    const travel::Option *best = nullptr;
+    for (int i = 0; i < found; ++i) {
+        if (options[i].leave >= now) {
+            best = &options[i];
+            break;
+        }
+    }
+    if (best == nullptr) {
+        theme::set_text(s_hero_travel, "");
+        return;
+    }
+
+    std::tm when{};
+    const auto at = static_cast<std::time_t>(best->leave);
+    localtime_r(&at, &when);
+
+    char text[96];
+    int  used = std::snprintf(text, sizeof(text), "Leave %02d:%02d", when.tm_hour, when.tm_min);
+    for (int i = 0; i < best->leg_count && used < static_cast<int>(sizeof(text)) - 1; ++i) {
+        used += std::snprintf(text + used, sizeof(text) - static_cast<std::size_t>(used),
+                              "  %s %s", best->legs[i].mode, best->legs[i].line);
+    }
+    theme::set_text(s_hero_travel, text);
+}
+
 }  // namespace
 
 void show_calendar()
@@ -97,6 +133,10 @@ void show_calendar()
     static ical::Event ahead[ROWS + 1];
     const int          count = ical::upcoming(ahead, ROWS + 1);
     const auto         now   = static_cast<std::int64_t>(std::time(nullptr));
+
+    constexpr std::int64_t ASK_WITHIN = 4 * 3600;
+    travel::want(count > 0 && ahead[0].start - now < ASK_WITHIN ? ahead[0].start : 0);
+    show_travel(count > 0 ? ahead[0].start : 0, now);
 
     if (count == 0) {
         theme::set_text(s_hero_in, "");
@@ -178,6 +218,9 @@ void build_calendar_page(lv_obj_t *page, std::int32_t width, std::int32_t height
 
     s_hero_where = theme::make_label(hero, "", theme::secondary, fonts::size_20());
     lv_obj_set_pos(s_hero_where, 0, 116);
+
+    s_hero_travel = theme::make_accent_label(hero, "", fonts::size_20());
+    lv_obj_align(s_hero_travel, LV_ALIGN_TOP_RIGHT, 0, 116);
 
     lv_obj_t *rest = lv_obj_create(page);
     lv_obj_set_pos(rest, 0, TOP + HERO_H + 16);
