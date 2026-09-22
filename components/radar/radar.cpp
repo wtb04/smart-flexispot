@@ -52,6 +52,9 @@ constexpr char AGENT[]       = "tab5-panel";
 // level, so changing the zoom shows the right aircraft at once instead of the
 // previous range's until the next request comes back.
 constexpr int    RANGE_DEFAULT_KM = 160;
+
+// How coarsely the home position is rounded before anything is asked about it.
+constexpr float HOME_GRID_DEG = 0.01f;
 constexpr float  NM_PER_KM        = 0.539957f;
 std::atomic<int>  s_range_km{RANGE_DEFAULT_KM};
 std::atomic<bool> s_force_fetch{false};
@@ -153,14 +156,19 @@ CacheEntry *s_cache = nullptr;
 SemaphoreHandle_t s_lock = nullptr;
 StaticSemaphore_t s_lock_ctrl;
 
-Aircraft     s_list[kMaxAircraft];
+// In PSRAM, not in .bss. An aircraft record is 108 bytes and there are four
+// copies of the list between the parser and the screen, which at sixty aircraft
+// is thirty kilobytes of the only internal pool DMA can reach -- the pool the
+// Wi-Fi transport asserts without. Nothing here is touched from an interrupt or
+// with the cache off, so none of it has any business being there.
+Aircraft    *s_list = nullptr;
 int          s_count      = 0;
 
 // Static rather than automatic: an Aircraft is sixty-odd bytes and forty of
 // them is two and a half kilobytes, which is not something to put on a stack
 // that is already carrying a TLS session.
-Aircraft s_scratch[kMaxAircraft];
-Snapshot s_published;
+Aircraft *s_scratch  = nullptr;
+Snapshot *s_published = nullptr;
 bool         s_ok         = false;
 std::int64_t s_fetched_us = 0;
 
@@ -331,8 +339,8 @@ bool fetch(float lat, float lon)
              static_cast<unsigned>(s_body_len));
 
     if (s_on_update != nullptr) {
-        snapshot(s_published);
-        s_on_update(s_published);
+        snapshot(*s_published);
+        s_on_update(*s_published);
     }
     return true;
 }
@@ -711,6 +719,15 @@ esp_err_t start(UpdateHandler on_update, DetailsHandler on_details, PhotoHandler
         static_cast<std::size_t>(PHOTO_MAX_W) * PHOTO_MAX_H * 2, MALLOC_CAP_SPIRAM));
     ESP_RETURN_ON_FALSE(s_photo != nullptr, ESP_ERR_NO_MEM, TAG, "photo buffer");
 
+    s_list      = static_cast<Aircraft *>(
+        heap_caps_calloc(kMaxAircraft, sizeof(Aircraft), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    s_scratch   = static_cast<Aircraft *>(
+        heap_caps_calloc(kMaxAircraft, sizeof(Aircraft), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    s_published = static_cast<Snapshot *>(
+        heap_caps_calloc(1, sizeof(Snapshot), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    ESP_RETURN_ON_FALSE(s_list != nullptr && s_scratch != nullptr && s_published != nullptr,
+                        ESP_ERR_NO_MEM, TAG, "aircraft buffers");
+
     s_cache = static_cast<CacheEntry *>(
         heap_caps_calloc(CACHE_SIZE, sizeof(CacheEntry), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     ESP_RETURN_ON_FALSE(s_cache != nullptr, ESP_ERR_NO_MEM, TAG, "lookup cache");
@@ -794,8 +811,14 @@ void set_home(float lat, float lon)
     if (first) {
         s_home_at_us = esp_timer_get_time();
     }
-    s_home_lat       = lat;
-    s_home_lon       = lon;
+    // Snapped to a coarse grid before it is stored, so neither the feed's url
+    // nor anything drawn from it carries the actual address. A hundredth of a
+    // degree is about a kilometre of latitude and rather less of longitude,
+    // which on an eighty kilometre scope is a pixel or two -- and the panel
+    // ends up on a lattice point shared with everyone else nearby rather than
+    // on its own doorstep.
+    s_home_lat       = std::round(lat / HOME_GRID_DEG) * HOME_GRID_DEG;
+    s_home_lon       = std::round(lon / HOME_GRID_DEG) * HOME_GRID_DEG;
     s_has_home       = true;
     xSemaphoreGive(s_lock);
 

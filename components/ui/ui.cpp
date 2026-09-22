@@ -3,6 +3,7 @@
 #include "board.h"
 #include "media.h"
 #include "esp_check.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
 #include "lvgl.h"
@@ -1705,9 +1706,18 @@ void refresh_log()
     if (s_log_shown < 0 || s_handlers.log == nullptr) {
         return;
     }
-    static char text[LOG_TEXT_MAX];
-    s_handlers.log(INFO_CARDS[s_log_shown].title, text, sizeof(text));
+    // Four kilobytes held for the whole uptime to be used only while a log is
+    // on screen, and held in the one internal pool DMA can reach. Taken from
+    // PSRAM when it is actually wanted instead.
+    auto *text = static_cast<char *>(
+        heap_caps_malloc(LOG_TEXT_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (text == nullptr) {
+        return;
+    }
+    text[0] = '\0';
+    s_handlers.log(INFO_CARDS[s_log_shown].title, text, LOG_TEXT_MAX);
     theme::set_text(s_log_text, text[0] != '\0' ? text : "Nothing logged yet");
+    heap_caps_free(text);
 }
 
 // Deliberately does not scroll: new lines arrive under whatever is being read,

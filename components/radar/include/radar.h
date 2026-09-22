@@ -12,7 +12,7 @@ namespace radar {
 // from internal memory: sixty took the low-water mark from 44 KB to 15 KB, and
 // this corner of the sky has never held forty at a hundred and sixty
 // kilometres.
-inline constexpr int kMaxAircraft = 40;
+inline constexpr int kMaxAircraft = 60;
 
 struct Snapshot {
     Aircraft list[kMaxAircraft];

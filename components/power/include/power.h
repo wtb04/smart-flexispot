@@ -37,6 +37,10 @@ esp_err_t read(State &out);
  *  for a few hundred milliseconds. */
 esp_err_t probe_pack(bool &present);
 
+/** TEMPORARY: logs both IO expanders' input registers, to find out whether any
+ *  pin tracks the battery. */
+void log_expanders();
+
 /** The most recent successful read, without touching the bus. False if there
  *  has not been one. */
 bool last(State &out);

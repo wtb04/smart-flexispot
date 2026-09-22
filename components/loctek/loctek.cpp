@@ -6,6 +6,7 @@
 
 #include <cstring>
 #include "esp_check.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -50,10 +51,16 @@ QueueHandle_t s_move_queue = nullptr;
 StaticSemaphore_t s_tx_mutex_ctrl;
 SemaphoreHandle_t s_tx_mutex = nullptr;
 
+// Created rather than reserved. The desk can be driven over the wire or over
+// Bluetooth and only one of those is chosen at a time, but a static stack is
+// reserved either way -- six kilobytes of the only internal pool DMA can reach,
+// held for a driver that never starts when the proxy is doing the talking. A
+// task stack has to stay in internal memory: a task whose stack is in PSRAM
+// cannot run while the cache is off.
 StaticTask_t s_tx_task_ctrl;
-StackType_t  s_tx_task_stack[TX_TASK_STACK];
 StaticTask_t s_rx_task_ctrl;
-StackType_t  s_rx_task_stack[RX_TASK_STACK];
+StackType_t *s_tx_task_stack = nullptr;
+StackType_t *s_rx_task_stack = nullptr;
 
 HeightHandler s_on_height = nullptr;
 
@@ -303,6 +310,13 @@ esp_err_t start(HeightHandler on_height)
     s_move_queue = queue;
     s_tx_mutex   = xSemaphoreCreateMutexStatic(&s_tx_mutex_ctrl);
     ESP_RETURN_ON_FALSE(s_tx_mutex != nullptr, ESP_ERR_NO_MEM, TAG, "tx mutex");
+
+    s_rx_task_stack = static_cast<StackType_t *>(
+        heap_caps_malloc(RX_TASK_STACK * sizeof(StackType_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    s_tx_task_stack = static_cast<StackType_t *>(
+        heap_caps_malloc(TX_TASK_STACK * sizeof(StackType_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    ESP_RETURN_ON_FALSE(s_rx_task_stack != nullptr && s_tx_task_stack != nullptr, ESP_ERR_NO_MEM,
+                        TAG, "task stacks");
 
     TaskHandle_t rx = xTaskCreateStaticPinnedToCore(rx_task, "loctek_rx", RX_TASK_STACK, nullptr,
                                                     RX_TASK_PRIORITY, s_rx_task_stack,

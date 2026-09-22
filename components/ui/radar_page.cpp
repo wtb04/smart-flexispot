@@ -61,6 +61,11 @@ constexpr int RANGES[]     = {20, 40, 60, 80, 100, 120, 140, 160};
 constexpr int RANGE_COUNT  = static_cast<int>(std::size(RANGES));
 constexpr int RANGE_BUTTON = 72;
 
+// Long enough to read as movement, short enough that a second press is not
+// waiting on it. The rings never move -- they are fixed fractions of whatever
+// the range is -- so only the ground and the aircraft travel.
+constexpr std::uint32_t ZOOM_MS = 260;
+
 // A degree of latitude is 110.57 km and a degree of longitude is 111.32 km
 // times the cosine of the latitude. Flat earth over eighty kilometres is off by
 // less than the width of the line being drawn.
@@ -149,11 +154,18 @@ struct Row {
 lv_obj_t *s_scope  = nullptr;
 lv_obj_t *s_marker = nullptr;
 lv_obj_t   *s_rings[RINGS]  = {};
+// While a zoom runs, the range the scope is drawn at slides from the old value
+// to the new one and the two ground pictures are scaled rather than redrawn;
+// rasterising them every frame would cost far more than it is worth.
+float       s_shown_range   = 0.0f;
+int         s_zoom_from     = 0;
 lv_obj_t   *s_zoom_in       = nullptr;
 lv_obj_t   *s_zoom_out      = nullptr;
 int         s_range_step    = 3;  // 80 km, which is where it starts
 
-Blip               s_blips[radar::kMaxAircraft] = {};
+// The last of the per-aircraft cost to leave the internal pool. With these in
+// PSRAM, raising how many aircraft the scope keeps costs it nothing.
+Blip              *s_blips = nullptr;
 lv_obj_t          *s_rim[RIM_DOTS]              = {};
 lv_obj_t          *s_legend[LEGEND_STEPS]       = {};
 
@@ -203,7 +215,9 @@ char           s_details_hex[radar::kHexLen] = {};
 
 // Held so the panel can be redrawn when the selection changes rather than only
 // when a reading lands.
-radar::Snapshot s_last                   = {};
+// In PSRAM: a Snapshot carries the whole aircraft list, and this is the fourth
+// copy of it. None of it is touched from an interrupt or with the cache off.
+radar::Snapshot *s_last = nullptr;
 char            s_chosen[radar::kHexLen] = {};
 
 // Until the page is tapped it follows the nearest aircraft on its own, so
@@ -230,7 +244,7 @@ struct Plot {
     std::int32_t           label_w;
 };
 
-Plot s_plots[radar::kMaxAircraft];
+Plot *s_plots = nullptr;
 int  s_shown  = 0;
 int  s_beyond = 0;
 
@@ -432,7 +446,7 @@ void scope_clicked(lv_event_t *event)
             radar::request_details(s_chosen, s_plots[best].aircraft->flight);
         }
     }
-    show_radar(s_last);
+    show_radar(*s_last);
 }
 
 // The scope's background is clipped to a circle, so its square's bottom-left
@@ -654,19 +668,95 @@ void paint_range_buttons()
 // buttons go to and the page shows whichever of those are inside the one it is
 // set to, so zooming is instant and never shows the wrong aircraft while a
 // request for the new range is still in the air.
-void apply_range()
+// The ground travels with the aircraft rather than fading: it was the full
+// redraw on every frame that made the first attempt stutter, not the transform.
+void scale_ground(float factor)
 {
-    const int range_km = RANGES[s_range_step];
+    const auto zoom = static_cast<std::uint32_t>(std::lround(factor * 256.0f));
+    for (lv_obj_t *canvas : {s_water_canvas, s_land_canvas}) {
+        if (canvas != nullptr) {
+            lv_image_set_pivot(canvas, s_centre, s_centre);
+            lv_image_set_scale(canvas, zoom);
+        }
+    }
+}
+
+void place_blip(Plot &plot, float range_km);
+
+// A frame of a zoom moves what is already on the scope and nothing else. The
+// full redraw sorts the aircraft, works out which tags can be shown without
+// touching, and rewrites the column; none of that changes while the range
+// slides, and doing it sixty times a second is what made the zoom stutter.
+void move_blips(float range_km)
+{
+    for (int i = 0; i < s_shown; ++i) {
+        // Zooming in takes the edge of the scope past aircraft that were inside
+        // it, and they have to leave with it rather than carry on outwards
+        // across the rest of the page.
+        const float distance_km = s_plots[i].aircraft->distance_nm * KM_PER_NM;
+        const bool  gone        = distance_km > range_km;
+        lv_obj_set_hidden(s_blips[i].shape, gone);
+        lv_obj_set_hidden(s_blips[i].dot, gone);
+        lv_obj_set_hidden(s_blips[i].label, true);
+        if (gone) {
+            continue;
+        }
+        place_blip(s_plots[i], range_km);
+        lv_obj_set_pos(s_blips[i].shape, s_plots[i].x - BOX / 2, s_plots[i].y - BOX / 2);
+        lv_obj_set_pos(s_blips[i].dot, s_plots[i].x - DOT_SIZE / 2, s_plots[i].y - DOT_SIZE / 2);
+    }
+    lv_obj_set_hidden(s_marker, true);
+}
+
+void zoom_step(void *, std::int32_t value)
+{
+    const auto  from = static_cast<float>(s_zoom_from);
+    const auto  to   = static_cast<float>(RANGES[s_range_step]);
+    const float t    = static_cast<float>(value) / 256.0f;
+
+    s_shown_range = from + (to - from) * t;
+    // The ground was rasterised at the range the zoom started from, so it grows
+    // by however much closer the scope has come since.
+    scale_ground(from / s_shown_range);
+    move_blips(s_shown_range);
+}
+
+void zoom_done(lv_anim_t *)
+{
+    const int settled = RANGES[s_range_step];
+    s_shown_range     = static_cast<float>(settled);
+    scale_ground(1.0f);
+    if (s_map_lat != 0.0f || s_map_lon != 0.0f) {
+        draw_map(s_map_lat, s_map_lon, settled);
+    }
+    show_radar(*s_last);
+}
+
+void apply_range(int from_km)
+{
+    const int settled = RANGES[s_range_step];
     for (int i = 1; i <= RINGS; ++i) {
         char text[12];
-        std::snprintf(text, sizeof(text), "%d", range_km * i / RINGS);
+        std::snprintf(text, sizeof(text), "%d", settled * i / RINGS);
         theme::set_text(s_rings[i - 1], text);
     }
-    if (s_map_lat != 0.0f || s_map_lon != 0.0f) {
-        draw_map(s_map_lat, s_map_lon, range_km);
-    }
     paint_range_buttons();
-    show_radar(s_last);
+
+    if (from_km <= 0 || s_scope == nullptr) {
+        zoom_done(nullptr);
+        return;
+    }
+
+    s_zoom_from = from_km;
+    lv_anim_t anim;
+    lv_anim_init(&anim);
+    lv_anim_set_var(&anim, s_scope);
+    lv_anim_set_values(&anim, 0, 256);
+    lv_anim_set_duration(&anim, ZOOM_MS);
+    lv_anim_set_exec_cb(&anim, zoom_step);
+    lv_anim_set_completed_cb(&anim, zoom_done);
+    lv_anim_set_path_cb(&anim, lv_anim_path_ease_out);
+    lv_anim_start(&anim);
 }
 
 void range_clicked(lv_event_t *event)
@@ -677,8 +767,12 @@ void range_clicked(lv_event_t *event)
     if (next == s_range_step) {
         return;
     }
-    s_range_step = next;
-    apply_range();
+    // Whatever is on screen right now, so pressing again mid-animation carries
+    // on from where the scope has got to rather than jumping back.
+    const int from = s_shown_range > 0.0f ? static_cast<int>(std::lround(s_shown_range))
+                                          : RANGES[s_range_step];
+    s_range_step   = next;
+    apply_range(from);
 }
 
 // A button rather than a styled panel, so it grows under a finger the way every
@@ -693,7 +787,7 @@ lv_obj_t *build_range_button(lv_obj_t *parent, std::int32_t x, const char *text,
     theme::style_button(button, theme::panel_light);
     lv_obj_set_style_radius(button, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(button, lv_color_hex(theme::disabled), LV_STATE_DISABLED);
-    lv_obj_add_event_cb(button, range_clicked, LV_EVENT_CLICKED,
+    lv_obj_add_event_cb(button, range_clicked, LV_EVENT_PRESSED,
                         reinterpret_cast<void *>(static_cast<std::intptr_t>(step)));
 
     lv_obj_t *label = theme::make_label(button, text, theme::secondary, fonts::size_28());
@@ -760,14 +854,18 @@ void build_scope(lv_obj_t *parent, std::int32_t side, int range_km)
     lv_obj_t *home = lv_obj_create(scope);
     lv_obj_set_size(home, 8, 8);
     lv_obj_set_pos(home, s_centre - 4, s_centre - 4);
-    theme::style_panel(home, theme::orange, 4);
+    theme::style_panel(home, theme::panel, 4);
+    theme::fill_accent(home);
     quiet(home);
 
     s_marker = lv_obj_create(scope);
     lv_obj_set_size(s_marker, 34, 34);
     lv_obj_set_style_radius(s_marker, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_opa(s_marker, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_color(s_marker, lv_color_hex(theme::orange), 0);
+    // Repainted with the rest of the scope rather than carrying a shared style,
+    // since there is no border-coloured accent style and one object does not
+    // justify adding one.
+    lv_obj_set_style_border_color(s_marker, lv_color_hex(theme::primary), 0);
     lv_obj_set_style_border_width(s_marker, 2, 0);
     lv_obj_set_style_pad_all(s_marker, 0, 0);
     lv_obj_set_hidden(s_marker, true);
@@ -831,7 +929,8 @@ void build_column(lv_obj_t *parent, std::int32_t x, std::int32_t height)
     lv_obj_set_style_pad_all(column, 0, 0);
     quiet(column);
 
-    s_title     = stacked(column, 0, theme::orange, fonts::size_32());
+    s_title = stacked(column, 0, theme::text, fonts::size_32());
+    theme::ink_accent(s_title);
     s_operator  = stacked(column, 46, theme::text, fonts::size_20());
     s_airframe  = stacked(column, 76, theme::secondary, fonts::size_16());
     s_route     = stacked(column, 112, theme::text, fonts::size_28());
@@ -1180,7 +1279,7 @@ void show_selected(const radar::Aircraft &aircraft)
 
     show_picture();
 
-    theme::set_text(s_summary, shout != nullptr ? shout : (s_last.ok ? "" : "feed unreachable"));
+    theme::set_text(s_summary, shout != nullptr ? shout : (s_last->ok ? "" : "feed unreachable"));
     theme::set_text_color(s_summary, shout != nullptr ? theme::red : theme::amber);
 }
 
@@ -1188,14 +1287,25 @@ void show_selected(const radar::Aircraft &aircraft)
 
 void build_radar_page(lv_obj_t *page, std::int32_t width, std::int32_t height)
 {
+    s_last = static_cast<radar::Snapshot *>(
+        heap_caps_calloc(1, sizeof(radar::Snapshot), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    s_blips = static_cast<Blip *>(
+        heap_caps_calloc(radar::kMaxAircraft, sizeof(Blip), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    s_plots = static_cast<Plot *>(
+        heap_caps_calloc(radar::kMaxAircraft, sizeof(Plot), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (s_last == nullptr || s_blips == nullptr || s_plots == nullptr) {
+        return;
+    }
+
     const std::int32_t side = std::min(width - COLUMN_W - COLUMN_GAP, height);
+    s_shown_range = static_cast<float>(RANGES[s_range_step]);
     build_scope(page, side, RANGES[s_range_step]);
     build_legend(page, side);
     s_zoom_out = build_range_button(page, 4, LV_SYMBOL_MINUS, 1);
     s_zoom_in  = build_range_button(page, side - RANGE_BUTTON - 4, LV_SYMBOL_PLUS, -1);
     paint_range_buttons();
     build_column(page, side + COLUMN_GAP, height);
-    show_radar(s_last);
+    show_radar(*s_last);
 }
 
 void radar_page_opened()
@@ -1205,22 +1315,22 @@ void radar_page_opened()
 
 void show_radar(const radar::Snapshot &snapshot)
 {
-    if (s_scope == nullptr) {
+    if (s_scope == nullptr || s_last == nullptr || s_blips == nullptr) {
         return;
     }
-    if (&snapshot != &s_last) {
-        s_last = snapshot;
+    if (&snapshot != s_last) {
+        *s_last = snapshot;
     }
 
-    // What the page is set to rather than what the last reading was fetched
-    // at: the two differ for one sweep after the range is changed, and the
-    // scope should redraw at the range its rings are labelled with.
-    const int range_km = RANGES[s_range_step];
+    // Wherever the zoom has got to, so the aircraft travel with the ground
+    // instead of jumping to the new range while it is still moving.
+    const float range_km = s_shown_range > 0.0f ? s_shown_range
+                                                : static_cast<float>(RANGES[s_range_step]);
 
     // Only when the centre actually moves, which is once at startup.
-    if (s_last.home_lat != s_map_lat || s_last.home_lon != s_map_lon) {
-        s_map_lat = s_last.home_lat;
-        s_map_lon = s_last.home_lon;
+    if (s_last->home_lat != s_map_lat || s_last->home_lon != s_map_lon) {
+        s_map_lat = s_last->home_lat;
+        s_map_lon = s_last->home_lon;
         if (s_map_lat != 0.0f || s_map_lon != 0.0f) {
             draw_map(s_map_lat, s_map_lon, range_km);
         }
@@ -1228,13 +1338,13 @@ void show_radar(const radar::Snapshot &snapshot)
 
     s_shown      = 0;
     int rim_used = 0;
-    for (int i = 0; i < s_last.count && s_shown < radar::kMaxAircraft; ++i) {
-        const radar::Aircraft &aircraft = s_last.list[i];
+    for (int i = 0; i < s_last->count && s_shown < radar::kMaxAircraft; ++i) {
+        const radar::Aircraft &aircraft = s_last->list[i];
         if (aircraft.on_ground) {
             continue;
         }
         const float distance_km = aircraft.distance_nm * KM_PER_NM;
-        if (distance_km > static_cast<float>(range_km)) {
+        if (distance_km > range_km) {
             // Out past the edge, so it sits on the rim at its bearing instead
             // of vanishing: an empty scope and a quiet sky look the same.
             if (rim_used < RIM_DOTS) {
@@ -1242,7 +1352,7 @@ void show_radar(const radar::Snapshot &snapshot)
             }
             continue;
         }
-        s_plots[s_shown].aircraft = &s_last.list[i];
+        s_plots[s_shown].aircraft = &s_last->list[i];
         s_plots[s_shown].east_km  = distance_km * std::sin(aircraft.bearing_deg * DEG);
         s_plots[s_shown].north_km = distance_km * std::cos(aircraft.bearing_deg * DEG);
         ++s_shown;
@@ -1294,7 +1404,7 @@ void show_radar(const radar::Snapshot &snapshot)
     }
 
     for (int i = 0; i < s_shown; ++i) {
-        place_blip(s_plots[i], static_cast<float>(range_km));
+        place_blip(s_plots[i], range_km);
     }
 
     // Name everything that can be named without two tags touching. Where two
@@ -1316,6 +1426,13 @@ void show_radar(const radar::Snapshot &snapshot)
                 named[j] = false;
             }
         }
+    }
+
+    // The accent can change while the page is built, and this is the one thing
+    // on the scope wearing it that no shared style reaches.
+    const lv_color_t accent = lv_color_hex(theme::primary);
+    if (!theme::has_local_color(s_marker, LV_STYLE_BORDER_COLOR, 0, accent)) {
+        lv_obj_set_style_border_color(s_marker, accent, 0);
     }
 
     const radar::Aircraft *chosen = nullptr;
@@ -1342,7 +1459,7 @@ void show_radar(const radar::Snapshot &snapshot)
         // Either nothing is selected or what was has left the scope.
         s_chosen[0] = '\0';
         lv_obj_set_hidden(s_marker, true);
-        show_summary(s_last);
+        show_summary(*s_last);
     }
 
 }
@@ -1396,7 +1513,7 @@ void show_radar_details(const char *hex, const radar::Details &details)
     s_picture = !details.photo_checked          ? Picture::Loading
                 : details.photo_url[0] != '\0' ? Picture::Loading
                                                 : Picture::Missing;
-    show_radar(s_last);
+    show_radar(*s_last);
 }
 
 }  // namespace ui

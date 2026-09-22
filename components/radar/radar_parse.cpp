@@ -490,8 +490,25 @@ int parse(const char *json, std::size_t length, Aircraft *out, int capacity)
             // the scanner no longer knows where it is.
             break;
         }
-        if (usable && stored < capacity) {
-            out[stored++] = aircraft;
+        // The feed answers with everything in range -- well over a hundred over
+        // a busy country -- and there is only room for a few dozen. Keeping the
+        // first few dozen keeps them in whatever order the feed happened to
+        // use, which threw away most of what was overhead and left a scope
+        // showing a third of the sky. The nearest are the ones worth keeping.
+        if (usable && !aircraft.on_ground) {
+            if (stored < capacity) {
+                out[stored++] = aircraft;
+            } else {
+                int farthest = 0;
+                for (int i = 1; i < capacity; ++i) {
+                    if (out[i].distance_nm > out[farthest].distance_nm) {
+                        farthest = i;
+                    }
+                }
+                if (aircraft.distance_nm < out[farthest].distance_nm) {
+                    out[farthest] = aircraft;
+                }
+            }
         }
         if (in.take(',')) {
             continue;

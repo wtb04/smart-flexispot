@@ -50,6 +50,15 @@ StackType_t  s_task_stack[TASK_STACK];
             } else {
                 ESP_LOGI(TAG, "no pack (%.2f V)", state.bus_volts);
             }
+            // TEMPORARY: both IO expanders' input registers, logged every poll.
+            // The board exposes no documented battery-detect line -- M5's own
+            // BSP declares no battery support at all -- but six pins on the
+            // expander that carries the charger are unaccounted for. If one of
+            // them tracks the pack, presence becomes something to read rather
+            // than something to infer. Pull the pack out and watch for a bit
+            // that flips.
+            power::log_expanders();
+
             ESP_ERROR_CHECK_WITHOUT_ABORT(
                 ui::set_battery(state.present, state.percent, state.charging));
 

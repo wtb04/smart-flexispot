@@ -3,6 +3,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <algorithm>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -50,11 +51,12 @@ int run(const std::string &json, Aircraft *out, int capacity)
 }
 
 // A real capture over Schiphol: 46 aircraft, all with positions, 21 on stands.
+// The parser keeps the airborne ones, so twenty-five come back.
 void test_capture(const std::string &json)
 {
     std::vector<Aircraft> found(64);
     const int             count = run(json, found.data(), static_cast<int>(found.size()));
-    check(count == 46, "reads every aircraft in the capture");
+    check(count == 25, "keeps every airborne aircraft in the capture");
     if (count == 0) {
         return;
     }
@@ -74,11 +76,13 @@ void test_capture(const std::string &json)
     check(std::strcmp(first.desc, "EMBRAER ERJ-190-100") == 0, "description");
     check(first.squawk == 6335, "squawk, sent as a string");
 
+    // Twenty-one of the forty-six are on stands, and the only way they can be
+    // left out is by reading "ground" where a number of feet would be.
     int on_ground = 0;
     for (int i = 0; i < count; ++i) {
         on_ground += found[i].on_ground ? 1 : 0;
     }
-    check(on_ground == 21, "\"ground\" read where a number of feet would be");
+    check(on_ground == 0, "aircraft on stands are left out");
 }
 
 void test_capacity(const std::string &json)
@@ -86,6 +90,14 @@ void test_capacity(const std::string &json)
     std::vector<Aircraft> found(5);
     check(run(json, found.data(), 5) == 5, "stops at capacity");
     check(run(json, found.data(), 0) == 0, "no capacity reads nothing");
+
+    // Filling up must not mean keeping whatever came first: the feed answers
+    // with everything in range and the nearest are the ones worth the room.
+    float farthest = 0.0f;
+    for (const Aircraft &aircraft : found) {
+        farthest = std::max(farthest, aircraft.distance_nm);
+    }
+    check(close_to(farthest, 4.425f, 0.005f), "keeps the nearest, not the first");
 }
 
 void test_shapes()

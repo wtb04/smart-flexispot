@@ -171,7 +171,15 @@ CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
 # need to be there. At sixteen kilobytes that included mbedtls's buffers and a
 # great deal else, crowding out the allocations that genuinely must be internal
 # because something DMAs from them.
-CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=1024
+# Below this size an allocation is kept in internal RAM. On this part
+# "internal" is three pools and only one of them, L2MEM, is reachable by DMA;
+# SPM and RTCRAM are not. So the free-internal figure can look comfortable while
+# the only pool the Wi-Fi transport, AES and TLS can draw from is empty -- 43 KB
+# internal against 4 KB DMA-capable, and the SDIO driver asserting for want of a
+# receive buffer. LVGL allocates every widget through plain malloc and none of
+# them need DMA, so sending them to PSRAM hands L2MEM back to the drivers that
+# do: measured 4 KB dma-capable at a kilobyte, 39 KB at this.
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=128
 
 # LVGL's on-screen monitors rewrite a label every refresh period, so the
 # rendering pipeline never reaches an idle frame and task_max_sleep_ms can

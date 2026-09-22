@@ -22,11 +22,19 @@ namespace {
 
 constexpr char TAG[] = "ble";
 
-// Long enough not to forget a slowly advertising phone between packets.
+// Long enough not to forget a slowly advertising phone between packets. Ninety
+// seconds was what a tenth-of-the-time scan needed to be reliable, and it made
+// walking away take a minute and a half. Listening three times as often instead
+// took the worst gap from twenty-three seconds to eight, so this is back to
+// thirty -- nearly four times the worst gap seen rather than the seven seconds
+// of margin it used to have. A phone that leaves does not fade, it just stops
+// being heard, so this is also how long "away" takes.
 constexpr TickType_t SEEN_TIMEOUT = pdMS_TO_TICKS(30000);
 
 // The phone resolves from well outside the room, so distance has to come into
 // it. Two thresholds, or the state flaps as the signal wanders across the line.
+// Measured in the same window: smoothed between -66 and -51, never within ten
+// dB of the lower threshold, so these were never what dropped it.
 constexpr int RSSI_ENTER = -70;
 constexpr int RSSI_EXIT  = -76;
 
@@ -34,11 +42,16 @@ constexpr int RSSI_EXIT  = -76;
 // smoothed.
 constexpr int RSSI_SMOOTHING = 3;  // of 10, weight given to the newest packet
 
-// A phone advertises many times a second, so listening a tenth of the time hears
-// it well inside the presence timeout and leaves the SDIO link Wi-Fi shares
-// alone for the rest.
+// This part has no radio of its own -- Wi-Fi and Bluetooth both live on the
+// companion chip -- so time spent listening is time not spent on Wi-Fi, and a
+// tenth of the time was chosen to stay out of its way. It was too little:
+// listening for a tenth, the phone was heard every six seconds at best and once
+// went twenty-three without being heard at all, which is what kept dropping it.
+// Three tenths, measured over the same kind of window: heard every two seconds,
+// worst gap eight, and nothing over ten. No feed errors and no change in lookup
+// times alongside it.
 constexpr std::uint16_t SCAN_INTERVAL_MS = 1000;
-constexpr std::uint16_t SCAN_WINDOW_MS   = 100;
+constexpr std::uint16_t SCAN_WINDOW_MS   = 300;
 
 std::atomic<bool> s_ready{false};
 
@@ -287,6 +300,7 @@ Stats stats()
         s_near.store(false, std::memory_order_relaxed);
     }
     out.phone_present = heard && s_near.load(std::memory_order_relaxed);
+
     return out;
 }
 

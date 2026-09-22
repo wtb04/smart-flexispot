@@ -323,6 +323,16 @@ dependencies:
       registry_url: https://components.espressif.com
       type: service
     version: 1.5.2
+  espressif/libjpeg-turbo:
+    component_hash: c83f32040e4dab9f424fddd0efdeb47552eba38d3f8e83bb16253a2ebc9aa483
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 3.1.1~2
   espressif/m5stack_tab5:
     component_hash: d1df864fc61daaab580fa8e5799ca73bf0e309e677dfa814099c8faa351bc834
     dependencies:
@@ -476,8 +486,9 @@ direct_dependencies:
 - espressif/esp_hosted
 - espressif/esp_websocket_client
 - espressif/esp_wifi_remote
+- espressif/libjpeg-turbo
 - espressif/m5stack_tab5
 - idf
-manifest_hash: e15ba589f9d8183d49f782cd69f31dfb9998b59f6a8525de5d83346bde3580c5
+manifest_hash: 02ea4fff9509765751392820c2c24df580eb2b4a235fb8b457ecbb974944d672
 target: esp32p4
 version: 2.0.0

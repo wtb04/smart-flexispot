@@ -350,6 +350,23 @@ esp_err_t read(State &out)
 }
 
 
+// TEMPORARY: a census of both expanders while the pack is in and out.
+void log_expanders()
+{
+    esp_io_expander_handle_t zero = bsp_io_expander_init();
+    esp_io_expander_handle_t one  = bsp_io_expander1_init();
+    std::uint32_t            a    = 0;
+    std::uint32_t            b    = 0;
+    if (zero != nullptr) {
+        esp_io_expander_get_level(zero, 0xff, &a);
+    }
+    if (one != nullptr) {
+        esp_io_expander_get_level(one, 0xff, &b);
+    }
+    ESP_LOGI(TAG, "PROBE expander 0x43=0x%02x 0x44=0x%02x", static_cast<unsigned>(a & 0xff),
+             static_cast<unsigned>(b & 0xff));
+}
+
 esp_err_t probe_pack(bool &present)
 {
     State now{};

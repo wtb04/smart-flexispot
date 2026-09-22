@@ -209,11 +209,27 @@ void on_album_art(media::Art state, const void *pixels)
         static bool settled = false;
         if (!settled && esp_timer_get_time() > 40000000) {
             settled = true;
-            ESP_LOGI(TAG, "memory once up: %u KB dma-capable, %u KB internal, %u KB internal low",
-                     static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_DMA) / 1024),
-                     static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
+            multi_heap_info_t dma{};
+            multi_heap_info_t psram{};
+            heap_caps_get_info(&dma, MALLOC_CAP_DMA);
+            heap_caps_get_info(&psram, MALLOC_CAP_SPIRAM);
+
+            // Free on its own says nothing about how close a particular
+            // allocation is to failing. The total says how much there was to
+            // begin with, the largest block says whether what is left is usable
+            // or only crumbs, and the low-water mark says how near it has been.
+            ESP_LOGI(TAG,
+                     "dma-capable: %u KB free of %u KB, largest block %u KB, low %u KB",
+                     static_cast<unsigned>(dma.total_free_bytes / 1024),
+                     static_cast<unsigned>((dma.total_free_bytes + dma.total_allocated_bytes) /
+                                           1024),
+                     static_cast<unsigned>(dma.largest_free_block / 1024),
+                     static_cast<unsigned>(dma.minimum_free_bytes / 1024));
+            ESP_LOGI(TAG, "psram: %u KB free of %u KB, largest block %u KB",
+                     static_cast<unsigned>(psram.total_free_bytes / 1024),
                      static_cast<unsigned>(
-                         heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL) / 1024));
+                         (psram.total_free_bytes + psram.total_allocated_bytes) / 1024),
+                     static_cast<unsigned>(psram.largest_free_block / 1024));
         }
 
         // What ran out when the Bluetooth transport and TLS both wanted DMA
