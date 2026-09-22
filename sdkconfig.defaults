@@ -193,3 +193,10 @@ CONFIG_LV_USE_MEM_MONITOR=n
 # the rest: what a draw thread needs depends on what is being drawn, and an
 # overflow there is a hard crash.
 CONFIG_LV_DRAW_THREAD_STACK_SIZE=5120
+
+# The flash is read four bits at a time rather than two. Verified booting on
+# this board: the second-stage bootloader reports SPI Mode : QIO. Note that
+# esptool still writes the image with --flash_mode dio and that is correct --
+# IDF maps the QIO choice to the string "dio" on purpose, because the ROM has to
+# be able to read the bootloader before anything has configured quad mode.
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y

@@ -75,9 +75,12 @@ constexpr std::int64_t FIRST_FETCH_DELAY_US = 6 * 1000000LL;
 constexpr std::int64_t POLL_ACTIVE_US = 5 * 1000000LL;
 constexpr std::int64_t POLL_IDLE_US   = 60 * 1000000LL;
 
-// Forty nautical miles over a busy corner of Europe is about 25 kB; this is
-// room for a far denser sky. It lives in PSRAM, where it is not missed.
-constexpr std::size_t BODY_MAX = 96 * 1024;
+// A hundred and sixty kilometres over this corner of Europe already runs to
+// 87 kB, which left ten kilobytes of headroom: a busier sky would have been
+// truncated mid-record, and the parser would have stopped at whatever it had
+// rather than saying anything was wrong. It lives in PSRAM, where twice as
+// much is not missed.
+constexpr std::size_t BODY_MAX = 192 * 1024;
 
 // An https handshake and the mbedtls session live on this stack, and the
 // certificate bundle is walked on it too.

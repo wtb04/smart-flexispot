@@ -1,6 +1,8 @@
 #include "radar_page.h"
 
 #include "esp_heap_caps.h"
+#include "esp_log.h"
+#include "esp_timer.h"
 #include "map_data.h"
 #include "theme.h"
 
@@ -29,6 +31,30 @@ constexpr int BOX = 24;  // local frame each outline is drawn in
 
 // Aircraft out past the edge are still worth knowing about, so they sit on the
 // rim at their bearing and slide inwards as they close.
+// Drawing is what costs: every aircraft on the scope is a line, a dot and
+// sometimes a label, and LVGL allocates per object per frame out of the one
+// internal pool DMA can reach. Measured low-water marks: 16 KB with sixty
+// drawn, 2 KB with a hundred -- and 2 KB is where the Wi-Fi transport asserts.
+// The sky is kept whole in the data and thinned to the nearest of them here, so
+// the overview can still say how many are really up there.
+// The whole sky is drawn, because an aircraft costs nothing to draw any more.
+// It used to cost about 670 bytes of DMA-capable memory apiece -- a line, a dot
+// and a label, each allocating per object per frame -- which is why there was a
+// ceiling at all: measured low-water marks of 25 KB with 48 drawn, 16 KB with
+// 60, and 2 KB with 100, where the Wi-Fi transport asserts. They are rasterised
+// into one alpha mask now, exactly as the ground is, so the cost is one image
+// however many are up there.
+constexpr int DRAWN_MAX = radar::kMaxAircraft;
+
+// Only the nearest few are ever named, so the labels stay objects.
+constexpr int LABEL_MAX = 20;
+
+// The picture the aircraft are drawn into carries its own colour rather than
+// taking one from a recolour, so the altitude ramp survives being rasterised.
+// LVGL lays this format out as an RGB565 plane followed by a separate alpha
+// plane, so the two are written side by side rather than interleaved.
+constexpr std::size_t AIR_BYTES_PER_PX = 3;
+
 constexpr int RIM_DOTS = 14;
 constexpr int RIM_SIZE = 6;
 
@@ -90,10 +116,7 @@ constexpr std::int32_t ROWS_Y     = 206;
 constexpr std::int32_t FOOT_H     = 22;
 
 struct Blip {
-    lv_obj_t          *shape;
-    lv_obj_t          *dot;
-    lv_obj_t          *label;
-    lv_point_precise_t points[8];
+    lv_obj_t *label;
 };
 
 // An outline says which way it is pointing and what sort of thing it is, but
@@ -177,6 +200,8 @@ lv_obj_t          *s_legend[LEGEND_STEPS]       = {};
 // co-processor's SDIO driver, which asserts when it cannot get a buffer.
 constexpr std::uint8_t WATER_ALPHA = 0x5c;
 
+lv_obj_t     *s_air_canvas   = nullptr;
+std::uint8_t *s_air_mask     = nullptr;
 lv_obj_t     *s_water_canvas = nullptr;
 lv_obj_t     *s_land_canvas  = nullptr;
 std::uint8_t *s_water_mask   = nullptr;
@@ -652,16 +677,32 @@ void draw_map(float home_lat, float home_lon, int range_km)
 
 // Greyed rather than merely inert, so the end of the range is visible before
 // pressing rather than after.
+// Disabling a button while a finger is still on it leaves the pressed state
+// behind: LVGL stops delivering events to it, so the release never arrives and
+// the accent colour stays on the button and its label. Since the range is
+// applied on the press, running out of range mid-press is exactly when that
+// happens, so the state is cleared by hand along with the children the press
+// was handed down to.
+void set_button_enabled(lv_obj_t *button, bool enabled)
+{
+    if (button == nullptr) {
+        return;
+    }
+    if (enabled) {
+        lv_obj_remove_state(button, LV_STATE_DISABLED);
+        return;
+    }
+    lv_obj_remove_state(button, LV_STATE_PRESSED);
+    for (std::uint32_t i = 0; i < lv_obj_get_child_count(button); ++i) {
+        lv_obj_remove_state(lv_obj_get_child(button, i), LV_STATE_PRESSED);
+    }
+    lv_obj_add_state(button, LV_STATE_DISABLED);
+}
+
 void paint_range_buttons()
 {
-    if (s_zoom_in != nullptr) {
-        s_range_step > 0 ? lv_obj_remove_state(s_zoom_in, LV_STATE_DISABLED)
-                         : lv_obj_add_state(s_zoom_in, LV_STATE_DISABLED);
-    }
-    if (s_zoom_out != nullptr) {
-        s_range_step < RANGE_COUNT - 1 ? lv_obj_remove_state(s_zoom_out, LV_STATE_DISABLED)
-                                       : lv_obj_add_state(s_zoom_out, LV_STATE_DISABLED);
-    }
+    set_button_enabled(s_zoom_in, s_range_step > 0);
+    set_button_enabled(s_zoom_out, s_range_step < RANGE_COUNT - 1);
 }
 
 // Nothing is fetched again. The sweep always asks for the farthest range the
@@ -687,23 +728,17 @@ void place_blip(Plot &plot, float range_km);
 // full redraw sorts the aircraft, works out which tags can be shown without
 // touching, and rewrites the column; none of that changes while the range
 // slides, and doing it sixty times a second is what made the zoom stutter.
-void move_blips(float range_km)
+// The aircraft are one picture now, so a frame of a zoom scales it exactly as
+// it scales the ground, rather than moving a hundred objects.
+void move_blips(float range_km, float factor)
 {
-    for (int i = 0; i < s_shown; ++i) {
-        // Zooming in takes the edge of the scope past aircraft that were inside
-        // it, and they have to leave with it rather than carry on outwards
-        // across the rest of the page.
-        const float distance_km = s_plots[i].aircraft->distance_nm * KM_PER_NM;
-        const bool  gone        = distance_km > range_km;
-        lv_obj_set_hidden(s_blips[i].shape, gone);
-        lv_obj_set_hidden(s_blips[i].dot, gone);
+    (void)range_km;
+    if (s_air_canvas != nullptr) {
+        lv_image_set_pivot(s_air_canvas, s_centre, s_centre);
+        lv_image_set_scale(s_air_canvas, static_cast<std::uint32_t>(std::lround(factor * 256.0f)));
+    }
+    for (int i = 0; i < LABEL_MAX; ++i) {
         lv_obj_set_hidden(s_blips[i].label, true);
-        if (gone) {
-            continue;
-        }
-        place_blip(s_plots[i], range_km);
-        lv_obj_set_pos(s_blips[i].shape, s_plots[i].x - BOX / 2, s_plots[i].y - BOX / 2);
-        lv_obj_set_pos(s_blips[i].dot, s_plots[i].x - DOT_SIZE / 2, s_plots[i].y - DOT_SIZE / 2);
     }
     lv_obj_set_hidden(s_marker, true);
 }
@@ -718,7 +753,7 @@ void zoom_step(void *, std::int32_t value)
     // The ground was rasterised at the range the zoom started from, so it grows
     // by however much closer the scope has come since.
     scale_ground(from / s_shown_range);
-    move_blips(s_shown_range);
+    move_blips(s_shown_range, from / s_shown_range);
 }
 
 void zoom_done(lv_anim_t *)
@@ -882,27 +917,21 @@ void build_scope(lv_obj_t *parent, std::int32_t side, int range_km)
         quiet(dot);
     }
 
-    // A fixed pool: rebuilding these on every reading would churn the heap
-    // every ten seconds for the whole uptime.
-    for (int i = 0; i < radar::kMaxAircraft; ++i) {
-        Blip &blip = s_blips[i];
-        blip.shape = lv_line_create(scope);
-        lv_obj_set_style_line_width(blip.shape, 2, 0);
-        lv_obj_set_style_line_rounded(blip.shape, true, 0);
-        lv_obj_set_hidden(blip.shape, true);
-        quiet(blip.shape);
+    // Above the rings, since the aircraft are what the rings are there to
+    // measure. One picture for all of them, tinted by its own recolour.
+    s_air_mask = static_cast<std::uint8_t *>(heap_caps_calloc(
+        static_cast<std::size_t>(side) * side, AIR_BYTES_PER_PX, MALLOC_CAP_SPIRAM));
+    if (s_air_mask != nullptr) {
+        s_air_canvas = lv_canvas_create(scope);
+        lv_canvas_set_buffer(s_air_canvas, s_air_mask, side, side, LV_COLOR_FORMAT_RGB565A8);
+        lv_obj_set_pos(s_air_canvas, 0, 0);
+        quiet(s_air_canvas);
+    }
 
-        blip.dot = lv_obj_create(scope);
-        lv_obj_set_size(blip.dot, DOT_SIZE, DOT_SIZE);
-        lv_obj_set_style_radius(blip.dot, LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_border_width(blip.dot, 0, 0);
-        lv_obj_set_style_pad_all(blip.dot, 0, 0);
-        lv_obj_set_hidden(blip.dot, true);
-        quiet(blip.dot);
-
-        blip.label = theme::make_label(scope, "", theme::secondary, fonts::size_16());
-        lv_obj_set_hidden(blip.label, true);
-        quiet(blip.label);
+    for (int i = 0; i < LABEL_MAX; ++i) {
+        s_blips[i].label = theme::make_label(scope, "", theme::secondary, fonts::size_16());
+        lv_obj_set_hidden(s_blips[i].label, true);
+        quiet(s_blips[i].label);
     }
 
     s_scope = scope;
@@ -1041,7 +1070,84 @@ void place_blip(Plot &plot, float range_km)
     plot.label_w = span;
 }
 
-void draw_blip(Blip &blip, const Plot &plot, bool named)
+std::uint16_t to_rgb565(std::uint32_t colour)
+{
+    return static_cast<std::uint16_t>((((colour >> 16) & 0xff) >> 3) << 11 |
+                                      (((colour >> 8) & 0xff) >> 2) << 5 |
+                                      ((colour & 0xff) >> 3));
+}
+
+void air_pixels(std::int32_t y, std::int32_t from, std::int32_t to, std::uint16_t ink)
+{
+    auto *colour = reinterpret_cast<std::uint16_t *>(s_air_mask) +
+                   static_cast<std::size_t>(y) * s_ground_side;
+    std::uint8_t *alpha = s_air_mask + static_cast<std::size_t>(s_ground_side) * s_ground_side * 2 +
+                          static_cast<std::size_t>(y) * s_ground_side;
+    for (std::int32_t x = from; x <= to; ++x) {
+        colour[x] = ink;
+    }
+    std::memset(alpha + from, 0xff, static_cast<std::size_t>(to - from + 1));
+}
+
+// The same even-odd scanline fill the water uses, on a shape small enough that
+// the bounding box is the whole of the work.
+void fill_blip(const lv_point_precise_t *points, int count, std::uint16_t ink)
+{
+    if (s_air_mask == nullptr || count < 3) {
+        return;
+    }
+    std::int32_t top    = points[0].y;
+    std::int32_t bottom = points[0].y;
+    for (int i = 1; i < count; ++i) {
+        top    = std::min<std::int32_t>(top, points[i].y);
+        bottom = std::max<std::int32_t>(bottom, points[i].y);
+    }
+    top    = std::max<std::int32_t>(top, 0);
+    bottom = std::min<std::int32_t>(bottom, s_ground_side - 1);
+
+    // Six-point outlines at most, so four crossings is the real bound; the
+    // headroom and the clamp below are there so the optimiser can see it too.
+    constexpr int MAX_CROSSINGS = 12;
+
+    for (std::int32_t y = top; y <= bottom; ++y) {
+        std::int32_t crossings[MAX_CROSSINGS];
+        int          found = 0;
+        for (int i = 0, j = count - 1; i < count && found < MAX_CROSSINGS; j = i++) {
+            const auto yi = static_cast<float>(points[i].y);
+            const auto yj = static_cast<float>(points[j].y);
+            if ((yi > static_cast<float>(y)) == (yj > static_cast<float>(y))) {
+                continue;
+            }
+            const auto  xi = static_cast<float>(points[i].x);
+            const auto  xj = static_cast<float>(points[j].x);
+            const float t  = (static_cast<float>(y) - yi) / (yj - yi);
+            crossings[found++] = static_cast<std::int32_t>(std::lround(xi + t * (xj - xi)));
+        }
+        // Insertion sort rather than std::sort: there are two crossings in the
+        // ordinary case and four at most, and introsort's heap path is enough
+        // machinery that the optimiser can no longer prove the index stays in
+        // the array.
+        for (int i = 1; i < found; ++i) {
+            const std::int32_t value = crossings[i];
+            int                j     = i - 1;
+            while (j >= 0 && crossings[j] > value) {
+                crossings[j + 1] = crossings[j];
+                --j;
+            }
+            crossings[j + 1] = value;
+        }
+        for (int i = 0; i + 1 < found; i += 2) {
+            const std::int32_t from = std::max<std::int32_t>(crossings[i], 0);
+            const std::int32_t to   = std::min<std::int32_t>(crossings[i + 1], s_ground_side - 1);
+            if (to < from) {
+                continue;
+            }
+            air_pixels(y, from, to, ink);
+        }
+    }
+}
+
+void raster_blip(const Plot &plot)
 {
     // Heading is clockwise from north and the screen's y runs downwards, which
     // is what puts the minus on the sine of y rather than of x.
@@ -1049,39 +1155,41 @@ void draw_blip(Blip &blip, const Plot &plot, bool named)
     const float sin_t = std::sin(track * DEG);
     const float cos_t = std::cos(track * DEG);
 
-    const Outline outline = outline_for(plot.aircraft->category);
+    const Outline      outline = outline_for(plot.aircraft->category);
+    lv_point_precise_t shape[8];
     for (int i = 0; i < outline.count; ++i) {
         const float px = outline.points[i][0] * cos_t - outline.points[i][1] * sin_t;
         const float py = outline.points[i][0] * sin_t + outline.points[i][1] * cos_t;
-        blip.points[i] = {static_cast<std::int32_t>(std::lround(px)) + BOX / 2,
-                          static_cast<std::int32_t>(std::lround(py)) + BOX / 2};
+        shape[i] = {plot.x + static_cast<std::int32_t>(std::lround(px)),
+                    plot.y + static_cast<std::int32_t>(std::lround(py))};
     }
-    int count = outline.count;
+
+    const bool          shout = emergency(plot.aircraft->squawk) != nullptr;
+    const std::uint16_t ink =
+        to_rgb565(shout ? theme::red : altitude_ink(plot.aircraft->altitude_ft));
+
+    // A rotorcraft is drawn as an open cross, which has no inside to fill, so it
+    // gets a blob at its position and nothing else.
     if (outline.closed) {
-        blip.points[count++] = blip.points[0];
+        fill_blip(shape, outline.count, ink);
     }
 
+    for (std::int32_t dy = -DOT_SIZE / 2; dy <= DOT_SIZE / 2; ++dy) {
+        const std::int32_t y = plot.y + dy;
+        if (y < 0 || y >= s_ground_side) {
+            continue;
+        }
+        const std::int32_t from = std::max<std::int32_t>(plot.x - DOT_SIZE / 2, 0);
+        const std::int32_t to   = std::min<std::int32_t>(plot.x + DOT_SIZE / 2, s_ground_side - 1);
+        if (to >= from) {
+            air_pixels(y, from, to, ink);
+        }
+    }
+}
+
+void draw_label(Blip &blip, const Plot &plot)
+{
     const bool shout = emergency(plot.aircraft->squawk) != nullptr;
-
-    lv_line_set_points(blip.shape, blip.points, static_cast<std::uint32_t>(count));
-    lv_obj_set_pos(blip.shape, plot.x - BOX / 2, plot.y - BOX / 2);
-    lv_obj_set_style_line_color(blip.shape, lv_color_hex(shout ? theme::red
-                                                              : altitude_ink(
-                                                                    plot.aircraft->altitude_ft)),
-                                0);
-    const std::uint32_t ink = shout ? theme::red : altitude_ink(plot.aircraft->altitude_ft);
-    lv_obj_set_style_line_width(blip.shape, shout ? 3 : 2, 0);
-    lv_obj_set_hidden(blip.shape, false);
-
-    lv_obj_set_pos(blip.dot, plot.x - DOT_SIZE / 2, plot.y - DOT_SIZE / 2);
-    theme::set_bg_color(blip.dot, ink);
-    lv_obj_set_hidden(blip.dot, false);
-
-    if (!named) {
-        lv_obj_set_hidden(blip.label, true);
-        return;
-    }
-
     theme::set_text(blip.label, blip_name(*plot.aircraft));
     theme::set_text_color(blip.label, shout ? theme::red : theme::secondary);
     lv_obj_set_pos(blip.label, plot.label_x, plot.y - 8);
@@ -1290,9 +1398,9 @@ void build_radar_page(lv_obj_t *page, std::int32_t width, std::int32_t height)
     s_last = static_cast<radar::Snapshot *>(
         heap_caps_calloc(1, sizeof(radar::Snapshot), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     s_blips = static_cast<Blip *>(
-        heap_caps_calloc(radar::kMaxAircraft, sizeof(Blip), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+        heap_caps_calloc(LABEL_MAX, sizeof(Blip), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     s_plots = static_cast<Plot *>(
-        heap_caps_calloc(radar::kMaxAircraft, sizeof(Plot), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+        heap_caps_calloc(DRAWN_MAX, sizeof(Plot), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     if (s_last == nullptr || s_blips == nullptr || s_plots == nullptr) {
         return;
     }
@@ -1338,7 +1446,7 @@ void show_radar(const radar::Snapshot &snapshot)
 
     s_shown      = 0;
     int rim_used = 0;
-    for (int i = 0; i < s_last->count && s_shown < radar::kMaxAircraft; ++i) {
+    for (int i = 0; i < s_last->count && s_shown < DRAWN_MAX; ++i) {
         const radar::Aircraft &aircraft = s_last->list[i];
         if (aircraft.on_ground) {
             continue;
@@ -1410,7 +1518,7 @@ void show_radar(const radar::Snapshot &snapshot)
     // Name everything that can be named without two tags touching. Where two
     // would collide neither is readable, so neither is drawn; the one that was
     // tapped is shown regardless, because that one was asked for.
-    bool named[radar::kMaxAircraft];
+    bool named[DRAWN_MAX];
     for (int i = 0; i < s_shown; ++i) {
         named[i] = true;
     }
@@ -1435,22 +1543,36 @@ void show_radar(const radar::Snapshot &snapshot)
         lv_obj_set_style_border_color(s_marker, accent, 0);
     }
 
+    // Everything into the one mask, and only the nearest handful get a label.
+    if (s_air_mask != nullptr) {
+        // Only the alpha plane decides what is visible, so the colour plane can
+        // keep whatever it had.
+        const auto pixels = static_cast<std::size_t>(s_ground_side) * s_ground_side;
+        std::memset(s_air_mask + pixels * 2, 0, pixels);
+    }
+    for (int i = 0; i < LABEL_MAX; ++i) {
+        lv_obj_set_hidden(s_blips[i].label, true);
+    }
+
     const radar::Aircraft *chosen = nullptr;
-    for (int i = 0; i < radar::kMaxAircraft; ++i) {
-        if (i >= s_shown) {
-            lv_obj_set_hidden(s_blips[i].shape, true);
-            lv_obj_set_hidden(s_blips[i].dot, true);
-            lv_obj_set_hidden(s_blips[i].label, true);
-            continue;
-        }
+    int                    labelled = 0;
+    for (int i = 0; i < s_shown; ++i) {
+        raster_blip(s_plots[i]);
+
         const bool mine =
             s_chosen[0] != '\0' && std::strcmp(s_chosen, s_plots[i].aircraft->hex) == 0;
-        draw_blip(s_blips[i], s_plots[i], named[i] || mine);
         if (mine) {
             chosen = s_plots[i].aircraft;
             lv_obj_set_pos(s_marker, s_plots[i].x - 17, s_plots[i].y - 17);
             lv_obj_set_hidden(s_marker, false);
         }
+        if ((named[i] || mine) && labelled < LABEL_MAX) {
+            draw_label(s_blips[labelled++], s_plots[i]);
+        }
+    }
+    if (s_air_canvas != nullptr) {
+        lv_image_set_scale(s_air_canvas, 256);
+        lv_obj_invalidate(s_air_canvas);
     }
 
     if (chosen != nullptr) {
@@ -1461,7 +1583,6 @@ void show_radar(const radar::Snapshot &snapshot)
         lv_obj_set_hidden(s_marker, true);
         show_summary(*s_last);
     }
-
 }
 
 void show_radar_photo(const char *hex, const void *pixels, int width, int height)
