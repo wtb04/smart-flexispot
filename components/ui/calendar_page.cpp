@@ -3,6 +3,7 @@
 #include "fonts/units_font.h"
 #include "ical.h"
 #include "theme.h"
+#include "travel_icons.h"
 #include "travel.h"
 
 #include <cstdio>
@@ -15,19 +16,20 @@ namespace {
 constexpr int ROWS  = 5;
 constexpr int TRIPS = 2;
 
-// One scale for the whole page. Everything is a multiple of it, so nothing has
-// to be nudged into line by eye.
-constexpr std::int32_t PAD    = 20;
-constexpr std::int32_t GAP    = 16;
-constexpr std::int32_t LINE   = 26;
+// One scale, and the layout is flex all the way down, so spacing comes from
+// these four numbers rather than from offsets typed into each object.
+constexpr std::int32_t PAD   = 20;  // inside a card
+constexpr std::int32_t GAP   = 16;  // between cards, and between blocks
+constexpr std::int32_t STEP  = 8;   // between lines of a block
+constexpr std::int32_t MARK  = 4;   // the colour down a row's edge
+
 constexpr std::int32_t ROW_H  = 48;
 constexpr std::int32_t HERO_H = 250;
-constexpr std::int32_t CHIP   = 24;
 constexpr std::int32_t KEY_H  = 22;
+constexpr std::int32_t ICON   = 22;
 
 constexpr std::int32_t TIME_W  = 78;
 constexpr std::int32_t PLACE_W = 150;
-constexpr std::int32_t MARK_W  = 4;
 
 constexpr std::uint32_t INK_LECTURES   = 0x74c97a;
 constexpr std::uint32_t INK_PRACTICALS = 0x63a9e8;
@@ -42,8 +44,8 @@ struct Row {
 };
 
 struct LegView {
-    lv_obj_t *chip = nullptr;
-    lv_obj_t *mark = nullptr;
+    lv_obj_t *root = nullptr;
+    lv_obj_t *icon = nullptr;
     lv_obj_t *text = nullptr;
 };
 
@@ -161,14 +163,14 @@ void show_calendar()
 
         for (int l = 0; l < travel::kLegsMax; ++l) {
             const bool real = l < option.leg_count;
-            lv_obj_set_hidden(trip.legs[l].chip, !real);
-            lv_obj_set_hidden(trip.legs[l].text, !real);
+            lv_obj_set_hidden(trip.legs[l].root, !real);
             if (!real) {
                 continue;
             }
             const travel::Leg &leg = option.legs[l];
-            theme::set_text(trip.legs[l].mark,
-                            std::strcmp(leg.mode, "train") == 0 ? "T" : "B");
+            lv_image_set_src(trip.legs[l].icon, std::strcmp(leg.mode, "train") == 0
+                                                    ? &icons::train_icon
+                                                    : &icons::bus_icon);
 
             char off[16];
             clock_of(leg.depart, off, sizeof(off));
@@ -203,88 +205,104 @@ void show_calendar()
 
 void build_calendar_page(lv_obj_t *page, std::int32_t width, std::int32_t height)
 {
+    (void)width;
+    (void)height;
+
+    lv_obj_set_flex_flow(page, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(page, GAP, 0);
+
     // --- what is next, and beside it how to get there
     lv_obj_t *hero = lv_obj_create(page);
-    lv_obj_set_pos(hero, 0, 0);
-    lv_obj_set_size(hero, width, HERO_H);
+    lv_obj_set_width(hero, LV_PCT(100));
+    lv_obj_set_height(hero, HERO_H);
     theme::style_panel(hero, theme::panel, 16);
     lv_obj_set_style_pad_all(hero, PAD, 0);
+    lv_obj_set_style_pad_column(hero, GAP, 0);
+    lv_obj_set_flex_flow(hero, LV_FLEX_FLOW_ROW);
     quiet(hero);
 
-    const std::int32_t inner = width - 2 * PAD;
-    const std::int32_t left  = (inner - GAP) * 45 / 100;
-    const std::int32_t right = inner - left - GAP;
+    lv_obj_t *left = bare(hero, 0, 0, 0, 0);
+    lv_obj_set_height(left, LV_PCT(100));
+    lv_obj_set_flex_grow(left, 45);
+    lv_obj_set_flex_flow(left, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(left, STEP, 0);
 
-    s_when = theme::make_accent_label(hero, "", fonts::size_20());
-    lv_obj_set_pos(s_when, 0, 0);
+    s_when = theme::make_accent_label(left, "", fonts::size_20());
 
-    s_title = theme::make_label(hero, "", theme::text, fonts::size_28());
-    lv_obj_set_pos(s_title, 0, LINE + 4);
-    lv_obj_set_width(s_title, left);
+    s_title = theme::make_label(left, "", theme::text, fonts::size_28());
+    lv_obj_set_width(s_title, LV_PCT(100));
     lv_obj_set_height(s_title, 2 * fonts::size_28()->line_height);
     lv_label_set_long_mode(s_title, LV_LABEL_LONG_MODE_WRAP);
 
-    s_span = theme::make_label(hero, "", theme::secondary, fonts::size_20());
-    lv_obj_set_pos(s_span, 0, LINE + 4 + 2 * fonts::size_28()->line_height + 8);
-
-    s_where = theme::make_label(hero, "", theme::secondary, fonts::size_20());
-    lv_obj_set_pos(s_where, 0, LINE + 4 + 2 * fonts::size_28()->line_height + 8 + LINE);
+    s_span  = theme::make_label(left, "", theme::secondary, fonts::size_20());
+    s_where = theme::make_label(left, "", theme::secondary, fonts::size_20());
 
     lv_obj_t *rule = lv_obj_create(hero);
-    lv_obj_set_pos(rule, left + GAP / 2, 0);
-    lv_obj_set_size(rule, 1, HERO_H - 2 * PAD);
+    lv_obj_set_size(rule, 1, LV_PCT(100));
     theme::style_panel(rule, theme::panel_light, 0);
     quiet(rule);
 
-    const std::int32_t trip_h = LINE + 2 * LINE + GAP;
+    lv_obj_t *right = bare(hero, 0, 0, 0, 0);
+    lv_obj_set_height(right, LV_PCT(100));
+    lv_obj_set_flex_grow(right, 55);
+    lv_obj_set_flex_flow(right, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(right, GAP, 0);
+
     for (int i = 0; i < TRIPS; ++i) {
         TripView &trip = s_trip[i];
-        trip.root      = bare(hero, left + GAP, i * trip_h, right, trip_h);
+        trip.root      = bare(right, 0, 0, 0, 0);
+        lv_obj_set_width(trip.root, LV_PCT(100));
+        lv_obj_set_height(trip.root, LV_SIZE_CONTENT);
+        lv_obj_set_flex_flow(trip.root, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_style_pad_row(trip.root, STEP / 2, 0);
         lv_obj_set_hidden(trip.root, true);
 
         trip.when = theme::make_accent_label(trip.root, "", fonts::size_20());
-        lv_obj_set_pos(trip.when, 0, 0);
 
         for (int l = 0; l < travel::kLegsMax; ++l) {
             LegView &leg = trip.legs[l];
-            leg.chip     = lv_obj_create(trip.root);
-            lv_obj_set_size(leg.chip, CHIP, CHIP);
-            lv_obj_set_pos(leg.chip, 0, LINE + l * LINE);
-            theme::style_panel(leg.chip, theme::panel_light, CHIP / 2);
-            lv_obj_set_hidden(leg.chip, true);
-            quiet(leg.chip);
+            leg.root     = bare(trip.root, 0, 0, 0, 0);
+            lv_obj_set_width(leg.root, LV_PCT(100));
+            lv_obj_set_height(leg.root, ICON);
+            lv_obj_set_flex_flow(leg.root, LV_FLEX_FLOW_ROW);
+            lv_obj_set_style_pad_column(leg.root, STEP + 2, 0);
+            lv_obj_set_flex_align(leg.root, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
+                                  LV_FLEX_ALIGN_CENTER);
+            lv_obj_set_hidden(leg.root, true);
 
-            leg.mark = theme::make_label(leg.chip, "", theme::secondary, fonts::size_16());
-            lv_obj_center(leg.mark);
+            leg.icon = lv_image_create(leg.root);
+            lv_image_set_src(leg.icon, &icons::bus_icon);
+            lv_obj_set_style_image_recolor(leg.icon, lv_color_hex(theme::secondary), 0);
+            lv_obj_set_style_image_recolor_opa(leg.icon, LV_OPA_COVER, 0);
+            quiet(leg.icon);
 
-            leg.text = theme::make_label(trip.root, "", theme::text, fonts::size_16());
-            lv_obj_set_pos(leg.text, CHIP + 10, LINE + l * LINE + 2);
-            lv_obj_set_width(leg.text, right - CHIP - 10);
+            leg.text = theme::make_label(leg.root, "", theme::text, fonts::size_16());
+            lv_obj_set_flex_grow(leg.text, 1);
+            lv_obj_set_height(leg.text, fonts::size_16()->line_height);
             lv_label_set_long_mode(leg.text, LV_LABEL_LONG_MODE_DOTS);
-            lv_obj_set_hidden(leg.text, true);
         }
     }
 
-    s_note = theme::make_label(hero, "", theme::secondary, fonts::size_20());
-    lv_obj_set_pos(s_note, left + GAP, 0);
+    s_note = theme::make_label(right, "", theme::secondary, fonts::size_20());
     quiet(s_note);
 
     // --- what follows it
-    const std::int32_t rest_y = HERO_H + GAP;
-    const std::int32_t rest_h = height - rest_y - KEY_H - GAP;
-
-    lv_obj_t *rest = bare(page, 0, rest_y, width, rest_h);
-    lv_obj_set_style_pad_row(rest, 8, 0);
+    lv_obj_t *rest = bare(page, 0, 0, 0, 0);
+    lv_obj_set_width(rest, LV_PCT(100));
+    lv_obj_set_flex_grow(rest, 1);
     lv_obj_set_flex_flow(rest, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(rest, STEP, 0);
 
     for (int i = 0; i < ROWS; ++i) {
         Row &row = s_row[i];
         row.root = lv_obj_create(rest);
-        lv_obj_set_size(row.root, width, ROW_H);
+        lv_obj_set_width(row.root, LV_PCT(100));
+        lv_obj_set_height(row.root, ROW_H);
         theme::style_panel(row.root, theme::panel, 10);
         lv_obj_set_style_pad_hor(row.root, PAD, 0);
+        lv_obj_set_style_pad_column(row.root, GAP, 0);
         lv_obj_set_style_border_side(row.root, LV_BORDER_SIDE_LEFT, 0);
-        lv_obj_set_style_border_width(row.root, MARK_W, 0);
+        lv_obj_set_style_border_width(row.root, MARK, 0);
         lv_obj_set_flex_flow(row.root, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(row.root, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
                               LV_FLEX_ALIGN_CENTER);
@@ -306,8 +324,10 @@ void build_calendar_page(lv_obj_t *page, std::int32_t width, std::int32_t height
     }
 
     // --- what the colours mean
-    lv_obj_t *key = bare(page, 0, height - KEY_H, width, KEY_H);
-    lv_obj_set_style_pad_column(key, 8, 0);
+    lv_obj_t *key = bare(page, 0, 0, 0, 0);
+    lv_obj_set_width(key, LV_PCT(100));
+    lv_obj_set_height(key, KEY_H);
+    lv_obj_set_style_pad_column(key, STEP, 0);
     lv_obj_set_flex_flow(key, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(key, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
