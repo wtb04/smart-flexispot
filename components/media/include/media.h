@@ -20,6 +20,19 @@ enum class Art : std::uint8_t {
 
 using ArtHandler = void (*)(Art state, const void *pixels);
 
+/** What the cover fetcher last managed, for the diagnostics page. */
+struct Status {
+    bool playing;
+    bool have_art;
+    bool art_ok;
+    bool hardware;   // the part's own engine, rather than the software fallback
+    int  decode_ms;
+    int  decodes;
+};
+
+/** Thread-safe. */
+Status status();
+
 /** Requires the network to be up. */
 esp_err_t start(ArtHandler on_art);
 

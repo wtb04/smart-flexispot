@@ -4,6 +4,7 @@
 #include "esp_check.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -19,6 +20,23 @@
 namespace media {
 namespace {
 constexpr char TAG[] = "media";
+
+Status       s_status{};
+portMUX_TYPE s_status_lock = portMUX_INITIALIZER_UNLOCKED;
+
+void record(bool playing, bool have_art, bool art_ok, bool hardware, int decode_ms)
+{
+    portENTER_CRITICAL(&s_status_lock);
+    s_status.playing  = playing;
+    s_status.have_art = have_art;
+    s_status.art_ok   = art_ok;
+    if (decode_ms >= 0) {
+        s_status.hardware  = hardware;
+        s_status.decode_ms = decode_ms;
+        ++s_status.decodes;
+    }
+    portEXIT_CRITICAL(&s_status_lock);
+}
 
 constexpr std::size_t MAX_JPEG = 512 * 1024;
 
@@ -215,14 +233,18 @@ bool decode(std::size_t bytes)
         ESP_LOGD(TAG, "cover path changed");
         if (wanted[0] == '\0') {
             std::strcpy(s_loaded, "");
+            record(false, false, false, true, -1);
             if (s_on_art != nullptr) {
                 s_on_art(Art::None, nullptr);
             }
             continue;
         }
 
-        const std::size_t bytes = download(wanted);
-        const bool        got   = bytes > 0 && decode(bytes);
+        const std::int64_t began = esp_timer_get_time();
+        const std::size_t  bytes = download(wanted);
+        const bool         got   = bytes > 0 && decode(bytes);
+        record(true, true, got, true,
+               got ? static_cast<int>((esp_timer_get_time() - began) / 1000) : -1);
 
         std::strncpy(s_loaded, wanted, sizeof(s_loaded));
         s_loaded[sizeof(s_loaded) - 1] = '\0';
@@ -414,6 +436,15 @@ void set_art_path(const char *path)
     if (changed && s_task != nullptr) {
         xTaskNotifyGive(s_task);
     }
+}
+
+
+Status status()
+{
+    portENTER_CRITICAL(&s_status_lock);
+    const Status copy = s_status;
+    portEXIT_CRITICAL(&s_status_lock);
+    return copy;
 }
 
 }  // namespace media

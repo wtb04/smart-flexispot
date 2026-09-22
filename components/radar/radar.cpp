@@ -60,7 +60,6 @@ std::size_t  s_body_len = 0;
 
 constexpr std::int64_t IDLE_CLOSE_US = 20 * 1000000LL;
 
-// A socket, not a TLS session: the image host is plain http.
 constexpr std::int64_t PHOTO_IDLE_US = 30 * 1000000LL;
 
 esp_http_client_handle_t s_feed_client     = nullptr;
@@ -253,7 +252,7 @@ bool fetch(float lat, float lon)
     s_fetched_us = esp_timer_get_time();
     xSemaphoreGive(s_lock);
 
-    ESP_LOGI(TAG, "%d aircraft within %d km, %u bytes", count, range_km,
+    ESP_LOGD(TAG, "%d aircraft within %d km, %u bytes", count, range_km,
              static_cast<unsigned>(s_body_len));
 
     if (s_on_update != nullptr) {
@@ -564,7 +563,6 @@ void expire_cache()
             due *= 2;
         }
         if (last_fetch == 0 || esp_timer_get_time() - last_fetch >= due) {
-            // Stamped before, so warming falls inside the interval.
             const std::int64_t began = esp_timer_get_time();
             if (fetch(lat, lon)) {
                 expire_cache();
@@ -720,6 +718,18 @@ void snapshot(Snapshot &out)
     out.count    = s_count;
     out.home_lat = s_home_lat;
     out.home_lon = s_home_lon;
+    out.range_km = s_range_km.load(std::memory_order_relaxed);
+    out.ok       = s_ok;
+    out.age_s    = s_fetched_us == 0
+                       ? -1
+                       : static_cast<int>((esp_timer_get_time() - s_fetched_us) / 1000000);
+    xSemaphoreGive(s_lock);
+}
+
+void status(Status &out)
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    out.count    = s_count;
     out.range_km = s_range_km.load(std::memory_order_relaxed);
     out.ok       = s_ok;
     out.age_s    = s_fetched_us == 0

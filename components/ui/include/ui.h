@@ -107,13 +107,24 @@ enum class Subsystem : std::uint8_t {
     Presence,
     Power,
     Desk,
+    Radar,
+    Media,
     System,
     Count,
 };
 
-/** Fills `out` with recent log lines for the named subsystem. Runs on the LVGL
- *  task, so it must not block. */
-using LogHandler = void (*)(const char *subsystem, char *out, std::size_t size);
+inline constexpr std::size_t kLogTextMax = 192;
+
+/** One line as the log view shows it. `level` is the logging system's severity
+ *  letter: E, W, I or D. */
+struct LogLine {
+    char level;
+    char text[kLogTextMax];
+};
+
+/** Fills `out` with a subsystem's recent lines, oldest first, and returns how
+ *  many. Runs on the LVGL task, so it must not block. */
+using LogHandler = int (*)(Subsystem subsystem, LogLine *out, int max);
 
 /** An empty title means nothing is playing; the card then shows the state. Strings are copied. */
 esp_err_t set_media(const char *source, const char *title, const char *artist, const char *state,
@@ -225,6 +236,13 @@ enum class Info : std::uint8_t {
     DeskSit,
     DeskOne,
     DeskTwo,
+    RadarFeed,
+    RadarAircraft,
+    RadarRange,
+    RadarSeen,
+    MediaPlayer,
+    MediaArt,
+    MediaDecoder,
     SysFirmware,
     SysBuilt,
     SysUptime,

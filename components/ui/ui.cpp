@@ -1503,6 +1503,7 @@ struct InfoRow {
 };
 
 struct InfoCard {
+    Subsystem   subsystem;
     const char *title;
     const char *icon;
     const InfoRow *rows;
@@ -1544,6 +1545,17 @@ constexpr InfoRow DESK_ROWS[] = {
     {Info::DeskStand, "Stand"},           {Info::DeskSit, "Sit"},
     {Info::DeskOne, "Preset 1"},          {Info::DeskTwo, "Preset 2"},
 };
+constexpr InfoRow RADAR_ROWS[] = {
+    {Info::RadarFeed, "Feed"},
+    {Info::RadarAircraft, "In range"},
+    {Info::RadarRange, "Reach"},
+    {Info::RadarSeen, "Last sweep"},
+};
+constexpr InfoRow MEDIA_ROWS[] = {
+    {Info::MediaPlayer, "Playing"},
+    {Info::MediaArt, "Artwork"},
+    {Info::MediaDecoder, "Decoder"},
+};
 constexpr InfoRow SYSTEM_ROWS[] = {
     {Info::SysFirmware, "Firmware"}, {Info::SysBuilt, "Built"},  {Info::SysUptime, "Uptime"},
     {Info::SysRam, "Internal free"}, {Info::SysPsram, "PSRAM free"},
@@ -1551,24 +1563,38 @@ constexpr InfoRow SYSTEM_ROWS[] = {
 };
 
 constexpr InfoCard INFO_CARDS[] = {
-    {"Network", LV_SYMBOL_WIFI, NETWORK_ROWS, static_cast<int>(std::size(NETWORK_ROWS)),
+    {Subsystem::Network, "Network", LV_SYMBOL_WIFI, NETWORK_ROWS, static_cast<int>(std::size(NETWORK_ROWS)),
      Info::WifiState, false, Setting::Charging, nullptr},
-    {"Home Assistant", LV_SYMBOL_HOME, HASS_ROWS, static_cast<int>(std::size(HASS_ROWS)),
+    {Subsystem::HomeAssistant, "Home Assistant", LV_SYMBOL_HOME, HASS_ROWS, static_cast<int>(std::size(HASS_ROWS)),
      Info::HaSocket, false, Setting::Charging, nullptr},
-    {"Bluetooth", LV_SYMBOL_BLUETOOTH, BLUETOOTH_ROWS,
+    {Subsystem::Bluetooth, "Bluetooth", LV_SYMBOL_BLUETOOTH, BLUETOOTH_ROWS,
      static_cast<int>(std::size(BLUETOOTH_ROWS)), Info::BleLink, false, Setting::Charging,
      nullptr},
-    {"Presence", LV_SYMBOL_EYE_OPEN, PRESENCE_ROWS, static_cast<int>(std::size(PRESENCE_ROWS)),
+    {Subsystem::Presence, "Presence", LV_SYMBOL_EYE_OPEN, PRESENCE_ROWS, static_cast<int>(std::size(PRESENCE_ROWS)),
      Info::PhoneState, true, Setting::PresenceGate, "Hide pages while away"},
-    {"Power", LV_SYMBOL_BATTERY_FULL, POWER_ROWS, static_cast<int>(std::size(POWER_ROWS)),
+    {Subsystem::Power, "Power", LV_SYMBOL_BATTERY_FULL, POWER_ROWS, static_cast<int>(std::size(POWER_ROWS)),
      Info::PowerCharge, true, Setting::Charging, "Charge the battery"},
-    {"Desk", LV_SYMBOL_UP, DESK_ROWS, static_cast<int>(std::size(DESK_ROWS)), Info::DeskLink,
+    {Subsystem::Desk, "Desk", LV_SYMBOL_UP, DESK_ROWS, static_cast<int>(std::size(DESK_ROWS)), Info::DeskLink,
      true, Setting::DeskBluetooth, "Drive it over Bluetooth"},
-    {"System", LV_SYMBOL_SETTINGS, SYSTEM_ROWS, static_cast<int>(std::size(SYSTEM_ROWS)),
+    {Subsystem::Radar, "Radar", LV_SYMBOL_GPS, RADAR_ROWS, static_cast<int>(std::size(RADAR_ROWS)),
+     Info::RadarFeed, false, Setting::Charging, nullptr},
+    {Subsystem::Media, "Media", LV_SYMBOL_AUDIO, MEDIA_ROWS, static_cast<int>(std::size(MEDIA_ROWS)),
+     Info::MediaPlayer, false, Setting::Charging, nullptr},
+    {Subsystem::System, "System", LV_SYMBOL_SETTINGS, SYSTEM_ROWS, static_cast<int>(std::size(SYSTEM_ROWS)),
      Info::SysUptime, false, Setting::Charging, nullptr},
 };
 constexpr int INFO_CARD_COUNT = static_cast<int>(std::size(INFO_CARDS));
 static_assert(INFO_CARD_COUNT == static_cast<int>(Subsystem::Count), "a tile per subsystem");
+constexpr bool cards_in_order()
+{
+    for (int i = 0; i < INFO_CARD_COUNT; ++i) {
+        if (static_cast<int>(INFO_CARDS[i].subsystem) != i) {
+            return false;
+        }
+    }
+    return true;
+}
+static_assert(cards_in_order(), "a tile is indexed by its subsystem");
 
 constexpr int SETTING_COUNT = static_cast<int>(Setting::Count);
 
@@ -1585,7 +1611,7 @@ constexpr std::int32_t DETAIL_MAX_FRAC = 80;
 constexpr std::int32_t DETAIL_PAD   = 24;
 constexpr std::int32_t DETAIL_ROW_H = 30;
 constexpr std::int32_t TILE_DOT     = 14;
-constexpr std::size_t  LOG_TEXT_MAX = 4096;
+constexpr int LOG_LINE_MAX = 24;
 
 lv_obj_t *s_settings_view   = nullptr;
 lv_obj_t *s_appearance_view = nullptr;
@@ -1611,7 +1637,9 @@ int s_summary_card[INFO_COUNT] = {};
 std::optional<ModalOverlay> s_diagnostics;
 std::optional<ModalOverlay> s_log_modal;
 lv_obj_t                   *s_log_title = nullptr;
-lv_obj_t                   *s_log_text  = nullptr;
+lv_obj_t                   *s_log_line[LOG_LINE_MAX] = {};
+lv_obj_t                   *s_log_empty = nullptr;
+lv_obj_t                   *s_log_pane  = nullptr;
 int                         s_log_shown = -1;
 lv_timer_t                 *s_log_timer = nullptr;
 
@@ -1643,20 +1671,56 @@ void refresh_diag_summary()
     theme::set_text_color(s_diag_summary, poor == 0 ? theme::secondary : theme::amber);
 }
 
+std::uint32_t level_colour(char level)
+{
+    switch (level) {
+        case 'E': return theme::red;
+        case 'W': return theme::amber;
+        case 'D': return theme::secondary;
+        default: return theme::text;
+    }
+}
+
+// Built on first sight rather than at startup: forty labels are a few kilobytes
+// of the internal pool the Wi-Fi transport needs, and the log is rarely opened.
+void build_log_lines()
+{
+    if (s_log_line[0] != nullptr || s_log_pane == nullptr) {
+        return;
+    }
+    const std::int32_t width = lv_obj_get_width(s_log_pane) - 28;
+    for (int i = 0; i < LOG_LINE_MAX; ++i) {
+        s_log_line[i] = theme::make_label(s_log_pane, "", theme::secondary, fonts::size_16());
+        lv_obj_set_width(s_log_line[i], width);
+        lv_label_set_long_mode(s_log_line[i], LV_LABEL_LONG_MODE_WRAP);
+        lv_obj_set_hidden(s_log_line[i], true);
+    }
+    s_log_empty = theme::make_label(s_log_pane, "Nothing logged yet", theme::secondary,
+                                    fonts::size_16());
+}
+
 void refresh_log()
 {
     if (s_log_shown < 0 || s_handlers.log == nullptr) {
         return;
     }
-    auto *text = static_cast<char *>(
-        heap_caps_malloc(LOG_TEXT_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    if (text == nullptr) {
+    build_log_lines();
+    auto *lines = static_cast<LogLine *>(heap_caps_malloc(
+        sizeof(LogLine) * LOG_LINE_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (lines == nullptr) {
         return;
     }
-    text[0] = '\0';
-    s_handlers.log(INFO_CARDS[s_log_shown].title, text, LOG_TEXT_MAX);
-    theme::set_text(s_log_text, text[0] != '\0' ? text : "Nothing logged yet");
-    heap_caps_free(text);
+
+    const int count = s_handlers.log(INFO_CARDS[s_log_shown].subsystem, lines, LOG_LINE_MAX);
+    for (int i = 0; i < LOG_LINE_MAX; ++i) {
+        lv_obj_set_hidden(s_log_line[i], i >= count);
+        if (i < count) {
+            theme::set_text(s_log_line[i], lines[i].text);
+            theme::set_text_color(s_log_line[i], level_colour(lines[i].level));
+        }
+    }
+    lv_obj_set_hidden(s_log_empty, count > 0);
+    heap_caps_free(lines);
 }
 
 void log_tick(lv_timer_t *)
@@ -1694,7 +1758,7 @@ void log_held_cb(lv_event_t *e)
     std::snprintf(title, sizeof(title), "%s log", INFO_CARDS[index].title);
     theme::set_text(s_log_title, title);
     refresh_log();
-    lv_obj_scroll_to_y(lv_obj_get_parent(s_log_text), 0, LV_ANIM_OFF);
+    lv_obj_scroll_to_y(s_log_pane, 0, LV_ANIM_OFF);
     s_log_modal->open();
 }
 
@@ -1923,9 +1987,9 @@ void build_log_overlay(lv_obj_t *parent)
     lv_obj_set_scrollable(pane, true);
     lv_obj_set_scroll_dir(pane, LV_DIR_VER);
 
-    s_log_text = theme::make_label(pane, "", theme::secondary, fonts::size_16());
-    lv_obj_set_width(s_log_text, width - 28);
-    lv_label_set_long_mode(s_log_text, LV_LABEL_LONG_MODE_WRAP);
+    lv_obj_set_flex_flow(pane, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(pane, 2, 0);
+    s_log_pane = pane;
 
     s_log_modal->add_close_button();
     s_log_timer = lv_timer_create(log_tick, 1000, nullptr);

@@ -200,3 +200,7 @@ CONFIG_LV_DRAW_THREAD_STACK_SIZE=5120
 # IDF maps the QIO choice to the string "dio" on purpose, because the ROM has to
 # be able to read the bootloader before anything has configured quad mode.
 CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+
+# Debug lines are compiled in but off at runtime, so a chatty subsystem can be
+# turned up with esp_log_level_set() without a reflash.
+CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y

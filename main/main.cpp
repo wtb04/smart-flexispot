@@ -103,7 +103,7 @@ extern "C" void app_main(void)
         ESP_ERROR_CHECK_WITHOUT_ABORT(nvs_flash_erase());
         ESP_ERROR_CHECK_WITHOUT_ABORT(nvs_flash_init());
     }
-    ESP_ERROR_CHECK_WITHOUT_ABORT(logbuf::start());
+    ESP_ERROR_CHECK_WITHOUT_ABORT(logbuf::start(diagnostics::channels(), diagnostics::route));
     ESP_ERROR_CHECK_WITHOUT_ABORT(settings::load());
 
     const bool flipped = settings::enabled(settings::Key::Flipped);

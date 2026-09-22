@@ -13,6 +13,8 @@
 #include "ha_ws.h"
 #include "hass.h"
 #include "logbuf.h"
+#include "media.h"
+#include "radar.h"
 #include "settings.h"
 #include "power.h"
 #include "room.h"
@@ -241,6 +243,63 @@ void update_power()
     push(Info::PowerStatus, status);
 }
 
+void update_radar()
+{
+    radar::Status shot{};
+    radar::status(shot);
+
+    char text[48];
+    if (shot.age_s < 0) {
+        push_missing(Info::RadarFeed);
+    } else {
+        push(Info::RadarFeed, shot.ok ? "Answering" : "Refusing",
+             shot.ok ? Level::Good : Level::Warn);
+    }
+
+    std::snprintf(text, sizeof(text), "%d aircraft", shot.count);
+    push(Info::RadarAircraft, text);
+    std::snprintf(text, sizeof(text), "%d km", shot.range_km);
+    push(Info::RadarRange, text);
+
+    if (shot.age_s < 0) {
+        push_missing(Info::RadarSeen);
+    } else {
+        std::snprintf(text, sizeof(text), "%d s ago", shot.age_s);
+        push(Info::RadarSeen, text, shot.age_s > 60 ? Level::Warn : Level::Neutral);
+    }
+
+    ui::set_health(ui::Subsystem::Radar, shot.age_s < 0            ? Level::Neutral
+                                         : shot.ok && shot.age_s <= 60 ? Level::Good
+                                                                       : Level::Warn);
+}
+
+void update_media()
+{
+    const media::Status status = media::status();
+
+    push(Info::MediaPlayer, status.playing ? "Yes" : "Nothing");
+
+    if (!status.have_art) {
+        push(Info::MediaArt, "None");
+    } else if (status.art_ok) {
+        push(Info::MediaArt, "Shown", Level::Good);
+    } else {
+        push(Info::MediaArt, "Failed", Level::Warn);
+    }
+
+    if (status.decodes == 0) {
+        push_missing(Info::MediaDecoder);
+    } else {
+        char text[48];
+        std::snprintf(text, sizeof(text), "%s, %d ms",
+                      status.hardware ? "Hardware" : "Software", status.decode_ms);
+        push(Info::MediaDecoder, text);
+    }
+
+    ui::set_health(ui::Subsystem::Media,
+                   status.have_art && !status.art_ok ? Level::Warn : Level::Good);
+}
+
 void update_desk()
 {
     const bool over_ble = settings::enabled(settings::Key::DeskBluetooth);
@@ -311,35 +370,55 @@ void update_system()
 constexpr const char *NETWORK_TAGS[] = {
     "wifi",       "esp_netif_handlers", "esp_netif",  "esp_wifi_remote", "wifi_init",
     "H_API",      "H_SDIO_DRV",         "transport",  "sdio_wrapper",    "esp_hosted"};
-constexpr const char *HASS_TAGS[] = {"hass", "ha_ws",     "websocket_client",
-                                     "room", "telemetry", "mqtt_client",
-                                     "MQTT_CLIENT",       "transport_base"};
-constexpr const char *BLUETOOTH_TAGS[] = {"ble", "NimBLE", "vhci_drv", "BTDM_INIT", "phy_init"};
-constexpr const char *POWER_TAGS[]  = {"power", "battery"};
-constexpr const char *DESK_TAGS[] = {"desk", "loctek", "desklink", "deskproxy"};
-constexpr const char *SYSTEM_TAGS[] = {"tab5",  "ui",       "diag",   "media", "clock",
-                                       "sound", "settings", "logbuf", "board", "main_task",
-                                       "cpu_start", "heap_init", "spiram", "esp_psram", "esp_image"};
+constexpr const char *HASS_TAGS[] = {"hass",        "ha_ws",       "websocket_client", "room",
+                                     "telemetry",   "mqtt_client", "MQTT_CLIENT",
+                                     "transport_base"};
+constexpr const char *BLUETOOTH_TAGS[] = {"NimBLE", "vhci_drv", "BTDM_INIT", "phy_init", "ble"};
+constexpr const char *PRESENCE_TAGS[]  = {"presence"};
+constexpr const char *POWER_TAGS[]     = {"power", "battery"};
+constexpr const char *DESK_TAGS[]      = {"desk", "loctek", "desklink", "deskproxy", "proxy"};
+constexpr const char *RADAR_TAGS[]     = {"radar"};
+constexpr const char *MEDIA_TAGS[]     = {"media", "sound"};
+constexpr const char *SYSTEM_TAGS[]    = {
+    "tab5",  "ui",     "diag",   "clock",     "settings",  "logbuf",   "board",
+    "rtc",   "main_task", "cpu_start", "heap_init", "spiram", "esp_psram", "esp_image"};
 
 struct TagSet {
-    const char        *subsystem;
+    ui::Subsystem      subsystem;
     const char *const *tags;
     int                count;
 };
 
 constexpr TagSet TAG_SETS[] = {
-    {"Network", NETWORK_TAGS, static_cast<int>(std::size(NETWORK_TAGS))},
-    {"Home Assistant", HASS_TAGS, static_cast<int>(std::size(HASS_TAGS))},
-    {"Bluetooth", BLUETOOTH_TAGS, static_cast<int>(std::size(BLUETOOTH_TAGS))},
-    {"Presence", BLUETOOTH_TAGS, static_cast<int>(std::size(BLUETOOTH_TAGS))},
-    {"Power", POWER_TAGS, static_cast<int>(std::size(POWER_TAGS))},
-    {"Desk", DESK_TAGS, static_cast<int>(std::size(DESK_TAGS))},
-    {"System", SYSTEM_TAGS, static_cast<int>(std::size(SYSTEM_TAGS))},
+    {ui::Subsystem::Network, NETWORK_TAGS, static_cast<int>(std::size(NETWORK_TAGS))},
+    {ui::Subsystem::HomeAssistant, HASS_TAGS, static_cast<int>(std::size(HASS_TAGS))},
+    {ui::Subsystem::Bluetooth, BLUETOOTH_TAGS, static_cast<int>(std::size(BLUETOOTH_TAGS))},
+    {ui::Subsystem::Presence, PRESENCE_TAGS, static_cast<int>(std::size(PRESENCE_TAGS))},
+    {ui::Subsystem::Power, POWER_TAGS, static_cast<int>(std::size(POWER_TAGS))},
+    {ui::Subsystem::Desk, DESK_TAGS, static_cast<int>(std::size(DESK_TAGS))},
+    {ui::Subsystem::Radar, RADAR_TAGS, static_cast<int>(std::size(RADAR_TAGS))},
+    {ui::Subsystem::Media, MEDIA_TAGS, static_cast<int>(std::size(MEDIA_TAGS))},
+    {ui::Subsystem::System, SYSTEM_TAGS, static_cast<int>(std::size(SYSTEM_TAGS))},
 };
+static_assert(std::size(TAG_SETS) == static_cast<std::size_t>(ui::Subsystem::Count),
+              "a tag set per subsystem");
+
+constexpr bool sets_in_order()
+{
+    for (std::size_t i = 0; i < std::size(TAG_SETS); ++i) {
+        if (static_cast<std::size_t>(TAG_SETS[i].subsystem) != i) {
+            return false;
+        }
+    }
+    return true;
+}
+static_assert(sets_in_order(), "a tag set is indexed by its subsystem");
 
 void update()
 {
     update_network();
+    update_radar();
+    update_media();
     update_hass();
     update_bluetooth();
     update_presence();
@@ -375,17 +454,42 @@ void refresh()
     }
 }
 
-void logs(const char *subsystem, char *out, std::size_t size)
+int route(const char *tag)
 {
     for (const TagSet &set : TAG_SETS) {
-        if (std::strcmp(set.subsystem, subsystem) == 0) {
-            logbuf::recent(set.tags, set.count, out, size, 40);
-            return;
+        for (int i = 0; i < set.count; ++i) {
+            if (std::strcmp(tag, set.tags[i]) == 0) {
+                return static_cast<int>(set.subsystem);
+            }
         }
     }
-    if (size > 0) {
-        out[0] = '\0';
+    // Anything unrecognised is still worth keeping, and System is where somebody
+    // would go looking for it.
+    return static_cast<int>(ui::Subsystem::System);
+}
+
+int channels()
+{
+    return static_cast<int>(ui::Subsystem::Count);
+}
+
+int logs(ui::Subsystem subsystem, ui::LogLine *out, int max)
+{
+    const int channel = static_cast<int>(subsystem);
+    const int held    = logbuf::count(channel);
+    const int first   = held > max ? held - max : 0;
+
+    int written = 0;
+    for (int i = first; i < held; ++i) {
+        logbuf::Entry line;
+        if (!logbuf::at(channel, i, line)) {
+            break;
+        }
+        out[written].level = line.level;
+        std::snprintf(out[written].text, sizeof(out[written].text), "%s", line.text);
+        ++written;
     }
+    return written;
 }
 
 }  // namespace diagnostics

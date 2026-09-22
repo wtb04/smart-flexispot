@@ -18,6 +18,15 @@ struct Snapshot {
     int      age_s;    // since the last good reading, or -1 if there is none
 };
 
+/** What the scope is doing, without the aircraft. Cheap enough for a small
+ *  stack, which a whole Snapshot is not. */
+struct Status {
+    int  count;
+    int  range_km;
+    bool ok;
+    int  age_s;
+};
+
 /** Called on the radar task after every good reading. */
 using UpdateHandler = void (*)(const Snapshot &snapshot);
 
@@ -49,5 +58,8 @@ void set_home(float lat, float lon);
 
 /** Thread-safe copy of the last good reading. */
 void snapshot(Snapshot &out);
+
+/** Thread-safe. */
+void status(Status &out);
 
 }  // namespace radar

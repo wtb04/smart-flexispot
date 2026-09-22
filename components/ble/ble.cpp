@@ -19,7 +19,8 @@
 
 namespace ble {
 namespace {
-constexpr char TAG[] = "ble";
+constexpr char TAG[]     = "ble";
+constexpr char PRESENCE[] = "presence";
 
 constexpr TickType_t SEEN_TIMEOUT = pdMS_TO_TICKS(30000);
 
@@ -136,13 +137,13 @@ bool matches_irk(const std::uint8_t val[6])
     if (hash_matches(s_irk, val)) {
         s_order_known  = true;
         s_use_reversed = false;
-        ESP_LOGI(TAG, "identity key matched as given");
+        ESP_LOGI(PRESENCE, "identity key matched as given");
         return true;
     }
     if (hash_matches(s_irk_reversed, val)) {
         s_order_known  = true;
         s_use_reversed = true;
-        ESP_LOGI(TAG, "identity key matched reversed");
+        ESP_LOGI(PRESENCE, "identity key matched reversed");
         return true;
     }
     return false;
@@ -161,10 +162,10 @@ void on_resolved(int rssi)
     const bool near = s_near.load(std::memory_order_relaxed);
     if (!near && avg >= RSSI_ENTER) {
         s_near.store(true, std::memory_order_relaxed);
-        ESP_LOGI(TAG, "phone near (%d dBm)", avg);
+        ESP_LOGI(PRESENCE, "phone near (%d dBm)", avg);
     } else if (near && avg < RSSI_EXIT) {
         s_near.store(false, std::memory_order_relaxed);
-        ESP_LOGI(TAG, "phone far (%d dBm)", avg);
+        ESP_LOGI(PRESENCE, "phone far (%d dBm)", avg);
     }
 }
 
@@ -244,9 +245,9 @@ esp_err_t start()
         s_irk_reversed[i] = s_irk[15 - i];
     }
     if (s_have_irk) {
-        ESP_LOGI(TAG, "identity key loaded");
+        ESP_LOGI(PRESENCE, "identity key loaded");
     } else {
-        ESP_LOGW(TAG, "no identity key - see ble_secrets.example.h");
+        ESP_LOGW(PRESENCE, "no identity key - see ble_secrets.example.h");
     }
 
     ESP_RETURN_ON_ERROR(nimble_port_init(), TAG, "nimble init");
