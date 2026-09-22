@@ -16,6 +16,8 @@ namespace {
 constexpr int ROWS = 4;
 constexpr int TRIPS = 2;
 
+constexpr std::int32_t LEGEND_H = 34;
+
 constexpr std::int32_t ROW_H   = 46;
 constexpr std::int32_t TIME_W  = 84;
 constexpr std::int32_t PLACE_W = 150;
@@ -41,9 +43,6 @@ lv_obj_t *s_hero_when  = nullptr;
 lv_obj_t *s_hero_title = nullptr;
 lv_obj_t *s_hero_where = nullptr;
 lv_obj_t *s_hero_in    = nullptr;
-constexpr std::uint32_t INK_TRAIN = 0x63a9e8;
-constexpr std::uint32_t INK_BUS   = 0x74c97a;
-
 struct LegView {
     lv_obj_t *pill  = nullptr;
     lv_obj_t *mode  = nullptr;
@@ -164,8 +163,6 @@ void show_travel(std::int64_t start, std::int64_t now)
             const bool train = std::strcmp(leg.mode, "train") == 0;
 
             theme::set_text(trip.legs[l].mode, train ? "TRAIN" : "BUS");
-            lv_obj_set_style_bg_color(trip.legs[l].pill,
-                                      lv_color_hex(train ? INK_TRAIN : INK_BUS), 0);
 
             char from[16];
             char to[16];
@@ -325,7 +322,7 @@ void build_calendar_page(lv_obj_t *page, std::int32_t width, std::int32_t height
             lv_obj_set_hidden(leg.pill, true);
             quiet(leg.pill);
 
-            leg.mode = theme::make_label(leg.pill, "", theme::background, fonts::size_16());
+            leg.mode = theme::make_label(leg.pill, "", theme::secondary, fonts::size_16());
             lv_obj_center(leg.mode);
 
             leg.text = theme::make_label(trip.root, "", theme::text, fonts::size_16());
@@ -338,7 +335,7 @@ void build_calendar_page(lv_obj_t *page, std::int32_t width, std::int32_t height
 
     lv_obj_t *rest = lv_obj_create(page);
     lv_obj_set_pos(rest, 0, TOP + HERO_H + 16);
-    lv_obj_set_size(rest, width, height - TOP - HERO_H - 16);
+    lv_obj_set_size(rest, width, height - TOP - HERO_H - 16 - LEGEND_H);
     lv_obj_set_style_bg_opa(rest, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(rest, 0, 0);
     lv_obj_set_style_pad_all(rest, 0, 0);
@@ -348,6 +345,30 @@ void build_calendar_page(lv_obj_t *page, std::int32_t width, std::int32_t height
 
     for (int i = 0; i < ROWS; ++i) {
         s_row[i] = make_row(rest, width);
+    }
+
+    lv_obj_t *legend = lv_obj_create(page);
+    lv_obj_set_pos(legend, 0, height - LEGEND_H);
+    lv_obj_set_size(legend, width, LEGEND_H);
+    lv_obj_set_style_bg_opa(legend, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(legend, 0, 0);
+    lv_obj_set_style_pad_all(legend, 0, 0);
+    lv_obj_set_style_pad_column(legend, 8, 0);
+    lv_obj_set_flex_flow(legend, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(legend, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    quiet(legend);
+
+    for (int i = 0; i < ical::kFeedCount; ++i) {
+        lv_obj_t *chip = lv_obj_create(legend);
+        lv_obj_set_size(chip, 14, 14);
+        theme::style_panel(chip, feed_ink(static_cast<std::uint8_t>(i)), 7);
+        quiet(chip);
+
+        lv_obj_t *name = theme::make_label(legend, ical::feed_name(static_cast<std::uint8_t>(i)),
+                                           theme::secondary, fonts::size_16());
+        lv_obj_set_style_margin_right(name, 18, 0);
+        quiet(name);
     }
 
     // An event that has finished should leave the page, and the countdown has to
