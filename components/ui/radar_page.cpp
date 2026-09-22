@@ -1232,7 +1232,8 @@ void build_radar_page(lv_obj_t *page, std::int32_t width, std::int32_t height)
 
 void radar_page_opened()
 {
-    s_following = true;
+    s_following      = true;
+    s_details_hex[0] = '\0';
 }
 
 void show_radar(const radar::Snapshot &snapshot)
@@ -1298,13 +1299,14 @@ void show_radar(const radar::Snapshot &snapshot)
             }
             const bool keep = held >= 0 && s_plots[held].aircraft->distance_nm <
                                                s_plots[0].aircraft->distance_nm * 1.2f;
+            const int at = keep ? held : 0;
             if (!keep) {
                 std::memcpy(s_chosen, s_plots[0].aircraft->hex, sizeof(s_chosen));
                 s_chosen[sizeof(s_chosen) - 1] = '\0';
-                if (std::strcmp(s_details_hex, s_chosen) != 0) {
-                    s_picture = Picture::Looking;
-                    radar::request_details(s_chosen, s_plots[0].aircraft->flight);
-                }
+            }
+            if (std::strcmp(s_details_hex, s_chosen) != 0) {
+                s_picture = Picture::Looking;
+                radar::request_details(s_chosen, s_plots[at].aircraft->flight);
             }
         } else {
             s_chosen[0] = '\0';
@@ -1378,6 +1380,7 @@ void show_radar(const radar::Snapshot &snapshot)
 
 void show_radar_photo(const char *hex, const void *pixels, int width, int height)
 {
+
     if (s_photo == nullptr || hex == nullptr || std::strcmp(hex, s_chosen) != 0) {
         return;  // the tap has moved on
     }

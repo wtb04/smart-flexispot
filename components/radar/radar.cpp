@@ -74,7 +74,6 @@ bool         s_photo_open   = false;
 
 constexpr int PREFETCH_PER_SWEEP = 6;
 
-std::atomic<bool> s_drop_cache{false};
 
 constexpr int CACHE_SIZE = 24;
 
@@ -494,13 +493,6 @@ void expire_cache()
     if (s_cache == nullptr) {
         return;
     }
-    if (s_drop_cache.exchange(false, std::memory_order_relaxed)) {
-        for (int i = 0; i < CACHE_SIZE; ++i) {
-            s_cache[i].valid = false;
-        }
-        return;
-    }
-
     xSemaphoreTake(s_lock, portMAX_DELAY);
     for (int i = 0; i < CACHE_SIZE; ++i) {
         if (!s_cache[i].valid) {
@@ -534,10 +526,6 @@ void expire_cache()
         std::memcpy(callsign, s_want_flight, sizeof(callsign));
         s_want_pending = false;
         xSemaphoreGive(s_lock);
-
-        if (s_drop_cache.load(std::memory_order_relaxed)) {
-            expire_cache();
-        }
 
         if (pending) {
             look_up(hex, callsign, true);
@@ -642,10 +630,6 @@ void set_active(bool active)
     const bool woke = active && !s_active;
     s_active        = active;
     xSemaphoreGive(s_lock);
-
-    if (!active) {
-        s_drop_cache.store(true, std::memory_order_relaxed);
-    }
 
     if (woke && s_task != nullptr) {
         xTaskNotifyGive(s_task);
