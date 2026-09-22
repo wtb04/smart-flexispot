@@ -14,7 +14,6 @@ namespace ui {
 namespace {
 
 constexpr int ROWS  = 5;
-constexpr int TRIPS = 2;
 
 // One scale, and the layout is flex all the way down, so spacing comes from
 // these four numbers rather than from offsets typed into each object.
@@ -29,6 +28,7 @@ constexpr std::int32_t KEY_H  = 22;
 constexpr std::int32_t ICON   = 22;
 
 constexpr std::int32_t TIME_W  = 78;
+constexpr std::int32_t STOP_W  = 112;
 constexpr std::int32_t PLACE_W = 150;
 
 constexpr std::uint32_t INK_LECTURES   = 0x74c97a;
@@ -43,24 +43,27 @@ struct Row {
     lv_obj_t *place = nullptr;
 };
 
-struct LegView {
+constexpr int POINTS = travel::kLegsMax + 1;
+
+struct PointView {
     lv_obj_t *root = nullptr;
-    lv_obj_t *icon = nullptr;
-    lv_obj_t *text = nullptr;
+    lv_obj_t *when = nullptr;
+    lv_obj_t *name = nullptr;
 };
 
-struct TripView {
-    lv_obj_t *root  = nullptr;
-    lv_obj_t *when  = nullptr;
-    LegView   legs[travel::kLegsMax];
+struct HopView {
+    lv_obj_t *root = nullptr;
+    lv_obj_t *icon = nullptr;
 };
 
 lv_obj_t *s_when   = nullptr;
 lv_obj_t *s_title  = nullptr;
 lv_obj_t *s_span   = nullptr;
 lv_obj_t *s_where  = nullptr;
-lv_obj_t *s_note   = nullptr;
-TripView  s_trip[TRIPS];
+PointView s_point[POINTS];
+HopView   s_hop[travel::kLegsMax];
+lv_obj_t *s_lead  = nullptr;
+lv_obj_t *s_after = nullptr;
 Row       s_row[ROWS];
 
 std::uint32_t feed_ink(std::uint8_t feed)
@@ -146,55 +149,87 @@ void show_calendar()
     static travel::Option options[travel::kOptionsMax];
     const int found = count == 0 ? 0 : travel::options(options, travel::kOptionsMax);
 
-    int shown = 0;
-    for (int i = 0; i < found && shown < TRIPS; ++i) {
-        const travel::Option &option = options[i];
-        if (option.leave < now) {
+    const travel::Option *going = nullptr;
+    const travel::Option *after = nullptr;
+    for (int i = 0; i < found; ++i) {
+        if (options[i].leave < now) {
             continue;
         }
-        TripView &trip = s_trip[shown];
+        if (going == nullptr) {
+            going = &options[i];
+        } else if (after == nullptr) {
+            after = &options[i];
+        }
+    }
 
-        char leave[16];
-        char arrive[16];
-        clock_of(option.leave, leave, sizeof(leave));
-        clock_of(option.arrive, arrive, sizeof(arrive));
-        std::snprintf(text, sizeof(text), "%s  %s  %s%s", leave, LV_SYMBOL_RIGHT, arrive,
-                      option.cancelled ? "   CANCELLED" : "");
-        theme::set_text(trip.when, text);
-        theme::set_text_color(trip.when, option.cancelled ? theme::red : theme::primary);
+    for (int i = 0; i < POINTS; ++i) {
+        lv_obj_set_hidden(s_point[i].root, true);
+    }
+    for (int i = 0; i < travel::kLegsMax; ++i) {
+        lv_obj_set_hidden(s_hop[i].root, true);
+    }
 
-        for (int l = 0; l < travel::kLegsMax; ++l) {
-            const bool real = l < option.leg_count;
-            lv_obj_set_hidden(trip.legs[l].root, !real);
-            if (!real) {
-                continue;
+    if (going == nullptr) {
+        theme::set_text(s_lead, count == 0 ? "" : "No way there yet");
+        theme::set_text_color(s_lead, theme::secondary);
+        theme::set_text(s_after, "");
+    } else {
+        const int minutes = static_cast<int>((going->leave - now) / 60);
+        if (minutes <= 0) {
+            std::snprintf(text, sizeof(text), "LEAVE NOW");
+        } else if (minutes < 60) {
+            std::snprintf(text, sizeof(text), "LEAVE IN %d MIN", minutes);
+        } else {
+            std::snprintf(text, sizeof(text), "LEAVE IN %dH %02dM", minutes / 60, minutes % 60);
+        }
+        theme::set_text(s_lead, text);
+        theme::set_text_color(s_lead, going->cancelled ? theme::red : theme::primary);
+
+        // A place the journey passes through is one place, whatever it is the end
+        // of and the start of. Its two times sit together rather than twice over.
+        const int legs = going->leg_count;
+        for (int i = 0; i <= legs && i < POINTS; ++i) {
+            const char *name = i < legs ? going->legs[i].from : going->legs[legs - 1].to;
+            char        into[16];
+            char        away[16];
+            into[0] = '\0';
+            away[0] = '\0';
+            if (i > 0) {
+                clock_of(going->legs[i - 1].arrive, into, sizeof(into));
             }
-            const travel::Leg &leg = option.legs[l];
-            lv_image_set_src(trip.legs[l].icon, std::strcmp(leg.mode, "train") == 0
+            if (i < legs) {
+                clock_of(going->legs[i].depart, away, sizeof(away));
+            }
+
+            if (into[0] != '\0' && away[0] != '\0') {
+                std::snprintf(text, sizeof(text), "%s  %s", into, away);
+            } else {
+                std::snprintf(text, sizeof(text), "%s", into[0] != '\0' ? into : away);
+            }
+            theme::set_text(s_point[i].when, text);
+            theme::set_text(s_point[i].name, name);
+            lv_obj_set_hidden(s_point[i].root, false);
+
+            if (i < legs) {
+                const travel::Leg &leg = going->legs[i];
+                lv_image_set_src(s_hop[i].icon, std::strcmp(leg.mode, "train") == 0
                                                     ? &icons::train_icon
                                                     : &icons::bus_icon);
-
-            // Both ends of the leg, so where it drops you and when is on screen
-            // rather than inferred from the whole journey's arrival.
-            char away[16];
-            char into[16];
-            clock_of(leg.depart, away, sizeof(away));
-            clock_of(leg.arrive, into, sizeof(into));
-            std::snprintf(text, sizeof(text), "%s %s  %s  %s %s", away, leg.from,
-                          LV_SYMBOL_RIGHT, into, leg.to);
-
-            const std::uint32_t ink = leg.cancelled ? theme::red : theme::text;
-            theme::set_text(trip.legs[l].text, text);
-            theme::set_text_color(trip.legs[l].text, ink);
-            lv_obj_set_style_image_recolor(trip.legs[l].icon, lv_color_hex(ink), 0);
+                lv_obj_set_style_image_recolor(
+                    s_hop[i].icon, lv_color_hex(leg.cancelled ? theme::red : theme::secondary), 0);
+                lv_obj_set_hidden(s_hop[i].root, false);
+            }
         }
-        lv_obj_set_hidden(trip.root, false);
-        ++shown;
+
+        if (after != nullptr) {
+            char next[16];
+            clock_of(after->leave, next, sizeof(next));
+            std::snprintf(text, sizeof(text), "then %s", next);
+            theme::set_text(s_after, text);
+        } else {
+            theme::set_text(s_after, "");
+        }
     }
-    for (int i = shown; i < TRIPS; ++i) {
-        lv_obj_set_hidden(s_trip[i].root, true);
-    }
-    theme::set_text(s_note, shown > 0 || count == 0 ? "" : "No way there yet");
 
     // --- what follows
     for (int i = 0; i < ROWS; ++i) {
@@ -256,45 +291,51 @@ void build_calendar_page(lv_obj_t *page, std::int32_t width, std::int32_t height
     lv_obj_set_height(right, LV_PCT(100));
     lv_obj_set_flex_grow(right, 55);
     lv_obj_set_flex_flow(right, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(right, GAP, 0);
+    lv_obj_set_style_pad_row(right, STEP / 2, 0);
 
-    for (int i = 0; i < TRIPS; ++i) {
-        TripView &trip = s_trip[i];
-        trip.root      = bare(right, 0, 0, 0, 0);
-        lv_obj_set_width(trip.root, LV_PCT(100));
-        lv_obj_set_height(trip.root, LV_SIZE_CONTENT);
-        lv_obj_set_flex_flow(trip.root, LV_FLEX_FLOW_COLUMN);
-        lv_obj_set_style_pad_row(trip.root, STEP / 2, 0);
-        lv_obj_set_hidden(trip.root, true);
+    s_lead = theme::make_accent_label(right, "", fonts::size_20());
 
-        trip.when = theme::make_accent_label(trip.root, "", fonts::size_20());
+    for (int i = 0; i < POINTS; ++i) {
+        PointView &point = s_point[i];
+        point.root       = bare(right, 0, 0, 0, 0);
+        lv_obj_set_width(point.root, LV_PCT(100));
+        lv_obj_set_height(point.root, fonts::size_20()->line_height);
+        lv_obj_set_flex_flow(point.root, LV_FLEX_FLOW_ROW);
+        lv_obj_set_style_pad_column(point.root, STEP + 2, 0);
+        lv_obj_set_flex_align(point.root, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
+                              LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_hidden(point.root, true);
 
-        for (int l = 0; l < travel::kLegsMax; ++l) {
-            LegView &leg = trip.legs[l];
-            leg.root     = bare(trip.root, 0, 0, 0, 0);
-            lv_obj_set_width(leg.root, LV_PCT(100));
-            lv_obj_set_height(leg.root, ICON);
-            lv_obj_set_flex_flow(leg.root, LV_FLEX_FLOW_ROW);
-            lv_obj_set_style_pad_column(leg.root, STEP + 2, 0);
-            lv_obj_set_flex_align(leg.root, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
-                                  LV_FLEX_ALIGN_CENTER);
-            lv_obj_set_hidden(leg.root, true);
+        point.when = theme::make_label(point.root, "", theme::text, fonts::size_20());
+        lv_obj_set_width(point.when, STOP_W);
 
-            leg.icon = lv_image_create(leg.root);
-            lv_image_set_src(leg.icon, &icons::bus_icon);
-            lv_obj_set_style_image_recolor(leg.icon, lv_color_hex(theme::secondary), 0);
-            lv_obj_set_style_image_recolor_opa(leg.icon, LV_OPA_COVER, 0);
-            quiet(leg.icon);
+        point.name = theme::make_label(point.root, "", theme::secondary, fonts::size_20());
+        lv_obj_set_flex_grow(point.name, 1);
+        lv_obj_set_height(point.name, fonts::size_20()->line_height);
+        lv_label_set_long_mode(point.name, LV_LABEL_LONG_MODE_DOTS);
 
-            leg.text = theme::make_label(leg.root, "", theme::text, fonts::size_16());
-            lv_obj_set_flex_grow(leg.text, 1);
-            lv_obj_set_height(leg.text, fonts::size_16()->line_height);
-            lv_label_set_long_mode(leg.text, LV_LABEL_LONG_MODE_DOTS);
+        if (i >= travel::kLegsMax) {
+            continue;
         }
+        HopView &hop = s_hop[i];
+        hop.root     = bare(right, 0, 0, 0, 0);
+        lv_obj_set_width(hop.root, LV_PCT(100));
+        lv_obj_set_height(hop.root, ICON);
+        lv_obj_set_style_pad_left(hop.root, STOP_W - ICON, 0);
+        lv_obj_set_flex_flow(hop.root, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(hop.root, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
+                              LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_hidden(hop.root, true);
+
+        hop.icon = lv_image_create(hop.root);
+        lv_image_set_src(hop.icon, &icons::bus_icon);
+        lv_obj_set_style_image_recolor(hop.icon, lv_color_hex(theme::secondary), 0);
+        lv_obj_set_style_image_recolor_opa(hop.icon, LV_OPA_COVER, 0);
+        quiet(hop.icon);
     }
 
-    s_note = theme::make_label(right, "", theme::secondary, fonts::size_20());
-    quiet(s_note);
+    s_after = theme::make_label(right, "", theme::secondary, fonts::size_16());
+    quiet(s_after);
 
     // --- what follows it
     lv_obj_t *rest = bare(page, 0, 0, 0, 0);
