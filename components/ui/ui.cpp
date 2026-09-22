@@ -1623,9 +1623,9 @@ lv_obj_t *s_volume_slider   = nullptr;
 lv_obj_t *s_tile_value[INFO_CARD_COUNT] = {};
 lv_obj_t *s_tile_dot[INFO_CARD_COUNT]   = {};
 lv_obj_t *s_detail[INFO_CARD_COUNT]     = {};
+lv_obj_t *s_detail_card                 = nullptr;
 Level     s_card_level[INFO_CARD_COUNT] = {};
 lv_obj_t *s_detail_title                = nullptr;
-int       s_detail_shown                = -1;
 std::int32_t s_detail_height[INFO_CARD_COUNT] = {};
 bool s_tile_long = false;
 
@@ -1730,6 +1730,9 @@ void log_tick(lv_timer_t *)
     }
 }
 
+void build_detail_panel(int i);
+void release_detail_panel(int i);
+
 void detail_clicked_cb(lv_event_t *e)
 {
     const int index = static_cast<int>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e)));
@@ -1737,13 +1740,24 @@ void detail_clicked_cb(lv_event_t *e)
         return;
     }
     for (int i = 0; i < INFO_CARD_COUNT; ++i) {
-        lv_obj_set_hidden(s_detail[i], i != index);
+        if (i != index) {
+            release_detail_panel(i);
+        }
     }
-    s_detail_shown = index;
+    build_detail_panel(index);
+    if (s_detail[index] == nullptr) {
+        return;
+    }
+
     theme::set_text(s_detail_title, INFO_CARDS[index].title);
     lv_obj_scroll_to_y(s_detail[index], 0, LV_ANIM_OFF);
     s_diagnostics->resize(DETAIL_W, s_detail_height[index]);
     s_diagnostics->open();
+
+    // The rows are empty until the next sweep fills them, which is a second away.
+    if (s_handlers.diagnostics != nullptr) {
+        s_handlers.diagnostics();
+    }
 }
 
 void log_held_cb(lv_event_t *e)
@@ -1919,51 +1933,76 @@ void build_detail_overlay(lv_obj_t *parent)
     s_detail_title = theme::make_accent_label(card, "", fonts::size_28());
     lv_obj_align(s_detail_title, LV_ALIGN_TOP_LEFT, 0, 6);
 
-    const std::int32_t width  = DETAIL_W - 2 * DETAIL_PAD;
-    const std::int32_t body_y = ModalOverlay::header_height() + HEADER_GAP;
-
+    s_detail_card = card;
     for (int i = 0; i < INFO_CARD_COUNT; ++i) {
-        s_detail_height[i]        = detail_height(INFO_CARDS[i]);
-        const std::int32_t height = s_detail_height[i] - 2 * DETAIL_PAD - body_y;
-        lv_obj_t *panel = lv_obj_create(card);
-        lv_obj_set_pos(panel, 0, body_y);
-        lv_obj_set_size(panel, width, height);
-        theme::style_panel(panel, theme::panel, 0);
-        lv_obj_set_style_bg_opa(panel, LV_OPA_TRANSP, 0);
-        lv_obj_set_hidden(panel, true);
-        lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_COLUMN);
-        lv_obj_set_style_pad_row(panel, DETAIL_ROW_GAP, 0);
-        lv_obj_set_scrollable(panel, true);
-        lv_obj_set_scroll_dir(panel, LV_DIR_VER);
-
-        for (int r = 0; r < INFO_CARDS[i].count; ++r) {
-            const InfoRow &row = INFO_CARDS[i].rows[r];
-            s_info[static_cast<int>(row.field)] =
-                build_info_row(panel, row.label, fonts::size_20(), DETAIL_ROW_H);
-        }
-
-        if (INFO_CARDS[i].has_setting) {
-            const int index  = static_cast<int>(INFO_CARDS[i].setting);
-            lv_obj_t *button = lv_button_create(panel);
-            lv_obj_set_size(button, LV_PCT(100), DETAIL_SET_H);
-            lv_obj_set_style_margin_top(button, DETAIL_SET_TOP, 0);
-            theme::style_button(button, theme::panel_light);
-            lv_obj_set_style_pad_hor(button, 16, 0);
-            lv_obj_set_flex_flow(button, LV_FLEX_FLOW_ROW);
-            lv_obj_set_flex_align(button, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
-                                  LV_FLEX_ALIGN_CENTER);
-            lv_obj_add_event_cb(button, setting_clicked_cb, LV_EVENT_CLICKED,
-                                reinterpret_cast<void *>(static_cast<std::intptr_t>(index)));
-
-            theme::make_label(button, INFO_CARDS[i].setting_label, theme::text, fonts::size_20());
-            s_setting_value[index] =
-                theme::make_label(button, "Off", theme::secondary, fonts::size_20());
-        }
-
-        s_detail[i] = panel;
+        s_detail_height[i] = detail_height(INFO_CARDS[i]);
     }
 
     s_diagnostics->add_close_button();
+}
+
+// Built when the tile is tapped and released when another is, so the forty-odd
+// rows behind these nine cards cost nothing while nobody is reading them. They
+// came to 33 KB of the internal pool the Wi-Fi transport draws on.
+void build_detail_panel(int i)
+{
+    if (s_detail[i] != nullptr || s_detail_card == nullptr) {
+        return;
+    }
+    const std::int32_t width  = DETAIL_W - 2 * DETAIL_PAD;
+    const std::int32_t body_y = ModalOverlay::header_height() + HEADER_GAP;
+    const std::int32_t height = s_detail_height[i] - 2 * DETAIL_PAD - body_y;
+    lv_obj_t *panel = lv_obj_create(s_detail_card);
+    lv_obj_set_pos(panel, 0, body_y);
+    lv_obj_set_size(panel, width, height);
+    theme::style_panel(panel, theme::panel, 0);
+    lv_obj_set_style_bg_opa(panel, LV_OPA_TRANSP, 0);
+    lv_obj_set_hidden(panel, true);
+    lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(panel, DETAIL_ROW_GAP, 0);
+    lv_obj_set_scrollable(panel, true);
+    lv_obj_set_scroll_dir(panel, LV_DIR_VER);
+
+    for (int r = 0; r < INFO_CARDS[i].count; ++r) {
+        const InfoRow &row = INFO_CARDS[i].rows[r];
+        s_info[static_cast<int>(row.field)] =
+            build_info_row(panel, row.label, fonts::size_20(), DETAIL_ROW_H);
+    }
+
+    if (INFO_CARDS[i].has_setting) {
+        const int index  = static_cast<int>(INFO_CARDS[i].setting);
+        lv_obj_t *button = lv_button_create(panel);
+        lv_obj_set_size(button, LV_PCT(100), DETAIL_SET_H);
+        lv_obj_set_style_margin_top(button, DETAIL_SET_TOP, 0);
+        theme::style_button(button, theme::panel_light);
+        lv_obj_set_style_pad_hor(button, 16, 0);
+        lv_obj_set_flex_flow(button, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(button, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
+                              LV_FLEX_ALIGN_CENTER);
+        lv_obj_add_event_cb(button, setting_clicked_cb, LV_EVENT_CLICKED,
+                            reinterpret_cast<void *>(static_cast<std::intptr_t>(index)));
+
+        theme::make_label(button, INFO_CARDS[i].setting_label, theme::text, fonts::size_20());
+        s_setting_value[index] =
+            theme::make_label(button, "Off", theme::secondary, fonts::size_20());
+    }
+
+    s_detail[i] = panel;
+}
+
+void release_detail_panel(int i)
+{
+    if (s_detail[i] == nullptr) {
+        return;
+    }
+    for (int r = 0; r < INFO_CARDS[i].count; ++r) {
+        s_info[static_cast<int>(INFO_CARDS[i].rows[r].field)] = nullptr;
+    }
+    if (INFO_CARDS[i].has_setting) {
+        s_setting_value[static_cast<int>(INFO_CARDS[i].setting)] = nullptr;
+    }
+    lv_obj_delete(s_detail[i]);
+    s_detail[i] = nullptr;
 }
 
 void build_log_overlay(lv_obj_t *parent)
@@ -2973,12 +3012,13 @@ esp_err_t set_info(Info field, const char *value, Level level)
     const int index = static_cast<int>(field);
     ESP_RETURN_ON_FALSE(index >= 0 && index < INFO_COUNT, ESP_ERR_INVALID_ARG, TAG, "info %d",
                         index);
-    ESP_RETURN_ON_FALSE(s_info[index] != nullptr, ESP_ERR_INVALID_STATE, TAG, "not initialised");
     ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
 
     const char *text = value != nullptr && value[0] != '\0' ? value : "--";
-    theme::set_text(s_info[index], text);
-    theme::set_text_color(s_info[index], info_ink(level));
+    if (s_info[index] != nullptr) {
+        theme::set_text(s_info[index], text);
+        theme::set_text_color(s_info[index], info_ink(level));
+    }
 
     const int card = s_summary_card[index];
     if (card >= 0) {
@@ -3061,8 +3101,6 @@ esp_err_t set_setting(Setting setting, bool on)
     const int index = static_cast<int>(setting);
     ESP_RETURN_ON_FALSE(index >= 0 && index < SETTING_COUNT, ESP_ERR_INVALID_ARG, TAG, "setting %d",
                         index);
-    ESP_RETURN_ON_FALSE(s_setting_value[index] != nullptr, ESP_ERR_INVALID_STATE, TAG,
-                        "not initialised");
     ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
     apply_setting(index, on);
     lvgl_port_unlock();
