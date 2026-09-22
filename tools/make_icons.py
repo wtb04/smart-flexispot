@@ -41,20 +41,31 @@ def render(solid, holes):
     return bytes(out)
 
 
-# A carriage: rounded roof, a split windscreen, a skirt and two wheels.
+# A carriage seen from the side: a rounded roof, a deep windscreen, a skirt over
+# the bogies, and a gap under it so the wheels read as wheels.
 TRAIN = render(
-    solid=[rounded(5, 2, 17, 16, 3), rounded(4, 15, 18, 17, 1),
-           disc(7.5, 18.5, 1.8), disc(14.5, 18.5, 1.8)],
-    holes=[rounded(7, 4.5, 15, 8.5, 1), rounded(10.6, 4, 11.4, 9, 0)],
+    solid=[rounded(5, 1, 17, 15, 4),       # body, roof rounded
+           rounded(4, 14, 18, 16.5, 1),    # skirt
+           rounded(6.5, 18, 9.5, 20.5, 1), # near bogie
+           rounded(12.5, 18, 15.5, 20.5, 1)],
+    holes=[rounded(6.5, 3.5, 15.5, 9, 2),  # windscreen
+           rounded(10.6, 3, 11.4, 9.5, 0), # its centre pillar
+           rounded(7, 10.5, 9, 13, 0.5),   # door
+           rounded(13, 10.5, 15, 13, 0.5)],
 )
 
-# A longer body sitting lower, two windows and a pair of wheels.
+# A bus is longer, flatter and sits lower, with a row of windows rather than one
+# screen: that difference is what has to read at this size.
 BUS = render(
-    solid=[rounded(2, 4, 20, 16, 2.5), rounded(2, 15, 20, 17, 1),
-           disc(6, 18.5, 1.8), disc(16, 18.5, 1.8)],
-    holes=[rounded(4, 6, 10, 9.5, 0.8), rounded(12, 6, 18, 9.5, 0.8)],
+    solid=[rounded(1, 4, 21, 15, 2),
+           rounded(1, 14, 21, 16.5, 1),
+           rounded(4, 18, 7, 20.5, 1),
+           rounded(15, 18, 18, 20.5, 1)],
+    holes=[rounded(2.5, 5.5, 8, 9.5, 1),
+           rounded(9.5, 5.5, 15, 9.5, 1),
+           rounded(16.5, 5.5, 19.5, 9.5, 1),
+           rounded(2.5, 11, 19.5, 11.8, 0)],
 )
-
 
 def emit(name, data):
     rows = []

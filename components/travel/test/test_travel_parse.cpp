@@ -106,6 +106,29 @@ int main()
 
     {
         const std::string text =
+            R"({"options":[{"leaveAt":1,"off":true,"legs":[)"
+            R"({"mode":"train","off":true,"dep":1},{"mode":"bus","dep":2}]}]})";
+        const int n = run(text, options, travel::kOptionsMax);
+        check(n == 1, "a cancelled option is still answered with");
+        check(options[0].cancelled, "the option counts as off");
+        check(options[0].legs[0].cancelled, "the cancelled leg is marked");
+        check(!options[0].legs[1].cancelled, "the running leg is not");
+    }
+
+    {
+        // "off" belongs to the leg it sits in, not to whatever follows.
+        const std::string text =
+            R"({"options":[{"leaveAt":1,"legs":[{"mode":"bus","dep":1},)"
+            R"({"mode":"train","off":true,"dep":2}]}]})";
+        const int n = run(text, options, travel::kOptionsMax);
+        check(n == 1, "parsed");
+        check(!options[0].legs[0].cancelled && options[0].legs[1].cancelled,
+              "off belongs to the leg it sits in, not to the one before it");
+        check(options[0].cancelled, "a journey with a leg off is off");
+    }
+
+    {
+        const std::string text =
             R"({"options":[{"leaveAt":5,"legs":[{"mode":"train","from":"AVeryLongStationNameThatGoesOnAndOnForever"}]}]})";
         const int n = run(text, options, travel::kOptionsMax);
         check(n == 1, "long name parsed");

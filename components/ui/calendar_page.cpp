@@ -158,8 +158,10 @@ void show_calendar()
         char arrive[16];
         clock_of(option.leave, leave, sizeof(leave));
         clock_of(option.arrive, arrive, sizeof(arrive));
-        std::snprintf(text, sizeof(text), "%s  %s  %s", leave, LV_SYMBOL_RIGHT, arrive);
+        std::snprintf(text, sizeof(text), "%s  %s  %s%s", leave, LV_SYMBOL_RIGHT, arrive,
+                      option.cancelled ? "   CANCELLED" : "");
         theme::set_text(trip.when, text);
+        theme::set_text_color(trip.when, option.cancelled ? theme::red : theme::primary);
 
         for (int l = 0; l < travel::kLegsMax; ++l) {
             const bool real = l < option.leg_count;
@@ -172,11 +174,19 @@ void show_calendar()
                                                     ? &icons::train_icon
                                                     : &icons::bus_icon);
 
-            char off[16];
-            clock_of(leg.depart, off, sizeof(off));
-            std::snprintf(text, sizeof(text), "%s  %s  %s  %s", off, leg.from, LV_SYMBOL_RIGHT,
-                          leg.to);
+            // Both ends of the leg, so where it drops you and when is on screen
+            // rather than inferred from the whole journey's arrival.
+            char away[16];
+            char into[16];
+            clock_of(leg.depart, away, sizeof(away));
+            clock_of(leg.arrive, into, sizeof(into));
+            std::snprintf(text, sizeof(text), "%s %s  %s  %s %s", away, leg.from,
+                          LV_SYMBOL_RIGHT, into, leg.to);
+
+            const std::uint32_t ink = leg.cancelled ? theme::red : theme::text;
             theme::set_text(trip.legs[l].text, text);
+            theme::set_text_color(trip.legs[l].text, ink);
+            lv_obj_set_style_image_recolor(trip.legs[l].icon, lv_color_hex(ink), 0);
         }
         lv_obj_set_hidden(trip.root, false);
         ++shown;

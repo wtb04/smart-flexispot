@@ -18,6 +18,7 @@ struct Leg {
     char         to[kPlaceMax];
     std::int64_t depart;            // unix seconds
     std::int64_t arrive;
+    bool         cancelled;
 };
 
 struct Option {
@@ -25,6 +26,7 @@ struct Option {
     std::int64_t arrive;
     Leg          legs[kLegsMax];
     int          leg_count;
+    bool         cancelled;
 };
 
 /** Reads the journeys out of the backend's answer. Times are unix seconds, so

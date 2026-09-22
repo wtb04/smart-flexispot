@@ -76,6 +76,12 @@ void read_string(const char *at, const char *end, char *out, std::size_t size)
     out[written] = '\0';
 }
 
+bool field_flag(const char *at, const char *end, const char *key)
+{
+    const char *found = find_key(at, end, key);
+    return found != nullptr && end - found >= 4 && std::strncmp(found, "true", 4) == 0;
+}
+
 void field_number(const char *at, const char *end, const char *key, std::int64_t &out)
 {
     const char *found = find_key(at, end, key);
@@ -172,10 +178,14 @@ int parse(const char *body, std::size_t length, Option *out, int capacity)
                 field_string(leg, leg_end, "to", into.to, sizeof(into.to));
                 field_number(leg, leg_end, "dep", into.depart);
                 field_number(leg, leg_end, "arr", into.arrive);
+                into.cancelled = field_flag(leg, leg_end, "off");
 
                 ++option.leg_count;
                 leg = leg_end;
             }
+        }
+        for (int i = 0; i < option.leg_count; ++i) {
+            option.cancelled = option.cancelled || option.legs[i].cancelled;
         }
         ++stored;
         at = option_end;
