@@ -12,18 +12,12 @@
 namespace {
 constexpr char TAG[] = "proxy";
 
-// The box answers every frame, so this arrives about twenty times a second.
 int s_shown_mm = -1;
 
 void on_height(int height_mm)
 {
-    // Always passed on: the link wants every report, and the panel is where
-    // this is meant to be read.
     desklink::note_height(height_mm);
 
-    // The console only gets a couple a second. Eighteen a second of these is
-    // most of what a 115200 line can carry, and it is the load the console
-    // has misbehaved under.
     static std::int64_t last = 0;
     if (height_mm == s_shown_mm || esp_timer_get_time() - last < 500000) {
         return;
@@ -46,8 +40,6 @@ extern "C" void app_main(void)
     ESP_LOGI(TAG, "desk link up, listening");
     ESP_ERROR_CHECK_WITHOUT_ABORT(desklink::start());
 
-    // Nothing drives the desk yet. This build only proves the wire: whether the
-    // control box is answering at all, and whether what it says decodes.
     std::uint32_t last_frames = 0;
     bool          complained  = false;
 
@@ -55,7 +47,6 @@ extern "C" void app_main(void)
         vTaskDelay(pdMS_TO_TICKS(5000));
         const loctek::Stats stats = loctek::stats();
 
-        // Only when nothing is decoding, which is the only time it helps.
         if (stats.frames_decoded == 0) {
             std::uint8_t raw[48];
             const int got = loctek::peek_raw(raw, sizeof(raw));
@@ -67,12 +58,6 @@ extern "C" void app_main(void)
                 ESP_LOGI(TAG, "raw: %s", hex);
             }
         }
-        // Nothing while it works. This line was printed once a minute and the
-        // console then emitted that one call thousands of times over, the
-        // same timestamp on every copy -- whatever is wrong is in the output
-        // path rather than here, and the counters have done their job now
-        // that the link is proven. What is worth saying is when the box goes
-        // quiet.
         if (stats.frames_decoded == last_frames) {
             if (!complained) {
                 complained = true;

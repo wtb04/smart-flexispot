@@ -7,7 +7,6 @@
 #include <vector>
 
 namespace hass::ws {
-
 enum class MessageType {
     AuthRequired,
     AuthOk,

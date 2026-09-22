@@ -5,7 +5,6 @@
 #include <ctime>
 
 namespace rtc {
-
 /** Requires bsp_i2c_init() first. Reads the backup clock and, if it is holding
  *  a time worth believing, sets the system clock from it -- so the panel shows
  *  the right time on the first frame rather than whenever the network answers.

@@ -27,21 +27,12 @@
 
 namespace telemetry {
 namespace {
-
 constexpr char TAG[] = "telemetry";
 
 constexpr TickType_t PUBLISH_INTERVAL = pdMS_TO_TICKS(2000);
 
-// How long to wait for an address before starting the network clients anyway.
-// Generous: the C6 has to come up and associate, which is slower than on-die
-// Wi-Fi. If it expires we start regardless, since both clients retry and the
-// network may simply be late.
 constexpr int NETWORK_WAIT_MS = 30000;
 
-// Generous because of what this task does on the way through: it brings up
-// MQTT, the WebSocket, BLE and the JPEG decoder at startup, and every tick it
-// builds the state document with cJSON, which formats floats through full
-// newlib printf -- well over a kilobyte of stack on its own.
 constexpr std::uint32_t TASK_STACK    = 6144;  // measured: uses 3.0 KB
 constexpr UBaseType_t   TASK_PRIORITY = 2;
 constexpr BaseType_t    TASK_CORE     = 0;
@@ -51,10 +42,6 @@ StackType_t  s_task_stack[TASK_STACK];
 
 std::atomic<int> s_brightness{board::kDefaultBrightness};
 
-// --- inbound, from Home Assistant. These run on the MQTT task. -------------
-
-// Home Assistant asking for the screen. The panel is told so its own control
-// agrees, and the board is told so something actually happens.
 std::atomic<bool> s_screen_on{true};
 
 void on_screen(bool on)
@@ -79,8 +66,6 @@ void on_brightness(int percent)
     settings::set(settings::Key::Brightness, percent);
 }
 
-// Until the screens that use these exist, say what arrived so the entity ids
-// and their states can be seen without guessing at them.
 void on_entities(const hass::ws::EntityStore &store)
 {
     room::render(store);
@@ -105,8 +90,6 @@ void on_notify(const hass::protocol::Notification &notice)
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::notify(notice.title.c_str(), notice.message.c_str(),
                                              notice.level.c_str(), notice.timeout_ms));
 }
-
-// --- outbound ---------------------------------------------------------------
 
 void fill_network(hass::protocol::Telemetry &out)
 {
@@ -146,25 +129,15 @@ void on_album_art(media::Art state, const void *pixels)
 
 [[noreturn]] void telemetry_task(void *)
 {
-    // Neither client can do anything without an address, and starting them
-    // early only produces a burst of connection failures that make a real
-    // fault harder to spot.
     if (!wifi::wait_for_ip(NETWORK_WAIT_MS)) {
         ESP_LOGW(TAG, "no address after %d s, starting clients anyway", NETWORK_WAIT_MS / 1000);
     }
 
     const hass::Handlers handlers{on_preset, on_brightness, on_notify, on_move, on_screen};
     ESP_ERROR_CHECK_WITHOUT_ABORT(hass::start(handlers));
-    // Not fatal: the desk works without Home Assistant.
     ESP_ERROR_CHECK_WITHOUT_ABORT(hass::ws::start(on_entities));
-    // Shares the SDIO link to the co-processor with Wi-Fi, so it goes up after
-    // the network rather than racing it.
     ESP_ERROR_CHECK_WITHOUT_ABORT(ble::start());
-    // Album art is fetched over plain HTTP from Home Assistant, so it needs the
-    // network but nothing else.
     ESP_ERROR_CHECK_WITHOUT_ABORT(media::start(on_album_art));
-    // Last: it needs an address and the home position, and the position comes
-    // over the WebSocket once that is subscribed.
     ESP_ERROR_CHECK_WITHOUT_ABORT(radar::start(on_radar, on_radar_details, on_radar_photo));
 
     for (;;) {
@@ -193,14 +166,8 @@ void on_album_art(media::Art state, const void *pixels)
 
         const ble::Stats radio = ble::stats();
         out.presence = radio.phone_present;
-        // The last reading whenever the phone has ever been heard, not only
-        // while it counts as present: the signal on the way out is exactly what
-        // is worth looking at when the thresholds need moving.
         out.presence_rssi = radio.ever_seen ? radio.phone_rssi : -127;
 
-        // Both, because the room page is fed by the WebSocket: a healthy
-        // broker with a dead socket left stale temperatures and lights on
-        // screen behind an icon saying everything was fine.
         ESP_ERROR_CHECK_WITHOUT_ABORT(
             ui::set_links(wifi::connected(), hass::connected() && hass::ws::connected()));
         ESP_ERROR_CHECK_WITHOUT_ABORT(
@@ -210,15 +177,8 @@ void on_album_art(media::Art state, const void *pixels)
             ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_done());
         }
 
-        // Last, so everything gathered above is in the document. Returns an
-        // error while the broker is unreachable, which is normal and not worth
-        // logging every two seconds.
         hass::publish(out);
 
-        // Said once, when everything that is going to start has started. This is
-        // the number that decides whether a TLS handshake or a Bluetooth packet
-        // can find a buffer, and it is worth knowing without waiting for it to
-        // go wrong.
         static bool settled = false;
         if (!settled && esp_timer_get_time() > 40000000) {
             settled = true;
@@ -227,10 +187,6 @@ void on_album_art(media::Art state, const void *pixels)
             heap_caps_get_info(&dma, MALLOC_CAP_DMA);
             heap_caps_get_info(&psram, MALLOC_CAP_SPIRAM);
 
-            // Free on its own says nothing about how close a particular
-            // allocation is to failing. The total says how much there was to
-            // begin with, the largest block says whether what is left is usable
-            // or only crumbs, and the low-water mark says how near it has been.
             ESP_LOGI(TAG,
                      "dma-capable: %u KB free of %u KB, largest block %u KB, low %u KB",
                      static_cast<unsigned>(dma.total_free_bytes / 1024),
@@ -245,15 +201,9 @@ void on_album_art(media::Art state, const void *pixels)
                      static_cast<unsigned>(psram.largest_free_block / 1024));
         }
 
-        // What ran out when the Bluetooth transport and TLS both wanted DMA
-        // memory at once. Reported when it is low rather than all the time, so
-        // it says something when it appears.
         static std::int64_t complained = 0;
         const std::size_t   dma_free   = heap_caps_get_free_size(MALLOC_CAP_DMA);
         const std::size_t   internal   = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-        // Set from what actually broke rather than from what felt comfortable:
-        // allocations began failing around eleven kilobytes and the panel was
-        // still steady at thirty-five, so the line is drawn between them.
         if (dma_free < 24 * 1024 && esp_timer_get_time() - complained > 30000000) {
             complained = esp_timer_get_time();
             ESP_LOGW(TAG, "low memory: %u KB dma-capable, %u KB internal",

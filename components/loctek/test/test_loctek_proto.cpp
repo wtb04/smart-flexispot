@@ -1,4 +1,3 @@
-// Host-side protocol tests -- no hardware, no ESP-IDF needed. See run.sh.
 #include "loctek_proto.h"
 
 #include <cstdio>
@@ -6,7 +5,6 @@
 #include <vector>
 
 namespace {
-
 using namespace loctek;
 
 int g_failures = 0;
@@ -37,7 +35,6 @@ std::vector<Frame> feed(const std::vector<std::uint8_t> &stream)
     return frames;
 }
 
-// Every documented command frame, regenerated from the CRC rather than copied.
 void test_key_frames()
 {
     const struct {
@@ -62,16 +59,11 @@ void test_key_frames()
     }
 }
 
-// The frames are constexpr, so a wrong CRC is a compile error, not a test
-// failure. This is the same check the firmware relies on.
 static_assert(build_key_frame(Key::Up) ==
               KeyFrame{0x9b, 0x06, 0x02, 0x01, 0x00, 0xfc, 0xa0, 0x9d});
 static_assert(build_key_frame(Key::None) ==
               KeyFrame{0x9b, 0x06, 0x02, 0x00, 0x00, 0x6c, 0xa1, 0x9d});
 
-// Real captures from control boxes in the wild, plus the repo's own test vector.
-// Which byte each preset button sends. Upstream sources disagree about which
-// handset label goes with which byte, so the mapping is pinned here by byte.
 void test_presets()
 {
     const struct {
@@ -90,14 +82,10 @@ void test_presets()
         check(std::vector<std::uint8_t>(got.begin(), got.end()) == c.expect, c.name);
     }
 
-    // Storing a preset presses M. Sustained for five seconds that key puts the
-    // control box into factory reset, so the byte is pinned here too: if this
-    // ever changes, the damage is silent and physical.
     check(build_key_frame(Key::Memory) ==
               KeyFrame{0x9b, 0x06, 0x02, 0x20, 0x00, 0xac, 0xb8, 0x9d},
           "memory key frame");
 
-    // Every preset must be a distinct key, or two buttons drive one position.
     const Key keys[] = {key_for(Preset::One), key_for(Preset::Two), key_for(Preset::Three),
                         key_for(Preset::Four)};
     bool distinct = true;
@@ -137,7 +125,6 @@ void test_height_decode()
 
 void test_stream()
 {
-    // Real capture: frames arrive concatenated in a single UART read.
     const std::vector<Frame> frames = feed(bytes({0x9b, 0x04, 0x15, 0xbf, 0xc2, 0x9d,
                                                   0x9b, 0x07, 0x12, 0x07, 0xe6, 0x06, 0x1b, 0xef,
                                                   0x9d, 0x9b, 0x04, 0x11, 0x7c, 0xc3, 0x9d}));
@@ -150,10 +137,6 @@ void test_stream()
 
 void test_payload_bounds()
 {
-    // The payload is everything between the type byte and the checksum, and
-    // nothing else: counting the CRC high byte as data let a short frame pass
-    // the "three digits" guard and decode a checksum byte as a segment
-    // pattern, which can read out as a plausible height.
     const std::vector<Frame> height =
         feed(bytes({0x9b, 0x07, 0x12, 0x07, 0xe6, 0x06, 0x1b, 0xef, 0x9d}));
     check(height.size() == 1 && height[0].payload().size() == 3,
@@ -173,8 +156,6 @@ void test_rejects()
     check(feed(bytes({0x9b, 0x04, 0x11, 0x7c, 0xc3, 0x00})).empty(), "rejects bad end byte");
     check(feed(bytes({0x00, 0xff, 0x12, 0x9b, 0x04, 0x11, 0x7c, 0xc3, 0x9d})).size() == 1,
           "resynchronises after garbage");
-    // A truncated frame swallows the start of the next one; the CRC rejects the
-    // result and the parser recovers on the frame after that.
     check(feed(bytes({0x9b, 0x07, 0x12,
                       0x9b, 0x04, 0x11, 0x7c, 0xc3, 0x9d,
                       0x9b, 0x04, 0x11, 0x7c, 0xc3, 0x9d})).size() == 1,

@@ -16,7 +16,6 @@
 
 namespace room {
 namespace {
-
 constexpr char TAG[] = "room";
 
 constexpr char CLIMATE_ENTITY[] = "climate.office_thermostaat";
@@ -30,7 +29,6 @@ struct PillSpec {
 
 constexpr PillSpec PILLS[] = {
     {"sensor.office_awair_carbon_dioxide", "CO2", 0.0f, 800.0f, 0.0f, 1200.0f},
-    // Awair's own bands: comfortable below 333 ppb, worth a window above 1000.
     {"sensor.office_awair_volatile_organic_compounds_parts", "VOC", 0.0f, 333.0f, 0.0f,
      1000.0f},
     {"sensor.office_awair_humidity", "HUMIDITY", 40.0f, 60.0f, 30.0f, 70.0f},
@@ -49,12 +47,10 @@ constexpr LightSpec LIGHTS[] = {
     {"light.office_grote_lamp", "Main lamp"},
 };
 
-// Two scripts rather than a toggle; the state helper says which one runs.
 constexpr char ALL_LIGHTS_ENTITY[] = "input_boolean.office_verlichting_actief";
 constexpr char ALL_LIGHTS_ON[]     = "script.office_verlichting_aan";
 constexpr char ALL_LIGHTS_OFF[]    = "script.office_verlichting_uit";
 
-// The chip reads as the position it is in; the colour says whether it is live.
 struct ToggleSpec {
     const char *entity;
     const char *on_label;
@@ -112,9 +108,6 @@ const char *on_off(const hass::ws::Entity *entity)
     return is_on(entity->state) ? "ON" : "OFF";
 }
 
-// What was last handed to the progress bar. Home Assistant reports
-// media_position only when it changes, so re-pushing the same stale number on
-// every event dragged the bar backwards.
 std::string s_position_stamp;
 int         s_position_duration = -1;
 bool        s_position_playing  = false;
@@ -140,21 +133,13 @@ int seconds_since(const std::string &iso)
     if (iso.size() < 19 || strptime(iso.c_str(), "%Y-%m-%dT%H:%M:%S", &parsed) == nullptr) {
         return 0;
     }
-    // timegm is not in newlib's headers here, and mktime would apply the panel's
-    // timezone to a stamp Home Assistant already sends in UTC.
     const std::time_t when = days_from_civil(parsed) * 86400LL + parsed.tm_hour * 3600LL +
                              parsed.tm_min * 60LL + parsed.tm_sec;
     const std::time_t now  = std::time(nullptr);
-    // Before SNTP lands the clock is at the epoch, which reads as a wildly
-    // negative age; anything implausible means no information.
     const double age = std::difftime(now, when);
     return age > 0.0 && age < 24 * 3600 ? static_cast<int>(age) : 0;
 }
 
-// render() runs on the WebSocket task and the handlers on the LVGL task. Letting
-// a handler read the entity store meant walking a std::map while the other task
-// rebalanced it -- a use-after-free waiting for a press to coincide with an
-// update. Atomics cross the boundary instead: one read per handler, no tearing.
 std::atomic<bool> s_climate_on{false};
 std::atomic<bool> s_all_lights_on{false};
 std::atomic<bool> s_light_on[LIGHT_COUNT];
@@ -162,22 +147,9 @@ std::atomic<bool> s_toggle_on[TOGGLE_COUNT];
 std::atomic<bool> s_muted{false};
 std::atomic<int>  s_volume_pct{-1};  // negative until the speaker reports one
 
-// Home Assistant echoes the volume a moment after it is set, and while presses
-// are still coming that echo is of the step before last. Its word is ignored
-// until they stop.
 constexpr std::int64_t     VOLUME_SETTLE_US = 1500000;
 constexpr std::int64_t     MEDIA_GONE_US    = 3000000;
 
-// The speaker is reached over HomeKit, which will not take a run of volume_set
-// calls: the later ones come back refused and the player reports itself
-// unavailable in between, which is what threw the cover away.
-//
-// So it is rate limited rather than debounced. Debouncing sent one call a
-// quarter second after the last press, which meant the number moved at once
-// and the speaker did not move until you stopped -- pressing + repeatedly felt
-// like nothing was happening. This sends the first press straight away and the
-// last one as soon as the window allows, which is two calls for a burst
-// instead of ten.
 constexpr std::int64_t     VOLUME_MIN_GAP_US = 250000;
 std::atomic<int>           s_volume_pending{-1};
 std::atomic<std::int64_t>  s_volume_sent_us{0};
@@ -254,8 +226,6 @@ void render_thermostat(const hass::ws::EntityStore &store)
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_thermostat_range(min_c, max_c, step_c));
     }
 
-    // hvac_action says whether the boiler is running; the state only says what it
-    // has been asked to do.
     const auto action  = climate->attributes.find("hvac_action");
     const bool heating = action != climate->attributes.end() ? action->second == "heating"
                                                              : is_on(climate->state);
@@ -273,13 +243,6 @@ void render_media(const hass::ws::EntityStore &store)
 {
     const hass::ws::Entity *player = store.find(MEDIA_ENTITY);
 
-    // Setting the volume several times quickly makes Home Assistant report the
-    // player unavailable between calls. Blanking the card and throwing the
-    // cover away for that reads as a fault, so a gap has to last before it is
-    // believed. Any entity event brings us back here, so a real outage still
-    // shows within a moment of the window passing.
-    // Unavailable is one way a player goes missing mid-command; keeping its
-    // state and losing its title is the other.
     const bool bare = known(player) && player->state != "off" && player->state != "idle" &&
                       attribute(*player, "media_title").empty();
 
@@ -310,9 +273,6 @@ void render_media(const hass::ws::EntityStore &store)
 
     s_muted.store(attribute(*player, "is_volume_muted") == "true", std::memory_order_relaxed);
 
-    // set_media is the one setter that is not idempotent -- it rewrites the
-    // cover's recolour and re-runs the text layout -- so pushing it on every
-    // entity event repainted the album art because a CO2 sensor reported.
     static std::string s_shown;
     const std::string  shown = source + '\n' + title + '\n' + artist + '\n' + state +
                               (playing ? "\n1" : "\n0");
@@ -330,7 +290,6 @@ void render_media(const hass::ws::EntityStore &store)
         s_position_duration = duration;
         s_position_playing  = playing;
 
-        // Carried forward to now: the reading was only true when it was made.
         const int reported = static_cast<int>(attribute_number(*player, "media_position"));
         const int elapsed  = reported + (playing ? seconds_since(stamp) : 0);
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_progress(elapsed, duration, playing));
@@ -345,19 +304,6 @@ void render_media(const hass::ws::EntityStore &store)
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_volume(percent));
     }
 
-    // The local proxy rather than entity_picture: Home Assistant serves that over
-    // plain HTTP with a token in the path.
-    //
-    // A player mid-command drops attributes for an event or two while keeping
-    // its state, and clearing the cover on that meant fetching it again a
-    // moment later. The picture is only acted on when the track has changed or
-    // there is actually one to show; a track that genuinely has no cover still
-    // clears it, because the title changed with it.
-    // Once per track, not once per event. The cover was being fetched and
-    // decoded again every couple of seconds while the volume was being
-    // pressed, which is an HTTP round trip and a JPEG decode each time and is
-    // what made the volume stop feeling instant. Whatever the picture's url
-    // does between events, the cover belongs to the track.
     static std::string s_art_title;
     static bool        s_art_asked = false;
     const std::string  picture     = attribute(*player, "entity_picture_local");
@@ -387,8 +333,6 @@ void send_volume(void *)
 
 }  // namespace
 
-// The volume_up and volume_down services step by whatever the player thinks is
-// sensible, a tenth of full scale here -- too coarse to settle on a level.
 void nudge_volume(float delta)
 {
     const int reported = s_volume_pct.load(std::memory_order_relaxed);
@@ -401,14 +345,9 @@ void nudge_volume(float delta)
     const int percent = static_cast<int>(wanted * 100.0f + 0.5f);
     ESP_LOGI(TAG, "volume %d%%", percent);
 
-    // The step just taken becomes what the next press steps from. Without this
-    // every press in a quick run read the same stale figure back and asked for
-    // the same level again, so only the first one moved anything.
     s_volume_pct.store(percent, std::memory_order_relaxed);
     s_volume_set_us.store(esp_timer_get_time(), std::memory_order_relaxed);
 
-    // Shown before the round trip, like every other control here: if the call is
-    // refused, the next update corrects it within a moment.
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_volume(percent));
 
     s_volume_pending.store(percent, std::memory_order_relaxed);
@@ -484,8 +423,6 @@ void render(const hass::ws::EntityStore &store)
 {
     s_entity_count.store(static_cast<int>(store.size()), std::memory_order_relaxed);
 
-    // The radar centres itself on wherever Home Assistant says home is, so the
-    // panel is not told its own coordinates a second time.
     if (const hass::ws::Entity *home = store.find("zone.home"); home != nullptr) {
         const float lat = attribute_number(*home, "latitude");
         const float lon = attribute_number(*home, "longitude");
@@ -560,7 +497,6 @@ void on_lights()
     const bool currently_on = s_all_lights_on.load(std::memory_order_relaxed);
     ESP_LOGI(TAG, "all lights -> %s", currently_on ? "off" : "on");
 
-    // Flipped straight away; Home Assistant's next update overwrites it.
     ESP_ERROR_CHECK_WITHOUT_ABORT(
         ui::set_lights("LIGHTS", currently_on ? "OFF" : "ON", !currently_on));
     run_script(currently_on ? ALL_LIGHTS_OFF : ALL_LIGHTS_ON);

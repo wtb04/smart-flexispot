@@ -7,13 +7,10 @@
 #include <cstdint>
 #include <cstring>
 
-// A chosen accent on near-black, carried over from the earlier panel.
 namespace ui::theme {
-
 inline constexpr std::uint32_t background  = 0x15110f;
 inline constexpr std::uint32_t panel       = 0x241c18;
 inline constexpr std::uint32_t panel_light = 0x382820;
-// A disabled control still has to read as a control, so it cannot take the background colour.
 inline constexpr std::uint32_t disabled     = 0x1b1512;
 inline constexpr std::uint32_t disabled_ink = 0x5c4d43;
 inline constexpr std::uint32_t text        = 0xfff3ea;
@@ -23,15 +20,11 @@ inline constexpr std::uint32_t amber       = 0xffc15a;
 inline constexpr std::uint32_t red         = 0xff6666;
 
 inline constexpr std::uint32_t default_primary = 0xff8738;
-// Kept wide of each other and of the level colours above, which appear in the
-// same cards and must not be read as the accent.
 inline constexpr std::array<std::uint32_t, 10> primaries{
     0xff6b5b, default_primary, 0xffb44a, 0xa8d75a, 0x5fcf7a,
     0x3fd0c0, 0x4fb0f5, 0x8b93ff, 0xb579f0, 0xff6fd0,
 };
 
-// A mark drawn on top of an accent fill needs the fill to step back, and for
-// that to hold whatever the hue is, the darker shade is derived, not stored.
 inline constexpr std::uint32_t dim_of(std::uint32_t colour)
 {
     constexpr std::uint32_t PART = 78;
@@ -41,12 +34,9 @@ inline constexpr std::uint32_t dim_of(std::uint32_t colour)
 
 inline std::uint32_t primary     = default_primary;
 inline std::uint32_t primary_dim = dim_of(default_primary);
-// The names radar_page.cpp still uses for the two of them.
 inline std::uint32_t &orange     = primary;
 inline std::uint32_t &orange_dim = primary_dim;
 
-// lv_label_set_text invalidates whether or not the text changed, and these are driven from
-// timers, so a screen that is not changing would cost the renderer a repaint per tick.
 inline void set_text(lv_obj_t *label, const char *value)
 {
     if (label == nullptr || value == nullptr) {
@@ -59,13 +49,6 @@ inline void set_text(lv_obj_t *label, const char *value)
     lv_label_set_text(label, value);
 }
 
-// Same for styles: a write marks the object dirty even when the value is identical.
-// Against the object's own default-state value, not the one its current state
-// resolves to. Buttons and their labels carry pressed and disabled variants,
-// so comparing the resolved colour skipped the write whenever the target
-// happened to equal the state colour -- and the default was then never
-// updated, so the control snapped back to the old colour when the state
-// cleared. That is why a desk icon stayed orange on a highlighted preset.
 inline bool has_local_color(lv_obj_t *obj, lv_style_prop_t prop, lv_style_selector_t selector,
                             lv_color_t next)
 {
@@ -86,7 +69,6 @@ inline void set_text_color(lv_obj_t *obj, std::uint32_t colour)
     lv_obj_set_style_text_color(obj, next, 0);
 }
 
-// Without this the panel repainted tiles on every sensor report.
 inline void set_bg_color(lv_obj_t *obj, std::uint32_t colour, lv_style_selector_t selector = 0)
 {
     if (obj == nullptr) {
@@ -111,8 +93,6 @@ inline void set_arc_color(lv_obj_t *obj, std::uint32_t colour, lv_style_selector
     lv_obj_set_style_arc_color(obj, next, selector);
 }
 
-// Every accent on the panel resolves through these four, so choosing a colour
-// is a write per style rather than a hunt for the objects carrying the old one.
 inline lv_style_t accent_fill_style;
 inline lv_style_t accent_dim_style;
 inline lv_style_t accent_ink_style;
@@ -126,7 +106,6 @@ inline void set_primary(std::uint32_t colour)
     lv_style_set_bg_color(&accent_dim_style, lv_color_hex(primary_dim));
     lv_style_set_text_color(&accent_ink_style, lv_color_hex(primary));
     lv_style_set_arc_color(&accent_arc_style, lv_color_hex(primary));
-    // Null covers all four in one walk of the tree rather than four.
     lv_obj_report_style_change(nullptr);
 }
 
@@ -140,9 +119,6 @@ inline void init_accents()
     set_primary(primary);
 }
 
-// LVGL takes a property from whichever style matches the most specific state,
-// and at equal specificity an object's own local value beats a shared one -- so
-// anything meant to follow the accent must not also hold a local colour there.
 inline void fill_accent(lv_obj_t *obj, lv_style_selector_t selector = 0)
 {
     if (obj == nullptr) {
@@ -179,9 +155,6 @@ inline void arc_accent(lv_obj_t *obj, lv_style_selector_t selector)
     lv_obj_add_style(obj, &accent_arc_style, selector);
 }
 
-// For the few objects that take the accent as one of several colours. Moving a
-// style on or off always invalidates, so these belong on a change of state and
-// not on anything driven by a timer.
 inline void fill_accent_or(lv_obj_t *obj, bool accent, std::uint32_t colour,
                            lv_style_selector_t selector = 0)
 {
@@ -214,8 +187,6 @@ inline void arc_accent_or(lv_obj_t *obj, bool accent, std::uint32_t colour,
     set_arc_color(obj, colour, selector);
 }
 
-// lv_obj_align always writes the align style, and that invalidates the object and dirties its
-// parent's layout -- unlike set_pos, set_width and set_height, which all compare first.
 inline void align(lv_obj_t *obj, lv_align_t alignment, std::int32_t x, std::int32_t y)
 {
     if (obj == nullptr) {
@@ -239,8 +210,6 @@ inline void style_panel(lv_obj_t *obj, std::uint32_t colour = panel, int radius 
     lv_obj_set_scrollable(obj, false);
 }
 
-// LVGL does not hand a button's pressed state to its children, so a label with its own ink sits
-// unchanged on a fill that just lit up. Two levels deep covers an icon and the parts it is built from.
 inline void hand_down_press(lv_event_t *event)
 {
     lv_obj_t  *button  = lv_event_get_current_target_obj(event);
@@ -266,22 +235,17 @@ inline void hand_down_press(lv_event_t *event)
 inline void style_button(lv_obj_t *button, std::uint32_t colour = panel_light)
 {
     style_panel(button, colour, 14);
-    // Darker than an active control's own colour, so holding something already on still changes.
     fill_dim_accent(button, LV_STATE_PRESSED);
     lv_obj_set_style_text_color(button, lv_color_hex(text), LV_STATE_PRESSED);
     lv_obj_add_event_cb(button, hand_down_press, LV_EVENT_PRESSED, nullptr);
     lv_obj_add_event_cb(button, hand_down_press, LV_EVENT_RELEASED, nullptr);
     lv_obj_add_event_cb(button, hand_down_press, LV_EVENT_PRESS_LOST, nullptr);
-    // LVGL's default button style carries a shadow and an outline, which read as embossed.
     lv_obj_set_style_shadow_width(button, 0, 0);
     lv_obj_set_style_shadow_width(button, 0, LV_STATE_PRESSED);
     lv_obj_set_style_outline_width(button, 0, 0);
     lv_obj_set_style_outline_width(button, 0, LV_STATE_FOCUSED);
     lv_obj_set_style_border_width(button, 0, LV_STATE_PRESSED);
-    // Pressed state changes colour only, with no shift in geometry.
     lv_obj_set_style_translate_y(button, 0, LV_STATE_PRESSED);
-    // Disabled is a real LVGL state with its own theme styling, which is how a dimmed button
-    // ended up with no background at all.
     lv_obj_set_style_bg_color(button, lv_color_hex(disabled), LV_STATE_DISABLED);
     lv_obj_set_style_bg_opa(button, LV_OPA_COVER, LV_STATE_DISABLED);
     lv_obj_set_style_shadow_width(button, 0, LV_STATE_DISABLED);
@@ -296,7 +260,6 @@ inline lv_obj_t *make_label(lv_obj_t *parent, const char *value, std::uint32_t c
     lv_obj_t *label = lv_label_create(parent);
     set_text(label, value);
     lv_obj_set_style_text_color(label, lv_color_hex(colour), 0);
-    // Only ever reached inside a button, and only because style_button hands its state down.
     lv_obj_set_style_text_color(label, lv_color_hex(text), LV_STATE_PRESSED);
     lv_obj_set_style_text_font(label, font != nullptr ? font : fonts::size_20(), 0);
     return label;

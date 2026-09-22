@@ -4,7 +4,6 @@
 #include <string>
 
 namespace hass::protocol {
-
 enum class Move { Stop, Up, Down, Unknown };
 
 struct Telemetry {

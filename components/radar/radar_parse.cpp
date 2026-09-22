@@ -5,7 +5,6 @@
 
 namespace radar {
 namespace {
-
 struct Scanner {
     const char *p;
     const char *end;
@@ -68,8 +67,6 @@ struct Scanner {
         return true;
     }
 
-    // Brackets inside strings are stepped over, and counting only the matching
-    // pair is enough: the other kind cannot close this one.
     bool skip_value()
     {
         skip_space();
@@ -119,7 +116,6 @@ bool key_is(const char *start, std::size_t length, const char *name)
     return std::strlen(name) == length && std::strncmp(start, name, length) == 0;
 }
 
-// Callsigns arrive padded to eight characters.
 void copy_trimmed(char *out, std::size_t size, const char *start, std::size_t length)
 {
     while (length > 0 && start[length - 1] == ' ') {
@@ -132,8 +128,6 @@ void copy_trimmed(char *out, std::size_t size, const char *start, std::size_t le
     out[length] = '\0';
 }
 
-// Returns false only when the scanner has lost its place, which ends the run;
-// an entry that simply has no position leaves `usable` clear and is skipped.
 bool read_aircraft(Scanner &in, Aircraft &out, bool &usable)
 {
     usable = false;
@@ -195,8 +189,6 @@ bool read_aircraft(Scanner &in, Aircraft &out, bool &usable)
             }
             copy_trimmed(out.desc, sizeof(out.desc), text, length);
         } else if (key_is(key, key_len, "category") && in.peek('"')) {
-            // The emitter class the aircraft broadcasts about itself, which is
-            // what decides the shape it gets drawn as.
             const char *text   = nullptr;
             std::size_t length = 0;
             if (!in.string(text, length)) {
@@ -204,7 +196,6 @@ bool read_aircraft(Scanner &in, Aircraft &out, bool &usable)
             }
             copy_trimmed(out.category, sizeof(out.category), text, length);
         } else if (key_is(key, key_len, "squawk") && in.peek('"')) {
-            // Four octal digits, sent as a string.
             const char *text   = nullptr;
             std::size_t length = 0;
             if (!in.string(text, length)) {
@@ -214,7 +205,6 @@ bool read_aircraft(Scanner &in, Aircraft &out, bool &usable)
             copy_trimmed(digits, sizeof(digits), text, length);
             out.squawk = static_cast<int>(std::strtol(digits, nullptr, 10));
         } else if (key_is(key, key_len, "alt_baro") && in.peek('"')) {
-            // "ground" stands where a number of feet would otherwise be.
             const char *text   = nullptr;
             std::size_t length = 0;
             if (!in.string(text, length)) {
@@ -263,8 +253,6 @@ struct Field {
     std::size_t size;
 };
 
-// Reads the object the scanner is already inside, from just past its '{' to
-// its '}', copying whichever listed fields turn up and stepping over the rest.
 bool read_fields(Scanner &in, const Field *fields, int count)
 {
     if (in.take('}')) {
@@ -396,7 +384,6 @@ bool parse_photo(const char *json, std::size_t length, char *out, std::size_t si
         }
     }
 
-    // An aircraft nobody has photographed answers with an empty array.
     if (!in.take('[') || !in.take('{')) {
         return false;
     }
@@ -409,7 +396,6 @@ bool parse_photo(const char *json, std::size_t length, char *out, std::size_t si
         return false;
     }
 
-    // The address comes back with its slashes escaped, which no url wants.
     char *write = out;
     for (const char *read = out; *read != '\0'; ++read) {
         if (*read == '\\' && read[1] != '\0') {
@@ -452,8 +438,6 @@ int parse(const char *json, std::size_t length, Aircraft *out, int capacity)
 
     Scanner in{json, json + length};
 
-    // Walk the top-level object for "aircraft" rather than assuming where it
-    // sits; the feed puts a timestamp and a count around it.
     if (!in.take('{')) {
         return 0;
     }
@@ -486,15 +470,8 @@ int parse(const char *json, std::size_t length, Aircraft *out, int capacity)
         Aircraft aircraft{};
         bool     usable = false;
         if (!read_aircraft(in, aircraft, usable)) {
-            // A malformed entry ends the run rather than poisoning the rest:
-            // the scanner no longer knows where it is.
             break;
         }
-        // The feed answers with everything in range -- well over a hundred over
-        // a busy country -- and there is only room for a few dozen. Keeping the
-        // first few dozen keeps them in whatever order the feed happened to
-        // use, which threw away most of what was overhead and left a scope
-        // showing a third of the sky. The nearest are the ones worth keeping.
         if (usable && !aircraft.on_ground) {
             if (stored < capacity) {
                 out[stored++] = aircraft;

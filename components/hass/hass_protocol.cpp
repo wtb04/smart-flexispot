@@ -10,7 +10,6 @@
 
 namespace hass::protocol {
 namespace {
-
 constexpr std::size_t MAX_TITLE   = 80;
 constexpr std::size_t MAX_MESSAGE = 400;
 constexpr int MIN_TIMEOUT_MS = 1000;
@@ -53,7 +52,6 @@ std::string normalise_level(const std::string &level)
 std::string string_field(const cJSON *object, const char *key)
 {
     const cJSON *item = cJSON_GetObjectItemCaseSensitive(object, key);
-    // An automation sending {"message": 42} must not take the notification down.
     return cJSON_IsString(item) && item->valuestring != nullptr ? item->valuestring : "";
 }
 
@@ -94,8 +92,6 @@ std::string state_document(const Telemetry &t)
 
     if (t.height_mm >= 0) {
         cJSON_AddNumberToObject(root, "height_mm", t.height_mm);
-        // In double: rounding in float and letting serialisation promote turns
-        // 72.8 into 72.80000305175781.
         const double cm = static_cast<double>(t.height_mm) / 10.0;
         cJSON_AddNumberToObject(root, "height_cm", cm);
     }
@@ -106,8 +102,6 @@ std::string state_document(const Telemetry &t)
         cJSON_AddNumberToObject(root, "battery_pct", t.battery_percent);
         cJSON_AddNumberToObject(root, "battery_v",
                                 static_cast<int>(t.battery_volts * 100.0f + 0.5f) / 100.0);
-        // Quantised: the raw reading jitters by a milliamp, which would republish
-        // on every tick.
         cJSON_AddNumberToObject(root, "battery_ma", (t.battery_milliamps / 10) * 10);
         cJSON_AddStringToObject(root, "battery_present", "ON");
         cJSON_AddStringToObject(root, "charging", t.charging ? "ON" : "OFF");
@@ -119,12 +113,10 @@ std::string state_document(const Telemetry &t)
     cJSON_AddStringToObject(root, "preset", t.preset);
     cJSON_AddStringToObject(root, "presence", t.presence ? "ON" : "OFF");
     cJSON_AddStringToObject(root, "screen", t.screen ? "ON" : "OFF");
-    // Quantised; -127 stands in for "nothing heard".
     cJSON_AddNumberToObject(root, "presence_rssi", (t.presence_rssi / 5) * 5);
 
     cJSON_AddNumberToObject(root, "brightness", t.brightness);
     cJSON_AddNumberToObject(root, "rssi", (t.rssi_dbm / 5) * 5);
-    // Minutes and KiB: a value ticking every second would defeat publish-on-change.
     cJSON_AddNumberToObject(root, "uptime_min", t.uptime_s / 60);
     cJSON_AddNumberToObject(root, "free_heap_kb", t.free_heap / 1024);
     if (!t.ip_address.empty()) {
@@ -155,7 +147,6 @@ std::string discovery_document(const std::string &device_id, const std::string &
     cJSON_AddStringToObject(device, "hw", "Tab5 / ESP32-P4");
     cJSON_AddItemToObject(root, "dev", device);
 
-    // Required for device-based discovery; the whole payload is rejected without it.
     cJSON *origin = cJSON_CreateObject();
     cJSON_AddStringToObject(origin, "name", "tab5-hello");
     cJSON_AddStringToObject(origin, "sw", sw_version.c_str());
@@ -229,8 +220,6 @@ std::string discovery_document(const std::string &device_id, const std::string &
     cJSON_AddStringToObject(preset, "val_tpl", "{{ value_json.preset | default('none') }}");
     cJSON_AddStringToObject(preset, "dev_cla", "enum");
     cJSON *preset_options = cJSON_AddArrayToObject(preset, "options");
-    // An enum sensor rejects anything outside this list, so it has to say the
-    // same words the state does.
     for (const char *option : {"Preset 1", "Preset 2", "Preset 3", "Preset 4", "Between"}) {
         cJSON_AddItemToArray(preset_options, cJSON_CreateString(option));
     }
@@ -323,9 +312,6 @@ std::string discovery_document(const std::string &device_id, const std::string &
         cJSON_AddStringToObject(button, "ic", "mdi:desk");
     }
 
-    // A switch rather than a button, because whether the screen is lit is a
-    // state Home Assistant can also be wrong about, and it should be able to see
-    // the panel's own answer.
     add_entity(cmps, "screen", "switch", "Screen", device_id + "_screen");
     cJSON *screen = cJSON_GetObjectItem(cmps, "screen");
     cJSON_AddStringToObject(screen, "stat_t", topics.state.c_str());
@@ -389,7 +375,6 @@ Notification parse_notification(const std::string &payload)
     return out;
 }
 
-// ON or OFF, however Home Assistant chooses to spell it.
 bool parse_screen(const std::string &payload, bool &on)
 {
     std::string text;

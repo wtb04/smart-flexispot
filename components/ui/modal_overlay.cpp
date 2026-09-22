@@ -4,12 +4,7 @@
 
 namespace ui {
 namespace {
-
 constexpr lv_opa_t     SCRIM_OPA = LV_OPA_70;
-// Moving the card repaints every label on it once per frame, and these cards
-// carry a lot of text; a long travel is what made the motion stutter. A short
-// one over few frames reads as a card arriving without asking the renderer to
-// redraw it twenty times.
 constexpr std::int32_t  SLIDE    = 18;
 constexpr std::uint32_t OPEN_MS  = 130;
 constexpr std::uint32_t CLOSE_MS = 100;
@@ -25,10 +20,7 @@ ModalOverlay::ModalOverlay(lv_obj_t *parent, std::int32_t width, std::int32_t he
 {
     scrim_ = lv_obj_create(parent);
     lv_obj_set_align(scrim_, LV_ALIGN_TOP_LEFT);
-    // Sized in open(): a percentage covers only the parent's content box, leaving its padding
-    // undimmed -- which showed as a bright border around a dimmed page.
     theme::style_panel(scrim_, theme::background, 0);
-    // Not animated: fading a scrim over the page means re-blending all of it every frame.
     lv_obj_set_style_bg_opa(scrim_, SCRIM_OPA, 0);
     lv_obj_set_hidden(scrim_, true);
     lv_obj_set_clickable(scrim_, true);
@@ -36,10 +28,8 @@ ModalOverlay::ModalOverlay(lv_obj_t *parent, std::int32_t width, std::int32_t he
 
     card_ = lv_obj_create(scrim_);
     lv_obj_set_size(card_, width_, height_);
-    // set_pos is interpreted relative to the alignment, so a sliding card must not stay centred.
     lv_obj_set_align(card_, LV_ALIGN_TOP_LEFT);
     theme::style_panel(card_, theme::panel, 24);
-    // Without this a tap on the card bubbles to the scrim and closes it.
     lv_obj_set_clickable(card_, true);
 }
 
@@ -47,16 +37,11 @@ void ModalOverlay::add_close_button()
 {
     lv_obj_t *close = lv_button_create(card_);
     lv_obj_set_size(close, CLOSE_SIZE, CLOSE_SIZE);
-    // Sits in the card's own header band. Nudging it downwards put it over the
-    // first row of whatever the card holds.
     lv_obj_set_align(close, LV_ALIGN_TOP_RIGHT);
-    // Up into the card's padding: sitting at the top of the content box put it
-    // right on the shoulder of the first row.
     lv_obj_set_pos(close, 0, -8);
     theme::style_button(close, theme::panel_light);
     lv_obj_center(theme::make_label(close, LV_SYMBOL_CLOSE, theme::text, fonts::size_22()));
     lv_obj_add_event_cb(close, close_clicked, LV_EVENT_CLICKED, this);
-    // Anything added to the card afterwards would otherwise sit over it.
     lv_obj_move_foreground(close);
 }
 
@@ -81,7 +66,6 @@ void ModalOverlay::open(lv_obj_t *)
 {
     lv_obj_update_layout(scrim_);
 
-    // Children sit in the parent's content box, so backing out by its padding reaches the edge.
     lv_obj_t *parent = lv_obj_get_parent(scrim_);
     lv_obj_set_pos(scrim_, -lv_obj_get_style_pad_left(parent, LV_PART_MAIN),
                    -lv_obj_get_style_pad_top(parent, LV_PART_MAIN));
@@ -124,7 +108,6 @@ void ModalOverlay::start(std::int32_t from, std::int32_t to, std::uint32_t durat
     lv_anim_start(&anim);
 }
 
-// Position only: the card keeps its size, so its contents are laid out once rather than per frame.
 void ModalOverlay::slide(void *target, std::int32_t value)
 {
     auto *self = static_cast<ModalOverlay *>(target);

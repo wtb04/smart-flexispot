@@ -5,15 +5,7 @@
 #include <optional>
 #include <span>
 
-// Wire format of the LoctekMotion / Flexispot control box:
-//
-//     9b <len> <type> <payload...> <crc_hi> <crc_lo> 9d
-//
-// `len` counts from itself through crc_lo, so a frame is len + 2 bytes. The
-// checksum is CRC-16/MODBUS over [len .. last payload byte], high byte first --
-// the opposite byte order to real Modbus RTU.
 namespace loctek {
-
 inline constexpr std::uint8_t kStart    = 0x9b;
 inline constexpr std::uint8_t kEnd      = 0x9d;
 inline constexpr std::size_t  kMaxFrame = 16;
@@ -95,9 +87,6 @@ public:
 
     std::span<const std::uint8_t> payload() const
     {
-        // Start, length, type, two CRC bytes and end are the six bytes that are
-        // not payload. Counting one more handed the CRC high byte to the decoder
-        // as data, defeating the "at least three digits" guard.
         return std::span<const std::uint8_t>(bytes_).subspan(3, len_ - kMinFrame);
     }
 

@@ -6,7 +6,6 @@
 #include <cstdint>
 
 namespace ble {
-
 struct Stats {
     bool ready         = false;
     bool has_key       = false;
@@ -22,9 +21,6 @@ esp_err_t start();
 /** Thread-safe. */
 Stats stats();
 
-// What the link to the desk proxy costs, in microseconds, over the last few
-// hundred exchanges. Measured rather than assumed: this decides whether a desk
-// button can live at the other end of it.
 struct LinkStats {
     bool connected;
     int  samples;
@@ -39,11 +35,7 @@ LinkStats link_stats();
 
 }  // namespace ble
 
-// The desk, reached over the link rather than over a wire. Same shape as the
-// loctek component it stands in for, so the supervisor above does not care
-// which of the two it is talking to.
 namespace ble::desk {
-
 /** Called from the Bluetooth host task on every status the proxy sends. */
 using StatusHandler = void (*)(int height_mm, bool linked, deskproto::Motion motion);
 
@@ -65,5 +57,4 @@ bool last(int &height_mm, bool &box_linked, deskproto::Motion &motion);
 }  // namespace ble::desk
 
 namespace ble {
-
 }  // namespace ble

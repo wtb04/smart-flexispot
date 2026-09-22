@@ -6,16 +6,6 @@
 #include <cstdint>
 
 namespace radar {
-
-// The feed returns whatever is in range and this decides how many of them get
-// kept, drawn and tapped. Each one costs a line and a label on the scope, drawn
-// from internal memory: sixty took the low-water mark from 44 KB to 15 KB, and
-// this corner of the sky has never held forty at a hundred and sixty
-// kilometres.
-// How many the feed's answer is boiled down to. Storing one is free -- the
-// records live in PSRAM -- so this is set by what is worth knowing about rather
-// than by what can be afforded. Drawing is the expensive part and is capped
-// separately, on the page.
 inline constexpr int kMaxAircraft = 160;
 
 struct Snapshot {

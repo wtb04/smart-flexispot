@@ -4,7 +4,6 @@
 #include "hass_protocol.h"
 
 namespace hass {
-
 /** Called on the MQTT task when Home Assistant asks for something. */
 struct Handlers {
     void (*on_preset)(int preset);                            // 1-4

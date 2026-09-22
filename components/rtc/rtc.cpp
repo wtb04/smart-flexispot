@@ -13,31 +13,21 @@
 
 namespace rtc {
 namespace {
-
 constexpr char TAG[] = "rtc";
 
-// The RX8130CE, on the bus the power monitor and the touch controller share.
 constexpr std::uint8_t  ADDRESS      = 0x32;
 constexpr std::uint32_t I2C_SPEED_HZ = 400000;
 constexpr int           I2C_TIMEOUT_MS = 100;
 
-// Seconds, minutes, hours, weekday, day, month, year -- seven registers in a
-// row, all binary-coded decimal.
 constexpr std::uint8_t REG_SEC   = 0x10;
 constexpr std::uint8_t REG_FLAG  = 0x1d;
 constexpr std::uint8_t REG_CTRL0 = 0x1e;
 constexpr std::uint8_t REG_CTRL1 = 0x1f;
 
-// Set while the oscillator has stopped, which after a power cut means the time
-// it is holding is nonsense rather than merely old.
 constexpr std::uint8_t FLAG_VOLTAGE_LOW = 1 << 1;
 
-// Halts the counter so the seven registers can be written without one of them
-// rolling over halfway through.
 constexpr std::uint8_t CTRL0_STOP = 1 << 6;
 
-// Without these the chip runs only while the panel is powered, which is the one
-// situation where a backup clock is no use at all.
 constexpr std::uint8_t CTRL1_BACKUP = (1 << 4) | (1 << 5);
 
 i2c_master_dev_handle_t s_dev   = nullptr;
@@ -72,8 +62,6 @@ esp_err_t store(std::time_t when)
     ESP_RETURN_ON_ERROR(write_byte(REG_CTRL0, static_cast<std::uint8_t>(ctrl0 | CTRL0_STOP)), TAG,
                         "stop");
 
-    // The chip counts months from one and years from 2000; tm counts months
-    // from zero and years from 1900.
     const std::array<std::uint8_t, 8> tx{REG_SEC,
                                          to_bcd(utc.tm_sec),
                                          to_bcd(utc.tm_min),
@@ -88,7 +76,6 @@ esp_err_t store(std::time_t when)
                         "start");
     ESP_RETURN_ON_ERROR(err, TAG, "write time");
 
-    // The time is good again, so the flag that says otherwise has to go.
     std::uint8_t flags = 0;
     if (read_bytes(REG_FLAG, &flags, 1) == ESP_OK && (flags & FLAG_VOLTAGE_LOW) != 0) {
         write_byte(REG_FLAG, static_cast<std::uint8_t>(flags & ~FLAG_VOLTAGE_LOW));

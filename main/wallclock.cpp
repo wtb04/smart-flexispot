@@ -13,13 +13,10 @@
 
 namespace wallclock {
 namespace {
-
 constexpr char TAG[] = "clock";
 
 constexpr TickType_t TICK = pdMS_TO_TICKS(1000);
 
-// An unsynced device comes up in 1970, so anything past this is a real time
-// without having to ask SNTP whether it finished.
 constexpr int PLAUSIBLE_YEAR = 2024;
 
 constexpr std::uint32_t TASK_STACK    = 3072;

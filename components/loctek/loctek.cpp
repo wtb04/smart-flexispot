@@ -13,19 +13,15 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
-
 #include <atomic>
 
 namespace loctek {
 namespace {
-
 constexpr char TAG[] = "loctek";
 
 constexpr auto UART        = static_cast<uart_port_t>(CONFIG_LOCTEK_UART_NUM);
 constexpr int  BAUD_RATE   = 9600;
 constexpr int  RX_BUF_SIZE = 1024;
-// No TX ring buffer: a backlog of movement frames cannot keep draining after
-// the release frame is written.
 constexpr int  TX_BUF_SIZE = 0;
 
 constexpr TickType_t REPEAT_TICKS    = pdMS_TO_TICKS(CONFIG_LOCTEK_REPEAT_MS);
@@ -51,12 +47,6 @@ QueueHandle_t s_move_queue = nullptr;
 StaticSemaphore_t s_tx_mutex_ctrl;
 SemaphoreHandle_t s_tx_mutex = nullptr;
 
-// Created rather than reserved. The desk can be driven over the wire or over
-// Bluetooth and only one of those is chosen at a time, but a static stack is
-// reserved either way -- six kilobytes of the only internal pool DMA can reach,
-// held for a driver that never starts when the proxy is doing the talking. A
-// task stack has to stay in internal memory: a task whose stack is in PSRAM
-// cannot run while the cache is off.
 StaticTask_t s_tx_task_ctrl;
 StaticTask_t s_rx_task_ctrl;
 StackType_t *s_tx_task_stack = nullptr;
@@ -78,8 +68,6 @@ esp_err_t write_frame_locked(const KeyFrame &frame)
     return uart_wait_tx_done(UART, pdMS_TO_TICKS(100));
 }
 
-// Preset commands come from another task than the transmit loop, and two
-// writers on one UART can interleave bytes mid-frame.
 esp_err_t write_frame(const KeyFrame &frame)
 {
     if (s_tx_mutex == nullptr) {
@@ -91,9 +79,6 @@ esp_err_t write_frame(const KeyFrame &frame)
     return err;
 }
 
-// A key press is a stream of frames, not one: a preset sent once registered
-// only sometimes. The lock is held for the whole press so the idle poll cannot
-// land in the middle of it and read as an instant release.
 esp_err_t press_key(Key key, int duration_ms)
 {
     const KeyFrame frame = build_key_frame(key);
@@ -115,7 +100,6 @@ esp_err_t press_key(Key key, int duration_ms)
     return err != ESP_OK ? err : release;
 }
 
-
 const KeyFrame &frame_for(Move direction)
 {
     switch (direction) {
@@ -126,9 +110,6 @@ const KeyFrame &frame_for(Move direction)
     return kFrameStop;
 }
 
-// The desk travels one short step per frame, so a held button means
-// retransmitting. Releasing sends the "no keys pressed" frame rather than going
-// quiet, or the desk coasts on.
 [[noreturn]] void tx_task(void *)
 {
     Move       direction     = Move::Stop;
@@ -153,12 +134,8 @@ const KeyFrame &frame_for(Move direction)
             const bool stopping = requested == Move::Stop && direction != Move::Stop;
             direction = requested;
             if (direction != Move::Stop) {
-                // No wake pulse: a movement frame is a real key press and the
-                // box acts on it whether or not its panel is lit.
                 move_deadline = xTaskGetTickCount() + MOVE_TIMEOUT;
             } else if (stopping) {
-                // Repeated so a single dropped frame cannot leave the desk
-                // travelling on past the button release.
                 for (int i = 0; i < kStopRepeats; ++i) {
                     ESP_ERROR_CHECK_WITHOUT_ABORT(write_frame(kFrameStop));
                 }
@@ -167,8 +144,6 @@ const KeyFrame &frame_for(Move direction)
     }
 }
 
-// A window on the wire, for when nothing decodes and the question is whether
-// the bytes are the desk's at all.
 constexpr int RAW_KEEP = 64;
 std::uint8_t  s_raw[RAW_KEEP];
 int           s_raw_len = 0;
@@ -188,8 +163,6 @@ void keep_raw(const std::uint8_t *bytes, int count)
 [[noreturn]] void rx_task(void *)
 {
     Parser parser;
-    // Small buffer, short timeout: the box sends ~525 B/s, and a read that
-    // waits to fill batches two readings into one visible update.
     std::array<std::uint8_t, 64> buf{};
 
     for (;;) {
@@ -221,16 +194,11 @@ void keep_raw(const std::uint8_t *bytes, int count)
     }
 }
 
-// The wake line rests low; driving it high puts the control box into operating
-// mode. turnon() in https://github.com/iMicknl/LoctekMotion_IoT does the same.
 esp_err_t init_wake_gpio()
 {
     if constexpr (CONFIG_LOCTEK_WAKE_GPIO < 0) {
         return ESP_OK;
     } else {
-        // Field by field rather than a designated initialiser: the hysteresis
-        // control only exists on the parts that have it, and this driver now
-        // builds for the panel and for the box that proxies it.
         gpio_config_t cfg{};
         cfg.pin_bit_mask = 1ULL << CONFIG_LOCTEK_WAKE_GPIO;
         cfg.mode         = GPIO_MODE_OUTPUT;
@@ -245,11 +213,6 @@ esp_err_t init_wake_gpio()
     }
 }
 
-// The line is left high, not returned low: a box held low goes fully silent and
-// ignores movement frames. The low period must be long enough for the box to see
-// the edge -- across a warm reset the line was already high and only floats
-// briefly, so a couple of milliseconds low passes unnoticed and the panel stays
-// dark.
 constexpr TickType_t WAKE_LOW = pdMS_TO_TICKS(200);
 
 esp_err_t turn_on()
@@ -284,8 +247,6 @@ esp_err_t init_uart()
     ESP_RETURN_ON_ERROR(uart_set_pin(UART, CONFIG_LOCTEK_TX_GPIO, CONFIG_LOCTEK_RX_GPIO,
                                      UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE),
                         TAG, "uart pins");
-    // The line floats until the pins are configured, so the FIFO can already
-    // hold noise. Drop it rather than reporting a garbage link.
     return uart_flush_input(UART);
 }
 
@@ -299,8 +260,6 @@ esp_err_t start(HeightHandler on_height)
 
     ESP_RETURN_ON_ERROR(init_wake_gpio(), TAG, "wake");
     ESP_RETURN_ON_ERROR(init_uart(), TAG, "uart");
-    // Unconditionally: the line has to end up high and stay there, or the box
-    // goes quiet ten seconds later and stops acting on movement frames.
     ESP_RETURN_ON_ERROR(turn_on(), TAG, "wake line high");
 
     QueueHandle_t queue = xQueueCreateStatic(MOVE_QUEUE_LEN, sizeof(Move),
@@ -380,8 +339,6 @@ esp_err_t store_preset(Preset preset)
     ESP_RETURN_ON_FALSE(s_move_queue != nullptr, ESP_ERR_INVALID_STATE, TAG, "not started");
     ESP_LOGI(TAG, "storing preset %d", static_cast<int>(preset) + 1);
 
-    // Five seconds of M puts the control box into factory reset, so this
-    // duration must stay well clear of that.
     static_assert(CONFIG_LOCTEK_PRESS_MS < 2000, "M must not be held near the factory-reset time");
     ESP_RETURN_ON_ERROR(press_key(Key::Memory, CONFIG_LOCTEK_PRESS_MS), TAG, "memory key");
     vTaskDelay(pdMS_TO_TICKS(CONFIG_LOCTEK_STORE_GAP_MS));

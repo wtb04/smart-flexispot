@@ -3,7 +3,6 @@
 #include "esp_err.h"
 
 namespace wifi {
-
 /** Returns as soon as the attempt is under way. An empty SSID starts nothing. */
 esp_err_t start();
 

@@ -5,7 +5,6 @@
 #include <ctime>
 
 namespace {
-
 int g_failures = 0;
 
 void check(bool ok, const char *what)
@@ -53,8 +52,6 @@ void test_epoch()
     check(rtc::utc_seconds(made(2038, 1, 19, 3, 14, 7)) == 2147483647, "the far end of 32 bits");
 }
 
-// The chip stores two digits of year, so the driver adds a century. Anything
-// that makes the wrong century come out lands the panel decades away.
 void test_century()
 {
     check(rtc::utc_seconds(made(2000 + rtc::from_bcd(0x00), 1, 1, 0, 0, 0)) == 946684800,
@@ -64,8 +61,6 @@ void test_century()
           "chip year 25 reads as 2025");
 }
 
-// Against the host's own timegm, across a spread of dates, because the whole
-// point of writing this by hand was that the platform has no timegm to call.
 void test_against_the_system()
 {
     static const std::tm cases[] = {

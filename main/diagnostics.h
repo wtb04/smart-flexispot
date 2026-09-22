@@ -5,7 +5,6 @@
 #include <cstddef>
 
 namespace diagnostics {
-
 /** Starts the task that fills the Setup page's diagnostics view. */
 esp_err_t start();
 

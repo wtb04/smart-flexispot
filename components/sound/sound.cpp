@@ -15,17 +15,13 @@
 
 namespace sound {
 namespace {
-
 constexpr char TAG[] = "sound";
 
 constexpr int SAMPLE_RATE = 16000;
 constexpr int VOLUME      = CONFIG_SOUND_VOLUME;
 
-// Two notes a fifth apart: a chime rather than an alarm.
 constexpr float NOTE_HZ[] = {880.0f, 1320.0f};
 constexpr int   NOTE_MS   = 110;
-// The speaker clicks audibly if a tone starts or stops at full amplitude, so
-// each note fades in and out over this fraction of its length.
 constexpr float EDGE_FRACTION = 0.25f;
 constexpr float AMPLITUDE     = 0.22f;
 
@@ -65,8 +61,6 @@ void build_chime()
 [[noreturn]] void sound_task(void *)
 {
     for (;;) {
-        // Coalesced: several notifications at once chime once, rather than
-        // queueing a stack of overlapping beeps.
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         if (s_speaker != nullptr && !s_chime.empty()) {
             esp_codec_dev_set_out_vol(s_speaker, s_volume.load(std::memory_order_relaxed));

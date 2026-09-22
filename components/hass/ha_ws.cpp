@@ -24,17 +24,11 @@
 
 namespace hass::ws {
 namespace {
-
 constexpr char TAG[] = "ha_ws";
 
-// Costs twice this in internal heap, and does not cap message size: a larger
-// dump simply arrives as several events.
 constexpr int BUFFER_SIZE = 4096;
-// The 4 KB default overflows when the client formats a connection error.
 constexpr int TASK_STACK = 6144;  // measured: uses 2.8 KB
 
-// Nothing in the client caps reassembly, so a confused server could otherwise
-// exhaust the heap.
 constexpr std::size_t MAX_MESSAGE = 256 * 1024;
 
 constexpr int SUBSCRIBE_ID = 2;
@@ -42,22 +36,14 @@ constexpr int SUBSCRIBE_ID = 2;
 esp_websocket_client_handle_t s_client = nullptr;
 std::atomic<bool>             s_connected{false};
 
-// Home Assistant requires every command id to be larger than any id already used
-// on the connection, and errors out otherwise. Hence one counter for all
-// commands: per-call-site counters let a high id block every later low one.
 std::atomic<int> s_next_command_id{SUBSCRIBE_ID + 1};
 
 int next_command_id()
 {
     return s_next_command_id.fetch_add(1, std::memory_order_relaxed);
 }
-// Set from the socket task, acted on elsewhere: stopping the client from its own
-// event handler frees the running task's control block.
 std::atomic<bool>             s_shutdown_wanted{false};
 
-// Queued rather than sent by the caller: send_text can block on the client lock
-// while the read loop runs, and the callers are LVGL handlers holding the UI
-// lock, so a press that waited on the socket froze the screen.
 struct Command {
     char domain[16];
     char service[40];
@@ -92,8 +78,6 @@ esp_err_t enqueue(const char *domain, const char *service, const char *entity_id
         copy_into(cmd.field, sizeof(cmd.field), field);
         copy_into(cmd.value, sizeof(cmd.value), value);
     }
-    // Never blocks: a full queue means a wedged socket, and waiting is what this
-    // queue exists to avoid.
     ESP_RETURN_ON_FALSE(xQueueSend(s_commands, &cmd, 0) == pdTRUE, ESP_ERR_NO_MEM, TAG,
                         "command queue full");
     return ESP_OK;
@@ -129,8 +113,6 @@ void send_text(const std::string &text)
     if (s_client == nullptr || text.empty()) {
         return;
     }
-    // Finite timeout: portMAX_DELAY would stall the read loop on a wedged socket.
-    // Sending from the handler is safe; the client lock is recursive.
     esp_websocket_client_send_text(s_client, text.data(), static_cast<int>(text.size()),
                                    pdMS_TO_TICKS(5000));
 }
@@ -156,7 +138,6 @@ void handle_message(const std::string &text)
             if (subscribe.empty()) {
                 ESP_LOGW(TAG, "no entities configured - see hass_secrets.example.h");
             } else {
-                // Ids are per connection, so a reconnect starts over.
                 s_next_command_id.store(SUBSCRIBE_ID + 1, std::memory_order_relaxed);
                 send_text(subscribe);
                 s_connected.store(true, std::memory_order_relaxed);
@@ -165,13 +146,11 @@ void handle_message(const std::string &text)
         }
 
         case MessageType::AuthInvalid:
-            // A bad token cannot fix itself; retrying just fills Home Assistant's log.
             ESP_LOGE(TAG, "token rejected, not retrying");
             s_shutdown_wanted.store(true, std::memory_order_relaxed);
             break;
 
         case MessageType::Event: {
-            // Gate on the subscription id: another subscription would feed the same store.
             if (message_id(root) != SUBSCRIBE_ID) {
                 break;
             }
@@ -203,9 +182,6 @@ void handle_message(const std::string &text)
 
 void handle_data(const esp_websocket_event_data_t *event)
 {
-    // Two independent kinds of splitting: a frame over the buffer size arrives as
-    // several events with a rising payload_offset, while a fragmented message
-    // arrives as separate frames, offset back at zero and opcode 0.
     switch (event->op_code) {
         case 0x01:  // text: first or only frame
             if (event->payload_offset == 0) {
@@ -269,7 +245,6 @@ void on_event(void *, esp_event_base_t, std::int32_t id, void *data)
 [[noreturn]] void supervisor_task(void *)
 {
     for (;;) {
-        // The timeout keeps the shutdown check below ticking.
         Command cmd;
         if (xQueueReceive(s_commands, &cmd, pdMS_TO_TICKS(500)) == pdTRUE) {
             if (connected()) {
@@ -284,8 +259,6 @@ void on_event(void *, esp_event_base_t, std::int32_t id, void *data)
         }
 
         if (s_shutdown_wanted.exchange(false, std::memory_order_relaxed) && s_client != nullptr) {
-            // Deliberately off the socket task: destroy() does not check that the
-            // stop succeeded and frees the client under its own running task.
             esp_websocket_client_stop(s_client);
             ESP_LOGW(TAG, "client stopped");
         }
@@ -318,8 +291,6 @@ esp_err_t start(UpdateHandler on_update)
         "events");
 
     static StaticTask_t task_ctrl;
-    // Sized for building a service call here: a Command on the stack, cJSON and
-    // the string holding the message.
     static StackType_t  task_stack[6144];
     s_commands = xQueueCreateStatic(COMMAND_QUEUE_LEN, sizeof(Command),
                                     reinterpret_cast<std::uint8_t *>(s_command_queue_storage),

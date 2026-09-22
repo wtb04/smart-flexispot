@@ -14,45 +14,22 @@
 
 namespace ui {
 namespace {
-
 constexpr float DEG  = 3.14159265f / 180.0f;
-// Room outside the outer ring for the compass letters. It has to hold the gap
-// plus a whole line box: at 24 the N and S boxes landed two pixels outside the
-// scope itself, so they were clipped against the ring rather than sitting clear
-// of it.
+// Must hold the gap plus a whole line box: at 24 the N and S labels landed
+// outside the scope object and were clipped against the ring.
 constexpr int MARK = 36;
 
-// Four, not twelve: at this size a spoke every thirty degrees is a texture
-// rather than a reference, and it was most of what made the scope look busy.
 constexpr int SPOKES = 4;
 constexpr int RINGS  = 4;
 
 constexpr int BOX = 24;  // local frame each outline is drawn in
 
-// Aircraft out past the edge are still worth knowing about, so they sit on the
-// rim at their bearing and slide inwards as they close.
-// Drawing is what costs: every aircraft on the scope is a line, a dot and
-// sometimes a label, and LVGL allocates per object per frame out of the one
-// internal pool DMA can reach. Measured low-water marks: 16 KB with sixty
-// drawn, 2 KB with a hundred -- and 2 KB is where the Wi-Fi transport asserts.
-// The sky is kept whole in the data and thinned to the nearest of them here, so
-// the overview can still say how many are really up there.
-// The whole sky is drawn, because an aircraft costs nothing to draw any more.
-// It used to cost about 670 bytes of DMA-capable memory apiece -- a line, a dot
-// and a label, each allocating per object per frame -- which is why there was a
-// ceiling at all: measured low-water marks of 25 KB with 48 drawn, 16 KB with
-// 60, and 2 KB with 100, where the Wi-Fi transport asserts. They are rasterised
-// into one alpha mask now, exactly as the ground is, so the cost is one image
-// however many are up there.
 constexpr int DRAWN_MAX = radar::kMaxAircraft;
 
-// Only the nearest few are ever named, so the labels stay objects.
 constexpr int LABEL_MAX = 20;
 
-// The picture the aircraft are drawn into carries its own colour rather than
-// taking one from a recolour, so the altitude ramp survives being rasterised.
-// LVGL lays this format out as an RGB565 plane followed by a separate alpha
-// plane, so the two are written side by side rather than interleaved.
+// LVGL stores RGB565A8 as an RGB565 plane followed by a separate alpha plane,
+// not interleaved.
 constexpr std::size_t AIR_BYTES_PER_PX = 3;
 
 constexpr int RIM_DOTS = 14;
@@ -60,45 +37,23 @@ constexpr int RIM_SIZE = 6;
 
 struct Blip;
 
-// Distance, altitude, speed, track, squawk. Not bearing: the whole purpose of
-// drawing a scope is that you can see the bearing.
 constexpr int READINGS = 5;
 
-// Coastline, borders and water, drawn once when Home Assistant says where home
-// is. A pool rather than an object per path: the embedded map covers several
-// hundred kilometres and only the part inside the outer ring is ever wanted,
-// which is a few dozen runs of it. The vertices live in PSRAM, where several
-// thousand of them are not missed.
-// The longest single path the generator emits, projected one at a time.
 constexpr int MAP_POINTS     = 2400;
 constexpr int MASK_MAX_EDGES = 64;
 
-// Water is the one thing on this screen allowed to be cold: everything else is
-// warm on near-black, and a coastline that reads as the edge of the sea tells
-// you more than another cream line would.
 constexpr std::uint32_t INK_WATER = 0x5d93b8;
-
-// The steps the two buttons walk through, in kilometres.
-// Lakes are filled rather than outlined, which LVGL has no primitive for, so
-// they are scanline-filled into a canvas laid under the scope. One canvas for
-// all of them, the size of the scope, in PSRAM.
 
 constexpr int RANGES[]     = {20, 40, 60, 80, 100, 120, 140, 160};
 constexpr int RANGE_COUNT  = static_cast<int>(std::size(RANGES));
 constexpr int RANGE_BUTTON = 72;
 
-// Long enough to read as movement, short enough that a second press is not
-// waiting on it. The rings never move -- they are fixed fractions of whatever
-// the range is -- so only the ground and the aircraft travel.
 constexpr std::uint32_t ZOOM_MS = 260;
 
-// A degree of latitude is 110.57 km and a degree of longitude is 111.32 km
-// times the cosine of the latitude. Flat earth over eighty kilometres is off by
-// less than the width of the line being drawn.
+// Flat earth over eighty kilometres is off by less than the line width.
 constexpr float KM_PER_LAT = 110.574f;
 constexpr float KM_PER_LON = 111.320f;
 
-// The altitude scale in the scope's bottom-left corner.
 constexpr int          SCALE_TOP_FT = 40000;
 constexpr int          LEGEND_STEPS = 18;
 constexpr std::int32_t LEGEND_W     = 108;
@@ -106,9 +61,6 @@ constexpr std::int32_t LEGEND_H     = 8;
 
 constexpr float KM_PER_NM = 1.852f;
 
-// The column beside the scope, top to bottom. No card behind it and no boxes
-// around the readings: a second surface sitting next to a circle read as
-// something bolted on rather than part of the same page.
 constexpr std::int32_t COLUMN_W   = 294;
 constexpr std::int32_t COLUMN_GAP = 28;
 constexpr std::int32_t ROW_H      = 30;
@@ -119,22 +71,16 @@ struct Blip {
     lv_obj_t *label;
 };
 
-// An outline says which way it is pointing and what sort of thing it is, but
-// its middle is empty, so where the aircraft actually is was a guess. A filled
-// dot underneath answers that exactly.
 constexpr int DOT_SIZE = 5;
 
-// The emitter class an aircraft broadcasts about itself is enough to tell a
-// helicopter from a jumbo without asking anybody, and a scope on which all of
-// them are the same triangle is throwing that away.
 enum class Shape : std::uint8_t { Airliner, Heavy, Light, Rotor, Other };
 
-// Nose towards negative y, which is up before the track rotation is applied.
+// Nose towards negative y: up, before the track rotation.
 constexpr float OUTLINE_AIRLINER[][2] = {{0, -9}, {7, 4}, {0, 1}, {-7, 4}};
 constexpr float OUTLINE_HEAVY[][2]    = {{0, -11}, {10, 5}, {0, 1}, {-10, 5}};
 constexpr float OUTLINE_LIGHT[][2]    = {{0, -6}, {4, 5}, {-4, 5}};
 constexpr float OUTLINE_OTHER[][2]    = {{0, -6}, {6, 0}, {0, 6}, {-6, 0}};
-// One stroke through both rotor diameters, because a line is a single polyline.
+// One stroke through both diameters, because a line is a single polyline.
 constexpr float OUTLINE_ROTOR[][2] = {{-7, -7}, {7, 7}, {0, 0}, {7, -7}, {-7, 7}};
 
 struct Outline {
@@ -177,27 +123,16 @@ struct Row {
 lv_obj_t *s_scope  = nullptr;
 lv_obj_t *s_marker = nullptr;
 lv_obj_t   *s_rings[RINGS]  = {};
-// While a zoom runs, the range the scope is drawn at slides from the old value
-// to the new one and the two ground pictures are scaled rather than redrawn;
-// rasterising them every frame would cost far more than it is worth.
 float       s_shown_range   = 0.0f;
 int         s_zoom_from     = 0;
 lv_obj_t   *s_zoom_in       = nullptr;
 lv_obj_t   *s_zoom_out      = nullptr;
 int         s_range_step    = 3;  // 80 km, which is where it starts
 
-// The last of the per-aircraft cost to leave the internal pool. With these in
-// PSRAM, raising how many aircraft the scope keeps costs it nothing.
 Blip              *s_blips = nullptr;
 lv_obj_t          *s_rim[RIM_DOTS]              = {};
 lv_obj_t          *s_legend[LEGEND_STEPS]       = {};
 
-// Water is an area, so it is filled rather than outlined, and LVGL has no
-// polygon primitive. Everything wet is scanline-filled into one alpha mask --
-// one byte a pixel, one image object, one colour from the object's recolour --
-// instead of a line object per path. A full ARGB layer the size of the scope
-// was what took the internal heap to nothing and brought down the Wi-Fi
-// co-processor's SDIO driver, which asserts when it cannot get a buffer.
 constexpr std::uint8_t WATER_ALPHA = 0x5c;
 
 lv_obj_t     *s_air_canvas   = nullptr;
@@ -223,9 +158,6 @@ lv_obj_t *s_photo       = nullptr;
 lv_obj_t *s_photo_frame = nullptr;
 lv_obj_t *s_photo_note  = nullptr;
 
-// The frame is shrunk to whatever the picture actually fills, because corners
-// can only be cut off something that reaches them: rounding a frame wider than
-// the picture inside it rounds empty space.
 std::int32_t s_photo_box_y = 0;
 std::int32_t s_photo_box_h = 0;
 lv_obj_t *s_nearby     = nullptr;
@@ -233,26 +165,14 @@ lv_obj_t *s_nearby     = nullptr;
 lv_image_dsc_t s_photo_dsc     = {};
 Row            s_rows[READINGS] = {};
 
-// Held against the selection so a lookup that comes back after the tap has
-// moved on is thrown away rather than shown against the wrong aircraft.
 radar::Details s_details                     = {};
 char           s_details_hex[radar::kHexLen] = {};
 
-// Held so the panel can be redrawn when the selection changes rather than only
-// when a reading lands.
-// In PSRAM: a Snapshot carries the whole aircraft list, and this is the fourth
-// copy of it. None of it is touched from an interrupt or with the cache off.
 radar::Snapshot *s_last = nullptr;
 char            s_chosen[radar::kHexLen] = {};
 
-// Until the page is tapped it follows the nearest aircraft on its own, so
-// arriving at it never shows an empty column. From the first tap onwards the
-// selection is exactly what was tapped, and tapping open sky means nothing --
-// following the nearest one anyway would be the panel overruling the tap.
 bool s_following = true;
 
-// A picture is two requests behind the tap that asked for it, so the wait gets
-// said out loud rather than leaving a gap where one is about to appear.
 enum class Picture : std::uint8_t { Idle, Looking, Loading, Missing, Shown };
 Picture s_picture = Picture::Idle;
 
@@ -273,14 +193,8 @@ Plot *s_plots = nullptr;
 int  s_shown  = 0;
 int  s_beyond = 0;
 
-// Height by brightness within whatever the accent colour happens to be, rather
-// than by hue. The map projects use a full rainbow, and borrowing it put cyan
-// and violet on a screen that is otherwise one warm colour on near-black:
-// readable, and wrong. Built from the accent at each call so that choosing a
-// different one takes the scope with it.
 constexpr int ALTITUDE_STOPS[] = {0, 12000, 25000, 40000};
 
-// Not on the scale: an aircraft that has not said how high it is.
 constexpr std::uint32_t INK_UNKNOWN = 0x6b5a50;
 
 std::uint32_t mix(std::uint32_t from, std::uint32_t to, float fraction)
@@ -317,8 +231,6 @@ std::uint32_t altitude_ink(int feet)
     return ink[count - 1];
 }
 
-// 7500 is a hijacking, 7600 a dead radio and 7700 everything else. Rare enough
-// that nobody would look for them, which is exactly why they get shouted about.
 const char *emergency(int squawk)
 {
     switch (squawk) {
@@ -329,8 +241,6 @@ const char *emergency(int squawk)
     }
 }
 
-// Measured rather than assumed: lv_obj_get_width only answers once a layout
-// pass has run, and every placement below has to be settled before that.
 std::int32_t text_width(const char *text, const lv_font_t *font)
 {
     std::int32_t width = 0;
@@ -360,10 +270,6 @@ void ring(lv_obj_t *parent, std::int32_t radius, lv_opa_t opa)
     quiet(circle);
 }
 
-// Off the letter's own measured box rather than a guess at how wide a glyph is.
-// Assuming twelve by eighteen for all four put W and S through the outer ring
-// and left E clear of it, which is the sort of thing that only looks like a
-// design decision.
 constexpr std::int32_t COMPASS_GAP = 10;
 
 void compass(lv_obj_t *parent, const char *text, char side)
@@ -384,8 +290,6 @@ void compass(lv_obj_t *parent, const char *text, char side)
     quiet(label);
 }
 
-// Bearing lines and labelled rings: without them a dot is somewhere vaguely
-// over there, and with them it is eleven miles out to the north east.
 void build_chart(lv_obj_t *scope, int range_km)
 {
     for (int i = 0; i < SPOKES; ++i) {
@@ -405,16 +309,11 @@ void build_chart(lv_obj_t *scope, int range_km)
         quiet(spoke);
     }
 
-    // Brightest at the edge, so the outline of the scope reads first and the
-    // inner rings stay reference rather than decoration.
     constexpr lv_opa_t WEIGHT[RINGS] = {LV_OPA_10, LV_OPA_20, LV_OPA_30, LV_OPA_40};
     for (int i = 1; i <= RINGS; ++i) {
         const std::int32_t radius = s_radius * i / RINGS;
         ring(scope, radius, WEIGHT[i - 1]);
 
-        // On the north spoke alone: the same number four times over is three
-        // more than anybody needs. Sitting above the ring rather than centred
-        // on it, so the line does not run through the digits.
         char text[12];
         std::snprintf(text, sizeof(text), "%d", range_km * i / RINGS);
         lv_obj_t *label = theme::make_label(scope, text, theme::secondary, fonts::size_16());
@@ -425,9 +324,6 @@ void build_chart(lv_obj_t *scope, int range_km)
     }
 }
 
-// Aiming at a twenty pixel triangle on a touchscreen is a game nobody wants to
-// play. A tap anywhere on the scope takes the nearest aircraft within a tenth
-// of the scope's width, and tapping open sky lets go of the one that was held.
 void scope_clicked(lv_event_t *event)
 {
     lv_indev_t *indev = lv_event_get_indev(event);
@@ -474,15 +370,9 @@ void scope_clicked(lv_event_t *event)
     show_radar(*s_last);
 }
 
-// The scope's background is clipped to a circle, so its square's bottom-left
-// corner is space nothing can reach. The scale that reads the blips goes there,
-// on the page behind it, rather than taking room in the column.
 void build_legend(lv_obj_t *parent, std::int32_t side)
 {
     const std::int32_t line = fonts::size_16()->line_height;
-    // Sat against the bottom-left, with its whole box kept outside the outer
-    // ring: the corner is only so big, and half the scale tucked under the
-    // scope is worse than no scale at all.
     const std::int32_t x = 4;
     const std::int32_t y = side - line - LEGEND_H - 4;
     const std::int32_t step = LEGEND_W / LEGEND_STEPS;
@@ -507,16 +397,6 @@ void build_legend(lv_obj_t *parent, std::int32_t side)
     quiet(high);
 }
 
-// Everything the map is drawn from, and nothing about where the panel is: the
-// data covers a region, and which part of it shows is decided here from
-// whatever position arrives at runtime.
-// The ground is two pictures, not a few dozen line objects. Everything wet goes
-// into one alpha mask and every political line into another; each is a single
-// image with its colour coming from the object's recolour. Drawn as objects it
-// was forty-odd lines for LVGL to re-render whenever anything on the scope
-// changed, which is what made opening the page take a visible moment and took
-// the internal heap to nothing -- the Wi-Fi co-processor's SDIO driver asserts
-// when it cannot get a receive buffer, and that is how the panel went down.
 void mask_line(std::uint8_t *mask, std::int32_t x0, std::int32_t y0, std::int32_t x1,
                std::int32_t y1, std::uint8_t value)
 {
@@ -549,12 +429,6 @@ void mask_line(std::uint8_t *mask, std::int32_t x0, std::int32_t y0, std::int32_
     }
 }
 
-// Even-odd scanline fill, clipped to the outer ring. The polygon is whole --
-// the generator clips areas with a polygon clipper so they stay closed -- so a
-// lake half off the scope still fills the half that is on it.
-// `rings` gives the length of each ring in `points`; the ones after the first
-// are holes -- the islands in a sea -- and counting crossings across every ring
-// at once is what leaves them unfilled.
 void fill_water(const lv_point_precise_t *points, const std::uint16_t *rings, int ring_count,
                 int count)
 {
@@ -598,8 +472,6 @@ void fill_water(const lv_point_precise_t *points, const std::uint16_t *rings, in
         if (span < 0.0f) {
             continue;
         }
-        // The ring's half-width at this row, so staying inside the circle is
-        // one square root a row rather than a test a pixel.
         const auto         half = static_cast<std::int32_t>(std::sqrt(span));
         const std::int32_t low  = std::max<std::int32_t>(s_centre - half, 0);
         const std::int32_t high = std::min<std::int32_t>(s_centre + half, s_ground_side - 1);
@@ -644,9 +516,6 @@ void draw_map(float home_lat, float home_lon, int range_km)
             const float x   = centre + (lon - home_lon) * per_lon;
             const float y   = centre - (lat - home_lat) * per_lat;
 
-            // Kept far enough out that the rasteriser still draws the part
-            // that crosses the scope, but not so far that the coordinates grow
-            // silly. Every vertex is kept, so the ring lengths stay true.
             const float clamped_x = std::clamp(x, centre - reach * 4.0f, centre + reach * 4.0f);
             const float clamped_y = std::clamp(y, centre - reach * 4.0f, centre + reach * 4.0f);
             s_map_points[count++] = {static_cast<std::int32_t>(std::lround(clamped_x)),
@@ -675,14 +544,6 @@ void draw_map(float home_lat, float home_lon, int range_km)
     }
 }
 
-// Greyed rather than merely inert, so the end of the range is visible before
-// pressing rather than after.
-// Disabling a button while a finger is still on it leaves the pressed state
-// behind: LVGL stops delivering events to it, so the release never arrives and
-// the accent colour stays on the button and its label. Since the range is
-// applied on the press, running out of range mid-press is exactly when that
-// happens, so the state is cleared by hand along with the children the press
-// was handed down to.
 void set_button_enabled(lv_obj_t *button, bool enabled)
 {
     if (button == nullptr) {
@@ -705,12 +566,6 @@ void paint_range_buttons()
     set_button_enabled(s_zoom_out, s_range_step < RANGE_COUNT - 1);
 }
 
-// Nothing is fetched again. The sweep always asks for the farthest range the
-// buttons go to and the page shows whichever of those are inside the one it is
-// set to, so zooming is instant and never shows the wrong aircraft while a
-// request for the new range is still in the air.
-// The ground travels with the aircraft rather than fading: it was the full
-// redraw on every frame that made the first attempt stutter, not the transform.
 void scale_ground(float factor)
 {
     const auto zoom = static_cast<std::uint32_t>(std::lround(factor * 256.0f));
@@ -724,12 +579,6 @@ void scale_ground(float factor)
 
 void place_blip(Plot &plot, float range_km);
 
-// A frame of a zoom moves what is already on the scope and nothing else. The
-// full redraw sorts the aircraft, works out which tags can be shown without
-// touching, and rewrites the column; none of that changes while the range
-// slides, and doing it sixty times a second is what made the zoom stutter.
-// The aircraft are one picture now, so a frame of a zoom scales it exactly as
-// it scales the ground, rather than moving a hundred objects.
 void move_blips(float range_km, float factor)
 {
     (void)range_km;
@@ -750,8 +599,6 @@ void zoom_step(void *, std::int32_t value)
     const float t    = static_cast<float>(value) / 256.0f;
 
     s_shown_range = from + (to - from) * t;
-    // The ground was rasterised at the range the zoom started from, so it grows
-    // by however much closer the scope has come since.
     scale_ground(from / s_shown_range);
     move_blips(s_shown_range, from / s_shown_range);
 }
@@ -802,23 +649,17 @@ void range_clicked(lv_event_t *event)
     if (next == s_range_step) {
         return;
     }
-    // Whatever is on screen right now, so pressing again mid-animation carries
-    // on from where the scope has got to rather than jumping back.
     const int from = s_shown_range > 0.0f ? static_cast<int>(std::lround(s_shown_range))
                                           : RANGES[s_range_step];
     s_range_step   = next;
     apply_range(from);
 }
 
-// A button rather than a styled panel, so it grows under a finger the way every
-// other button on the panel does; that comes from the theme, not from here.
 lv_obj_t *build_range_button(lv_obj_t *parent, std::int32_t x, const char *text, int step)
 {
     lv_obj_t *button = lv_button_create(parent);
     lv_obj_set_size(button, RANGE_BUTTON, RANGE_BUTTON);
     lv_obj_set_pos(button, x, 4);
-    // The same helper the navigation tabs use, so these press and grow like
-    // every other button rather than like a panel that happens to be tappable.
     theme::style_button(button, theme::panel_light);
     lv_obj_set_style_radius(button, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(button, lv_color_hex(theme::disabled), LV_STATE_DISABLED);
@@ -845,10 +686,6 @@ void build_scope(lv_obj_t *parent, std::int32_t side, int range_km)
     lv_obj_set_scrollable(scope, false);
     lv_obj_add_event_cb(scope, scope_clicked, LV_EVENT_CLICKED, nullptr);
 
-    // The ground goes in a layer of its own, made before the rings so that
-    // everything in it is underneath them. Shuffling each line to the back
-    // afterwards was doing the same job by hand, and doing it wrong: rivers
-    // came out over the rings they should pass beneath.
     lv_obj_t *ground = lv_obj_create(scope);
     lv_obj_set_pos(ground, 0, 0);
     lv_obj_set_size(ground, side, side);
@@ -897,9 +734,6 @@ void build_scope(lv_obj_t *parent, std::int32_t side, int range_km)
     lv_obj_set_size(s_marker, 34, 34);
     lv_obj_set_style_radius(s_marker, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_opa(s_marker, LV_OPA_TRANSP, 0);
-    // Repainted with the rest of the scope rather than carrying a shared style,
-    // since there is no border-coloured accent style and one object does not
-    // justify adding one.
     lv_obj_set_style_border_color(s_marker, lv_color_hex(theme::primary), 0);
     lv_obj_set_style_border_width(s_marker, 2, 0);
     lv_obj_set_style_pad_all(s_marker, 0, 0);
@@ -917,8 +751,6 @@ void build_scope(lv_obj_t *parent, std::int32_t side, int range_km)
         quiet(dot);
     }
 
-    // Above the rings, since the aircraft are what the rings are there to
-    // measure. One picture for all of them, tinted by its own recolour.
     s_air_mask = static_cast<std::uint8_t *>(heap_caps_calloc(
         static_cast<std::size_t>(side) * side, AIR_BYTES_PER_PX, MALLOC_CAP_SPIRAM));
     if (s_air_mask != nullptr) {
@@ -991,9 +823,6 @@ void build_column(lv_obj_t *parent, std::int32_t x, std::int32_t height)
     const std::int32_t photo_y = ROWS_Y + READINGS * ROW_H + 16;
     const std::int32_t photo_h = height - photo_y - FOOT_H - 4;
 
-    // An image draws its own content rather than drawing it as a child, so a
-    // radius on the image itself rounds nothing. The corners have to be cut by
-    // a parent that clips what it contains.
     s_photo_box_y = photo_y;
     s_photo_box_h = photo_h;
 
@@ -1013,8 +842,6 @@ void build_column(lv_obj_t *parent, std::int32_t x, std::int32_t height)
     lv_image_set_inner_align(s_photo, LV_IMAGE_ALIGN_CONTAIN);
     quiet(s_photo);
 
-    // With nothing selected the picture's space would be a hole, so it holds
-    // what is overhead instead. Which is also the answer to what to tap.
     s_nearby = theme::make_label(column, "", theme::secondary, fonts::size_20());
     lv_obj_set_pos(s_nearby, 0, photo_y);
     lv_obj_set_width(s_nearby, COLUMN_W);
@@ -1022,7 +849,6 @@ void build_column(lv_obj_t *parent, std::int32_t x, std::int32_t height)
     lv_obj_set_hidden(s_nearby, true);
     quiet(s_nearby);
 
-    // Sits where the picture will be, so the wait has somewhere to be said.
     s_photo_note = theme::make_label(column, "", theme::secondary, fonts::size_16());
     lv_obj_set_style_text_opa(s_photo_note, LV_OPA_60, 0);
     lv_obj_set_pos(s_photo_note, 0, photo_y + photo_h / 2 - 10);
@@ -1030,7 +856,6 @@ void build_column(lv_obj_t *parent, std::int32_t x, std::int32_t height)
     lv_obj_set_style_text_align(s_photo_note, LV_TEXT_ALIGN_CENTER, 0);
     quiet(s_photo_note);
 
-    // Only ever says anything when something is wrong.
     s_summary = theme::make_label(column, "", theme::amber, fonts::size_16());
     lv_obj_set_width(s_summary, COLUMN_W);
     lv_label_set_long_mode(s_summary, LV_LABEL_LONG_MODE_DOTS);
@@ -1062,9 +887,6 @@ void place_blip(Plot &plot, float range_km)
     plot.x = static_cast<std::int32_t>(std::lround(s_centre + plot.east_km * scale));
     plot.y = static_cast<std::int32_t>(std::lround(s_centre - plot.north_km * scale));
 
-    // Tags turned inwards: on the right of the scope they would otherwise run
-    // off the edge, and two aircraft either side of the centre would have their
-    // labels pointing at each other.
     const std::int32_t span = text_width(blip_name(*plot.aircraft), fonts::size_16());
     plot.label_x = plot.x > s_centre ? plot.x - 11 - span : plot.x + 11;
     plot.label_w = span;
@@ -1089,8 +911,6 @@ void air_pixels(std::int32_t y, std::int32_t from, std::int32_t to, std::uint16_
     std::memset(alpha + from, 0xff, static_cast<std::size_t>(to - from + 1));
 }
 
-// The same even-odd scanline fill the water uses, on a shape small enough that
-// the bounding box is the whole of the work.
 void fill_blip(const lv_point_precise_t *points, int count, std::uint16_t ink)
 {
     if (s_air_mask == nullptr || count < 3) {
@@ -1105,8 +925,6 @@ void fill_blip(const lv_point_precise_t *points, int count, std::uint16_t ink)
     top    = std::max<std::int32_t>(top, 0);
     bottom = std::min<std::int32_t>(bottom, s_ground_side - 1);
 
-    // Six-point outlines at most, so four crossings is the real bound; the
-    // headroom and the clamp below are there so the optimiser can see it too.
     constexpr int MAX_CROSSINGS = 12;
 
     for (std::int32_t y = top; y <= bottom; ++y) {
@@ -1123,10 +941,6 @@ void fill_blip(const lv_point_precise_t *points, int count, std::uint16_t ink)
             const float t  = (static_cast<float>(y) - yi) / (yj - yi);
             crossings[found++] = static_cast<std::int32_t>(std::lround(xi + t * (xj - xi)));
         }
-        // Insertion sort rather than std::sort: there are two crossings in the
-        // ordinary case and four at most, and introsort's heap path is enough
-        // machinery that the optimiser can no longer prove the index stays in
-        // the array.
         for (int i = 1; i < found; ++i) {
             const std::int32_t value = crossings[i];
             int                j     = i - 1;
@@ -1149,8 +963,6 @@ void fill_blip(const lv_point_precise_t *points, int count, std::uint16_t ink)
 
 void raster_blip(const Plot &plot)
 {
-    // Heading is clockwise from north and the screen's y runs downwards, which
-    // is what puts the minus on the sine of y rather than of x.
     const float track = plot.aircraft->track_deg < 0.0f ? 0.0f : plot.aircraft->track_deg;
     const float sin_t = std::sin(track * DEG);
     const float cos_t = std::cos(track * DEG);
@@ -1168,8 +980,6 @@ void raster_blip(const Plot &plot)
     const std::uint16_t ink =
         to_rgb565(shout ? theme::red : altitude_ink(plot.aircraft->altitude_ft));
 
-    // A rotorcraft is drawn as an open cross, which has no inside to fill, so it
-    // gets a blob at its position and nothing else.
     if (outline.closed) {
         fill_blip(shape, outline.count, ink);
     }
@@ -1215,8 +1025,6 @@ void set_row(int index, const char *name, const char *value)
     theme::set_text_color(s_rows[index].value, theme::text);
 }
 
-// Nothing is selected, so the column says what is overhead rather than standing
-// empty with the word Radar at the top of it.
 void show_summary(const radar::Snapshot &snapshot)
 {
     char text[128];
@@ -1268,7 +1076,6 @@ void show_summary(const radar::Snapshot &snapshot)
         }
     }
 
-    // The four nearest, where the picture would be.
     text[0]    = '\0';
     int length = 0;
     for (int i = 0; i < s_shown && i < 4; ++i) {
@@ -1296,8 +1103,6 @@ void show_selected(const radar::Aircraft &aircraft)
     lv_obj_set_hidden(s_nearby, true);
     theme::set_text(s_title, aircraft.flight[0] != '\0' ? aircraft.flight : aircraft.hex);
 
-    // Only what came back for this aircraft; the lookup is one flight behind
-    // whenever a tap lands while the last one is still in the air.
     const bool mine = std::strcmp(s_details_hex, aircraft.hex) == 0;
 
     if (mine && s_details.airline[0] != '\0') {
@@ -1308,10 +1113,6 @@ void show_selected(const radar::Aircraft &aircraft)
         theme::set_text(s_operator, "");
     }
 
-    // Registration and shape on one line: three labels for three short strings
-    // was most of the clutter. The feed sends no prose description, so who built
-    // it and what model it is are put back together from the lookup, which
-    // keeps them in separate fields.
     char shape[56] = {};
     if (mine && s_details.manufacturer[0] != '\0' && s_details.model[0] != '\0') {
         std::snprintf(shape, sizeof(shape), "%s %s", s_details.manufacturer, s_details.model);
@@ -1354,8 +1155,6 @@ void show_selected(const radar::Aircraft &aircraft)
     theme::set_text(s_rows[0].value, text);
 
     if (aircraft.altitude_ft >= 0) {
-        // Level, climbing or descending, at dump1090's threshold: below this a
-        // rate is the aircraft breathing rather than going anywhere.
         const char *trend = aircraft.vertical_fpm > 245    ? " " LV_SYMBOL_UP
                             : aircraft.vertical_fpm < -245 ? " " LV_SYMBOL_DOWN
                                                            : "";
@@ -1430,12 +1229,9 @@ void show_radar(const radar::Snapshot &snapshot)
         *s_last = snapshot;
     }
 
-    // Wherever the zoom has got to, so the aircraft travel with the ground
-    // instead of jumping to the new range while it is still moving.
     const float range_km = s_shown_range > 0.0f ? s_shown_range
                                                 : static_cast<float>(RANGES[s_range_step]);
 
-    // Only when the centre actually moves, which is once at startup.
     if (s_last->home_lat != s_map_lat || s_last->home_lon != s_map_lon) {
         s_map_lat = s_last->home_lat;
         s_map_lon = s_last->home_lon;
@@ -1453,8 +1249,6 @@ void show_radar(const radar::Snapshot &snapshot)
         }
         const float distance_km = aircraft.distance_nm * KM_PER_NM;
         if (distance_km > range_km) {
-            // Out past the edge, so it sits on the rim at its bearing instead
-            // of vanishing: an empty scope and a quiet sky look the same.
             if (rim_used < RIM_DOTS) {
                 draw_rim(s_rim[rim_used++], aircraft);
             }
@@ -1470,9 +1264,6 @@ void show_radar(const radar::Snapshot &snapshot)
     }
     s_beyond = rim_used;
 
-    // The scale is built from the accent, so it has to be repainted when the
-    // accent changes. set_bg_color skips a write that would change nothing, so
-    // when it has not changed this costs nothing.
     for (int i = 0; i < LEGEND_STEPS; ++i) {
         theme::set_bg_color(s_legend[i], altitude_ink(SCALE_TOP_FT * i / (LEGEND_STEPS - 1)));
     }
@@ -1481,14 +1272,8 @@ void show_radar(const radar::Snapshot &snapshot)
         return a.aircraft->distance_nm < b.aircraft->distance_nm;
     });
 
-    // Nothing tapped yet, so the nearest aircraft is the subject. It is also the
-    // one whose details have already been fetched, so this costs no network.
     if (s_following) {
         if (s_shown > 0) {
-            // Two aircraft at much the same distance trade places every sweep,
-            // and each swap threw away the picture that had just been fetched
-            // for the other one. The one being followed keeps its place until
-            // something is clearly nearer.
             int held = -1;
             for (int i = 0; i < s_shown; ++i) {
                 if (std::strcmp(s_chosen, s_plots[i].aircraft->hex) == 0) {
@@ -1515,9 +1300,6 @@ void show_radar(const radar::Snapshot &snapshot)
         place_blip(s_plots[i], range_km);
     }
 
-    // Name everything that can be named without two tags touching. Where two
-    // would collide neither is readable, so neither is drawn; the one that was
-    // tapped is shown regardless, because that one was asked for.
     bool named[DRAWN_MAX];
     for (int i = 0; i < s_shown; ++i) {
         named[i] = true;
@@ -1536,17 +1318,12 @@ void show_radar(const radar::Snapshot &snapshot)
         }
     }
 
-    // The accent can change while the page is built, and this is the one thing
-    // on the scope wearing it that no shared style reaches.
     const lv_color_t accent = lv_color_hex(theme::primary);
     if (!theme::has_local_color(s_marker, LV_STYLE_BORDER_COLOR, 0, accent)) {
         lv_obj_set_style_border_color(s_marker, accent, 0);
     }
 
-    // Everything into the one mask, and only the nearest handful get a label.
     if (s_air_mask != nullptr) {
-        // Only the alpha plane decides what is visible, so the colour plane can
-        // keep whatever it had.
         const auto pixels = static_cast<std::size_t>(s_ground_side) * s_ground_side;
         std::memset(s_air_mask + pixels * 2, 0, pixels);
     }
@@ -1578,7 +1355,6 @@ void show_radar(const radar::Snapshot &snapshot)
     if (chosen != nullptr) {
         show_selected(*chosen);
     } else {
-        // Either nothing is selected or what was has left the scope.
         s_chosen[0] = '\0';
         lv_obj_set_hidden(s_marker, true);
         show_summary(*s_last);
@@ -1604,8 +1380,6 @@ void show_radar_photo(const char *hex, const void *pixels, int width, int height
     s_photo_dsc.data_size     = static_cast<std::uint32_t>(width * height * 2);
     s_photo_dsc.data          = static_cast<const std::uint8_t *>(pixels);
 
-    // Sized to what the picture will occupy once contained, and centred in the
-    // space kept for it, so the rounded frame follows the picture's own edges.
     const std::int32_t fit_w = std::min(COLUMN_W, width * s_photo_box_h / height);
     const std::int32_t fit_h = std::min(s_photo_box_h, height * COLUMN_W / width);
     lv_obj_set_size(s_photo_frame, fit_w, fit_h);
@@ -1626,11 +1400,6 @@ void show_radar_details(const char *hex, const radar::Details &details)
     }
     s_details = details;
     std::snprintf(s_details_hex, sizeof(s_details_hex), "%s", hex);
-    // The picture is a second request behind this one, so the wait carries on
-    // being shown rather than looking as though nothing is coming. Not knowing
-    // of a picture is not the same as knowing there is none: details published
-    // before the photo database has been asked would otherwise say there is no
-    // photograph, and then one would appear a moment later.
     s_picture = !details.photo_checked          ? Picture::Loading
                 : details.photo_url[0] != '\0' ? Picture::Loading
                                                 : Picture::Missing;

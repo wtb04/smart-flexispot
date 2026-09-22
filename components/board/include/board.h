@@ -3,7 +3,6 @@
 #include "esp_err.h"
 
 namespace board {
-
 /** Brings up rails, panel, touch and the LVGL port task. Once, before any lv_*
  *  call. flipped hangs the panel the other way up. */
 esp_err_t init(bool flipped);

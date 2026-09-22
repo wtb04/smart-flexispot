@@ -23,21 +23,17 @@
 
 namespace ui {
 namespace {
-
 constexpr char TAG[] = "ui";
 
-// Generous: at 100 ms a push landing during the first full-screen render simply gave up.
 constexpr std::uint32_t LOCK_TIMEOUT_MS = 500;
 
-
-// Sized from the real display rather than with percentages: LV_PCT() returns an encoded
-// sentinel, so LV_PCT(100) - something is not a width, it is nonsense that lays out wrong.
+// Sized from the real display rather than with percentages: LV_PCT() returns an
+// encoded sentinel, so LV_PCT(100) - something lays out as nonsense.
 constexpr std::int32_t RAIL_W      = 330;
 constexpr std::int32_t NAV_H       = 92;
 constexpr std::int32_t RAIL_BTN_H  = 124;
 constexpr std::int32_t GAP        = 16;
 constexpr std::int32_t EDGE_GAP   = 0;   // navigation sits on the bottom edge
-// Matches the gap above the page, so the content sits centred rather than crowding the buttons.
 constexpr std::int32_t NAV_GAP    = GAP;
 
 constexpr std::int32_t PANEL_PAD  = 16;
@@ -53,12 +49,8 @@ struct Layout {
     bool         rail_right;
 };
 
-// Which edge the rail is against. Everything placed against it asks the layout
-// rather than assuming the left.
 bool s_rail_right = false;
 
-// Which way up the panel is hung. The picture and the touchscreen are turned
-// together by board::set_flipped(); this is only what the page shows.
 bool s_flipped = false;
 
 Layout layout()
@@ -79,23 +71,14 @@ Layout layout()
 
 Handlers s_handlers{};
 
-
-
-// Dimmed as a group when the control box is not answering.
 constexpr int DESK_CONTROL_MAX = 8;
 bool          s_desk_available                  = true;
 
 lv_obj_t     *s_desk_controls[DESK_CONTROL_MAX] = {};
 int           s_desk_control_count              = 0;
 
-// Off when it is asked to be, not when it gets bored. esp_lvgl_port keeps
-// reading the touch controller whether or not the backlight is lit, so the tap
-// that turns it back on arrives the same as any other.
 bool      s_screen_on         = true;
 
-// A message nobody can see is not a message, so one lights the screen if it was
-// dark -- and puts it back when it has been read, unless the reading turned
-// into using the panel.
 bool s_notice_lit_screen = false;
 
 void set_screen_state(bool on)
@@ -109,25 +92,17 @@ void set_screen_state(bool on)
 
 void wake_on_touch(lv_event_t *)
 {
-    // A touch means somebody is here, so a screen lit only for a message stops
-    // being temporary.
     s_notice_lit_screen = false;
     if (s_screen_on) {
         return;
     }
 
-    // The tap that lights the screen does nothing else. Whatever was under the
-    // finger was not visible when it landed, so acting on it would be acting on
-    // something nobody chose -- and on this panel one of those things moves a
-    // desk. Lift and tap again and everything works normally.
-    // lv_indev_active(), not lv_event_get_indev(): the latter returns the
-    // event's parameter, which carries the device only for events sent to a
-    // widget. On an event sent to the device itself it is null, so both calls
-    // below were quietly doing nothing and the tap went through as before.
-    //
-    // stop_processing withholds this press from the widget; the reset drops the
-    // device's hold on it as well, so the release that follows cannot arrive as
-    // a click on something nobody could see.
+    // The tap that lights the screen does nothing else: whatever was under the
+    // finger was not visible when it landed, and one of those things moves a desk.
+    // lv_indev_active(), not lv_event_get_indev() -- the latter returns the event's
+    // parameter, which is null for an event sent to the device itself, so both
+    // calls below quietly did nothing. stop_processing withholds the press; the
+    // reset drops the device's hold so the release cannot arrive as a click.
     lv_indev_t *indev = lv_indev_active();
     lv_indev_stop_processing(indev);
     lv_indev_reset(indev, nullptr);
@@ -237,7 +212,6 @@ void show_next_notice()
 
     const NoticeInk ink = notice_ink(notice.level);
     theme::fill_accent_or(s_notice_bar, ink.accent, ink.colour);
-    // A message with no title reads better promoted into the heading.
     if (notice.title[0] != '\0') {
         lv_label_set_text(s_notice_title, notice.title);
         lv_label_set_text(s_notice_body, notice.message);
@@ -266,8 +240,6 @@ void create_notice_card()
 {
     const Layout l = layout();
 
-    // Covers the page and the navigation under it, so there is no navigating out from under a
-    // notification. The rail stays live, so the desk can still be driven while a message is up.
     s_notice_scrim = lv_obj_create(lv_layer_top());
     lv_obj_set_pos(s_notice_scrim, l.rail_right ? 0 : RAIL_W, 0);
     lv_obj_set_size(s_notice_scrim, l.screen_w - RAIL_W, l.screen_h);
@@ -279,8 +251,6 @@ void create_notice_card()
 
     s_notice_card = lv_obj_create(lv_layer_top());
     lv_obj_set_size(s_notice_card, NOTIFY_W, NOTIFY_H);
-    // On the top layer so no page can cover it, but centred over the content area rather than
-    // the screen, which would put it half behind the rail.
     lv_obj_align(s_notice_card, LV_ALIGN_CENTER,
                  l.content_x + l.content_w / 2 - l.screen_w / 2,
                  GAP + l.content_h / 2 - l.screen_h / 2);
@@ -301,7 +271,6 @@ void create_notice_card()
     lv_label_set_long_mode(s_notice_title, LV_LABEL_LONG_MODE_WRAP);
     lv_obj_align(s_notice_title, LV_ALIGN_TOP_LEFT, 24, 8);
     lv_obj_set_style_text_font(s_notice_title, fonts::size_28(), 0);
-    // Explicit: the card is dark and the inherited theme colour is not.
     lv_obj_set_style_text_color(s_notice_title, lv_color_hex(theme::text), 0);
 
     s_notice_body = lv_label_create(s_notice_card);
@@ -325,11 +294,9 @@ void move_event_cb(lv_event_t *e)
     s_handlers.move(lv_event_get_code(e) == LV_EVENT_PRESSED ? direction : Move::Stop);
 }
 
-// PRESS_LOST matters as much as RELEASED: a finger sliding off must not leave the desk moving.
 void create_move_button(lv_obj_t *parent, const char *symbol, Move direction, std::int32_t w,
                         std::int32_t h)
 {
-    // Via the shared helper: styling by hand left LVGL's default shadow showing as a ring.
     lv_obj_t *btn = theme::make_button(parent, symbol, theme::panel_light,
                                        fonts::size_48());
     lv_obj_set_size(btn, w, h);
@@ -350,15 +317,12 @@ lv_obj_t *icon_bar(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int32_
     lv_obj_set_size(bar, w, h);
     theme::style_panel(bar, theme::panel, 2);
     theme::fill_accent(bar);
-    // White while the preset it belongs to is the one the desk stands at, the
-    // same way it goes white under a finger.
     lv_obj_set_style_bg_color(bar, lv_color_hex(theme::text), LV_STATE_CHECKED);
     lv_obj_set_style_bg_color(bar, lv_color_hex(theme::text), LV_STATE_PRESSED);
     lv_obj_set_clickable(bar, false);
     return bar;
 }
 
-// Five bars: top, two legs, two feet. The legs get shorter for the sit variant.
 void add_desk_icon(lv_obj_t *button, bool high)
 {
     lv_obj_t *icon = lv_obj_create(button);
@@ -376,8 +340,6 @@ void add_desk_icon(lv_obj_t *button, bool high)
     icon_bar(icon, 40, 49, 14, 5);
 }
 
-// The clock keeps the corner furthest from the content, so moving the rail
-// mirrors the strip rather than leaving the time stranded in the middle.
 void place_strip()
 {
     const bool right = s_rail_right;
@@ -416,8 +378,6 @@ void preset_clicked_cb(lv_event_t *e)
 {
     const int index = static_cast<int>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e)));
     const bool store = lv_event_get_code(e) == LV_EVENT_LONG_PRESSED;
-    // Already there: travelling to where you are is nothing but a jolt. Storing
-    // still works, since that is about this height, not about moving to it.
     if (!store && index >= 0 && index < kPresetCount && s_preset_active[index]) {
         return;
     }
@@ -454,9 +414,6 @@ void create_rail(lv_obj_t *parent)
     lv_obj_set_style_pad_all(strip, 0, 0);
     lv_obj_set_scrollable(strip, false);
 
-    // Three labels in a row rather than one string: blinking the separator by
-    // swapping it for a space would reflow the digits, because the glyphs are
-    // not the same width. Fading it in place leaves them still.
     lv_obj_t *clock = lv_obj_create(strip);
     s_clock_box     = clock;
     lv_obj_set_size(clock, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
@@ -469,10 +426,6 @@ void create_rail(lv_obj_t *parent)
 
     s_clock_hours   = theme::make_label(clock, "--", theme::text, fonts::size_28());
     s_clock_colon   = theme::make_label(clock, ":", theme::text, fonts::size_28());
-    // The colon's own side bearings are not symmetric, so the gap is set on it
-    // rather than on the row.
-    // The colon glyph carries more bearing on its right than its left, so equal
-    // padding does not look equal; the hours need the wider gap to balance it.
     lv_obj_set_style_pad_left(s_clock_colon, 4, 0);
     lv_obj_set_style_pad_right(s_clock_colon, 4, 0);
     s_clock_minutes = theme::make_label(clock, "--", theme::text, fonts::size_28());
@@ -480,11 +433,8 @@ void create_rail(lv_obj_t *parent)
 
     s_wifi_icon = theme::make_label(strip, LV_SYMBOL_WIFI, theme::text, fonts::size_22());
 
-    // A slash over the glyph: LVGL has no wifi-off symbol.
     s_wifi_slash = theme::make_label(strip, "/", theme::text, fonts::size_32());
 
-    // Drawn rather than taken from the font: LVGL's phone symbol is a corded handset. The colour
-    // never changes -- the slash is the state.
     s_phone_icon = lv_obj_create(strip);
     lv_obj_set_size(s_phone_icon, 18, 26);
     theme::style_panel(s_phone_icon, theme::text, 4);
@@ -499,8 +449,6 @@ void create_rail(lv_obj_t *parent)
     s_phone_slash = theme::make_label(strip, "/", theme::text, fonts::size_32());
     place_strip();
 
-    // The status strip stays where it was, under the bezel; everything below it
-    // reads better carried a little further down.
     lv_obj_t *heading = theme::make_label(rail, "DESK HEIGHT", theme::secondary,
                                           &lv_font_montserrat_18);
     lv_obj_set_style_margin_top(heading, 18, 0);
@@ -510,7 +458,6 @@ void create_rail(lv_obj_t *parent)
     theme::style_panel(readout, theme::panel, 0);
     lv_obj_set_style_bg_opa(readout, LV_OPA_TRANSP, 0);
     lv_obj_set_flex_flow(readout, LV_FLEX_FLOW_COLUMN);
-    // END on the cross axis right-aligns the unit under the digits rather than beside them.
     lv_obj_set_flex_align(readout, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_START);
     lv_obj_set_style_pad_bottom(readout, 18, 0);
 
@@ -519,8 +466,6 @@ void create_rail(lv_obj_t *parent)
 
     theme::make_label(readout, "CM", theme::secondary, fonts::size_22());
 
-    // Presets 3 and 4 are the two anyone uses, so they get names and the space; the rest
-    // live behind Manual.
     lv_obj_t *stand = make_rail_button(rail, "STAND");
     add_desk_icon(stand, true);
     lv_obj_align(lv_obj_get_child(stand, 0), LV_ALIGN_CENTER, 34, 0);
@@ -539,12 +484,9 @@ void create_rail(lv_obj_t *parent)
     lv_obj_add_event_cb(s_drawer_toggle, manual_clicked_cb, LV_EVENT_CLICKED, nullptr);
 }
 
-// The rail widens rather than a card floating over the page: these controls belong to the rail.
 constexpr std::int32_t DRAWER_W  = 340;
 constexpr std::uint32_t DRAWER_MS = 200;
 
-// With the rail on the right the drawer opens towards the content, so its left
-// edge travels as it widens.
 void place_drawer(std::int32_t width)
 {
     const Layout l = layout();
@@ -557,7 +499,6 @@ void drawer_width_cb(void *, std::int32_t value) { place_drawer(value); }
 void animate_drawer(bool open)
 {
     s_drawer_open = open;
-    // The arrow points the way the drawer will go.
     if (s_drawer_toggle != nullptr) {
         theme::set_text(lv_obj_get_child(s_drawer_toggle, 0),
                         open != s_rail_right ? LV_SYMBOL_LEFT : LV_SYMBOL_RIGHT);
@@ -583,7 +524,6 @@ void create_drawer(lv_obj_t *parent)
     lv_obj_set_height(s_drawer, l.screen_h);
     place_drawer(0);
     theme::style_panel(s_drawer, theme::panel, 0);
-    // Children are clipped to the object, so at zero width the buttons are simply not drawn.
     lv_obj_set_style_pad_all(s_drawer, PANEL_PAD, 0);
     lv_obj_set_flex_flow(s_drawer, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(s_drawer, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
@@ -642,16 +582,12 @@ void apply_rail_side(bool right)
     paint_side_buttons();
 }
 
-// The arc carries an integer, so everything is scaled to tenths of a degree and divided back
-// out; without that a 0.5 step is not representable.
 constexpr int   DIAL_SCALE     = 10;
 constexpr float DEFAULT_MIN_C  = 15.0f;
 constexpr float DEFAULT_MAX_C  = 30.0f;
 constexpr float DEFAULT_STEP_C = 0.5f;
 
 constexpr std::int32_t DIAL_CARD_W = 480;
-// Leaves a square of space in the top corners for the toggles, clear of the arc, so a tap on
-// one is never read as a drag of the setpoint.
 constexpr std::int32_t DIAL_INSET    = 100;
 constexpr std::int32_t DIAL_CHIP     = 56;
 constexpr std::int32_t DIAL_CHIP_GAP = 10;
@@ -663,7 +599,6 @@ lv_obj_t *s_dial_mode    = nullptr;
 lv_obj_t *s_dial_toggles[kDialToggleCount] = {};
 
 float s_dial_step = DEFAULT_STEP_C;
-// Updates are ignored while a finger is down, or the setpoint jumps back under the thumb.
 bool s_dial_dragging = false;
 
 float dial_value_c()
@@ -704,7 +639,6 @@ void arc_released_cb(lv_event_t *)
         return;
     }
     s_dial_dragging = false;
-    // On release, not on every step of the drag: one setpoint, not thirty on the way to it.
     if (s_handlers.setpoint != nullptr) {
         s_handlers.setpoint(snap(dial_value_c()));
     }
@@ -735,14 +669,12 @@ void build_thermostat(lv_obj_t *parent, std::int32_t y, std::int32_t w, std::int
 
     const std::int32_t inner   = w - 2 * PANEL_PAD;
     const std::int32_t inner_h = h - 2 * PANEL_PAD;
-    // Centred in the card, not in what is left under the toggles: that left the ring visibly low.
     const std::int32_t ring   = std::min(w - DIAL_INSET, inner_h);
     const std::int32_t ring_y = (inner_h - ring) / 2;
 
     s_dial = lv_arc_create(card);
     lv_obj_set_size(s_dial, ring, ring);
     lv_obj_align(s_dial, LV_ALIGN_TOP_MID, 0, ring_y);
-    // A gap at the bottom, like a physical thermostat.
     lv_arc_set_bg_angles(s_dial, 135, 45);
     lv_arc_set_rotation(s_dial, 0);
     lv_arc_set_range(s_dial, static_cast<int>(DEFAULT_MIN_C * DIAL_SCALE),
@@ -769,7 +701,6 @@ void build_thermostat(lv_obj_t *parent, std::int32_t y, std::int32_t w, std::int
     s_dial_target = theme::make_accent_label(card, "--", fonts::temp_34());
     lv_obj_align(s_dial_target, LV_ALIGN_TOP_MID, 0, centre + 46);
 
-    // After the arc, so these are on top of it and take their own presses.
     for (int i = 0; i < kDialToggleCount; ++i) {
         lv_obj_t *chip = theme::make_button(card, "", theme::panel, fonts::size_16());
         lv_obj_set_size(chip, DIAL_CHIP, DIAL_CHIP);
@@ -782,8 +713,6 @@ void build_thermostat(lv_obj_t *parent, std::int32_t y, std::int32_t w, std::int
         lv_obj_set_hidden(chip, true);
     }
 
-    // Sits in the ring's own gap: narrow enough that its corners stay within the 90 degrees the
-    // arc does not draw, and clear of where the knob parks at either end.
     const std::int32_t mode_w = ring * 11 / 20;
     const std::int32_t mode_h = 68;
     s_dial_mode               = theme::make_button(card, "OFF", theme::panel);
@@ -794,8 +723,6 @@ void build_thermostat(lv_obj_t *parent, std::int32_t y, std::int32_t w, std::int
     lv_obj_add_event_cb(s_dial_mode, mode_clicked_cb, LV_EVENT_CLICKED, nullptr);
 }
 
-// Heating takes the accent, and moving a shared style on or off invalidates,
-// so the dial is repainted when the mode changes rather than on every report.
 Hvac s_dial_shown = Hvac::Heating;  // what build_thermostat leaves on screen
 
 void paint_dial(Hvac state)
@@ -826,8 +753,6 @@ std::int32_t s_pill_row_w = 0;
 
 constexpr std::int32_t PILL_PAD = 22;
 
-// Fixed widths, shared out: sizing each pill to its text shuffled the whole row sideways
-// whenever a reading gained or lost a digit.
 void reflow_pills()
 {
     int visible = 0;
@@ -897,8 +822,6 @@ void build_pills(lv_obj_t *parent, std::int32_t w)
         lv_obj_set_flex_flow(column, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_flex_align(column, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START,
                               LV_FLEX_ALIGN_START);
-        // Tightens the two rows without touching the pill's size. All upper case, so nothing
-        // descends far enough to clip.
         lv_obj_set_style_pad_row(column, -1, 0);
 
         lv_obj_t *label = theme::make_label(column, "", theme::secondary, fonts::size_16());
@@ -920,8 +843,8 @@ lv_obj_t *s_lights_state  = nullptr;
 lv_obj_t *s_bulbs[kLightCount]   = {};
 bool      s_light_on[kLightCount] = {};
 bool      s_lights_on             = false;
-// A long press fires LONG_PRESSED and then CLICKED on release, so without this one gesture
-// would both open the picker and toggle the lights.
+// A long press fires LONG_PRESSED and then CLICKED on release, so without this
+// one gesture would both open the picker and toggle the lights.
 bool s_lights_long = false;
 
 std::optional<ModalOverlay> s_light_picker;
@@ -932,10 +855,6 @@ struct LightButton {
 };
 LightButton s_lights[kLightCount];
 
-// Two independent things decide a bulb's colour: whether that light is on, and
-// whether the button it is drawn on has lit up -- a lit bulb on a lit button
-// would otherwise be the accent on the accent. Both are object states, so the
-// four colours are four selectors rather than a pair worked out here.
 void bulb_states(lv_obj_t *part)
 {
     theme::fill_accent(part, LV_STATE_CHECKED);
@@ -1107,8 +1026,6 @@ lv_obj_t *s_media_art    = nullptr;
 lv_obj_t *s_media_source = nullptr;
 lv_obj_t *s_media_title  = nullptr;
 lv_obj_t *s_media_artist = nullptr;
-// Alternated with the two pixel buffers behind them, so a new cover never arrives under a
-// source pointer LVGL has already seen.
 lv_image_dsc_t s_art_dsc[2]{};
 int            s_art_slot = 0;
 bool           s_media_long   = false;
@@ -1151,8 +1068,6 @@ std::int32_t artist_height(const lv_font_t *font, std::int32_t available)
     return available >= 2 * line ? 2 * line : line;
 }
 
-// The label keeps a fixed height so DOTS truncates rather than grows, so whatever sits under it
-// has to be told where the text actually ended.
 std::int32_t title_height(const char *text, const lv_font_t *font, std::int32_t width)
 {
     const std::int32_t line = lv_font_get_line_height(font);
@@ -1164,7 +1079,6 @@ std::int32_t title_height(const char *text, const lv_font_t *font, std::int32_t 
     return size.y > line ? 2 * line : line;
 }
 
-// From where the title really ends: fixed offsets left a line-sized gap under any one-line title.
 void layout_media_text()
 {
     const TextBox card  = s_has_art ? s_card_with_art : s_card_bare;
@@ -1199,14 +1113,13 @@ void layout_media_text()
     theme::align(s_panel_louder, LV_ALIGN_TOP_RIGHT, 0, y);
 }
 
-// The last position reported and when we heard it, so the bar keeps moving between updates.
 int        s_position_s   = 0;
 int        s_duration_s   = 0;
 bool       s_media_playing = false;
 TickType_t s_position_at  = 0;
 
-// LV_LABEL_LONG_MODE_DOTS only truncates once the text exceeds the label's height, and a label
-// left at content height simply grows -- which is how a long title ended up over the artist.
+// LV_LABEL_LONG_MODE_DOTS only truncates once the text exceeds the label's
+// height, and a label left at content height simply grows.
 void one_line(lv_obj_t *label, const lv_font_t *font, std::int32_t width)
 {
     lv_obj_set_width(label, width);
@@ -1221,8 +1134,8 @@ void two_lines(lv_obj_t *label, const lv_font_t *font, std::int32_t width)
     lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_DOTS);
 }
 
-// A radius on an image widget does nothing: clipping happens on a parent, so the cover goes in
-// a container that carries the radius and clips what it holds.
+// A radius on an image widget does nothing: clipping happens on a parent, so the
+// cover goes in a container that carries the radius.
 lv_obj_t *rounded_frame(lv_obj_t *parent, std::int32_t side, std::int32_t radius)
 {
     lv_obj_t *frame = lv_obj_create(parent);
@@ -1243,7 +1156,6 @@ void write_clock(lv_obj_t *label, int seconds)
     theme::set_text(label, text);
 }
 
-// Tenths of a second, not whole ones: a second is a visible step across a bar this wide.
 constexpr int PROGRESS_TICK_MS = 200;
 constexpr int PROGRESS_SCALE   = 10;  // bar units per second
 
@@ -1263,9 +1175,6 @@ void progress_tick(lv_timer_t *)
     write_clock(s_panel_elapsed, tenths / PROGRESS_SCALE);
 }
 
-// Skipping a track takes the player through paused or idle on the way to the
-// next one, and flashing the cover grey for a moment each time reads as a
-// glitch. A short wait tells a real pause from a gap between tracks.
 constexpr std::uint32_t PAUSE_SETTLE_MS = 1500;
 
 lv_timer_t *s_pause_timer     = nullptr;
@@ -1277,9 +1186,6 @@ void apply_playing(bool playing)
     s_playing_shown = playing;
     theme::set_text(lv_obj_get_child(s_panel_play, 0), playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
 
-    // Compared first: neither setter checks, so writing this unconditionally
-    // repainted both covers -- one 200 pixels square out of PSRAM -- on every
-    // entity update.
     const lv_opa_t dim = s_has_track_shown && !playing ? LV_OPA_50 : LV_OPA_TRANSP;
     for (lv_obj_t *art : {s_media_art, s_panel_art}) {
         if (lv_obj_get_style_image_recolor_opa(art, LV_PART_MAIN) != dim) {
@@ -1307,8 +1213,6 @@ void media_action_cb(lv_event_t *e)
 {
     const auto action =
         static_cast<MediaAction>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e)));
-    // Same as pressing the card: a deliberate pause shows at once rather than
-    // waiting out the delay that exists for track changes.
     if (action == MediaAction::PlayPause) {
         cancel_pause_settle();
         apply_playing(!s_playing_shown);
@@ -1322,8 +1226,6 @@ void media_card_cb(lv_event_t *e)
 {
     const lv_event_code_t code = lv_event_get_code(e);
 
-    // A gesture still ends in a release over the card, so it has to be remembered and the click
-    // that follows dropped, or every skip would also toggle play.
     if (code == LV_EVENT_GESTURE) {
         const lv_dir_t direction = lv_indev_get_gesture_dir(lv_indev_active());
         if (direction != LV_DIR_LEFT && direction != LV_DIR_RIGHT) {
@@ -1346,8 +1248,6 @@ void media_card_cb(lv_event_t *e)
     if (std::exchange(s_media_long, false) || std::exchange(s_media_swiped, false)) {
         return;
     }
-    // Pressing pause here is not a gap between tracks, so it shows at once --
-    // the wait is only there to ride out what a player does while skipping.
     cancel_pause_settle();
     apply_playing(!s_playing_shown);
     if (s_handlers.media != nullptr) {
@@ -1380,7 +1280,6 @@ void build_media_panel(lv_obj_t *parent)
     const std::int32_t inner_w = CARD_W - 2 * PAD;
     const std::int32_t inner_h = CARD_H - 2 * PAD;
     s_panel_inner_h            = inner_h;
-    // What the artist has to leave room for: the bar, the clocks, the volume row and the transport.
     s_panel_below = 20 + 8 + 14 + lv_font_get_line_height(fonts::size_16()) + 20 + VOL_H + 16 +
                     BTN_H;
 
@@ -1452,12 +1351,10 @@ void build_media_card(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int
     lv_obj_add_event_cb(s_media_card, media_card_cb, LV_EVENT_CLICKED, nullptr);
     lv_obj_add_event_cb(s_media_card, media_card_cb, LV_EVENT_LONG_PRESSED, nullptr);
     lv_obj_add_event_cb(s_media_card, media_card_cb, LV_EVENT_GESTURE, nullptr);
-    // Gestures bubble by default, so LVGL walks past the card to the screen and a handler here
-    // never runs. Claim them.
+    // Gestures bubble by default, so LVGL walks past the card to the screen and a
+    // handler here never runs.
     lv_obj_remove_flag(s_media_card, LV_OBJ_FLAG_GESTURE_BUBBLE);
 
-    // Smaller than the card allows: a square filling the height left a third of the width for
-    // the title.
     const std::int32_t art = h - 61;
     s_media_frame          = rounded_frame(s_media_card, art, 14);
     lv_obj_align(s_media_frame, LV_ALIGN_LEFT_MID, 0, 0);
@@ -1498,7 +1395,6 @@ void build_home_page(lv_obj_t *page)
     const std::int32_t body_h = inner_h - body_y;
     build_thermostat(page, body_y, DIAL_CARD_W, body_h);
 
-    // Letting this column wrap across the page is what put the tiles on top of the thermostat.
     const std::int32_t col_x    = DIAL_CARD_W + BUTTON_GAP;
     const std::int32_t col_w    = inner_w - col_x;
     const std::int32_t lights_h = body_h * 5 / 9;
@@ -1507,7 +1403,6 @@ void build_home_page(lv_obj_t *page)
     const std::int32_t media_y = body_y + lights_h + BUTTON_GAP;
     build_media_card(page, col_x, media_y, col_w, inner_h - media_y);
 
-    // Last, so the overlays cover the page rather than being covered by it.
     build_light_picker(page);
     build_media_panel(page);
 }
@@ -1519,8 +1414,6 @@ lv_obj_t *s_nav_tabs[PAGE_COUNT] = {};
 struct NavItem {
     const char *icon;
     const char *caption;
-    // Hidden while the tracked phone is away. Home stays because the desk has to work for
-    // anyone, and Setup stays because it is where the presence readout explains the rest.
     bool        needs_presence;
 };
 constexpr NavItem NAV_ITEMS[PAGE_COUNT] = {
@@ -1529,19 +1422,14 @@ constexpr NavItem NAV_ITEMS[PAGE_COUNT] = {
     {LV_SYMBOL_SETTINGS, "Setup", false},
 };
 
-// Nothing is gated until the phone has been recognised once: hiding half the panel because a
-// key is wrong, or because Bluetooth never came up, is worse than not gating at all.
 bool s_presence_known = false;
 bool s_present        = false;
 int  s_page           = 0;
 
 constexpr int RADAR_PAGE = 3;
 constexpr int SETUP_PAGE = 4;
-// Read from the diagnostics task, which does no work at all while the page it
-// fills is not the one on screen.
 std::atomic<bool> s_setup_visible{false};
 
-// Off by setting, and ignored until the phone has been recognised once.
 bool s_presence_gate = true;
 
 bool page_available(int index)
@@ -1614,8 +1502,6 @@ struct InfoRow {
     const char *label;
 };
 
-// summary is the row the tile shows, so a subsystem says something useful
-// before it is opened. setting is the one control that belongs to it, if any.
 struct InfoCard {
     const char *title;
     const char *icon;
@@ -1688,18 +1574,13 @@ constexpr int SETTING_COUNT = static_cast<int>(Setting::Count);
 
 constexpr std::int32_t ROW_CARD_H   = 88;
 constexpr std::int32_t DIAG_HEADER_H = 56;
-// The log card is one size whatever it holds; the state card is only as tall
-// as the subsystem it is showing.
 constexpr std::int32_t LOG_W        = 800;
 constexpr std::int32_t LOG_H        = 520;
 constexpr std::int32_t DETAIL_W     = 660;
 constexpr std::int32_t DETAIL_ROW_GAP = 2;
 constexpr std::int32_t DETAIL_SET_TOP = 14;
 constexpr std::int32_t DETAIL_SET_H   = 56;
-// Clear air under the title and the close button before the content starts.
 constexpr std::int32_t HEADER_GAP   = 22;
-// Past this the card would crowd the page, so it scrolls instead. Everything
-// the panel reports fits well inside it.
 constexpr std::int32_t DETAIL_MAX_FRAC = 80;
 constexpr std::int32_t DETAIL_PAD   = 24;
 constexpr std::int32_t DETAIL_ROW_H = 30;
@@ -1720,14 +1601,11 @@ Level     s_card_level[INFO_CARD_COUNT] = {};
 lv_obj_t *s_detail_title                = nullptr;
 int       s_detail_shown                = -1;
 std::int32_t s_detail_height[INFO_CARD_COUNT] = {};
-// A long press is followed by a click on release, which would drop the state
-// card straight on top of the log that was just opened.
 bool s_tile_long = false;
 
 lv_obj_t *s_setting_value[SETTING_COUNT] = {};
 bool      s_setting_on[SETTING_COUNT]    = {};
 
-// Which tile mirrors this row, or -1. Saves the summary needing its own setter.
 int s_summary_card[INFO_COUNT] = {};
 
 std::optional<ModalOverlay> s_diagnostics;
@@ -1770,9 +1648,6 @@ void refresh_log()
     if (s_log_shown < 0 || s_handlers.log == nullptr) {
         return;
     }
-    // Four kilobytes held for the whole uptime to be used only while a log is
-    // on screen, and held in the one internal pool DMA can reach. Taken from
-    // PSRAM when it is actually wanted instead.
     auto *text = static_cast<char *>(
         heap_caps_malloc(LOG_TEXT_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     if (text == nullptr) {
@@ -1784,8 +1659,6 @@ void refresh_log()
     heap_caps_free(text);
 }
 
-// Deliberately does not scroll: new lines arrive under whatever is being read,
-// and yanking the view back to the bottom every second made it unreadable.
 void log_tick(lv_timer_t *)
 {
     if (s_log_modal.has_value() && s_log_modal->visible()) {
@@ -1934,8 +1807,6 @@ lv_obj_t *build_info_row(lv_obj_t *parent, const char *label, const lv_font_t *f
 
     lv_obj_t *value = theme::make_label(row, "--", theme::text, font);
     lv_obj_set_flex_grow(value, 1);
-    // DOTS needs a bounded box in both directions, so the height is pinned to
-    // one line as well as the width coming from the grow.
     lv_obj_set_height(value, font->line_height);
     lv_obj_set_style_text_align(value, LV_TEXT_ALIGN_RIGHT, 0);
     lv_label_set_long_mode(value, LV_LABEL_LONG_MODE_DOTS);
@@ -1965,8 +1836,6 @@ void build_info_tile(lv_obj_t *parent, int index, std::int32_t x, std::int32_t y
 
 std::int32_t detail_height(const InfoCard &card)
 {
-    // Every gap the flex column puts between the rows counts, and leaving them
-    // out is what left every card a few pixels short and therefore scrolling.
     std::int32_t body = card.count * DETAIL_ROW_H + (card.count - 1) * DETAIL_ROW_GAP;
     if (card.has_setting) {
         body += DETAIL_ROW_GAP + DETAIL_SET_TOP + DETAIL_SET_H;
@@ -2033,8 +1902,6 @@ void build_detail_overlay(lv_obj_t *parent)
     s_diagnostics->add_close_button();
 }
 
-// Its own card, because a log wants the whole surface and its own dark ground
-// rather than a strip under a table.
 void build_log_overlay(lv_obj_t *parent)
 {
     s_log_modal.emplace(parent, LOG_W, LOG_H);
@@ -2085,8 +1952,6 @@ lv_obj_t *build_slider_card(lv_obj_t *parent, std::int32_t y, std::int32_t w, co
     lv_obj_t *slider = lv_slider_create(root);
     lv_obj_set_flex_grow(slider, 1);
     lv_obj_set_height(slider, 18);
-    // The bar is the whole hit area otherwise, and a finger rarely lands inside
-    // eighteen pixels of it.
     lv_obj_set_ext_click_area(slider, 26);
     lv_slider_set_range(slider, low, 100);
     lv_slider_set_value(slider, value, LV_ANIM_OFF);
@@ -2168,8 +2033,6 @@ void flip_clicked_cb(lv_event_t *e)
     }
 }
 
-// The same shell as a slider card: icon, caption, then whatever the setting is
-// operated with. A handler makes it a button, so the whole row is the target.
 lv_obj_t *build_row_card(lv_obj_t *parent, std::int32_t y, std::int32_t w, const char *icon,
                          const char *title, lv_event_cb_t clicked)
 {
@@ -2205,8 +2068,6 @@ void build_accent_card(lv_obj_t *parent, std::int32_t y, std::int32_t w)
     theme::make_label(root, LV_SYMBOL_RIGHT, theme::secondary, fonts::size_28());
 }
 
-// The pair carries the choice at LV_STATE_CHECKED, so showing it again is a
-// state change rather than a restyle, and the accent follows on its own.
 void build_choice_card(lv_obj_t *parent, std::int32_t y, std::int32_t w, const char *icon,
                        const char *title, const char *first, const char *second,
                        lv_event_cb_t clicked, lv_obj_t *out[2])
@@ -2223,8 +2084,6 @@ void build_choice_card(lv_obj_t *parent, std::int32_t y, std::int32_t w, const c
     }
 }
 
-// Swatches, not sliders: a hue is chosen by eye, and the target has to be found
-// by a fingertip on a wall panel.
 void build_colour_picker(lv_obj_t *parent)
 {
     const int rows = (static_cast<int>(theme::primaries.size()) + SWATCH_COLS - 1) / SWATCH_COLS;
@@ -2256,8 +2115,6 @@ void build_colour_picker(lv_obj_t *parent)
         lv_obj_set_size(btn, SWATCH, SWATCH);
         theme::style_button(btn, colour);
         lv_obj_set_style_radius(btn, 18, 0);
-        // Its own colour darkened rather than the accent's: pressing a swatch
-        // must not flash the colour it is about to replace.
         lv_obj_set_style_bg_color(btn, lv_color_hex(theme::dim_of(colour)), LV_STATE_PRESSED);
         lv_obj_add_event_cb(btn, swatch_clicked_cb, LV_EVENT_CLICKED,
                             reinterpret_cast<void *>(static_cast<std::intptr_t>(i)));
@@ -2327,8 +2184,6 @@ void build_settings_view(lv_obj_t *parent, std::int32_t w, std::int32_t h)
     s_diag_summary = tile_value(diag, w, "");
     theme::set_text_color(s_diag_summary, theme::secondary);
 
-    // An action rather than a choice: there is no on button because turning it
-    // on is a tap on the screen, wherever it lands.
     lv_obj_t *screen = build_tile(view, 0, tiles_y + 2 * pitch, half, tile_h,
                                   LV_SYMBOL_EYE_CLOSE, "Screen off");
     lv_obj_add_event_cb(screen, screen_off_cb, LV_EVENT_CLICKED, nullptr);
@@ -2349,9 +2204,6 @@ void build_appearance_view(lv_obj_t *parent, std::int32_t w, std::int32_t h)
     build_sub_header(view, "Appearance");
 
     const std::int32_t body_y = DIAG_HEADER_H + BUTTON_GAP;
-    // Stacked with an ordinary gap rather than spread to fill the page: four
-    // rows pushed to the corners of all that room read as four unrelated
-    // things rather than one list.
     const std::int32_t pitch = ROW_CARD_H + BUTTON_GAP;
 
     build_slider_card(view, body_y, w, LV_SYMBOL_EYE_OPEN, "Brightness", s_initial_brightness,
@@ -2363,7 +2215,6 @@ void build_appearance_view(lv_obj_t *parent, std::int32_t w, std::int32_t h)
     build_choice_card(view, body_y + 3 * pitch, w, LV_SYMBOL_REFRESH, "Orientation", "NORMAL",
                       "FLIPPED", flip_clicked_cb, s_flip_buttons);
     paint_choice(s_flip_buttons, s_flipped);
-
 
     s_appearance_view = view;
 }
@@ -2410,8 +2261,6 @@ void build_settings_page(lv_obj_t *page)
 
 void create_content(lv_obj_t *parent)
 {
-
-
     const Layout l = layout();
 
     lv_obj_t *area = lv_obj_create(parent);
@@ -2486,8 +2335,6 @@ std::int32_t s_splash_floor  = 0;
 std::uint32_t s_splash_start = 0;
 bool         s_splash_ready  = false;
 
-// Hundredths of a percent: at whole percent each step moved the bar almost
-// four pixels, which reads as ticking however often it runs.
 constexpr std::int32_t SPLASH_FULL = 10000;
 
 constexpr std::int32_t DESK_W     = 260;
@@ -2510,7 +2357,6 @@ void splash_opa(void *target, std::int32_t value)
     lv_obj_set_style_opa(static_cast<lv_obj_t *>(target), static_cast<lv_opa_t>(value), 0);
 }
 
-// The desk stands up as the panel comes up.
 void splash_raise(std::int32_t progress)
 {
     lv_bar_set_value(s_splash_bar, progress, LV_ANIM_OFF);
@@ -2523,19 +2369,10 @@ void splash_raise(std::int32_t progress)
     }
 }
 
-// Measured on the device: the display wakes at 3.9 s and Home Assistant is
-// authenticated at 12.3 s.
 constexpr std::uint32_t SPLASH_EXPECTED_MS = 8400;
 constexpr std::int32_t  SPLASH_PREDICTED   = 90 * SPLASH_FULL / 100;
 constexpr std::int32_t  SPLASH_TAIL        = 99 * SPLASH_FULL / 100;
 
-// Driven by the clock rather than by the startup steps. The steps are seconds
-// apart and unevenly spaced, so following them meant standing still through
-// the long waits however smoothly each jump was eased. Since how long the
-// whole thing takes is known, the bar runs to its own schedule and eases out
-// as it approaches it; if the panel is not ready by then it keeps going,
-// slower and slower, rather than stopping. A step that lands ahead of
-// schedule pulls it forward.
 void splash_animate(lv_timer_t *)
 {
     const std::uint32_t elapsed = lv_tick_elaps(s_splash_start);
@@ -2627,9 +2464,6 @@ void build_splash()
     s_splash_start = lv_tick_get();
     s_splash_tick  = lv_timer_create(splash_animate, 16, nullptr);
 
-    // Home Assistant is reachable about eight seconds after the display wakes,
-    // so this is the backstop, not the usual path: telemetry dismisses it as
-    // soon as the network, the broker and the socket are all up.
     s_splash_guard = lv_timer_create(splash_expired, 10000, nullptr);
     lv_timer_set_repeat_count(s_splash_guard, 1);
 }
@@ -2641,10 +2475,6 @@ void build_screen()
     lv_obj_set_style_pad_all(scr, 0, 0);
     lv_obj_set_scrollable(scr, false);
 
-    // On the input device, not on the screen object. A press is delivered to
-    // whatever is under the finger, and on this panel that is always some
-    // button or card rather than the screen itself, so a handler there never
-    // heard about it.
     for (lv_indev_t *dev = lv_indev_get_next(nullptr); dev != nullptr;
          dev = lv_indev_get_next(dev)) {
         lv_indev_add_event_cb(dev, wake_on_touch, LV_EVENT_PRESSED, nullptr);
@@ -2686,8 +2516,6 @@ esp_err_t splash_done()
         s_splash_ready = true;
         theme::set_text(s_splash_step, "ready");
 
-        // A full-screen blend per frame. Affordable once at boot with nothing
-        // else running; not a pattern to reuse for anything on top of a page.
         lv_anim_t fade;
         lv_anim_init(&fade);
         lv_anim_set_var(&fade, s_splash);
@@ -2711,10 +2539,7 @@ esp_err_t init(const Handlers &handlers, int initial_brightness, std::uint32_t a
                bool rail_right, bool flipped)
 {
     ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
-    // Before any label exists: the fonts carry the fallback Montserrat lacks.
     fonts::init();
-    // Both before anything is built, so nothing is ever drawn in last week's
-    // colour or on the wrong side and then moved.
     theme::init_accents();
     if (accent != 0) {
         theme::set_primary(accent);
@@ -2724,8 +2549,6 @@ esp_err_t init(const Handlers &handlers, int initial_brightness, std::uint32_t a
     s_handlers           = handlers;
     s_initial_brightness = initial_brightness;
     build_screen();
-    // Draw before returning: the caller lights the backlight next, and what is
-    // on the panel until the first flush is whatever it powered up holding.
     lv_refr_now(nullptr);
     lvgl_port_unlock();
     return ESP_OK;
@@ -2773,16 +2596,13 @@ esp_err_t set_desk_available(bool available)
     s_desk_available = available;
     for (int i = 0; i < s_desk_control_count; ++i) {
         lv_obj_t *obj = s_desk_controls[i];
-        // Labels inherit the state's text colour only if they were not given one of their own.
         lv_obj_set_state(obj, LV_STATE_DISABLED, !available);
         lv_obj_t *label = lv_obj_get_child(obj, 0);
         if (label != nullptr) {
             theme::set_text_color(label, available ? theme::text : theme::disabled_ink);
         }
-        // A press that cannot reach the desk should do nothing rather than appear to work.
         lv_obj_set_clickable(obj, available);
     }
-    // The readout is left alone: blanking it from two places is how it ended up stuck empty.
     lvgl_port_unlock();
     return ESP_OK;
 }
@@ -3032,7 +2852,6 @@ esp_err_t set_presence(bool has_key, bool present, bool ever_seen)
     if (known != s_presence_known || here != s_present) {
         s_presence_known = known;
         s_present        = here;
-        // Falls back to Home if the page in front of you just went away.
         select_page(s_page);
     }
     lvgl_port_unlock();
@@ -3065,7 +2884,6 @@ esp_err_t set_links(bool wifi, bool mqtt)
 {
     (void)mqtt;  // the broker has its own indicator in Home Assistant
     ESP_RETURN_ON_FALSE(s_wifi_icon != nullptr, ESP_ERR_INVALID_STATE, TAG, "not initialised");
-    // Called on a timer, so restyling anyway would invalidate the icon every couple of seconds.
     static int last = -1;
     if (last == (wifi ? 1 : 0)) {
         return ESP_OK;
@@ -3080,7 +2898,6 @@ esp_err_t set_links(bool wifi, bool mqtt)
 
 esp_err_t set_battery(bool present, int percent, bool charging)
 {
-    // Nothing on screen shows battery any more; kept so callers need not care.
     (void)present;
     (void)percent;
     (void)charging;
@@ -3099,8 +2916,6 @@ esp_err_t set_info(Info field, const char *value, Level level)
     theme::set_text(s_info[index], text);
     theme::set_text_color(s_info[index], info_ink(level));
 
-    // The tile shows the value but takes its colour from the subsystem's health,
-    // not from this row: a phone correctly reported as away is not a fault.
     const int card = s_summary_card[index];
     if (card >= 0) {
         theme::set_text(s_tile_value[card], text);

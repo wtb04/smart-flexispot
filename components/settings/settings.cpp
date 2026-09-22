@@ -12,7 +12,6 @@
 
 namespace settings {
 namespace {
-
 constexpr char TAG[]       = "settings";
 constexpr char NAMESPACE[] = "panel";
 
@@ -29,7 +28,6 @@ constexpr Spec SPECS[] = {
     {"volume", 60, 0, 100},
     {"presence_gate", 1, 0, 1},
     {"desk_over_ble", 1, 0, 1},
-    // Zero until a colour has been chosen, which leaves the panel on its own.
     {"accent", 0, 0, 0xffffff},
     {"rail_right", 0, 0, 1},
     {"flipped", 0, 0, 1},
@@ -40,9 +38,6 @@ static_assert(std::size(SPECS) == COUNT, "every key needs a spec");
 std::atomic<int>           s_value[COUNT];
 std::atomic<std::uint32_t> s_dirty{0};
 
-// Long enough that dragging the brightness slider from one end to the other is
-// a single write, short enough that pulling the power straight after a change
-// keeps it.
 constexpr TickType_t SETTLE = pdMS_TO_TICKS(2000);
 
 constexpr std::uint32_t TASK_STACK    = 2048;  // measured: uses 0.3 KB
@@ -79,7 +74,6 @@ void commit()
 {
     for (;;) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        // Let a burst finish before writing, so the flash sees one write.
         vTaskDelay(SETTLE);
         commit();
     }

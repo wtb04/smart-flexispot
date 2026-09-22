@@ -5,7 +5,6 @@
 #include <cstddef>
 
 namespace logbuf {
-
 /** Starts capturing everything written through the logging system. The console
  *  keeps receiving it too. Call early: what happens before this is not kept. */
 esp_err_t start();

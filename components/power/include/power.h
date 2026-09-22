@@ -3,7 +3,6 @@
 #include "esp_err.h"
 
 namespace power {
-
 struct State {
     bool  present;
     float bus_volts;
@@ -22,7 +21,6 @@ esp_err_t init();
  *  whatever is plugged in. */
 esp_err_t set_charging(bool enable);
 
-
 /** Puts CHG_EN back: re-initialising the IO expander clears it, and the BSP does
  *  that when enabling Wi-Fi. */
 void reassert_charging();
@@ -36,10 +34,6 @@ esp_err_t read(State &out);
  *  calls are an ordinary reading and interrupt nothing; that one case blocks
  *  for a few hundred milliseconds. */
 esp_err_t probe_pack(bool &present);
-
-/** TEMPORARY: logs both IO expanders' input registers, to find out whether any
- *  pin tracks the battery. */
-void log_expanders();
 
 /** The most recent successful read, without touching the bus. False if there
  *  has not been one. */

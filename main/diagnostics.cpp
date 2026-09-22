@@ -25,11 +25,8 @@
 
 namespace diagnostics {
 namespace {
-
 constexpr char TAG[] = "diag";
 
-// Only ever runs while the view is on screen, so a second costs nothing when it
-// is not and keeps the uptime honest when it is.
 constexpr TickType_t TICK = pdMS_TO_TICKS(1000);
 
 constexpr std::uint32_t TASK_STACK    = 3072;  // measured: uses 0.7 KB
@@ -168,7 +165,6 @@ void update_bluetooth()
         push_missing(Info::BleLoss);
     }
 
-    // The radio's own health: is it up, and is it carrying what it is asked to.
     ui::set_health(ui::Subsystem::Bluetooth, !radio.ready ? Level::Bad
                                              : (wants_link && !link.connected) ? Level::Bad
                                                                                : Level::Good);
@@ -181,8 +177,6 @@ void update_presence()
     push(Info::PhoneKey, radio.has_key ? "loaded" : "missing",
          radio.has_key ? Level::Good : Level::Bad);
 
-    // Whether the tracker is doing its job, not whether the answer is the one
-    // you wanted: a phone correctly seen to be away is working perfectly.
     ui::set_health(ui::Subsystem::Presence, !radio.has_key     ? Level::Bad
                                             : !radio.ever_seen ? Level::Warn
                                                                : Level::Good);
@@ -221,7 +215,6 @@ void update_power()
         return;
     }
 
-    // Running off the pack is not a fault; running it flat is.
     ui::set_health(ui::Subsystem::Power,
                    !battery.present                              ? Level::Warn
                    : battery.on_battery && battery.percent < 10  ? Level::Bad
@@ -248,12 +241,8 @@ void update_power()
     push(Info::PowerStatus, status);
 }
 
-
 void update_desk()
 {
-    // Which wire the commands are meant to take, and whether that wire is
-    // there. Said plainly, because the two look the same from the outside and
-    // only one of them is plugged in at a time.
     const bool over_ble = settings::enabled(settings::Key::DeskBluetooth);
     push(Info::DeskTransport, over_ble ? "Bluetooth" : "Local wire");
 
@@ -309,8 +298,6 @@ void update_system()
     }
     push(Info::SysUptime, text);
 
-    // The panel runs out of internal RAM long before it runs out of PSRAM, so
-    // that is the number worth watching.
     const std::size_t internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     ui::set_health(ui::Subsystem::System, internal < 24 * 1024   ? Level::Bad
                                           : internal < 48 * 1024 ? Level::Warn
@@ -321,8 +308,6 @@ void update_system()
     push_kilobytes(Info::SysRamLow, heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL));
 }
 
-// Which tags belong to which tile. A subsystem is more than one component --
-// the network is as much the co-processor link as it is the Wi-Fi driver.
 constexpr const char *NETWORK_TAGS[] = {
     "wifi",       "esp_netif_handlers", "esp_netif",  "esp_wifi_remote", "wifi_init",
     "H_API",      "H_SDIO_DRV",         "transport",  "sdio_wrapper",    "esp_hosted"};
@@ -366,8 +351,6 @@ void update()
 [[noreturn]] void diagnostics_task(void *)
 {
     for (;;) {
-        // Woken when the view opens so it is never filled in behind the user,
-        // and otherwise once a second while it is up.
         ulTaskNotifyTake(pdTRUE, TICK);
         if (ui::diagnostics_open()) {
             update();

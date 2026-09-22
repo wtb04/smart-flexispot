@@ -3,7 +3,6 @@
 #include "esp_err.h"
 
 namespace telemetry {
-
 /** Connects to the broker and starts publishing what the panel knows. */
 esp_err_t start();
 

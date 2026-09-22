@@ -16,16 +16,10 @@
 
 namespace logbuf {
 namespace {
-
 constexpr char TAG[] = "logbuf";
 
-// A boot alone writes more than a hundred lines, so a short ring had thrown
-// most subsystems' history away before anyone could look at it. This lives in
-// PSRAM, where the room is not worth counting.
 constexpr int         LINE_COUNT = 512;
 constexpr std::size_t LINE_BYTES = 144;
-// Long enough for the longest tag in the system. At sixteen, esp_netif_handlers
-// and websocket_client were dropped as unparseable and belonged to nothing.
 constexpr std::size_t TAG_BYTES  = 32;
 
 struct Line {
@@ -35,8 +29,6 @@ struct Line {
     char         text[LINE_BYTES];
 };
 
-// Before SNTP lands the clock sits near the epoch, and a wall time then is a
-// lie; uptime is what there is.
 constexpr std::time_t CLOCK_SET_AFTER = 1600000000;
 
 Line        *s_lines = nullptr;
@@ -46,8 +38,6 @@ portMUX_TYPE s_lock  = portMUX_INITIALIZER_UNLOCKED;
 
 vprintf_like_t s_next_sink = nullptr;
 
-// "I (12345) tag: message" is what the logging system emits. Anything that does
-// not look like that is kept whole under an empty tag rather than dropped.
 void split(const char *line, const char *&tag, std::size_t &tag_len, const char *&body)
 {
     tag     = "";
@@ -102,8 +92,6 @@ int sink(const char *format, va_list args)
         vsnprintf(line, sizeof(line), format, copy);
         va_end(copy);
 
-        // The logging system ends every line itself; keeping it would double
-        // the spacing wherever these are shown.
         char *end = line + std::strlen(line);
         while (end > line && (end[-1] == '\n' || end[-1] == '\r')) {
             *--end = '\0';
@@ -148,7 +136,6 @@ int recent(const char *const *tags, int tag_count, char *out, std::size_t out_si
         return 0;
     }
 
-    // Newest first to find which lines to keep, then written oldest first.
     int  wanted[64];
     int  found = 0;
     const int cap = max_lines < static_cast<int>(std::size(wanted))

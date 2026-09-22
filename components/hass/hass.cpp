@@ -19,7 +19,6 @@
 
 namespace hass {
 namespace {
-
 constexpr char TAG[] = "hass";
 constexpr char SW_VERSION[] = "1.0.0";
 
@@ -31,8 +30,6 @@ std::atomic<bool>        s_connected{false};
 Handlers                 s_handlers{};
 protocol::Topics         s_topics;
 std::string              s_last_state;   // telemetry task only
-// Set from the MQTT task: clearing s_last_state from there instead raced the
-// telemetry task comparing and assigning the same std::string.
 std::atomic<bool>        s_force_publish{false};
 
 struct Inbound {
@@ -89,7 +86,6 @@ void dispatch(const std::string &topic, const std::string &payload)
         return;
     }
     if (topic == "homeassistant/status" && payload == "online") {
-        // Home Assistant restarted and has forgotten every discovered entity.
         publish_discovery();
         s_force_publish.store(true, std::memory_order_relaxed);
     }
@@ -119,7 +115,6 @@ void on_mqtt_event(void *, esp_event_base_t, std::int32_t id, void *data)
             break;
 
         case MQTT_EVENT_DATA:
-            // A payload over the buffer size arrives in pieces; only the first has the topic.
             if (event->current_data_offset == 0) {
                 s_inbound.topic.assign(event->topic, event->topic_len);
                 s_inbound.payload.clear();
@@ -153,7 +148,6 @@ esp_err_t start(const Handlers &handlers)
     cfg.credentials.username                = HASS_MQTT_USER;
     cfg.credentials.authentication.password = HASS_MQTT_PASSWORD;
 
-    // Retained: Home Assistant may not be listening at the moment the link drops.
     cfg.session.last_will.topic  = s_topics.availability.c_str();
     cfg.session.last_will.msg    = "offline";
     cfg.session.last_will.qos    = QOS_AT_LEAST_ONCE;
@@ -161,7 +155,6 @@ esp_err_t start(const Handlers &handlers)
     cfg.session.keepalive        = 30;
 
     cfg.network.reconnect_timeout_ms = 5000;
-    // The discovery payload is several kilobytes; the 1024 default fragments it.
     cfg.buffer.size     = 2048;
     cfg.buffer.out_size = 8192;
 
@@ -170,7 +163,6 @@ esp_err_t start(const Handlers &handlers)
     ESP_RETURN_ON_ERROR(
         esp_mqtt_client_register_event(s_client, MQTT_EVENT_ANY, on_mqtt_event, nullptr), TAG,
         "register events");
-    // Starts trying immediately and keeps retrying; no need to wait for an IP.
     return esp_mqtt_client_start(s_client);
 }
 

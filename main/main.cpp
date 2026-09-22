@@ -23,8 +23,6 @@
 namespace {
 constexpr char TAG[] = "tab5";
 
-// Both the panel's slider and Home Assistant land here, so the published value
-// stays right either way.
 void on_brightness_changed(int percent)
 {
     board::set_brightness_percent(percent);
@@ -32,8 +30,6 @@ void on_brightness_changed(int percent)
     settings::set(settings::Key::Brightness, percent);
 }
 
-// The panel has already redrawn itself and applied whatever it owns; this side
-// stores the choice and applies whatever it does not.
 void on_setting(ui::Setting setting, bool on)
 {
     switch (setting) {
@@ -52,9 +48,6 @@ void on_setting(ui::Setting setting, bool on)
     }
 }
 
-// Storing on every step would be a flash write per pixel dragged; the store
-// coalesces, so this only has to keep the codec and the setting in step. The
-// preview is the point of the slider -- you hear what you are choosing.
 void on_volume(int percent, bool preview)
 {
     sound::set_volume(percent);
@@ -69,9 +62,6 @@ void on_primary(std::uint32_t colour)
     settings::set(settings::Key::Accent, static_cast<int>(colour));
 }
 
-// Asked for by the panel when nothing has been touched for a while, and again
-// on the tap that follows. Whatever brightness the settings hold is what comes
-// back, so a slider change made before the screen went dark still applies.
 void on_screen(bool on)
 {
     telemetry::note_screen(on);
@@ -101,10 +91,6 @@ void on_radar_page(bool showing, bool reachable)
 void on_restart()
 {
     ESP_LOGI(TAG, "restart requested from the panel");
-    // The panel goes on scanning out whatever the MIPI link last left in it
-    // while the SoC restarts, which is the flash of blue. Dimming is not
-    // enough -- set_brightness floors at the lowest level the panel honours --
-    // so the backlight goes off and the panel is put to sleep.
     ESP_ERROR_CHECK_WITHOUT_ABORT(board::display_off());
     esp_restart();
 }
@@ -112,14 +98,11 @@ void on_restart()
 
 extern "C" void app_main(void)
 {
-    // Before anything that stores settings: the desk keeps its learned preset
-    // heights here, and Wi-Fi its calibration data.
     if (esp_err_t err = nvs_flash_init();
         err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(nvs_flash_erase());
         ESP_ERROR_CHECK_WITHOUT_ABORT(nvs_flash_init());
     }
-    // First, so the diagnostics pages can show what happened during startup.
     ESP_ERROR_CHECK_WITHOUT_ABORT(logbuf::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(settings::load());
 
@@ -136,10 +119,7 @@ extern "C" void app_main(void)
     ESP_ERROR_CHECK(ui::init(handlers, brightness,
                              static_cast<std::uint32_t>(settings::get(settings::Key::Accent)),
                              settings::enabled(settings::Key::RailSide), flipped));
-    // Through the same path a change takes, so the panel, the backlight and
-    // what gets published all start out agreeing.
     on_brightness_changed(brightness);
-    // Only now is there something worth lighting.
     ESP_ERROR_CHECK_WITHOUT_ABORT(board::display_on(brightness));
     ESP_ERROR_CHECK_WITHOUT_ABORT(
         ui::set_setting(ui::Setting::Charging, settings::enabled(settings::Key::Charging)));
@@ -152,12 +132,8 @@ extern "C" void app_main(void)
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_notification_volume(volume));
 
     room::init();
-    // Neither is fatal: panicking here put the panel in a boot loop over a
-    // peripheral it can perfectly well run without.
     ESP_ERROR_CHECK_WITHOUT_ABORT(desk::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("desk", 25));
-    // Before the network, because the whole point is that the clock is right
-    // on the first frame rather than whenever the network answers.
     ESP_ERROR_CHECK_WITHOUT_ABORT(rtc::start());
 
     ESP_ERROR_CHECK_WITHOUT_ABORT(battery::start());
@@ -171,5 +147,4 @@ extern "C" void app_main(void)
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("home assistant", 85));
 
     ESP_LOGI(TAG, "up");
-    // app_main returns; the LVGL, loctek and supervisor tasks carry on.
 }

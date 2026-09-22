@@ -5,7 +5,6 @@
 #include <cstdint>
 
 namespace settings {
-
 enum class Key : std::uint8_t {
     Brightness,
     Charging,

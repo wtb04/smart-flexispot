@@ -5,7 +5,6 @@
 #include "ui.h"
 
 namespace room {
-
 /** Scaffolds the home screen before any connect. */
 void init();
 
@@ -16,7 +15,6 @@ void render(const hass::ws::EntityStore &store);
 int entity_count();
 
 void on_media(ui::MediaAction action);
-
 
 void on_setpoint(float celsius);
 

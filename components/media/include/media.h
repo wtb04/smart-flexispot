@@ -5,7 +5,6 @@
 #include <cstdint>
 
 namespace media {
-
 /** Pixels. Sized for the largest place it is shown, so nothing scales up. */
 inline constexpr int kArtSize = 200;
 

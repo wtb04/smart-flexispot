@@ -5,7 +5,6 @@
 
 namespace hass::ws {
 namespace {
-
 constexpr char KEY_STATE[]      = "s";
 constexpr char KEY_ATTRIBUTES[] = "a";
 constexpr char KEY_ADDITIONS[]  = "+";
@@ -39,7 +38,6 @@ std::string as_text(const cJSON *item)
     }
     if (cJSON_IsNumber(item)) {
         char buf[32];
-        // Integers are the common case and look wrong with a trailing .0.
         if (item->valuedouble == static_cast<double>(item->valueint)) {
             std::snprintf(buf, sizeof(buf), "%d", item->valueint);
         } else {
@@ -118,7 +116,6 @@ std::string auth_message(const std::string &token)
 std::string subscribe_entities_message(int id, const std::vector<std::string> &entity_ids)
 {
     if (entity_ids.empty()) {
-        // Omitting entity_ids subscribes to the whole state machine.
         return "";
     }
     cJSON *root = cJSON_CreateObject();
@@ -167,7 +164,6 @@ std::string call_service_message(int id, const std::string &domain, const std::s
     cJSON *data = cJSON_CreateObject();
     char  *end  = nullptr;
     const double number = std::strtod(value.c_str(), &end);
-    // A setpoint has to arrive as a number; a mode has to arrive as a string.
     if (end != value.c_str() && *end == '\0') {
         cJSON_AddNumberToObject(data, field.c_str(), number);
     } else {
@@ -194,7 +190,6 @@ bool EntityStore::apply_event(const cJSON *event)
     }
     bool changed = false;
 
-    // "a": whole states, sent once per entity when the subscription starts.
     const cJSON *added = cJSON_GetObjectItemCaseSensitive(event, "a");
     if (cJSON_IsObject(added)) {
         for (const cJSON *item = added->child; item != nullptr; item = item->next) {
@@ -209,7 +204,6 @@ bool EntityStore::apply_event(const cJSON *event)
         }
     }
 
-    // "c": per-entity diffs.
     const cJSON *changes = cJSON_GetObjectItemCaseSensitive(event, "c");
     if (cJSON_IsObject(changes)) {
         for (const cJSON *item = changes->child; item != nullptr; item = item->next) {
@@ -232,8 +226,6 @@ bool EntityStore::apply_event(const cJSON *event)
                 }
             }
 
-            // "-": attributes Home Assistant has dropped, by name; without this
-            // they linger forever.
             const cJSON *removals = cJSON_GetObjectItemCaseSensitive(item, KEY_REMOVALS);
             if (cJSON_IsObject(removals)) {
                 const cJSON *gone = cJSON_GetObjectItemCaseSensitive(removals, KEY_ATTRIBUTES);
@@ -251,7 +243,6 @@ bool EntityStore::apply_event(const cJSON *event)
         }
     }
 
-    // "r": entities that have left the state machine, as a list of ids.
     const cJSON *removed = cJSON_GetObjectItemCaseSensitive(event, "r");
     if (cJSON_IsArray(removed)) {
         for (const cJSON *name = removed->child; name != nullptr; name = name->next) {

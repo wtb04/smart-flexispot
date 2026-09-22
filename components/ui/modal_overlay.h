@@ -5,7 +5,6 @@
 #include <cstdint>
 
 namespace ui {
-
 class ModalOverlay {
 public:
     ModalOverlay(lv_obj_t *parent, std::int32_t width, std::int32_t height);

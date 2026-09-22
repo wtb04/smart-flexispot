@@ -3,7 +3,6 @@
 #include "esp_err.h"
 
 namespace sound {
-
 esp_err_t init();
 
 /** 0 silences it. Takes effect on the next chime. */

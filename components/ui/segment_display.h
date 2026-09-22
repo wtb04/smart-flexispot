@@ -6,9 +6,6 @@
 #include <cstdint>
 
 namespace ui {
-
-// Unlit segments are left faintly visible rather than hidden: that is what makes a real segment
-// display readable as one.
 class SegmentDisplay {
 public:
     explicit SegmentDisplay(lv_obj_t *parent);
@@ -21,7 +18,6 @@ public:
 private:
     struct Digit {
         std::array<lv_obj_t *, 7> bars{};
-        // Restyling a bar invalidates it and there are 28 of them, so only redraw what changed.
         int shown = -2;
     };
 

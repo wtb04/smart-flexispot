@@ -23,7 +23,6 @@
 #if __has_include("wifi_secrets.h")
 #include "wifi_secrets.h"
 #endif
-// A build without the secrets header runs; it just never joins.
 #ifndef TAB5_WIFI_SSID
 #define TAB5_WIFI_SSID ""
 #define TAB5_WIFI_PASS ""
@@ -31,7 +30,6 @@
 
 namespace wifi {
 namespace {
-
 constexpr char TAG[] = "wifi";
 
 std::atomic<bool> s_connected{false};
@@ -41,12 +39,8 @@ StaticEventGroup_t    s_events_ctrl;
 EventGroupHandle_t    s_events = nullptr;
 bool              s_sntp_started = false;
 
-// A POSIX TZ string, as there is no timezone database on the device:
-// Europe/Amsterdam with its DST rules.
 constexpr char TIMEZONE[] = "CET-1CEST,M3.5.0,M10.5.0/3";
 
-// Written back so the next cold boot starts from the right time rather than
-// from 1970, whether or not the network is there when it happens.
 void on_time_synced(timeval *)
 {
     const std::time_t now = std::time(nullptr);
@@ -89,7 +83,6 @@ void on_wifi_event(void *, esp_event_base_t base, std::int32_t id, void *data)
         }
         ESP_LOGW(TAG, "disconnected from '%s' (reason %d), retrying", TAB5_WIFI_SSID,
                  event->reason);
-        // Retry forever: this is a wall panel and the router may be rebooting.
         esp_wifi_connect();
         return;
     }
@@ -118,7 +111,6 @@ esp_err_t init_nvs()
 
 esp_err_t start()
 {
-    // Before anything reads a clock: an unset TZ silently offsets every local time.
     setenv("TZ", TIMEZONE, 1);
     tzset();
 
@@ -129,12 +121,9 @@ esp_err_t start()
         return ESP_OK;
     }
 
-    // The C6 co-processor sits behind a power gate on the IO expander; without
-    // this it never answers on SDIO.
     ESP_RETURN_ON_ERROR(bsp_feature_enable(BSP_FEATURE_WIFI, true), TAG, "wifi power");
     vTaskDelay(pdMS_TO_TICKS(100));
 
-    // Wi-Fi keeps its calibration data in NVS.
     ESP_RETURN_ON_ERROR(init_nvs(), TAG, "nvs");
     ESP_RETURN_ON_ERROR(esp_netif_init(), TAG, "netif");
     ESP_RETURN_ON_ERROR(esp_event_loop_create_default(), TAG, "event loop");
@@ -159,11 +148,6 @@ esp_err_t start()
     ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_STA), TAG, "sta mode");
     ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_STA, &config), TAG, "sta config");
     ESP_RETURN_ON_ERROR(esp_wifi_start(), TAG, "wifi start");
-    // The default has the station sleep between beacons, and the access point
-    // holds its packets until the next one. Measured on this network: a round
-    // trip alternating between 2 ms and 90 ms, with a worst case of 290 ms.
-    // Nothing here is worth that, and a desk driven over the network is worth
-    // it least of all.
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_ps(WIFI_PS_NONE));
 
     ESP_LOGI(TAG, "joining '%s'", TAB5_WIFI_SSID);

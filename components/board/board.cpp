@@ -10,14 +10,12 @@
 
 namespace board {
 namespace {
-
 constexpr char TAG[] = "board";
 
 lv_display_t *s_disp = nullptr;
 
 constexpr TickType_t LCD_RAIL_SETTLE   = pdMS_TO_TICKS(200);
 constexpr TickType_t TOUCH_RAIL_SETTLE = pdMS_TO_TICKS(500);
-
 
 constexpr int LVGL_TASK_PRIORITY  = 4;
 constexpr int LVGL_TASK_STACK     = 8192;
@@ -49,18 +47,11 @@ esp_err_t start_display(lv_display_t **out_disp)
             .task_stack_caps  = MALLOC_CAP_INTERNAL | MALLOC_CAP_DEFAULT,
             .timer_period_ms  = LVGL_TICK_PERIOD_MS,
         },
-        // A whole frame, not a strip: LVGL redraws an invalidated area in one
-        // pass only if the buffer holds it, and otherwise flushes in bands you
-        // watch fill downwards. full_refresh and direct_mode are forbidden
-        // alongside the sw_rotate the portrait panel needs, so capacity is the
-        // only lever.
         .buffer_size   = BSP_LCD_H_RES * BSP_LCD_V_RES,
         .double_buffer = true,
         .flags = {
-            // A full frame is far larger than the internal DMA pool can spare.
             .buff_dma    = false,
             .buff_spiram = true,
-            // Routed through the P4's PPA when CONFIG_LVGL_PORT_ENABLE_PPA is set.
             .sw_rotate   = true,
         },
     };
@@ -83,19 +74,12 @@ esp_err_t init(bool flipped)
     s_disp = disp;
     set_flipped(flipped);
 
-    // Backlight stays off until display_on(): the panel powers up showing
-    // whatever was in it, and lighting that is the blue flash at boot.
     ESP_RETURN_ON_ERROR(bsp_display_backlight_off(), TAG, "backlight");
     return ESP_OK;
 }
 
-// The touchscreen follows for free: the BSP hands esp_lcd_touch no mirroring
-// or swapping of its own, so LVGL maps every raw portrait coordinate through
-// the display rotation itself. Turning the picture turns the touch with it.
 void set_flipped(bool flipped)
 {
-    // Panel is natively 720x1280 portrait; the Tab5 is used landscape, and the
-    // other way up is that same landscape a further half turn round.
     bsp_display_rotate(s_disp, flipped ? LV_DISPLAY_ROTATION_270 : LV_DISPLAY_ROTATION_90);
 }
 
@@ -114,11 +98,10 @@ esp_err_t display_on(int percent)
     return set_brightness(percent);
 }
 
-// The backlight and nothing else. bsp_display_enter_sleep() would also put the
-// touch controller to sleep, and on this board's controller that is both
-// unsupported -- it returns an error after having already blanked the panel --
-// and self-defeating, since a sleeping touch controller cannot report the tap
-// that is supposed to wake it. The backlight is what draws the power anyway.
+// The backlight and nothing else: bsp_display_enter_sleep() also sleeps the touch
+// controller, which this board's controller reports as unsupported after having
+// already blanked the panel -- and a sleeping controller cannot report the tap
+// that is meant to wake it.
 esp_err_t display_off()
 {
     return bsp_display_backlight_off();

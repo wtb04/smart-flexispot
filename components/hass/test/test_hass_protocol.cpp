@@ -1,4 +1,3 @@
-// Host-side tests for the transport-free protocol layer. See run.sh.
 #include "hass_protocol.h"
 
 #include "cJSON.h"
@@ -7,7 +6,6 @@
 #include <string>
 
 namespace {
-
 using namespace hass::protocol;
 
 int g_failures = 0;
@@ -59,27 +57,21 @@ void test_state_document()
     t.brightness        = 80;
 
     const std::string doc = state_document(t);
-    // Rounding in float and letting serialisation promote turns 72.8 into
-    // 72.80000305175781; this is the regression that guards against it.
     check(field(doc, "height_cm") == "72.8", "height in cm without float noise");
     check(field(doc, "height_mm") == "728", "height in mm");
     check(field(doc, "desk") == "ON", "desk link state");
     check(field(doc, "battery_pct") == "84", "battery percent");
     check(field(doc, "battery_present") == "ON", "battery present");
 
-    // No pack fitted: report absence rather than a misleading zero percent.
     Telemetry empty;
     empty.battery_percent = -1;
     const std::string no_batt = state_document(empty);
     check(field(no_batt, "battery_present") == "OFF", "absent battery reported as absent");
     check(field(no_batt, "battery_pct") == "<missing>", "no percentage invented when absent");
 
-    // Height unknown before the first reading: omitted, not zero.
     check(field(no_batt, "height_mm") == "<missing>", "unknown height omitted");
 }
 
-// Noisy fields must be quantised, or publish-on-change never suppresses
-// anything and the broker sees a message every tick.
 void test_noise_quantisation()
 {
     Telemetry a;
@@ -99,8 +91,6 @@ void test_noise_quantisation()
     check(state_document(a) != state_document(c), "a real signal change still shows");
 }
 
-// The sign convention was measured, not assumed: running from the pack reads
-// +243 mA, so positive is out of the battery.
 void test_charge_state()
 {
     Telemetry running;
@@ -120,7 +110,6 @@ void test_charge_state()
     check(field(chg, "charging") == "ON", "charging reported");
     check(field(chg, "external_power") == "ON", "charging implies external power");
 
-    // No pack: neither claim should be made at all.
     Telemetry absent;
     absent.battery_percent = -1;
     check(field(state_document(absent), "charging") == "<missing>",
@@ -137,19 +126,14 @@ void test_discovery_document()
     }
 
     check(cJSON_GetObjectItem(root, "dev") != nullptr, "device block present");
-    // Device-based discovery is rejected outright without an origin block.
     check(cJSON_GetObjectItem(root, "o") != nullptr, "origin block present");
     check(cJSON_GetObjectItem(root, "avty_t") != nullptr, "availability topic present");
 
     const cJSON *cmps = cJSON_GetObjectItem(root, "cmps");
     check(cmps != nullptr, "components block present");
 
-    // object_id was deprecated in HA 2025.10 and removed in 2026.4. A stale one
-    // is ignored silently, so entity ids drift without any error anywhere.
     check(doc.find("\"object_id\"") == std::string::npos, "no removed object_id key");
 
-    // Every component needs its own unique_id or HA will not restore the
-    // entity across a restart.
     bool all_unique = true;
     int  count      = 0;
     for (const cJSON *entity = cmps != nullptr ? cmps->child : nullptr; entity != nullptr;
@@ -176,9 +160,7 @@ void test_notification_parsing()
     check(rich.level == "warning", "level alias normalised");
     check(rich.timeout_ms == 12000, "timeout_s converted to ms");
 
-    // Looks like JSON, is not: showing braces to the user helps nobody.
     check(!parse_notification("{not json at all").valid, "broken json rejected");
-    // A wrong type must not take the whole notification down.
     const Notification numeric = parse_notification(R"({"message":42,"title":"Hi"})");
     check(numeric.valid && numeric.message.empty() && numeric.title == "Hi",
           "non-string field ignored rather than fatal");
@@ -186,11 +168,9 @@ void test_notification_parsing()
     check(!parse_notification(R"({"level":"info"})").valid, "no text means nothing to show");
     check(parse_notification(R"({"title":"Only a title"})").valid, "title alone is enough");
 
-    // Clamped, so an automation cannot pin a popup on screen forever.
     check(parse_notification(R"({"message":"x","timeout_s":9999})").timeout_ms == 120000,
           "timeout clamped");
 
-    // Truncation must not split a multi-byte character in half.
     const std::string long_utf8 = std::string(399, 'a') + "\xc3\xa9";
     const Notification truncated = parse_notification(long_utf8);
     check(truncated.valid && truncated.message.size() == 399, "utf-8 not split by truncation");

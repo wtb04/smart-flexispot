@@ -19,26 +19,18 @@
 
 namespace desk {
 namespace {
-
 constexpr char TAG[] = "desk";
 constexpr char kConnected[] = "connected";
 constexpr char kAsleep[]    = "desk display asleep";
 constexpr char kNoReply[]   = "disconnected";
 constexpr char kWaking[]    = "waking desk";
 
-// A sleeping control box is silent, so "nothing on the wire" is normal at
-// startup. Only a wiring fault once the wake line has been pulsed this often.
 constexpr int WIRING_FAULT_AFTER_WAKES = 3;
 
 constexpr TickType_t SUPERVISE_TICK = pdMS_TO_TICKS(200);
-// The box streams in bursts with gaps of a second or so between them, so only a
-// longer silence than that means the link has dropped.
 constexpr TickType_t LINK_TIMEOUT = pdMS_TO_TICKS(3000);
-// One wake pulse can be missed, and without a retry the height never appears.
 constexpr TickType_t WAKE_RETRY = pdMS_TO_TICKS(5000);
 
-// This task puts notifications on screen: it copies a Notice onto its stack and
-// then walks LVGL's label and layout paths.
 constexpr std::uint32_t TASK_STACK    = 4096;  // measured: uses 1.8 KB
 constexpr UBaseType_t   TASK_PRIORITY = 3;
 constexpr BaseType_t    TASK_CORE     = 0;
@@ -46,8 +38,6 @@ constexpr BaseType_t    TASK_CORE     = 0;
 StaticTask_t s_task_ctrl;
 StackType_t  s_task_stack[TASK_STACK];
 
-// Preset work cannot run in the LVGL callback: storing one blocks for the gap
-// between the M key and the preset key, so the supervisor task does it.
 struct PresetCommand {
     int  index;
     bool store;
@@ -58,34 +48,14 @@ StaticQueue_t s_preset_queue_ctrl;
 PresetCommand s_preset_queue_storage[PRESET_QUEUE_LEN];
 QueueHandle_t s_preset_queue = nullptr;
 
-// The control box never reports what a preset is set to, so the panel learns:
-// a height stored to a preset is that preset's height, and so is wherever the
-// desk comes to rest after being sent to one. Kept in NVS because a desk that
-// has not moved since the last boot is still standing at a preset.
 constexpr char NVS_NAMESPACE[] = "desk";
-// Bumped when the learning changes meaning: the first version recorded the
-// height a preset was pressed *from*, so anything stored under it is wrong.
 constexpr char NVS_PRESETS[]   = "presets2";
 
-// Whether the desk has actually set off, rather than whether a height matches
-// a preset: the highlight has to come down the moment it starts moving, and a
-// millimetre of jitter in the readout is not moving.
 constexpr int DEPARTED_MM = 8;
 
-// Long enough to be sure the desk has finished, because recording the wrong
-// height teaches the preset something wrong and it persists.
 constexpr TickType_t SETTLE_TIME = pdMS_TO_TICKS(1500);
-// Short, because this only decides whether to light a button: the box reports
-// a new height several times a second while travelling, so a brief quiet
-// period already means it has stopped.
 constexpr TickType_t STILL_TIME = pdMS_TO_TICKS(350);
 
-// A preset takes a moment to get the desk going, and for that moment the height
-// is exactly where it has been sitting -- which read as still standing at the
-// preset that was lit, so the highlight came back on and went off again as the
-// desk finally moved. Motion is assumed from the command until the height
-// proves it, or until this runs out and the desk evidently is not going
-// anywhere, which is the case when it was already there.
 constexpr TickType_t COMMAND_GRACE = pdMS_TO_TICKS(4000);
 
 constexpr TickType_t LEARN_TIMEOUT = pdMS_TO_TICKS(45000);
@@ -151,8 +121,6 @@ void publish_active(int height_mm, bool linked, bool moving)
 {
     int standing_at = -1;
     for (int i = 0; i < ui::kPresetCount; ++i) {
-        // Exactly, with no tolerance: the box puts the desk back on the same
-        // millimetre it was asked for, so anything else is a different height.
         const bool active =
             linked && !moving && height_mm >= 0 && height_mm == s_preset_mm[i];
         if (active) {
@@ -163,9 +131,6 @@ void publish_active(int height_mm, bool linked, bool moving)
     s_active_preset.store(standing_at, std::memory_order_relaxed);
 }
 
-// The moment the desk is asked to move, standing at a preset stops being true.
-// Waiting for the supervisor's next tick, or for the height to leave the
-// tolerance, would leave the highlight up while the desk was already moving.
 void clear_active()
 {
     s_active_preset.store(-1, std::memory_order_relaxed);
@@ -176,9 +141,6 @@ void clear_active()
 
 std::atomic<int>  s_height_mm{-1};
 
-// Which wire the commands take. Read once at startup: handing a moving desk
-// from one transport to the other while it travels is not something to do for
-// the sake of a toggle, so the setting takes effect on the next boot.
 bool s_over_ble = false;
 
 bool over_ble()
@@ -222,15 +184,8 @@ void run_preset(const PresetCommand &cmd)
 std::atomic<bool> s_linked{false};
 std::atomic<int>  s_motion{0};  // -1 down, 0 idle, +1 up
 
-// Repaints only on a change: the box streams frames far faster than the display
-// needs, and redrawing an already-correct label just costs the LVGL task time.
 void on_height(int height_mm);
 
-// The status arrives on the Bluetooth host task. Pushing it to the screen from
-// there means taking the LVGL lock on the task that runs the Bluetooth stack:
-// a render in progress would block it for as long as it took, which delays
-// every command including Stop and risks the supervision timeout. So the
-// height is handed to a task of our own and the host task goes back to work.
 std::atomic<int> s_pending_height{-1};
 TaskHandle_t     s_height_pump = nullptr;
 
@@ -269,8 +224,6 @@ void on_height(int height_mm)
     }
 }
 
-// What the link and the box on the far end of it are doing, which are two
-// separate things and fail separately.
 const char *proxy_status()
 {
     if (!ble::desk::connected()) {
@@ -288,8 +241,6 @@ const char *proxy_status()
 const char *link_status(const loctek::Stats &stats, bool link_up, int wake_attempts)
 {
     if (link_up) {
-        // Height frames with nothing readable in them mean the box has blanked
-        // its display.
         const bool never_read = s_height_mm.load(std::memory_order_relaxed) < 0;
         if (never_read && stats.height_frames > 0 && stats.heights_decoded == 0) {
             return kAsleep;
@@ -339,11 +290,6 @@ const char *link_status(const loctek::Stats &stats, bool link_up, int wake_attem
             settled_since = now;
         }
         if (s_learning >= 0) {
-            // The desk has not started moving yet when the preset is pressed,
-            // so the height is already long settled. Recording it then taught
-            // the preset whatever height it was sent from -- which is how SIT
-            // came to be stored as STAND's height. Wait for it to actually
-            // move, and give up if it never does.
             if (now - s_learn_started > LEARN_TIMEOUT) {
                 s_learning = -1;
             } else if (height >= 0 && height != s_learn_from &&
@@ -356,9 +302,6 @@ const char *link_status(const loctek::Stats &stats, bool link_up, int wake_attem
             s_presets_dirty = false;
             save_presets();
         }
-        // Tied to the height going quiet rather than to the learning, which
-        // waits far longer on purpose and was holding the highlight back for
-        // a second and a half after the desk had visibly stopped.
         const bool commanded = s_commanded_at != 0;
         if (commanded) {
             const bool left = height >= 0 && s_commanded_from >= 0 &&
@@ -378,22 +321,15 @@ const char *link_status(const loctek::Stats &stats, bool link_up, int wake_attem
             const bool linked = status == kConnected;
             s_linked.store(linked, std::memory_order_relaxed);
             ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_desk_available(linked));
-            // Pushed again on every transition: on_height only fires on a
-            // change, so a dropout would leave dashes until the desk next moved.
             ESP_ERROR_CHECK_WITHOUT_ABORT(
                 ui::set_height(linked ? s_height_mm.load(std::memory_order_relaxed) : -1));
             ESP_LOGI(TAG, "%s", status);
 #if CONFIG_LOCTEK_NUDGE_WAKE
             if (status == kAsleep) {
-                // Only reached before the first reading: nudging on every sleep
-                // cycle would creep the desk upward all day.
                 ESP_ERROR_CHECK_WITHOUT_ABORT(loctek::nudge());
             }
 #endif
         }
-        // Only until the first reading lands; after that the box is left to
-        // sleep. A fully asleep box transmits nothing, so this must not be gated
-        // on hearing anything from it.
         const bool never_read = s_height_mm.load(std::memory_order_relaxed) < 0;
         if (never_read && status != kConnected && (last_wake == 0 || now - last_wake > WAKE_RETRY)) {
             last_wake = now;
@@ -430,9 +366,6 @@ esp_err_t start()
         ble::desk::on_status(on_proxy_status);
     }
     if (!s_over_ble) {
-        // Left alone entirely when the proxy holds the wire: an unconnected
-        // UART polling into nothing is noise, and the wake retries below are
-        // worse.
         ESP_RETURN_ON_ERROR(loctek::start(on_height), TAG, "loctek");
     }
 
@@ -468,10 +401,6 @@ const char *active_preset()
     return preset_name(s_active_preset.load(std::memory_order_relaxed));
 }
 
-// Wherever it is reported rather than pressed. The rail's two buttons are
-// called STAND and SIT because that is what they are for, but a readout that
-// mixes those with "preset_1" reads as an accident, so everything reported is
-// numbered the way the presets themselves are.
 const char *active_preset_label()
 {
     switch (s_active_preset.load(std::memory_order_relaxed)) {
@@ -511,8 +440,6 @@ void on_move(ui::Move direction)
         clear_active();
     }
     if (over_ble()) {
-        // The repeating is the link's job, and its stopping is what stops the
-        // desk; this only says which way.
         ble::desk::hold(direction == ui::Move::Up     ? deskproto::Motion::Up
                         : direction == ui::Move::Down ? deskproto::Motion::Down
                                                       : deskproto::Motion::Idle);

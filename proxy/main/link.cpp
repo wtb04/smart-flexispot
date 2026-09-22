@@ -24,21 +24,16 @@
 
 namespace desklink {
 namespace {
-
 constexpr char TAG[]  = "desklink";
 constexpr char NAME[] = "desk-proxy";
 
 int          s_height_mm  = -1;
 TaskHandle_t s_status_task = nullptr;
 
-// Whether the control box is answering now, not whether it ever has. The
-// counter is cumulative, so "has decoded a frame" stays true for the rest of
-// the uptime and pulling the cable out could never clear it.
 constexpr std::int64_t BOX_QUIET_US = 4000000;
 
 std::atomic<bool> s_box_up{false};
 
-// Made up rather than assigned; nothing else is expected to use them.
 constexpr ble_uuid128_t SERVICE_UUID = BLE_UUID128_INIT(0x2d, 0x71, 0x9a, 0x4c, 0x8e, 0x3b, 0x4f,
                                                         0x6a, 0x9c, 0x1d, 0x5e, 0x77, 0x01, 0x00,
                                                         0xa5, 0xde);
@@ -50,9 +45,6 @@ std::uint16_t s_echo_handle = 0;
 std::uint16_t s_conn        = BLE_HS_CONN_HANDLE_NONE;
 std::uint8_t  s_address_type = 0;
 
-// A hold is only good for this long. The panel repeats it while a button is
-// down, so silence -- a panel that crashed, walked out of range or ran out of
-// battery -- stops the desk rather than leaving it running into its limit.
 constexpr std::int64_t HOLD_GOOD_FOR_US = 300000;
 
 std::int64_t        s_hold_until  = 0;
@@ -62,10 +54,6 @@ bool                s_seq_started = false;
 
 void advertise();
 
-// Suppressed at the last step rather than earlier: with this on, every command
-// is decoded, the deadman runs and the status goes back, and only the frame
-// that would move the desk is held back. It is how the whole path gets tested
-// without the desk moving.
 bool movement_allowed()
 {
 #if CONFIG_LOCTEK_PROXY_DRY_RUN
@@ -120,9 +108,6 @@ void send_status()
     }
 }
 
-// Anything that holds a key down for hundreds of milliseconds runs here rather
-// than on the Bluetooth host task. Blocking that task stops commands being
-// received at all, and the command that matters most is Stop.
 QueueHandle_t s_slow = nullptr;
 
 [[noreturn]] void slow_task(void *)
@@ -180,7 +165,6 @@ void apply(const deskproto::Command &command)
         case deskproto::Op::Preset:
         case deskproto::Op::Store:
         case deskproto::Op::Wake:
-            // Handed off; these hold a key down for a good part of a second.
             if (s_slow != nullptr) {
                 xQueueSend(s_slow, &command, 0);
             }
@@ -208,19 +192,12 @@ int on_echo(std::uint16_t conn, std::uint16_t attr, ble_gatt_access_ctxt *ctxt, 
         return 0;
     }
 
-    // Out of order or repeated within this connection. The counter is only
-    // meaningful inside one, and is forgotten when the panel connects again:
-    // a panel that restarts counts from one, which against a remembered five
-    // hundred looks exactly like a replay and had every command silently
-    // dropped.
     if (s_seq_started && command.seq <= s_last_seq) {
         return 0;
     }
     s_last_seq    = command.seq;
     s_seq_started = true;
 
-    // The handle NimBLE hands in here is the one notifications have to go out
-    // on; the one filled in when the service was registered was not it.
     s_conn        = conn;
     s_echo_handle = attr;
 
@@ -229,13 +206,6 @@ int on_echo(std::uint16_t conn, std::uint16_t attr, ble_gatt_access_ctxt *ctxt, 
     return 0;
 }
 
-// Status went back only in reply to a command, so while nothing was being
-// pressed the panel heard the height once a second and the final position
-// after a move arrived up to a second late. This pushes it when it changes.
-// Woken by the height changing rather than polled, so the panel sees it as
-// fast as the box says it -- about every fifty-five milliseconds while the
-// desk travels. Floored at fifty so a chatty box cannot turn into a flood,
-// and sent once a second regardless so a still desk still reports.
 constexpr std::int64_t STATUS_MIN_GAP_US = 50000;
 constexpr TickType_t   STATUS_KEEPALIVE  = pdMS_TO_TICKS(1000);
 
@@ -251,8 +221,6 @@ constexpr TickType_t   STATUS_KEEPALIVE  = pdMS_TO_TICKS(1000);
     for (;;) {
         ulTaskNotifyTake(pdTRUE, STATUS_KEEPALIVE);
 
-        // Woken at least once a second by the keepalive, which is often enough
-        // to notice the box going quiet.
         const std::uint32_t frames = loctek::stats().frames_decoded;
         const std::int64_t  now_us = esp_timer_get_time();
         if (frames != seen_frames) {
@@ -264,11 +232,6 @@ constexpr TickType_t   STATUS_KEEPALIVE  = pdMS_TO_TICKS(1000);
             ESP_LOGW(TAG, "control box %s", box_up ? "answering" : "gone quiet - check the cable");
         }
 
-        // This board owns the wire, so keeping the box awake is its job. The
-        // panel only retries a wake before its first reading, so a box that
-        // went to sleep later would leave the controls greyed out with nothing
-        // trying to bring it back. Costs a pulse and a "no keys" frame, and
-        // moves nothing.
         static std::int64_t woke_at = 0;
         if (!box_up && now_us - woke_at > 30000000) {
             woke_at = now_us;
@@ -302,7 +265,6 @@ constexpr TickType_t   STATUS_KEEPALIVE  = pdMS_TO_TICKS(1000);
     }
 }
 
-// Nothing arriving is what stops the desk.
 [[noreturn]] void deadman_task(void *)
 {
     for (;;) {
@@ -357,7 +319,6 @@ int on_gap(ble_gap_event *event, void *)
         case BLE_GAP_EVENT_DISCONNECT:
             ESP_LOGI(TAG, "panel gone (reason %d)", event->disconnect.reason);
             s_conn = BLE_HS_CONN_HANDLE_NONE;
-            // The panel leaving is exactly the case the deadman exists for.
             if (s_holding != deskproto::Motion::Idle) {
                 ESP_LOGW(TAG, "link lost mid-hold, stopping");
                 s_holding = deskproto::Motion::Idle;
@@ -382,17 +343,10 @@ int on_gap(ble_gap_event *event, void *)
 
 void advertise()
 {
-    // Not while a panel is already connected. There is only room for one, so
-    // advertising cannot start, so it completes at once, which asked to
-    // advertise again -- a loop that emitted fifteen thousand log lines a
-    // minute and drowned the console.
     if (s_conn != BLE_HS_CONN_HANDLE_NONE) {
         return;
     }
 
-    // Flags, the name and a 128-bit UUID come to thirty-three bytes against a
-    // limit of thirty-one, so the UUID goes in the scan response. The name is
-    // what the panel looks for; the UUID is there for anything else that asks.
     ble_hs_adv_fields fields{};
     fields.flags            = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
     fields.name             = reinterpret_cast<const std::uint8_t *>(NAME);
@@ -415,8 +369,6 @@ void advertise()
     ble_gap_adv_params params{};
     params.conn_mode = BLE_GAP_CONN_MODE_UND;
     params.disc_mode = BLE_GAP_DISC_MODE_GEN;
-    // Found quickly rather than cheaply: this is a mains-powered box beside a
-    // desk, not a coin cell.
     params.itvl_min  = BLE_GAP_ADV_ITVL_MS(30);
     params.itvl_max  = BLE_GAP_ADV_ITVL_MS(60);
 
@@ -473,8 +425,6 @@ esp_err_t start()
     ESP_RETURN_ON_FALSE(xTaskCreate(deadman_task, "deadman", 3072, nullptr, 6, nullptr) == pdPASS,
                         ESP_ERR_NO_MEM, TAG, "deadman");
 
-    // Said plainly at every boot: which of the two builds this is, is the
-    // difference between a log line and a moving desk.
     if (movement_allowed()) {
         ESP_LOGW(TAG, "LIVE: commands will move the desk");
     } else {

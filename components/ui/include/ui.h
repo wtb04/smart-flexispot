@@ -7,7 +7,6 @@
 #include <cstdint>
 
 namespace ui {
-
 enum class Move : std::int8_t {
     Stop = 0,
     Up   = 1,
@@ -39,7 +38,6 @@ enum class MediaAction : std::uint8_t {
 
 using MediaHandler = void (*)(MediaAction action);
 
-
 inline constexpr int kPillCount = 4;
 
 inline constexpr int kLightCount = 4;
@@ -68,8 +66,6 @@ using DialToggleHandler = void (*)(int index);
 /** Called when the Setup page comes up, so its readouts can be filled at once. */
 using DiagnosticsHandler = void (*)();
 
-// Settings that belong to a subsystem live in that subsystem's page rather
-// than in a list of their own.
 enum class Setting : std::uint8_t {
     Charging,
     PresenceGate,
@@ -104,8 +100,6 @@ using OrientationHandler = void (*)(bool flipped);
  *  once presence gating has hidden it away entirely. */
 using RadarHandler = void (*)(bool showing, bool reachable);
 
-// Bluetooth is the radio. Presence and the desk are two things that ride on
-// it, and they fail separately from it and from each other.
 enum class Subsystem : std::uint8_t {
     Network,
     HomeAssistant,
@@ -121,16 +115,11 @@ enum class Subsystem : std::uint8_t {
  *  task, so it must not block. */
 using LogHandler = void (*)(const char *subsystem, char *out, std::size_t size);
 
-// Every setter here takes the LVGL lock, so any task may call them.
-
 /** An empty title means nothing is playing; the card then shows the state. Strings are copied. */
 esp_err_t set_media(const char *source, const char *title, const char *artist, const char *state,
                     bool playing);
 
 /** RGB565, media::kArtSize square. Null hides the art; the buffer must live until it is replaced. */
-// Null with placeholder set leaves an empty frame where the cover would be,
-// for a cover that exists but could not be fetched; null without it gives the
-// space back to the text.
 esp_err_t set_album_art(const void *pixels, bool placeholder);
 
 /** The position is carried forward while playing; a duration of zero hides the bar. */
@@ -184,17 +173,13 @@ struct Handlers {
 esp_err_t init(const Handlers &handlers, int initial_brightness, std::uint32_t accent,
                bool rail_right, bool flipped);
 
-// Advances the startup screen. Ignored once it has been dismissed.
 esp_err_t splash_step(const char *label, int percent);
 
-// Fades out the startup screen. Safe to call more than once.
 esp_err_t splash_done();
 
 /** Height in millimetres, or negative for "unknown". */
 esp_err_t set_height(int height_mm);
 
-// Highlights the preset the desk is currently standing at; a tap on it does
-// nothing, though holding to store still works.
 esp_err_t set_preset_active(int index, bool active);
 
 /** Unavailable dims and disables every desk control, so nothing can be pressed in vain. */
@@ -210,9 +195,6 @@ esp_err_t set_presence(bool has_key, bool present, bool ever_seen);
 
 esp_err_t set_battery(bool present, int percent, bool charging);
 
-// One labelled row on the Setup page. Whatever knows a value pushes it here and
-// the page decides where it lands, so a new readout is a row in the tables in
-// ui.cpp plus one call, not a layout change.
 enum class Info : std::uint8_t {
     WifiState,
     WifiSsid,

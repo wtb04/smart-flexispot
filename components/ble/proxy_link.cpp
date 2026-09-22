@@ -15,9 +15,7 @@
 #include <cstring>
 
 namespace ble::proxy {
-
 namespace {
-
 constexpr char TAG[]  = "desklink";
 constexpr char NAME[] = "desk-proxy";
 
@@ -28,15 +26,9 @@ constexpr ble_uuid128_t ECHO_UUID    = BLE_UUID128_INIT(0x2d, 0x71, 0x9a, 0x4c, 
                                                         0x6a, 0x9c, 0x1d, 0x5e, 0x77, 0x02, 0x00,
                                                         0xa5, 0xde);
 
-// A desk button wants the shortest interval the pair will agree on. Seven and a
-// half milliseconds is the floor the specification allows.
 constexpr std::uint16_t ITVL_MIN_UNITS = 6;   // 7.5 ms, the floor the spec allows
 constexpr std::uint16_t ITVL_MAX_UNITS = 8;   // 10 ms
 constexpr std::uint16_t SUPERVISION_UNITS = 400;  // 4 s, in 10 ms units
-
-// Measured with the presence scanner stopped and running: it costs about five
-// milliseconds of median and ten at the tail, which is not enough to justify
-// moving presence anywhere or thinning the scan.
 
 constexpr std::int64_t PROBE_TIMEOUT_US = 1000000;
 
@@ -48,8 +40,6 @@ void (*s_rescan)() = nullptr;
 
 std::atomic<bool> s_up{false};
 
-// One outstanding probe at a time: the round trip is what is being measured, so
-// letting several overlap would measure the queue instead.
 std::atomic<std::uint32_t> s_seq{0};
 std::atomic<std::int64_t>  s_sent_us{0};
 std::atomic<bool>          s_waiting{false};
@@ -61,9 +51,6 @@ int s_samples[SAMPLE_MAX];
 int s_sample_count = 0;
 int s_lost         = 0;
 
-
-// The hold repeater and the probe both send, and a GATT procedure on one
-// connection is not something to start twice at once.
 SemaphoreHandle_t s_send_lock = nullptr;
 StaticSemaphore_t s_send_lock_ctrl;
 
@@ -84,9 +71,6 @@ bool send(deskproto::Op op, deskproto::Motion direction, std::uint8_t preset)
     std::uint8_t packet[deskproto::COMMAND_LEN];
     deskproto::encode(command, packet);
 
-    // Timed against whatever is already being sent rather than against a ping
-    // invented for the purpose. There is no measurement while nothing is
-    // happening, which is when it does not matter, and no traffic either.
     const bool timing = !s_waiting.exchange(true, std::memory_order_relaxed);
     if (timing) {
         s_sent_us.store(esp_timer_get_time(), std::memory_order_relaxed);
@@ -101,8 +85,6 @@ bool send(deskproto::Op op, deskproto::Motion direction, std::uint8_t preset)
         s_waiting.store(false, std::memory_order_relaxed);
     }
 
-    // Said out loud rather than swallowed: a write that will not go is the
-    // whole link not working, and it looked like silence.
     if (rc != 0) {
         static std::int64_t complained = 0;
         if (esp_timer_get_time() - complained > 5000000) {
@@ -150,9 +132,6 @@ int on_chr(std::uint16_t conn, const ble_gatt_error *error, const ble_gatt_chr *
         return 0;
     }
 
-    // Ask for the shortest interval the other end will take. The answer arrives
-    // as a connection update event, which is worth seeing in the log because it
-    // sets the floor on everything measured here.
     ble_gap_upd_params params{};
     params.itvl_min            = ITVL_MIN_UNITS;
     params.itvl_max            = ITVL_MAX_UNITS;
@@ -162,8 +141,6 @@ int on_chr(std::uint16_t conn, const ble_gatt_error *error, const ble_gatt_chr *
 
     s_up.store(true, std::memory_order_relaxed);
     ESP_LOGI(TAG, "linked to the desk proxy");
-    // Proves the whole path without touching the desk: the box's display wakes
-    // and it starts reporting its height, which comes back over this link.
     send(deskproto::Op::Wake, deskproto::Motion::Idle, 0);
     if (s_rescan != nullptr) {
         s_rescan();
@@ -193,16 +170,11 @@ int on_svc(std::uint16_t conn, const ble_gatt_error *error, const ble_gatt_svc *
 std::atomic<int> s_hold{static_cast<int>(deskproto::Motion::Idle)};
 desk::StatusHandler s_on_status = nullptr;
 
-// The last thing the proxy said, so the diagnostics page can ask rather than
-// having to be told.
 std::atomic<int>  s_last_height{-1};
 std::atomic<bool> s_box_linked{false};
 std::atomic<int>  s_last_motion{static_cast<int>(deskproto::Motion::Idle)};
 std::atomic<bool> s_ever_heard{false};
 
-// While a button is held this repeats, and the proxy stops the desk as soon as
-// it stops. Faster than the proxy's three hundred millisecond patience, so a
-// dropped packet costs nothing.
 constexpr TickType_t HOLD_PERIOD = pdMS_TO_TICKS(100);
 
 TaskHandle_t s_hold_task = nullptr;
@@ -219,21 +191,15 @@ void expire_stale_timing();
         if (wanted != deskproto::Motion::Idle) {
             send(deskproto::Op::Hold, wanted, 0);
         } else if (last != deskproto::Motion::Idle) {
-            // Said outright as well as implied by the silence, and said twice,
-            // because stopping is the message that matters.
             send(deskproto::Op::Stop, deskproto::Motion::Idle, 0);
             send(deskproto::Op::Stop, deskproto::Motion::Idle, 0);
         }
         last = wanted;
         expire_stale_timing();
-        // Cut short when the button changes, so pressing is not waiting on the
-        // next tick of this.
         ulTaskNotifyTake(pdTRUE, HOLD_PERIOD);
     }
 }
 
-// An answer that never came is a lost packet, not a slow one. Nothing polls
-// for this; it is checked whenever the next command goes out.
 void expire_stale_timing()
 {
     if (!s_waiting.load(std::memory_order_relaxed)) {
@@ -247,9 +213,6 @@ void expire_stale_timing()
     }
 }
 
-// Connection events go to the callback given when the connection was asked
-// for, not to the one scanning was started with. Passing nothing here is why
-// the first attempt connected and then sat there.
 int on_conn_event(ble_gap_event *event, void *)
 {
     handle(event);
@@ -346,8 +309,6 @@ bool handle(ble_gap_event *event)
                 }
             }
 
-            // Status also arrives unprompted now, and timing the path against one
-            // of those would flatter it.
             if (s_waiting.load(std::memory_order_relaxed) &&
                 status.seq == s_probe_seq.load(std::memory_order_relaxed)) {
                 const std::int64_t round_trip =
@@ -362,7 +323,6 @@ bool handle(ble_gap_event *event)
             return false;
     }
 }
-
 
 bool connected()
 {
@@ -415,8 +375,6 @@ void set_hold(deskproto::Motion direction)
     ESP_LOGI(TAG, "hold %s", direction == deskproto::Motion::Up     ? "up"
                              : direction == deskproto::Motion::Down ? "down"
                                                                     : "released");
-    // The repeater picks this up within its period; nudged so the first one
-    // goes now rather than up to a tenth of a second later.
     if (s_hold_task != nullptr) {
         xTaskNotifyGive(s_hold_task);
     }
@@ -444,7 +402,6 @@ esp_err_t start()
 }  // namespace ble::proxy
 
 namespace ble::desk {
-
 void on_status(StatusHandler handler)
 {
     proxy::set_status_handler(handler);
@@ -483,7 +440,6 @@ bool last(int &height_mm, bool &box_linked, deskproto::Motion &motion)
 }  // namespace ble::desk
 
 namespace ble {
-
 LinkStats link_stats()
 {
     LinkStats out{};

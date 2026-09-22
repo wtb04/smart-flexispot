@@ -6,7 +6,6 @@
 #include <cstdint>
 
 namespace ui {
-
 void build_radar_page(lv_obj_t *page, std::int32_t width, std::int32_t height);
 
 /** Arriving at the page starts it following the nearest aircraft again. */

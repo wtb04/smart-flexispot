@@ -4,7 +4,6 @@
 #include "ha_ws_protocol.h"
 
 namespace hass::ws {
-
 /** Invoked from the socket task whenever the entity store changes. */
 using UpdateHandler = void (*)(const EntityStore &store);
 

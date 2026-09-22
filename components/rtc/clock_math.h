@@ -1,14 +1,9 @@
 #pragma once
 
-// The arithmetic the backup clock needs, kept free of hardware so it can be
-// tested on a host. Getting a date conversion subtly wrong is the sort of thing
-// that shows up months later on one particular day of the year.
-
 #include <cstdint>
 #include <ctime>
 
 namespace rtc {
-
 inline std::uint8_t from_bcd(std::uint8_t value)
 {
     return static_cast<std::uint8_t>((value >> 4) * 10 + (value & 0x0f));

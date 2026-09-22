@@ -2,11 +2,9 @@
 
 namespace loctek {
 namespace {
-
 constexpr std::uint8_t kSegBlank = 0x00;
 constexpr std::uint8_t kSegPoint = 0x80;
 
-// Common-cathode 7-segment patterns, bit 0 = segment a .. bit 6 = segment g.
 constexpr std::array<std::uint8_t, 10> kDigitSegments{
     0x3f,
     0x06,
@@ -20,7 +18,6 @@ constexpr std::array<std::uint8_t, 10> kDigitSegments{
     0x6f,
 };
 
-// A reading outside this is an error code, not a height.
 constexpr int kSaneMinMm = 400;
 constexpr int kSaneMaxMm = 2000;
 
@@ -82,7 +79,6 @@ std::optional<int> decode_height_mm(const Frame &frame)
     }
     const std::span<const std::uint8_t> digits = frame.payload();
 
-    // Blank display: the box is asleep and has nothing to report.
     if (digits[0] == kSegBlank && digits[1] == kSegBlank && digits[2] == kSegBlank) {
         return std::nullopt;
     }
@@ -91,14 +87,11 @@ std::optional<int> decode_height_mm(const Frame &frame)
     for (std::size_t i = 0; i < 3; ++i) {
         const std::optional<int> digit = decode_digit(digits[i]);
         if (!digit) {
-            // 0x40 is a hyphen ("S-1", shown while programming presets) and
-            // anything else unmatched is an error code such as "E01".
             return std::nullopt;
         }
         value = value * 10 + *digit;
     }
 
-    // The decimal point sits on the middle digit: 7 4. 1 is 74.1 cm.
     const int mm = (digits[1] & kSegPoint) ? value : value * 10;
     if (mm < kSaneMinMm || mm > kSaneMaxMm) {
         return std::nullopt;

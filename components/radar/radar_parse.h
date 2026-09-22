@@ -3,7 +3,6 @@
 #include <cstddef>
 
 namespace radar {
-
 inline constexpr int kHexLen    = 8;
 inline constexpr int kFlightLen = 10;
 inline constexpr int kTypeLen   = 8;
@@ -29,9 +28,6 @@ struct Aircraft {
     bool  on_ground;
 };
 
-// What adsbdb knows about an aircraft and the flight it is on. Both halves are
-// looked up separately and either may be missing: an aircraft the database has
-// never seen still flies, and a positioning flight has no route.
 struct Details {
     char airline[36];
     char origin_code[8];  // IATA

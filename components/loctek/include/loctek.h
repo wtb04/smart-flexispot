@@ -4,7 +4,6 @@
 #include "loctek_proto.h"
 
 namespace loctek {
-
 enum class Move : std::int8_t {
     Stop = 0,
     Up   = 1,

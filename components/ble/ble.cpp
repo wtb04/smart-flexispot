@@ -19,46 +19,24 @@
 
 namespace ble {
 namespace {
-
 constexpr char TAG[] = "ble";
 
-// Long enough not to forget a slowly advertising phone between packets. Ninety
-// seconds was what a tenth-of-the-time scan needed to be reliable, and it made
-// walking away take a minute and a half. Listening three times as often instead
-// took the worst gap from twenty-three seconds to eight, so this is back to
-// thirty -- nearly four times the worst gap seen rather than the seven seconds
-// of margin it used to have. A phone that leaves does not fade, it just stops
-// being heard, so this is also how long "away" takes.
 constexpr TickType_t SEEN_TIMEOUT = pdMS_TO_TICKS(30000);
 
-// The phone resolves from well outside the room, so distance has to come into
-// it. Two thresholds, or the state flaps as the signal wanders across the line.
-// Measured in the same window: smoothed between -66 and -51, never within ten
-// dB of the lower threshold, so these were never what dropped it.
 constexpr int RSSI_ENTER = -70;
 constexpr int RSSI_EXIT  = -76;
 
-// Packets swing ten dB as a body gets in the way, so the thresholds see this
-// smoothed.
 constexpr int RSSI_SMOOTHING = 3;  // of 10, weight given to the newest packet
 
-// This part has no radio of its own -- Wi-Fi and Bluetooth both live on the
-// companion chip -- so time spent listening is time not spent on Wi-Fi, and a
-// tenth of the time was chosen to stay out of its way. It was too little:
-// listening for a tenth, the phone was heard every six seconds at best and once
-// went twenty-three without being heard at all, which is what kept dropping it.
-// Three tenths, measured over the same kind of window: heard every two seconds,
-// worst gap eight, and nothing over ten. No feed errors and no change in lookup
-// times alongside it.
 constexpr std::uint16_t SCAN_INTERVAL_MS = 1000;
 constexpr std::uint16_t SCAN_WINDOW_MS   = 300;
 
 std::atomic<bool> s_ready{false};
 
+std::uint8_t s_irk[16]{};
 // Two copies of the key, as given and reversed: hex from Home Assistant and
 // base64 from the Apple side are not always the same way round, and a key the
-// wrong way round never matches, which looks exactly like an absent phone.
-std::uint8_t s_irk[16]{};
+// wrong way round looks exactly like an absent phone.
 std::uint8_t s_irk_reversed[16]{};
 bool         s_have_irk     = false;
 bool         s_use_reversed = false;
@@ -125,10 +103,11 @@ bool is_resolvable_private(const ble_addr_t &addr)
     return addr.type == BLE_ADDR_RANDOM && (addr.val[5] & 0xC0) == 0x40;
 }
 
+// Plaintext is thirteen zero bytes then prand, most significant octet first;
+// NimBLE hands the address over least significant octet first. The bottom three
+// octets of the result are the hash.
 bool hash_matches(const std::uint8_t key[16], const std::uint8_t val[6])
 {
-    // Plaintext is thirteen zero bytes then prand, most significant octet first;
-    // NimBLE hands the address over least significant octet first.
     std::uint8_t block[16]{};
     block[13] = val[5];
     block[14] = val[4];
@@ -143,7 +122,6 @@ bool hash_matches(const std::uint8_t key[16], const std::uint8_t val[6])
     if (!ok) {
         return false;
     }
-    // The bottom three octets of the result are the hash.
     return out[13] == val[2] && out[14] == val[1] && out[15] == val[0];
 }
 
@@ -194,7 +172,6 @@ void start_scanning();
 
 int on_gap_event(ble_gap_event *event, void *)
 {
-    // The link to the desk proxy shares this host and these events.
     if (proxy::handle(event)) {
         return 0;
     }
@@ -224,9 +201,6 @@ void start_scanning()
 
     const int rc =
         ble_gap_disc(BLE_OWN_ADDR_PUBLIC, BLE_HS_FOREVER, &params, on_gap_event, nullptr);
-    // Already scanning is the state this wants, not a failure. It happens
-    // because scanning is asked for again whenever the desk link connects,
-    // fails to connect or drops, and NimBLE may have resumed it already.
     if (rc == BLE_HS_EALREADY) {
         s_ready.store(true, std::memory_order_relaxed);
         return;
@@ -236,7 +210,6 @@ void start_scanning()
         return;
     }
     s_ready.store(true, std::memory_order_relaxed);
-    // Once, not every time the desk link comes and goes.
     static bool announced = false;
     if (!announced) {
         announced = true;
@@ -292,8 +265,6 @@ Stats stats()
     out.ever_seen  = s_ever.load(std::memory_order_relaxed);
     out.phone_rssi = s_rssi.load(std::memory_order_relaxed);
 
-    // Heard recently AND close enough: a phone walking out does not fade, it
-    // just stops being heard.
     const TickType_t seen = s_seen.load(std::memory_order_relaxed);
     const bool heard = seen != 0 && (xTaskGetTickCount() - seen) <= SEEN_TIMEOUT;
     if (!heard) {

@@ -16,7 +16,6 @@
 
 namespace power {
 namespace {
-
 constexpr char TAG[] = "power";
 
 constexpr std::uint8_t  INA226_ADDRESS = 0x41;
@@ -31,17 +30,11 @@ constexpr std::uint8_t REG_SHUNT_VOLTAGE = 0x01;
 constexpr std::uint8_t REG_MANUFACTURER  = 0xfe;
 constexpr std::uint8_t REG_DIE_ID        = 0xff;
 
-// The audio ADC also answers in this address range, so the address alone is not
-// enough to go on.
 constexpr std::uint16_t MANUFACTURER_TI = 0x5449;  // "TI"
 constexpr std::uint16_t DIE_INA226      = 0x2260;
 
-// 16 averages, 1.1 ms conversions, shunt and bus continuous.
 constexpr std::uint16_t CONFIG_VALUE = (0b010 << 9) | (0b100 << 6) | (0b100 << 3) | 0b111;
 
-// 2 A full scale rather than 8.192 A: the panel never draws near 8 A, and the
-// lower range gives four times the current resolution, which is what the
-// charge/discharge deadband depends on. Matches M5Unified.
 constexpr float SHUNT_OHMS       = 0.005f;
 constexpr float MAX_CURRENT_AMPS = 2.0f;
 constexpr float CURRENT_LSB      = MAX_CURRENT_AMPS / 32768.0f;
@@ -51,84 +44,42 @@ struct CellPoint {
     float volts;
     int   percent;
 };
-// Lithium cells sag in a curve, so interpolating a straight line between empty
-// and full reads badly wrong through the middle. Anchored to this pack: M5
-// document it full at 8.23 V and shutting down at 6.0 V, so 4.115 and 3.0 per
-// cell are 100% and 0%. Approximate, and per cell -- the pack is two in series.
 constexpr std::array<CellPoint, 11> CELL_CURVE{{
     {4.115f, 100}, {4.05f, 90}, {3.98f, 80}, {3.89f, 70}, {3.79f, 60}, {3.70f, 45},
     {3.60f, 30},   {3.50f, 15}, {3.40f, 7},  {3.20f, 2},  {3.00f, 0},
 }};
 constexpr int CELLS_IN_SERIES = 2;
 
-// Whether a pack is there cannot be read off the voltage while the charger is
-// running, because then the charger is what sets it. With no pack it walks up
-// to its constant-voltage setpoint, finds nothing to push into, collapses and
-// tries again: measured here, the node alternated between 8.41 V and 4.15 V
-// every few seconds, which read as a full pack half the time and a flat one the
-// rest, and the smoothing blended the two into a plausible-looking number that
-// wandered between fifty and seventy per cent.
-//
-// Switching the charger off for a moment settles it. A pack holds its voltage,
-// because that is what a battery does; an empty socket has nothing to hold it
-// and collapses. This is a measurement rather than a guess.
-//
-// It is only needed when the charger is running and nothing is moving through
-// the shunt, though. Current is the better answer whenever there is any: an
-// empty socket cannot sustain a charge current and cannot supply a discharge
-// one, so either direction proves a pack on its own. That leaves the charger
-// on with no current as the one ambiguous case, which is the only time this
-// has to interrupt anything.
 constexpr float      PACK_MIN_VOLTS = 6.0f;
 constexpr float      PACK_MAX_VOLTS = 8.8f;
 constexpr TickType_t PROBE_SETTLE   = pdMS_TO_TICKS(250);
 
-// Two cells are full at 8.4 V and the charger will hold them there for as long
-// as it is enabled, which is where a lithium cell ages fastest. Once the pack
-// stops taking current at the top of its range there is nothing left to put in.
-// The gap between these two is deliberate: without it the pack would relax a
-// few millivolts, ask for more, and be topped up again for ever.
+// The gap between these two is the hysteresis: without it the pack relaxes a
+// few millivolts, asks for more, and is topped up for ever.
 constexpr float FULL_VOLTS   = 8.30f;
 constexpr float FULL_TAPER_A = 0.06f;
 
-// Terminal voltage is not open-circuit voltage: the pack sags under load and is
-// pushed up while charging, which walked the percentage by ten points or more
-// depending on nothing but whether the charger happened to be running.
-// Measured on this pack: enabling the charger moved it 0.085 V at 357 mA.
 constexpr float PACK_RESISTANCE_OHMS = 0.24f;
 
-// What is left after the compensation is conversion noise and the curve's own
-// steps, so the reported figure follows slowly.
 constexpr float PERCENT_TAU_S = 30.0f;
 
-// CHG_EN sits on bit 7 of the second IO expander (0x44), left clear by M5's own
-// bring-up.
 constexpr esp_io_expander_pin_num_t CHARGE_ENABLE_PIN = IO_EXPANDER_PIN_NUM_7;
 
-// The shunt reads positive on discharge and negative on charge. At 2 A full
-// scale the noise floor is far below this deadband.
 constexpr float CURRENT_DEADBAND_A = 0.01f;
 
-// The charger must not be switched on into a collapsed or absent pack: a Tab5
-// pack below 6 V has to be removed and refitted before it will charge.
 constexpr float CHARGE_SAFE_VOLTS = 6.0f;
 
 // Active low, and nothing to do with USB quick-charge despite the name: it
-// gates a resistor across the charger's NTC pin. Released, the IP2326 charges at
-// its full ~1 A; asserted, the pin reads "warm" and the chip halves the current.
+// gates a resistor across the charger's NTC pin, which halves the current.
 constexpr esp_io_expander_pin_num_t CHARGE_QC_PIN = IO_EXPANDER_PIN_NUM_5;
 
 i2c_master_dev_handle_t s_dev = nullptr;
 bool                    s_charging_wanted = false;
 
-// Read by tasks that want a number without taking the bus the touchscreen
-// shares. The spinlock is for the struct, not the hardware.
 portMUX_TYPE s_last_lock = portMUX_INITIALIZER_UNLOCKED;
 State        s_last{};
 bool         s_have_last = false;
 
-// Serialises read(): two tasks sharing one device handle would otherwise
-// interleave transactions, and the smoothing below is not reentrant either.
 SemaphoreHandle_t s_read_lock = nullptr;
 StaticSemaphore_t s_read_lock_ctrl;
 
@@ -185,8 +136,6 @@ esp_err_t read_locked(State &out)
 
     out.bus_volts    = static_cast<std::int16_t>(raw_bus) * BUS_VOLTAGE_LSB;
     out.current_amps = static_cast<std::int16_t>(raw_current) * CURRENT_LSB;
-    // A reading no two-cell pack could give means it has gone, without waiting
-    // for the next probe to say so. The probe is what puts it back.
     if (out.bus_volts < PACK_MIN_VOLTS || out.bus_volts > PACK_MAX_VOLTS) {
         s_pack_present.store(false, std::memory_order_relaxed);
     }
@@ -196,8 +145,6 @@ esp_err_t read_locked(State &out)
     out.full         = out.present && out.bus_volts >= FULL_VOLTS &&
                        out.current_amps > -FULL_TAPER_A;
 
-    // Current is positive on discharge, so this both lifts a sagging pack and
-    // takes the charger's push back off.
     const float open_circuit = out.bus_volts + out.current_amps * PACK_RESISTANCE_OHMS;
     const int   measured     = out.present ? percent_for(open_circuit) : 0;
 
@@ -253,14 +200,13 @@ esp_err_t init()
                         TAG, "not an INA226 at 0x%02x", INA226_ADDRESS);
 
     ESP_RETURN_ON_ERROR(write_register(REG_CONFIG, CONFIG_VALUE), TAG, "config");
-    // Datasheet calibration: 0.00512 / (current LSB * shunt).
     const auto calibration =
         static_cast<std::uint16_t>(0.00512f / (CURRENT_LSB * SHUNT_OHMS));
     ESP_RETURN_ON_ERROR(write_register(REG_CALIBRATION, calibration), TAG, "calibration");
 
-    // The config write restarts conversion, and sixteen averaged samples take
-    // about 35 ms. Reading straight away returns zero volts, which reads as "no
-    // pack" and leaves the charger off for the whole uptime.
+    // The config write restarts conversion and sixteen averaged samples take
+    // about 35 ms; reading straight away returns zero volts, which reads as
+    // "no pack".
     vTaskDelay(pdMS_TO_TICKS(60));
 
     State probe{};
@@ -273,11 +219,6 @@ esp_err_t init()
 }
 
 namespace {
-
-// The pin writes on their own. set_charging says so in the log because it is a
-// decision; the probe moves the same pins for a quarter of a second and saying
-// so twice a poll is how the console filled up with a charger that was not in
-// fact changing its mind.
 esp_err_t apply_charging(bool enable)
 {
     esp_io_expander_handle_t expander = bsp_io_expander1_init();
@@ -287,8 +228,7 @@ esp_err_t apply_charging(bool enable)
                                                 IO_EXPANDER_OUTPUT),
                         TAG, "charge pin dir");
     // The PI4IOE5V6408 resets with every pin high-impedance, so a direction and
-    // a level leave the pin floating and the charger off however often they are
-    // written. This is the register that actually connects the driver.
+    // a level alone leave the pin floating and the charger off.
     ESP_RETURN_ON_ERROR(esp_io_expander_set_output_mode(expander,
                                                         CHARGE_ENABLE_PIN | CHARGE_QC_PIN,
                                                         IO_EXPANDER_OUTPUT_MODE_PUSH_PULL),
@@ -311,9 +251,6 @@ esp_err_t set_charging(bool enable)
         return ESP_ERR_INVALID_STATE;
     }
 
-    // Recorded before it is attempted, so a transient I2C failure here is
-    // retried by reassert_charging rather than leaving the charger off for the
-    // whole uptime.
     s_charging_wanted = enable;
     ESP_RETURN_ON_ERROR(apply_charging(enable), TAG, "charge pins");
     ESP_LOGI(TAG, "charger %s", enable ? "enabled (fast)" : "disabled");
@@ -349,24 +286,6 @@ esp_err_t read(State &out)
     return err;
 }
 
-
-// TEMPORARY: a census of both expanders while the pack is in and out.
-void log_expanders()
-{
-    esp_io_expander_handle_t zero = bsp_io_expander_init();
-    esp_io_expander_handle_t one  = bsp_io_expander1_init();
-    std::uint32_t            a    = 0;
-    std::uint32_t            b    = 0;
-    if (zero != nullptr) {
-        esp_io_expander_get_level(zero, 0xff, &a);
-    }
-    if (one != nullptr) {
-        esp_io_expander_get_level(one, 0xff, &b);
-    }
-    ESP_LOGI(TAG, "PROBE expander 0x43=0x%02x 0x44=0x%02x", static_cast<unsigned>(a & 0xff),
-             static_cast<unsigned>(b & 0xff));
-}
-
 esp_err_t probe_pack(bool &present)
 {
     State now{};
@@ -378,19 +297,12 @@ esp_err_t probe_pack(bool &present)
 
     const bool in_range = now.bus_volts >= PACK_MIN_VOLTS && now.bus_volts <= PACK_MAX_VOLTS;
 
-    // Current in either direction could only have come from a pack, and with
-    // the charger off there is nothing propping the voltage up, so in both of
-    // those cases the reading just taken is already as settled as switching the
-    // charger off would make it.
     if (std::fabs(now.current_amps) > CURRENT_DEADBAND_A || !s_charging_wanted) {
         present = in_range;
         s_pack_present.store(present, std::memory_order_relaxed);
         return ESP_OK;
     }
 
-    // Charging with nothing moving through the shunt: either a pack that is
-    // full or a socket with nothing in it, and only interrupting tells them
-    // apart.
     ESP_RETURN_ON_ERROR(apply_charging(false), TAG, "charger off for probe");
     vTaskDelay(PROBE_SETTLE);
 
@@ -403,8 +315,6 @@ esp_err_t probe_pack(bool &present)
     if (present) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(apply_charging(true));
     } else {
-        // Nothing to charge, and apply_charging does not record that the way
-        // set_charging would, so reassert_charging would put it straight back.
         s_charging_wanted = false;
     }
     return settled_err;

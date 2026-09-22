@@ -18,14 +18,10 @@
 
 namespace media {
 namespace {
-
 constexpr char TAG[] = "media";
 
-// Covers are a few hundred kilobytes at most; anything larger is refused.
 constexpr std::size_t MAX_JPEG = 512 * 1024;
 
-// The decoder writes full size, so this is sized for the largest cover worth
-// decoding, not for the square that ends up on screen. Spotify serves 640.
 constexpr int MAX_DECODE_SIDE = 800;
 
 constexpr std::uint32_t TASK_STACK    = 4096;  // measured: uses 2.8 KB
@@ -40,18 +36,14 @@ ArtHandler s_on_art = nullptr;
 jpeg_decoder_handle_t s_decoder = nullptr;
 std::uint8_t         *s_jpeg    = nullptr;
 std::uint8_t         *s_full    = nullptr;
-// Two, so the cover on screen is never the one being written over.
 std::uint16_t *s_art[2] = {nullptr, nullptr};
 int            s_next   = 0;
 
-// Compared so an unchanged track does not re-download its cover every tick.
 char              s_wanted[320] = {};
 char              s_loaded[320] = {};
 SemaphoreHandle_t s_lock        = nullptr;
 StaticSemaphore_t s_lock_ctrl;
 
-// There is one JPEG engine on the part and one set of buffers behind it, so
-// anything else wanting a picture decoded queues here.
 SemaphoreHandle_t s_decoder_lock = nullptr;
 StaticSemaphore_t s_decoder_lock_ctrl;
 TaskHandle_t      s_task = nullptr;
@@ -63,7 +55,6 @@ const char *http_origin()
         return origin;
     }
     const char *uri = HASS_WS_URI;
-    // ws://host/api/websocket -> http://host
     const char *host = std::strstr(uri, "://");
     host             = host != nullptr ? host + 3 : uri;
     const char *end  = std::strchr(host, '/');
@@ -113,10 +104,9 @@ std::size_t download(const char *path)
     return total;
 }
 
-// The decoder writes whole MCUs, so a cover whose width is not a multiple of
-// the MCU width comes out with padding on the end of every row. Reading it back
-// at the picture width slid each row a little further left than the one above,
-// which shears the image into diagonal streaks of colour.
+// The engine writes whole MCUs, so a picture whose width is not a multiple of
+// the MCU width comes back padded on the end of every row. Reading it at the
+// picture width shears the image into diagonal streaks.
 int decoded_stride(const jpeg_decode_picture_info_t &info)
 {
     const int mcu_w = info.sample_method == JPEG_DOWN_SAMPLING_YUV422 ||
@@ -127,11 +117,8 @@ int decoded_stride(const jpeg_decode_picture_info_t &info)
 }
 
 // A single-component jpeg is the one thing the engine will not give back as
-// RGB565: asked for colour it answers ESP_ERR_NOT_SUPPORTED and says the
-// picture is a gray style picture. Black and white covers and black and white
-// aircraft photographs are both ordinary things to come across, so the grey
-// plane is taken as it comes and widened here. Built arithmetically, so unlike
-// the engine's own output it needs no byte swap.
+// RGB565: asked for colour it answers ESP_ERR_NOT_SUPPORTED. Built
+// arithmetically, so unlike the engine's own output it needs no byte swap.
 inline std::uint16_t grey_to_rgb565(std::uint8_t level)
 {
     return static_cast<std::uint16_t>(((level >> 3) << 11) | ((level >> 2) << 5) | (level >> 3));
@@ -176,11 +163,6 @@ bool decode_locked(std::size_t bytes)
 
     jpeg_decode_cfg_t cfg{};
     cfg.output_format = grey ? JPEG_DECODE_OUT_FORMAT_GRAY : JPEG_DECODE_OUT_FORMAT_RGB565;
-    // Despite the name this picks the byte order of the RGB565 word, not the
-    // channel order. _RGB writes it big-endian; LVGL reads it as a native
-    // little-endian uint16, which mangles red and blue into each other and
-    // splits green. Greys survive that, which is why it looked plausible until
-    // a colourful cover turned up.
     cfg.rgb_order     = JPEG_DEC_RGB_ELEMENT_ORDER_BGR;
 
     std::uint32_t out_size = 0;
@@ -219,7 +201,6 @@ bool decode(std::size_t bytes)
 [[noreturn]] void media_task(void *)
 {
     for (;;) {
-        // Woken by set_art_path; the timeout is only a safety net.
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(10000));
 
         char wanted[sizeof(s_wanted)];
@@ -231,8 +212,6 @@ bool decode(std::size_t bytes)
         if (std::strcmp(wanted, s_loaded) == 0) {
             continue;
         }
-        // Said once per change, so a cover being fetched repeatedly shows up as
-        // the url churning rather than as mysterious work.
         ESP_LOGD(TAG, "cover path changed");
         if (wanted[0] == '\0') {
             std::strcpy(s_loaded, "");
@@ -245,10 +224,6 @@ bool decode(std::size_t bytes)
         const std::size_t bytes = download(wanted);
         const bool        got   = bytes > 0 && decode(bytes);
 
-        // Recorded either way. Leaving it unrecorded meant a cover that could
-        // not be fetched was retried every ten seconds for the whole track,
-        // and the previous track's cover stayed on screen the entire time --
-        // which is worse than showing nothing, because it is wrong.
         std::strncpy(s_loaded, wanted, sizeof(s_loaded));
         s_loaded[sizeof(s_loaded) - 1] = '\0';
         if (!got && s_on_art != nullptr) {
@@ -257,9 +232,6 @@ bool decode(std::size_t bytes)
     }
 }
 
-
-// SOF0 and SOF1 are the two the engine can read; SOF2 is progressive. Walking
-// the segment headers is enough, and stops at the first scan.
 bool baseline(const std::uint8_t *jpeg, std::size_t length)
 {
     std::size_t at = 2;  // past the start-of-image marker
@@ -287,11 +259,6 @@ void on_jpeg_error(j_common_ptr info)
     std::longjmp(reinterpret_cast<JpegError *>(info->err)->escape, 1);
 }
 
-// The part's engine takes baseline jpegs only, and every aircraft photograph
-// planespotters serves is progressive, so those come through here instead.
-// A progressive decode holds the whole coefficient array at once, which is far
-// larger than the picture; SPIRAM_MALLOC_ALWAYSINTERNAL sends an allocation
-// that size to PSRAM, which is the only reason this is affordable.
 bool decode_soft(const void *jpeg, std::size_t length, std::uint16_t *out, int max_w, int max_h,
                  int &out_w, int &out_h)
 {
@@ -309,9 +276,10 @@ bool decode_soft(const void *jpeg, std::size_t length, std::uint16_t *out, int m
     jpeg_mem_src(&info, static_cast<const unsigned char *>(jpeg), length);
     jpeg_read_header(&info, TRUE);
 
+    // Despite the name this picks the byte order of the RGB565 word, not the
+    // channel order: _RGB writes it big-endian and LVGL reads a native
+    // little-endian uint16, which mangles red and blue into each other.
     info.out_color_space = JCS_RGB565;
-    // Scaling during the inverse DCT rather than afterwards, so a picture
-    // larger than the frame never has to exist at full size.
     info.scale_num   = 1;
     info.scale_denom = 1;
     jpeg_calc_output_dimensions(&info);
@@ -353,16 +321,8 @@ bool decode_image(const void *jpeg, std::size_t length, std::uint16_t *out, int 
     xSemaphoreTake(s_decoder_lock, portMAX_DELAY);
     bool ok = false;
 
-    // The engine reads over DMA from its own allocation, so the bytes have to
-    // be moved into it rather than decoded where they landed.
     std::memcpy(s_jpeg, jpeg, length);
 
-    // The engine is asked only where it can actually help: it refuses a picture
-    // whose width times height is not a multiple of eight, and it cannot read a
-    // progressive one at all. Anything it will not take goes to the software
-    // decoder below rather than being given up on. Progressive is spotted here
-    // rather than by asking, because asking makes the driver complain about a
-    // file that was never its business.
     jpeg_decode_picture_info_t info{};
     if (baseline(s_jpeg, length) && jpeg_decoder_get_info(s_jpeg, length, &info) == ESP_OK &&
         (info.width * info.height) % 8 == 0 &&
@@ -418,7 +378,6 @@ esp_err_t start(ArtHandler on_art)
     const jpeg_decode_engine_cfg_t engine{.intr_priority = 0, .timeout_ms = 2000};
     ESP_RETURN_ON_ERROR(jpeg_new_decoder_engine(&engine, &s_decoder), TAG, "decoder");
 
-    // Read and written over DMA, so they come from the decoder's own allocator.
     jpeg_decode_memory_alloc_cfg_t in{.buffer_direction = JPEG_DEC_ALLOC_INPUT_BUFFER};
     jpeg_decode_memory_alloc_cfg_t out{.buffer_direction = JPEG_DEC_ALLOC_OUTPUT_BUFFER};
     std::size_t got = 0;

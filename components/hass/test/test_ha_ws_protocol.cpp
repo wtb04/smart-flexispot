@@ -1,11 +1,9 @@
-// Host-side tests for the Home Assistant WebSocket protocol layer. See run.sh.
 #include "ha_ws_protocol.h"
 
 #include <cstdio>
 #include <string>
 
 namespace {
-
 using namespace hass::ws;
 
 int g_failures = 0;
@@ -52,7 +50,6 @@ void test_handshake()
     check(classify_text(R"({"type":"something_new"})") == MessageType::Unknown,
           "unknown type does not throw");
 
-    // The auth reply is the one message that carries no id.
     const std::string auth = auth_message("abc123");
     check(auth.find("\"type\":\"auth\"") != std::string::npos, "auth message type");
     check(auth.find("\"access_token\":\"abc123\"") != std::string::npos, "auth carries the token");
@@ -66,8 +63,6 @@ void test_subscription()
     check(sub.find("\"id\":2") != std::string::npos, "subscribe carries its id");
     check(sub.find("light.office") != std::string::npos, "entity ids included");
 
-    // Omitting entity_ids subscribes to the whole state machine, which is not
-    // what an empty list is asking for.
     check(subscribe_entities_message(3, {}).empty(), "empty list does not subscribe to everything");
 }
 
@@ -83,7 +78,6 @@ void test_entity_store_add()
     const Entity *light = store.find("light.office");
     check(light != nullptr && light->state == "on", "state stored");
     check(light != nullptr && light->name == "Office", "friendly_name hoisted to name");
-    // Numbers arrive as JSON numbers but are only ever displayed.
     check(light != nullptr && light->attributes.at("brightness") == "180",
           "numeric attribute stringified without a trailing .0");
 
@@ -103,8 +97,6 @@ void test_entity_store_change()
     check(store.find("light.office")->attributes.at("brightness") == "180",
           "untouched attributes survive a diff");
 
-    // The removals key. Without handling it, a light keeps a brightness it no
-    // longer has and the panel shows a value Home Assistant stopped reporting.
     check(feed(store, R"({"event":{"c":{"light.office":{"-":{"a":["brightness","color_temp"]}}}}})"),
           "removals applied");
     const Entity *light = store.find("light.office");
@@ -112,8 +104,6 @@ void test_entity_store_change()
     check(light->attributes.count("color_temp") == 0, "second cleared attribute removed");
     check(light->attributes.count("friendly_name") == 1, "untouched attribute kept");
 
-    // The two mirrored fields have to be un-hoisted too, or the staleness just
-    // moves up a level.
     feed(store, R"({"event":{"c":{"light.office":{"-":{"a":["friendly_name"]}}}}})");
     check(store.find("light.office")->name.empty(), "cleared friendly_name clears the name");
 
@@ -137,7 +127,6 @@ void test_malformed()
     check(!feed(store, R"({"event":{}})"), "empty event changes nothing");
     check(!feed(store, R"({"event":{"a":"not an object"}})"), "wrong type ignored");
     check(!feed(store, R"({"event":{"r":"not an array"}})"), "wrong removal type ignored");
-    // A diff for an entity never seen should not crash; it creates a stub.
     feed(store, R"({"event":{"c":{"light.ghost":{"+":{"s":"on"}}}}})");
     check(store.find("light.ghost") != nullptr, "diff for an unknown entity is tolerated");
 }
@@ -151,8 +140,6 @@ void test_service_call()
     check(call.find("\"entity_id\":\"light.office\"") != std::string::npos, "target entity");
 }
 
-// A setpoint must arrive as a JSON number and a mode as a string, or Home
-// Assistant rejects the call.
 void test_service_call_with_data()
 {
     const std::string setpoint =
@@ -164,7 +151,6 @@ void test_service_call_with_data()
         call_service_message(10, "climate", "set_hvac_mode", "climate.x", "hvac_mode", "heat");
     check(mode.find("\"hvac_mode\":\"heat\"") != std::string::npos, "mode sent as a string");
 
-    // "21.5C" is not a number, and must not be truncated into one.
     const std::string mixed =
         call_service_message(11, "climate", "set_temperature", "climate.x", "temperature", "21.5C");
     check(mixed.find("\"temperature\":\"21.5C\"") != std::string::npos,

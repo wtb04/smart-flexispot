@@ -1,4 +1,3 @@
-// Host-side parser tests -- no hardware, no ESP-IDF needed. See run.sh.
 #include "radar_parse.h"
 
 #include <cmath>
@@ -9,7 +8,6 @@
 #include <vector>
 
 namespace {
-
 using namespace radar;
 
 int g_failures = 0;
@@ -50,8 +48,6 @@ int run(const std::string &json, Aircraft *out, int capacity)
     return parse(json.c_str(), json.size(), out, capacity);
 }
 
-// A real capture over Schiphol: 46 aircraft, all with positions, 21 on stands.
-// The parser keeps the airborne ones, so twenty-five come back.
 void test_capture(const std::string &json)
 {
     std::vector<Aircraft> found(64);
@@ -76,8 +72,6 @@ void test_capture(const std::string &json)
     check(std::strcmp(first.desc, "EMBRAER ERJ-190-100") == 0, "description");
     check(first.squawk == 6335, "squawk, sent as a string");
 
-    // Twenty-one of the forty-six are on stands, and the only way they can be
-    // left out is by reading "ground" where a number of feet would be.
     int on_ground = 0;
     for (int i = 0; i < count; ++i) {
         on_ground += found[i].on_ground ? 1 : 0;
@@ -91,8 +85,6 @@ void test_capacity(const std::string &json)
     check(run(json, found.data(), 5) == 5, "stops at capacity");
     check(run(json, found.data(), 0) == 0, "no capacity reads nothing");
 
-    // Filling up must not mean keeping whatever came first: the feed answers
-    // with everything in range and the nearest are the ones worth the room.
     float farthest = 0.0f;
     for (const Aircraft &aircraft : found) {
         farthest = std::max(farthest, aircraft.distance_nm);
@@ -182,8 +174,6 @@ void test_route(const std::string &json)
     check(std::strcmp(details.origin_city, "Newcastle") == 0, "origin city");
     check(std::strcmp(details.dest_code, "AMS") == 0, "destination code");
     check(std::strcmp(details.dest_city, "Amsterdam") == 0, "destination city");
-    // The airports also carry a "name", and taking that for the airline's would
-    // be the easy mistake.
     check(std::strcmp(details.airline, "Newcastle Airport") != 0,
           "a nested name does not overwrite the airline");
 }
@@ -224,7 +214,6 @@ void test_photo(const std::string &json, const std::string &none)
 {
     char url[160] = {};
     check(parse_photo(json.c_str(), json.size(), url, sizeof(url)), "a photo is found");
-    // The address arrives with its slashes escaped and has to come out usable.
     check(std::strncmp(url, "https://", 8) == 0, "the photo address is a url");
     check(std::strstr(url, "\\") == nullptr, "the escapes are gone");
     check(std::strstr(url, "_280.jpg") != nullptr, "the larger thumbnail is taken");

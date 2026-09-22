@@ -2,9 +2,6 @@
 
 namespace ui::fonts {
 namespace {
-
-// Mutable copies of the built-in fonts: the originals are const, and a
-// fallback has to be written into the struct.
 lv_font_t s_16;
 lv_font_t s_20;
 lv_font_t s_22;
@@ -37,7 +34,6 @@ const lv_font_t *size_28() { return &s_28; }
 const lv_font_t *size_32() { return &s_32; }
 const lv_font_t *size_48() { return &s_48; }
 
-// No fallback: these carry the degree sign themselves.
 const lv_font_t *temp_34() { return &lv_font_temp_34; }
 const lv_font_t *temp_64() { return &lv_font_temp_64; }
 

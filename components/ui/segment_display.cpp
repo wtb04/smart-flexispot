@@ -6,12 +6,9 @@
 
 namespace ui {
 namespace {
-
-// Bit per segment, a through g.
 constexpr std::uint8_t DIGIT_MASK[10] = {0x3f, 0x06, 0x5b, 0x4f, 0x66,
                                          0x6d, 0x7d, 0x07, 0x7f, 0x6f};
 
-// The middle bar alone.
 constexpr std::uint8_t DASH_MASK = 0x40;
 constexpr int          DASH      = -2;
 
@@ -42,7 +39,6 @@ SegmentDisplay::SegmentDisplay(lv_obj_t *parent)
             lv_obj_set_scrollable(bar, false);
         }
         const int x = DIGIT_X[d];
-        // a, b, c, d, e, f, g -- clockwise from the top, then the middle bar.
         lv_obj_set_pos(digits_[d].bars[0], x + BAR_THICK, 0);
         lv_obj_set_size(digits_[d].bars[0], BAR_LONG, BAR_THICK);
         lv_obj_set_pos(digits_[d].bars[1], x + BAR_LONG + BAR_THICK, 7);
@@ -89,7 +85,6 @@ void SegmentDisplay::set_digit(int index, int value)
 void SegmentDisplay::set_tenths(int tenths)
 {
     if (tenths < 0) {
-        // ---.- reads as "no reading"; a blank panel reads as "switched off".
         for (int d = 0; d < 4; ++d) {
             set_digit(d, d == 0 ? -1 : DASH);
         }

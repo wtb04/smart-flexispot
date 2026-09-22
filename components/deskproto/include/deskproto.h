@@ -3,15 +3,7 @@
 #include <cstdint>
 #include <cstring>
 
-// What the panel and the proxy say to each other. Header only, shared by both,
-// so the two ends cannot disagree about the layout.
-//
-// Not authenticated. The link is point to point over Bluetooth, so reaching it
-// means being in the room, and the deadman below means the worst a stray packet
-// can do is a third of a second of travel. The tag bytes are reserved so that
-// can be added without moving anything else.
 namespace deskproto {
-
 inline constexpr std::uint8_t MAGIC0  = 'D';
 inline constexpr std::uint8_t MAGIC1  = 'K';
 inline constexpr std::uint8_t VERSION = 1;
@@ -20,15 +12,11 @@ inline constexpr std::size_t COMMAND_LEN = 12;
 inline constexpr std::size_t STATUS_LEN  = 16;
 
 enum class Op : std::uint8_t {
-    // Sent repeatedly for as long as the button is held. The proxy stops the
-    // desk when they stop arriving, so a panel that crashes, loses the link or
-    // runs out of battery stops it too.
     Hold   = 1,
     Stop   = 2,
     Preset = 3,
     Store  = 4,
     Wake   = 5,
-    // Costs nothing and moves nothing; used to prove the path.
     Ping   = 6,
 };
 

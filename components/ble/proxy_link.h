@@ -7,11 +7,7 @@
 
 #include <cstdint>
 
-// The link to the box that holds the desk's wire. Lives beside the presence
-// scanner because NimBLE has one host and one set of GAP events, and they have
-// to be shared rather than started twice.
 namespace ble::proxy {
-
 /** Called for every advertisement the scanner sees. Returns true once it has
  *  decided to connect, so the scanner knows it has been stopped. */
 bool consider(const ble_gap_disc_desc &advert);

@@ -12,20 +12,12 @@
 
 namespace battery {
 namespace {
-
 constexpr char TAG[] = "battery";
 
-// As often as a charge icon is worth taking the shared I2C bus for.
 constexpr TickType_t POLL_INTERVAL = pdMS_TO_TICKS(30000);
 
-// Where charging starts again after the pack has reported itself full. The
-// charger would otherwise hold it at its setpoint indefinitely, and a pack left
-// sitting at the top of its range is the one that ages fastest. Well below the
-// full threshold on purpose: anything closer and it would relax into a resume,
-// charge for a minute, report full, and do it again for ever.
 constexpr float RESUME_VOLTS = 8.00f;
 
-// Logs a float, which goes through full newlib printf.
 constexpr std::uint32_t TASK_STACK    = 4096;
 constexpr UBaseType_t   TASK_PRIORITY = 2;
 constexpr BaseType_t    TASK_CORE     = 0;
@@ -50,26 +42,13 @@ StackType_t  s_task_stack[TASK_STACK];
             } else {
                 ESP_LOGI(TAG, "no pack (%.2f V)", state.bus_volts);
             }
-            // TEMPORARY: both IO expanders' input registers, logged every poll.
-            // The board exposes no documented battery-detect line -- M5's own
-            // BSP declares no battery support at all -- but six pins on the
-            // expander that carries the charger are unaccounted for. If one of
-            // them tracks the pack, presence becomes something to read rather
-            // than something to infer. Pull the pack out and watch for a bit
-            // that flips.
-            power::log_expanders();
 
             ESP_ERROR_CHECK_WITHOUT_ABORT(
                 ui::set_battery(state.present, state.percent, state.charging));
 
-            // No sense driving a charger into an empty socket: that is what
-            // makes the sense node swing, and it is what the pack detection has
-            // to see through.
             bool present = false;
             ESP_ERROR_CHECK_WITHOUT_ABORT(power::probe_pack(present));
 
-            // Full latches the charger off and only a real fall clears it, so
-            // the two thresholds are what stops it cycling.
             if (state.full) {
                 topped_off = true;
             } else if (state.bus_volts <= RESUME_VOLTS) {
@@ -95,8 +74,6 @@ StackType_t  s_task_stack[TASK_STACK];
 esp_err_t start()
 {
     ESP_RETURN_ON_ERROR(power::init(), TAG, "power monitor");
-    // init() only reads; whether the charger runs is the stored setting, and
-    // set_charging refuses a pack too flat to take it.
     ESP_ERROR_CHECK_WITHOUT_ABORT(power::set_charging(settings::enabled(settings::Key::Charging)));
 
     TaskHandle_t task = xTaskCreateStaticPinnedToCore(battery_task, "battery", TASK_STACK, nullptr,
