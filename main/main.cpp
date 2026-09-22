@@ -8,6 +8,7 @@
 #include "logbuf.h"
 #include "nvs_flash.h"
 #include "power.h"
+#include "backup_clock.h"
 #include "radar.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -141,6 +142,10 @@ extern "C" void app_main(void)
     // peripheral it can perfectly well run without.
     ESP_ERROR_CHECK_WITHOUT_ABORT(desk::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("desk", 25));
+    // Before the network, because the whole point is that the clock is right
+    // on the first frame rather than whenever the network answers.
+    ESP_ERROR_CHECK_WITHOUT_ABORT(rtc::start());
+
     ESP_ERROR_CHECK_WITHOUT_ABORT(battery::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(sound::init());
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("power", 45));

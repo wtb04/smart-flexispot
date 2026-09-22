@@ -8,6 +8,7 @@
 #include "esp_wifi.h"
 #include "esp_netif_sntp.h"
 #include "esp_sntp.h"
+#include "backup_clock.h"
 #include "nvs_flash.h"
 
 #include "freertos/FreeRTOS.h"
@@ -44,6 +45,16 @@ bool              s_sntp_started = false;
 // Europe/Amsterdam with its DST rules.
 constexpr char TIMEZONE[] = "CET-1CEST,M3.5.0,M10.5.0/3";
 
+// Written back so the next cold boot starts from the right time rather than
+// from 1970, whether or not the network is there when it happens.
+void on_time_synced(timeval *)
+{
+    const std::time_t now = std::time(nullptr);
+    if (now > 0 && rtc::store(now) == ESP_OK) {
+        ESP_LOGI(TAG, "backup clock set from the network");
+    }
+}
+
 void start_time_sync()
 {
     if (s_sntp_started) {
@@ -53,6 +64,7 @@ void start_time_sync()
 
     esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
     config.start                    = true;
+    config.sync_cb                  = on_time_synced;
     config.server_from_dhcp         = true;  // a local NTP server offered by DHCP wins
     config.renew_servers_after_new_IP = true;
 
