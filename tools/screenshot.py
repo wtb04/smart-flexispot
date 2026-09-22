@@ -3,8 +3,15 @@
 
 Usage: tools/screenshot.py [port] [out.png]
 
-The panel writes base64 RGB565 between BEGIN and END on the console. PNG is
-assembled here with zlib and struct, so nothing has to be installed.
+Build with -DSHOT_ENABLED=1 first, and set SHOT_PAGE in ui.cpp to the page
+wanted; it is off otherwise because taking one holds the LVGL lock for several
+seconds. This restarts the panel, which is what asks for the picture.
+
+The panel writes numbered base64 RGB565 between BEGIN and END on the console.
+PNG is assembled here from zlib and struct, so nothing has to be installed
+beyond pyserial. A line or two out of five thousand is usually lost -- the
+console writes without blocking and discards what will not fit -- and those
+rows come out black rather than shifting everything after them.
 """
 import base64
 import re
@@ -45,7 +52,7 @@ def main():
 
     size = None
     body = {}
-    deadline = time.time() + 150
+    deadline = time.time() + 240
     pending = b""
 
     while time.time() < deadline:

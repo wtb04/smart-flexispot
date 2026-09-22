@@ -16,13 +16,13 @@ constexpr char TAG[] = "shot";
 
 // Quarter size. Enough to judge where things sit and how they line up, and a
 // sixteenth of the bytes to push down a serial line.
-constexpr int SHRINK = 3;
+constexpr int SHRINK = 2;
 
 const char BASE64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 void emit(const std::uint8_t *bytes, std::size_t length)
 {
-    char line[121];
+    char line[160];
     int  at      = 0;
     int  written = 0;
 
@@ -42,10 +42,12 @@ void emit(const std::uint8_t *bytes, std::size_t length)
             std::printf("SHOT %d %s\n", written, line);
             at = 0;
 
-            // The console drops what it cannot take, and a picture missing a
-            // line in the middle is not a picture.
-            if (++written % 4 == 0) {
-                vTaskDelay(pdMS_TO_TICKS(20));
+            // The console writes without blocking and throws away what will not
+            // fit. Installing the driver to make it block takes the peripheral
+            // off the console altogether and nothing comes out at all, so it is
+            // paced instead.
+            if (++written % 8 == 0) {
+                vTaskDelay(pdMS_TO_TICKS(10));
             }
         }
     }
@@ -85,19 +87,32 @@ void screenshot()
     }
 
     for (std::int32_t y = 0; y < out_h; ++y) {
-        const auto *line = reinterpret_cast<const std::uint32_t *>(
-            shot->data + static_cast<std::size_t>(y * SHRINK) * shot->header.stride);
         for (std::int32_t x = 0; x < out_w; ++x) {
-            const std::uint32_t pixel = line[x * SHRINK];
-            const std::uint32_t r     = (pixel >> 16) & 0xff;
-            const std::uint32_t g     = (pixel >> 8) & 0xff;
-            const std::uint32_t b     = pixel & 0xff;
+            std::uint32_t r = 0;
+            std::uint32_t g = 0;
+            std::uint32_t b = 0;
+            for (int dy = 0; dy < SHRINK; ++dy) {
+                const auto *from = reinterpret_cast<const std::uint32_t *>(
+                    shot->data +
+                    static_cast<std::size_t>(y * SHRINK + dy) * shot->header.stride);
+                for (int dx = 0; dx < SHRINK; ++dx) {
+                    const std::uint32_t pixel = from[x * SHRINK + dx];
+                    r += (pixel >> 16) & 0xff;
+                    g += (pixel >> 8) & 0xff;
+                    b += pixel & 0xff;
+                }
+            }
+            constexpr std::uint32_t OVER = SHRINK * SHRINK;
+            r /= OVER;
+            g /= OVER;
+            b /= OVER;
             small[y * out_w + x] = static_cast<std::uint16_t>(((r & 0xf8) << 8) |
                                                               ((g & 0xfc) << 3) | (b >> 3));
         }
     }
 
     ESP_LOGI(TAG, "BEGIN %d %d", static_cast<int>(out_w), static_cast<int>(out_h));
+    vTaskDelay(pdMS_TO_TICKS(50));
     emit(reinterpret_cast<const std::uint8_t *>(small), bytes);
     ESP_LOGI(TAG, "END");
 
