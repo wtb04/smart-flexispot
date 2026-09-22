@@ -6,7 +6,8 @@ import sys
 root = pathlib.Path(__file__).resolve().parent.parent
 table = (root / "main/diagnostics.cpp").read_text()
 
-sources = subprocess.run(["git", "ls-files", "*.cpp"], cwd=root, check=True,
+sources = subprocess.run(["git", "ls-files", "--cached", "--others",
+                          "--exclude-standard", "*.cpp"], cwd=root, check=True,
                          capture_output=True, text=True).stdout.split()
 
 missing = []

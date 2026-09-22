@@ -109,6 +109,7 @@ enum class Subsystem : std::uint8_t {
     Desk,
     Radar,
     Media,
+    Calendar,
     System,
     Count,
 };
@@ -243,6 +244,9 @@ enum class Info : std::uint8_t {
     MediaPlayer,
     MediaArt,
     MediaDecoder,
+    CalFeeds,
+    CalEvents,
+    CalNext,
     SysFirmware,
     SysBuilt,
     SysUptime,

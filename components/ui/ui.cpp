@@ -1557,6 +1557,11 @@ constexpr InfoRow MEDIA_ROWS[] = {
     {Info::MediaArt, "Artwork"},
     {Info::MediaDecoder, "Decoder"},
 };
+constexpr InfoRow CALENDAR_ROWS[] = {
+    {Info::CalFeeds, "Feeds"},
+    {Info::CalEvents, "Ahead"},
+    {Info::CalNext, "Next"},
+};
 constexpr InfoRow SYSTEM_ROWS[] = {
     {Info::SysFirmware, "Firmware"}, {Info::SysBuilt, "Built"},  {Info::SysUptime, "Uptime"},
     {Info::SysRam, "Internal free"}, {Info::SysPsram, "PSRAM free"},
@@ -1581,6 +1586,9 @@ constexpr InfoCard INFO_CARDS[] = {
      Info::RadarFeed, false, Setting::Charging, nullptr},
     {Subsystem::Media, "Media", LV_SYMBOL_AUDIO, MEDIA_ROWS, static_cast<int>(std::size(MEDIA_ROWS)),
      Info::MediaPlayer, false, Setting::Charging, nullptr},
+    {Subsystem::Calendar, "Calendar", LV_SYMBOL_LIST, CALENDAR_ROWS,
+     static_cast<int>(std::size(CALENDAR_ROWS)), Info::CalNext, false, Setting::Charging,
+     nullptr},
     {Subsystem::System, "System", LV_SYMBOL_SETTINGS, SYSTEM_ROWS, static_cast<int>(std::size(SYSTEM_ROWS)),
      Info::SysUptime, false, Setting::Charging, nullptr},
 };

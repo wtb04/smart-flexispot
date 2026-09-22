@@ -13,6 +13,7 @@
 #include "ha_ws.h"
 #include "hass.h"
 #include "logbuf.h"
+#include "ical.h"
 #include "media.h"
 #include "radar.h"
 #include "settings.h"
@@ -23,6 +24,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <iterator>
 
 namespace diagnostics {
@@ -300,6 +302,40 @@ void update_media()
                    status.have_art && !status.art_ok ? Level::Warn : Level::Good);
 }
 
+void update_calendar()
+{
+    static ical::Event ahead[8];
+    const int          n = ical::upcoming(ahead, static_cast<int>(std::size(ahead)));
+
+    char text[64];
+    std::snprintf(text, sizeof(text), "%d", ical::kFeedCount);
+    push(Info::CalFeeds, text);
+
+    if (n == 0) {
+        push_missing(Info::CalEvents);
+        push_missing(Info::CalNext);
+        ui::set_health(ui::Subsystem::Calendar, Level::Neutral);
+        return;
+    }
+
+    std::snprintf(text, sizeof(text), "%d event%s", n, n == 1 ? "" : "s");
+    push(Info::CalEvents, text);
+
+    const auto   now     = static_cast<std::int64_t>(std::time(nullptr));
+    const int    minutes = static_cast<int>((ahead[0].start - now) / 60);
+    std::tm      local{};
+    const auto   when = static_cast<std::time_t>(ahead[0].start);
+    localtime_r(&when, &local);
+    if (minutes > 0) {
+        std::snprintf(text, sizeof(text), "%02d:%02d, in %dh%02dm", local.tm_hour, local.tm_min,
+                      minutes / 60, minutes % 60);
+    } else {
+        std::snprintf(text, sizeof(text), "%02d:%02d, now", local.tm_hour, local.tm_min);
+    }
+    push(Info::CalNext, text);
+    ui::set_health(ui::Subsystem::Calendar, Level::Good);
+}
+
 void update_desk()
 {
     const bool over_ble = settings::enabled(settings::Key::DeskBluetooth);
@@ -379,6 +415,7 @@ constexpr const char *POWER_TAGS[]     = {"power", "battery"};
 constexpr const char *DESK_TAGS[]      = {"desk", "loctek", "desklink", "deskproxy", "proxy"};
 constexpr const char *RADAR_TAGS[]     = {"radar"};
 constexpr const char *MEDIA_TAGS[]     = {"media", "sound"};
+constexpr const char *CALENDAR_TAGS[]  = {"ical"};
 constexpr const char *SYSTEM_TAGS[]    = {
     "tab5",  "ui",     "diag",   "clock",     "settings",  "logbuf",   "board",
     "rtc",   "main_task", "cpu_start", "heap_init", "spiram", "esp_psram", "esp_image"};
@@ -398,6 +435,7 @@ constexpr TagSet TAG_SETS[] = {
     {ui::Subsystem::Desk, DESK_TAGS, static_cast<int>(std::size(DESK_TAGS))},
     {ui::Subsystem::Radar, RADAR_TAGS, static_cast<int>(std::size(RADAR_TAGS))},
     {ui::Subsystem::Media, MEDIA_TAGS, static_cast<int>(std::size(MEDIA_TAGS))},
+    {ui::Subsystem::Calendar, CALENDAR_TAGS, static_cast<int>(std::size(CALENDAR_TAGS))},
     {ui::Subsystem::System, SYSTEM_TAGS, static_cast<int>(std::size(SYSTEM_TAGS))},
 };
 static_assert(std::size(TAG_SETS) == static_cast<std::size_t>(ui::Subsystem::Count),
@@ -419,6 +457,7 @@ void update()
     update_network();
     update_radar();
     update_media();
+    update_calendar();
     update_hass();
     update_bluetooth();
     update_presence();

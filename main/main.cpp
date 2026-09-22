@@ -3,6 +3,7 @@
 #include "board.h"
 #include "desk.h"
 #include "diagnostics.h"
+#include "ical.h"
 #include "esp_log.h"
 #include "esp_system.h"
 #include "logbuf.h"
@@ -144,6 +145,7 @@ extern "C" void app_main(void)
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("network", 70));
     ESP_ERROR_CHECK_WITHOUT_ABORT(telemetry::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(diagnostics::start());
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ical::start(nullptr));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("home assistant", 85));
 
     ESP_LOGI(TAG, "up");
