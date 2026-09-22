@@ -1689,7 +1689,9 @@ void build_log_lines()
     if (s_log_line[0] != nullptr || s_log_pane == nullptr) {
         return;
     }
-    const std::int32_t width = lv_obj_get_width(s_log_pane) - 28;
+    // From the constants the pane is sized with, not from the object: this runs
+    // at boot, before anything has been laid out, and asking then gives nothing.
+    const std::int32_t width = LOG_W - 2 * DETAIL_PAD - 28;
     for (int i = 0; i < LOG_LINE_MAX; ++i) {
         s_log_line[i] = theme::make_label(s_log_pane, "", theme::secondary, fonts::size_16());
         lv_obj_set_width(s_log_line[i], width);
