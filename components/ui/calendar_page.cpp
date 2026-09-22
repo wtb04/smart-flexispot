@@ -13,7 +13,7 @@
 namespace ui {
 namespace {
 
-constexpr int ROWS  = 5;
+constexpr int ROWS  = 4;
 
 // One scale, and the layout is flex all the way down, so spacing comes from
 // these four numbers rather than from offsets typed into each object.
@@ -61,7 +61,6 @@ lv_obj_t *s_title  = nullptr;
 lv_obj_t *s_span   = nullptr;
 lv_obj_t *s_where  = nullptr;
 lv_obj_t *s_trip   = nullptr;   // the whole getting-there band
-lv_obj_t *s_rule   = nullptr;
 PointView s_point[POINTS];
 HopView   s_hop[travel::kLegsMax];
 lv_obj_t *s_lead  = nullptr;
@@ -182,7 +181,6 @@ void show_calendar()
 
     const bool travelling = going != nullptr;
     lv_obj_set_hidden(s_trip, !travelling);
-    lv_obj_set_hidden(s_rule, !travelling);
 
     if (travelling) {
         const int minutes = static_cast<int>((going->leave - now) / 60);
@@ -273,7 +271,7 @@ void build_calendar_page(lv_obj_t *page, std::int32_t width, std::int32_t height
     lv_obj_t *hero = lv_obj_create(page);
     lv_obj_set_width(hero, LV_PCT(100));
     lv_obj_set_height(hero, LV_SIZE_CONTENT);
-    theme::style_panel(hero, theme::panel, 16);
+    theme::style_panel(hero, theme::panel_light, 16);
     lv_obj_set_style_pad_all(hero, PAD, 0);
     lv_obj_set_style_pad_row(hero, STEP, 0);
     lv_obj_set_flex_flow(hero, LV_FLEX_FLOW_COLUMN);
@@ -304,18 +302,12 @@ void build_calendar_page(lv_obj_t *page, std::int32_t width, std::int32_t height
 
     // The journey only takes room when there is one. A half-empty card with a
     // rule down the middle said nothing most of the day.
-    s_rule = lv_obj_create(hero);
-    lv_obj_set_width(s_rule, LV_PCT(100));
-    lv_obj_set_height(s_rule, 1);
-    theme::style_panel(s_rule, theme::panel_light, 0);
-    lv_obj_set_style_margin_ver(s_rule, STEP / 2, 0);
-    quiet(s_rule);
-
     s_trip = bare(hero, 0, 0, 0, 0);
     lv_obj_set_width(s_trip, LV_PCT(100));
     lv_obj_set_height(s_trip, LV_SIZE_CONTENT);
+    lv_obj_set_style_margin_top(s_trip, STEP, 0);
     lv_obj_set_flex_flow(s_trip, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(s_trip, STEP / 2, 0);
+    lv_obj_set_style_pad_row(s_trip, 2, 0);
 
     lv_obj_t *band = bare(s_trip, 0, 0, 0, 0);
     lv_obj_set_width(band, LV_PCT(100));
@@ -351,8 +343,8 @@ void build_calendar_page(lv_obj_t *page, std::int32_t width, std::int32_t height
         HopView &hop = s_hop[i];
         hop.root     = bare(s_trip, 0, 0, 0, 0);
         lv_obj_set_width(hop.root, LV_PCT(100));
-        lv_obj_set_height(hop.root, ICON);
-        lv_obj_set_style_pad_left(hop.root, STOP_W - ICON - STEP, 0);
+        lv_obj_set_height(hop.root, ICON - 6);
+        lv_obj_set_style_pad_left(hop.root, STOP_W - ICON / 2, 0);
         lv_obj_set_flex_flow(hop.root, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(hop.root, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
                               LV_FLEX_ALIGN_CENTER);
@@ -376,6 +368,8 @@ void build_calendar_page(lv_obj_t *page, std::int32_t width, std::int32_t height
     lv_obj_set_flex_grow(rest, 1);
     lv_obj_set_flex_flow(rest, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(rest, STEP, 0);
+    lv_obj_set_scrollable(rest, true);
+    lv_obj_set_scroll_dir(rest, LV_DIR_VER);
 
     for (int i = 0; i < ROWS; ++i) {
         Row &row = s_row[i];

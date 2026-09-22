@@ -24,6 +24,7 @@ import serial
 
 PORT = sys.argv[1] if len(sys.argv) > 1 else "/dev/cu.usbmodem202401"
 OUT = sys.argv[2] if len(sys.argv) > 2 else "screen.png"
+WANT = int(sys.argv[3]) if len(sys.argv) > 3 else 1
 
 
 def png(width, height, rgb):
@@ -52,7 +53,8 @@ def main():
 
     size = None
     body = {}
-    deadline = time.time() + 240
+    taken = 0
+    deadline = time.time() + 600
     pending = b""
 
     while time.time() < deadline:
@@ -81,17 +83,25 @@ def main():
                 for i in range(0, min(len(data), width * height * 2), 2):
                     pixel = data[i] | (data[i + 1] << 8)
                     rgb += bytes(((pixel >> 8) & 0xf8, (pixel >> 3) & 0xfc, (pixel << 3) & 0xf8))
-                with open(OUT, "wb") as out:
+                name = OUT if taken == 0 else OUT.replace(".png", f"-{taken}.png")
+                with open(name, "wb") as out:
                     out.write(png(width, height, bytes(rgb)))
-                print(f"wrote {OUT} ({width}x{height})")
-                return 0
-            # Only whole, untouched lines. Under load the console drops a
-            # newline now and then and two lines arrive as one; taken as data
-            # that corrupts everything after it, quietly.
+                print(f"wrote {name} ({width}x{height})")
+                taken += 1
+                size = None
+                if taken >= WANT:
+                    return 0
+                continue
+            # Only whole, untouched lines, in whole base64 groups. Under load the
+            # console drops a newline now and then and two lines arrive as one,
+            # or one arrives cut short; taken as data either corrupts everything
+            # after it, quietly.
             whole = re.fullmatch(r"SHOT (\d+) ([A-Za-z0-9+/=]{1,120})", text)
-            if whole:
+            if whole and len(whole.group(2)) % 4 == 0:
                 body[int(whole.group(1))] = whole.group(2)
 
+    if taken:
+        return 0
     print("no picture came back", file=sys.stderr)
     return 1
 

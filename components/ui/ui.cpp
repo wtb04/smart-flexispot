@@ -2564,13 +2564,14 @@ void build_screen()
     // Development: hands a picture of the screen to tools/screenshot.py a little
     // after boot. SHOT_PAGE picks what to look at; -1 leaves the panel alone.
     // It holds the LVGL lock for several seconds, so it is off unless wanted.
-    constexpr int SHOT_PAGE = -1;
-    if (SHOT_PAGE >= -1 && SHOT_ENABLED) {
+    if (SHOT_ENABLED) {
         lv_timer_t *shot = lv_timer_create([](lv_timer_t *) {
-            if (SHOT_PAGE >= 0) {
-                lv_obj_send_event(s_nav_tabs[SHOT_PAGE], LV_EVENT_CLICKED, nullptr);
+            static const int PAGES[] = {0, CALENDAR_PAGE, RADAR_PAGE, SETUP_PAGE};
+            for (int page : PAGES) {
+                lv_obj_send_event(s_nav_tabs[page], LV_EVENT_CLICKED, nullptr);
+                lv_refr_now(nullptr);
+                screenshot();
             }
-            screenshot();
         }, 25000, nullptr);
         lv_timer_set_repeat_count(shot, 1);
     }
