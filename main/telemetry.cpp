@@ -53,6 +53,18 @@ std::atomic<int> s_brightness{board::kDefaultBrightness};
 
 // --- inbound, from Home Assistant. These run on the MQTT task. -------------
 
+// Home Assistant asking for the screen. The panel is told so its own control
+// agrees, and the board is told so something actually happens.
+std::atomic<bool> s_screen_on{true};
+
+void on_screen(bool on)
+{
+    s_screen_on.store(on, std::memory_order_relaxed);
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_screen(on));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(on ? board::display_on(settings::get(settings::Key::Brightness))
+                                     : board::display_off());
+}
+
 void on_preset(int preset)
 {
     ESP_LOGI(TAG, "preset %d requested", preset);
@@ -141,7 +153,7 @@ void on_album_art(media::Art state, const void *pixels)
         ESP_LOGW(TAG, "no address after %d s, starting clients anyway", NETWORK_WAIT_MS / 1000);
     }
 
-    const hass::Handlers handlers{on_preset, on_brightness, on_notify, on_move};
+    const hass::Handlers handlers{on_preset, on_brightness, on_notify, on_move, on_screen};
     ESP_ERROR_CHECK_WITHOUT_ABORT(hass::start(handlers));
     // Not fatal: the desk works without Home Assistant.
     ESP_ERROR_CHECK_WITHOUT_ABORT(hass::ws::start(on_entities));
@@ -160,7 +172,8 @@ void on_album_art(media::Art state, const void *pixels)
         out.height_mm      = desk::height_mm();
         out.desk_connected = desk::linked();
         out.motion         = desk::motion();
-        out.preset         = desk::active_preset();
+        out.preset         = desk::active_preset_label();
+        out.screen         = s_screen_on.load(std::memory_order_relaxed);
         out.brightness     = s_brightness.load(std::memory_order_relaxed);
         out.uptime_s       = static_cast<std::uint32_t>(esp_timer_get_time() / 1000000);
         out.free_heap      = static_cast<std::uint32_t>(esp_get_free_heap_size());
@@ -262,6 +275,8 @@ esp_err_t start()
     ESP_RETURN_ON_FALSE(task != nullptr, ESP_ERR_NO_MEM, TAG, "task");
     return ESP_OK;
 }
+
+void note_screen(bool on) { s_screen_on.store(on, std::memory_order_relaxed); }
 
 void note_brightness(int percent)
 {

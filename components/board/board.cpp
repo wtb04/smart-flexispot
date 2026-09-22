@@ -114,12 +114,14 @@ esp_err_t display_on(int percent)
     return set_brightness(percent);
 }
 
+// The backlight and nothing else. bsp_display_enter_sleep() would also put the
+// touch controller to sleep, and on this board's controller that is both
+// unsupported -- it returns an error after having already blanked the panel --
+// and self-defeating, since a sleeping touch controller cannot report the tap
+// that is supposed to wake it. The backlight is what draws the power anyway.
 esp_err_t display_off()
 {
-    // Dark first, so the sleep command is not something you watch happen.
-    ESP_RETURN_ON_ERROR(bsp_display_backlight_off(), TAG, "backlight");
-    vTaskDelay(pdMS_TO_TICKS(40));
-    return bsp_display_enter_sleep();
+    return bsp_display_backlight_off();
 }
 
 }  // namespace board

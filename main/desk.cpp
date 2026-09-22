@@ -468,6 +468,21 @@ const char *active_preset()
     return preset_name(s_active_preset.load(std::memory_order_relaxed));
 }
 
+// Wherever it is reported rather than pressed. The rail's two buttons are
+// called STAND and SIT because that is what they are for, but a readout that
+// mixes those with "preset_1" reads as an accident, so everything reported is
+// numbered the way the presets themselves are.
+const char *active_preset_label()
+{
+    switch (s_active_preset.load(std::memory_order_relaxed)) {
+        case 0:  return "Preset 1";
+        case 1:  return "Preset 2";
+        case 2:  return "Preset 3";
+        case 3:  return "Preset 4";
+        default: return "Between";
+    }
+}
+
 int preset_height_mm(int index)
 {
     return index >= 0 && index < ui::kPresetCount ? s_preset_mm[index] : -1;

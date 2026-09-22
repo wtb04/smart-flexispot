@@ -2,6 +2,7 @@
 
 #include "cJSON.h"
 
+#include <cctype>
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -83,6 +84,7 @@ Topics topics_for(const std::string &device_id)
         device_id + "/cmd/brightness",
         device_id + "/cmd/notify",
         device_id + "/cmd/move",
+        device_id + "/cmd/screen",
     };
 }
 
@@ -116,6 +118,7 @@ std::string state_document(const Telemetry &t)
 
     cJSON_AddStringToObject(root, "preset", t.preset);
     cJSON_AddStringToObject(root, "presence", t.presence ? "ON" : "OFF");
+    cJSON_AddStringToObject(root, "screen", t.screen ? "ON" : "OFF");
     // Quantised; -127 stands in for "nothing heard".
     cJSON_AddNumberToObject(root, "presence_rssi", (t.presence_rssi / 5) * 5);
 
@@ -226,7 +229,9 @@ std::string discovery_document(const std::string &device_id, const std::string &
     cJSON_AddStringToObject(preset, "val_tpl", "{{ value_json.preset | default('none') }}");
     cJSON_AddStringToObject(preset, "dev_cla", "enum");
     cJSON *preset_options = cJSON_AddArrayToObject(preset, "options");
-    for (const char *option : {"stand", "sit", "preset_1", "preset_2", "none"}) {
+    // An enum sensor rejects anything outside this list, so it has to say the
+    // same words the state does.
+    for (const char *option : {"Preset 1", "Preset 2", "Preset 3", "Preset 4", "Between"}) {
         cJSON_AddItemToArray(preset_options, cJSON_CreateString(option));
     }
 
@@ -318,6 +323,18 @@ std::string discovery_document(const std::string &device_id, const std::string &
         cJSON_AddStringToObject(button, "ic", "mdi:desk");
     }
 
+    // A switch rather than a button, because whether the screen is lit is a
+    // state Home Assistant can also be wrong about, and it should be able to see
+    // the panel's own answer.
+    add_entity(cmps, "screen", "switch", "Screen", device_id + "_screen");
+    cJSON *screen = cJSON_GetObjectItem(cmps, "screen");
+    cJSON_AddStringToObject(screen, "stat_t", topics.state.c_str());
+    cJSON_AddStringToObject(screen, "val_tpl", "{{ value_json.screen | default('ON') }}");
+    cJSON_AddStringToObject(screen, "cmd_t", topics.cmd_screen.c_str());
+    cJSON_AddStringToObject(screen, "pl_on", "ON");
+    cJSON_AddStringToObject(screen, "pl_off", "OFF");
+    cJSON_AddStringToObject(screen, "ic", "mdi:monitor");
+
     add_entity(cmps, "notify", "notify", "Screen message", device_id + "_notify");
     cJSON *notify = cJSON_GetObjectItem(cmps, "notify");
     cJSON_AddStringToObject(notify, "cmd_t", topics.cmd_notify.c_str());
@@ -370,6 +387,24 @@ Notification parse_notification(const std::string &payload)
     out.valid = !out.message.empty() || !out.title.empty();
     cJSON_Delete(root);
     return out;
+}
+
+// ON or OFF, however Home Assistant chooses to spell it.
+bool parse_screen(const std::string &payload, bool &on)
+{
+    std::string text;
+    for (char c : payload) {
+        text += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    if (text.find("on") != std::string::npos || text == "1" || text == "true") {
+        on = true;
+        return true;
+    }
+    if (text.find("off") != std::string::npos || text == "0" || text == "false") {
+        on = false;
+        return true;
+    }
+    return false;
 }
 
 Move parse_move(const std::string &payload)

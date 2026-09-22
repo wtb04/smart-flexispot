@@ -248,22 +248,6 @@ void update_power()
     push(Info::PowerStatus, status);
 }
 
-const char *preset_label(const char *preset)
-{
-    if (std::strcmp(preset, "stand") == 0) {
-        return "Stand";
-    }
-    if (std::strcmp(preset, "sit") == 0) {
-        return "Sit";
-    }
-    if (std::strcmp(preset, "preset_1") == 0) {
-        return "Preset 1";
-    }
-    if (std::strcmp(preset, "preset_2") == 0) {
-        return "Preset 2";
-    }
-    return "between";
-}
 
 void update_desk()
 {
@@ -299,7 +283,7 @@ void update_desk()
     ui::set_health(ui::Subsystem::Desk, linked ? Level::Good : Level::Bad);
     push(Info::DeskLink, state, linked ? Level::Good : Level::Bad);
     push_height(Info::DeskHeight, height);
-    push(Info::DeskActive, preset_label(desk::active_preset()));
+    push(Info::DeskActive, desk::active_preset_label());
     push_height(Info::DeskStand, desk::preset_height_mm(2));
     push_height(Info::DeskSit, desk::preset_height_mm(3));
     push_height(Info::DeskOne, desk::preset_height_mm(0));

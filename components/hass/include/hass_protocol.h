@@ -20,6 +20,7 @@ struct Telemetry {
     int   rssi_dbm      = 0;
     const char *preset      = "none";
     bool  presence          = false;
+    bool  screen            = true;
     int   presence_rssi     = -127;
     std::uint32_t uptime_s   = 0;
     std::uint32_t free_heap  = 0;
@@ -35,6 +36,7 @@ struct Topics {
     std::string cmd_brightness;
     std::string cmd_notify;
     std::string cmd_move;
+    std::string cmd_screen;
 };
 
 Topics topics_for(const std::string &device_id);
@@ -60,6 +62,9 @@ struct Notification {
 Notification parse_notification(const std::string &payload);
 
 Move parse_move(const std::string &payload);
+
+/** True when the payload said something; `on` is what it said. */
+bool parse_screen(const std::string &payload, bool &on);
 
 /** 0 when the payload names no preset. */
 int parse_preset(const std::string &payload);

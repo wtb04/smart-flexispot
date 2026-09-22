@@ -29,6 +29,7 @@ constexpr char TAG[] = "ui";
 // Generous: at 100 ms a push landing during the first full-screen render simply gave up.
 constexpr std::uint32_t LOCK_TIMEOUT_MS = 500;
 
+
 // Sized from the real display rather than with percentages: LV_PCT() returns an encoded
 // sentinel, so LV_PCT(100) - something is not a width, it is nonsense that lays out wrong.
 constexpr std::int32_t RAIL_W      = 330;
@@ -78,11 +79,66 @@ Layout layout()
 
 Handlers s_handlers{};
 
+
+
 // Dimmed as a group when the control box is not answering.
 constexpr int DESK_CONTROL_MAX = 8;
+bool          s_desk_available                  = true;
+
 lv_obj_t     *s_desk_controls[DESK_CONTROL_MAX] = {};
 int           s_desk_control_count              = 0;
-bool          s_desk_available                  = true;
+
+// Off when it is asked to be, not when it gets bored. esp_lvgl_port keeps
+// reading the touch controller whether or not the backlight is lit, so the tap
+// that turns it back on arrives the same as any other.
+bool      s_screen_on         = true;
+
+// A message nobody can see is not a message, so one lights the screen if it was
+// dark -- and puts it back when it has been read, unless the reading turned
+// into using the panel.
+bool s_notice_lit_screen = false;
+
+void set_screen_state(bool on)
+{
+    if (on == s_screen_on || s_handlers.screen == nullptr) {
+        return;
+    }
+    s_screen_on = on;
+    s_handlers.screen(on);
+}
+
+void wake_on_touch(lv_event_t *)
+{
+    // A touch means somebody is here, so a screen lit only for a message stops
+    // being temporary.
+    s_notice_lit_screen = false;
+    if (s_screen_on) {
+        return;
+    }
+
+    // The tap that lights the screen does nothing else. Whatever was under the
+    // finger was not visible when it landed, so acting on it would be acting on
+    // something nobody chose -- and on this panel one of those things moves a
+    // desk. Lift and tap again and everything works normally.
+    // lv_indev_active(), not lv_event_get_indev(): the latter returns the
+    // event's parameter, which carries the device only for events sent to a
+    // widget. On an event sent to the device itself it is null, so both calls
+    // below were quietly doing nothing and the tap went through as before.
+    //
+    // stop_processing withholds this press from the widget; the reset drops the
+    // device's hold on it as well, so the release that follows cannot arrive as
+    // a click on something nobody could see.
+    lv_indev_t *indev = lv_indev_active();
+    lv_indev_stop_processing(indev);
+    lv_indev_reset(indev, nullptr);
+    set_screen_state(true);
+}
+
+void screen_off_cb(lv_event_t *)
+{
+    s_notice_lit_screen = false;
+    set_screen_state(false);
+}
 
 void register_desk_control(lv_obj_t *obj)
 {
@@ -163,7 +219,15 @@ void show_next_notice()
 {
     if (s_notice_count == 0) {
         hide_notice();
+        if (s_notice_lit_screen) {
+            s_notice_lit_screen = false;
+            set_screen_state(false);
+        }
         return;
+    }
+    if (!s_screen_on) {
+        s_notice_lit_screen = true;
+        set_screen_state(true);
     }
     const Notice notice = s_notice_queue[0];
     for (int i = 1; i < s_notice_count; ++i) {
@@ -2251,6 +2315,7 @@ void build_settings_view(lv_obj_t *parent, std::int32_t w, std::int32_t h)
     const std::int32_t tiles_y = ROW_CARD_H + BUTTON_GAP;
     const std::int32_t tile_h  = (h - tiles_y - 2 * BUTTON_GAP) / 3;
     const std::int32_t pitch   = tile_h + BUTTON_GAP;
+    const std::int32_t half    = (w - BUTTON_GAP) / 2;
 
     lv_obj_t *look = build_page_tile(view, tiles_y, w, tile_h, LV_SYMBOL_IMAGE, "Appearance",
                                      show_appearance_cb);
@@ -2262,10 +2327,17 @@ void build_settings_view(lv_obj_t *parent, std::int32_t w, std::int32_t h)
     s_diag_summary = tile_value(diag, w, "");
     theme::set_text_color(s_diag_summary, theme::secondary);
 
-    lv_obj_t *restart = build_tile(view, 0, tiles_y + 2 * pitch, w, tile_h, LV_SYMBOL_POWER,
-                                   "Restart panel");
+    // An action rather than a choice: there is no on button because turning it
+    // on is a tap on the screen, wherever it lands.
+    lv_obj_t *screen = build_tile(view, 0, tiles_y + 2 * pitch, half, tile_h,
+                                  LV_SYMBOL_EYE_CLOSE, "Screen off");
+    lv_obj_add_event_cb(screen, screen_off_cb, LV_EVENT_CLICKED, nullptr);
+    theme::set_text_color(tile_value(screen, half, "Tap to bring it back"), theme::secondary);
+
+    lv_obj_t *restart = build_tile(view, half + BUTTON_GAP, tiles_y + 2 * pitch, half, tile_h,
+                                   LV_SYMBOL_POWER, "Restart");
     lv_obj_add_event_cb(restart, restart_held_cb, LV_EVENT_LONG_PRESSED, nullptr);
-    theme::set_text_color(tile_value(restart, w, "Hold to restart"), theme::secondary);
+    theme::set_text_color(tile_value(restart, half, "Hold to restart"), theme::secondary);
 
     s_settings_view = view;
 }
@@ -2291,6 +2363,7 @@ void build_appearance_view(lv_obj_t *parent, std::int32_t w, std::int32_t h)
     build_choice_card(view, body_y + 3 * pitch, w, LV_SYMBOL_REFRESH, "Orientation", "NORMAL",
                       "FLIPPED", flip_clicked_cb, s_flip_buttons);
     paint_choice(s_flip_buttons, s_flipped);
+
 
     s_appearance_view = view;
 }
@@ -2567,6 +2640,15 @@ void build_screen()
     lv_obj_set_style_bg_color(scr, lv_color_hex(theme::background), 0);
     lv_obj_set_style_pad_all(scr, 0, 0);
     lv_obj_set_scrollable(scr, false);
+
+    // On the input device, not on the screen object. A press is delivered to
+    // whatever is under the finger, and on this panel that is always some
+    // button or card rather than the screen itself, so a handler there never
+    // heard about it.
+    for (lv_indev_t *dev = lv_indev_get_next(nullptr); dev != nullptr;
+         dev = lv_indev_get_next(dev)) {
+        lv_indev_add_event_cb(dev, wake_on_touch, LV_EVENT_PRESSED, nullptr);
+    }
 
     create_rail(scr);
     create_content(scr);
@@ -3082,6 +3164,15 @@ esp_err_t set_notification_volume(int percent)
     std::snprintf(text, sizeof(text), "%d%%", percent);
     theme::set_text(s_volume_value, text);
 
+    lvgl_port_unlock();
+    return ESP_OK;
+}
+
+esp_err_t set_screen(bool on)
+{
+    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
+    s_screen_on         = on;
+    s_notice_lit_screen = false;
     lvgl_port_unlock();
     return ESP_OK;
 }

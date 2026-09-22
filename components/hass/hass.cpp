@@ -65,6 +65,13 @@ void dispatch(const std::string &topic, const std::string &payload)
         }
         return;
     }
+    if (topic == s_topics.cmd_screen) {
+        bool on = true;
+        if (protocol::parse_screen(payload, on) && s_handlers.on_screen != nullptr) {
+            s_handlers.on_screen(on);
+        }
+        return;
+    }
     if (topic == s_topics.cmd_move) {
         const protocol::Move move = protocol::parse_move(payload);
         if (move != protocol::Move::Unknown && s_handlers.on_move != nullptr) {

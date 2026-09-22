@@ -69,6 +69,19 @@ void on_primary(std::uint32_t colour)
     settings::set(settings::Key::Accent, static_cast<int>(colour));
 }
 
+// Asked for by the panel when nothing has been touched for a while, and again
+// on the tap that follows. Whatever brightness the settings hold is what comes
+// back, so a slider change made before the screen went dark still applies.
+void on_screen(bool on)
+{
+    telemetry::note_screen(on);
+    if (on) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(board::display_on(settings::get(settings::Key::Brightness)));
+    } else {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(board::display_off());
+    }
+}
+
 void on_rail_side(bool right)
 {
     settings::set(settings::Key::RailSide, right);
@@ -117,7 +130,8 @@ extern "C" void app_main(void)
                                 room::on_lights,    room::on_light,       room::on_dial_toggle,
                                 diagnostics::refresh, on_setting,         on_volume,
                                 on_restart,           on_radar_page,      diagnostics::logs,
-                                on_primary,           on_rail_side,       on_orientation};
+                                on_primary,           on_rail_side,       on_orientation,
+                                on_screen};
     const int brightness = settings::get(settings::Key::Brightness);
     ESP_ERROR_CHECK(ui::init(handlers, brightness,
                              static_cast<std::uint32_t>(settings::get(settings::Key::Accent)),

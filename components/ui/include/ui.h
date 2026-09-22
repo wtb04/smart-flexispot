@@ -74,6 +74,7 @@ enum class Setting : std::uint8_t {
     Charging,
     PresenceGate,
     DeskBluetooth,
+    Screen,
     Count,
 };
 
@@ -88,6 +89,10 @@ using RestartHandler = void (*)();
 
 /** The accent the panel draws everything in. */
 using PrimaryHandler = void (*)(std::uint32_t colour);
+
+/** The screen going dark after a while, and coming back on a touch. The panel
+ *  only asks; what that means for the backlight is the board's business. */
+using ScreenHandler = void (*)(bool on);
 
 /** True while the rail is against the right edge. */
 using RailSideHandler = void (*)(bool right);
@@ -169,6 +174,7 @@ struct Handlers {
     PrimaryHandler     primary;
     RailSideHandler    rail_side;
     OrientationHandler orientation;
+    ScreenHandler      screen;
 };
 
 /** Requires the LVGL port to be running. A zero accent keeps the built-in
@@ -254,6 +260,10 @@ bool diagnostics_open();
 
 /** Shows a setting's position, and applies the ones the panel owns itself. */
 esp_err_t set_setting(Setting setting, bool on);
+
+/** Home Assistant turning the screen on or off, so the panel's own control
+ *  shows the same thing. */
+esp_err_t set_screen(bool on);
 
 esp_err_t set_notification_volume(int percent);
 

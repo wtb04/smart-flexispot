@@ -11,6 +11,7 @@ struct Handlers {
     void (*on_brightness)(int percent);                       // 0-100
     void (*on_notify)(const protocol::Notification &notice);
     void (*on_move)(protocol::Move direction);
+    void (*on_screen)(bool on);
 };
 
 /** Safe to call before Wi-Fi is up. */
