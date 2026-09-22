@@ -201,6 +201,13 @@ void on_album_art(media::Art state, const void *pixels)
                      static_cast<unsigned>(psram.largest_free_block / 1024));
         }
 
+        multi_heap_info_t now{};
+        heap_caps_get_info(&now, MALLOC_CAP_DMA);
+        ESP_LOGD(TAG, "dma-capable: %u KB free, largest %u KB, low %u KB",
+                 static_cast<unsigned>(now.total_free_bytes / 1024),
+                 static_cast<unsigned>(now.largest_free_block / 1024),
+                 static_cast<unsigned>(now.minimum_free_bytes / 1024));
+
         static std::int64_t complained = 0;
         const std::size_t   dma_free   = heap_caps_get_free_size(MALLOC_CAP_DMA);
         const std::size_t   internal   = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);

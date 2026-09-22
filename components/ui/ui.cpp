@@ -1437,6 +1437,8 @@ bool page_available(int index)
     return !NAV_ITEMS[index].needs_presence || !s_presence_gate || !s_presence_known || s_present;
 }
 
+void build_setup_widgets();
+
 void select_page(int index)
 {
     if (!page_available(index)) {
@@ -1444,6 +1446,10 @@ void select_page(int index)
     }
     s_page = index;
     s_setup_visible.store(index == SETUP_PAGE, std::memory_order_relaxed);
+
+    if (index == SETUP_PAGE) {
+        build_setup_widgets();
+    }
     if (index == SETUP_PAGE && s_handlers.diagnostics != nullptr) {
         s_handlers.diagnostics();
     }
@@ -1731,7 +1737,21 @@ void log_tick(lv_timer_t *)
 }
 
 void build_detail_panel(int i);
-void release_detail_panel(int i);
+void build_log_lines();
+
+// Forty kilobytes of the internal pool the Wi-Fi transport draws on, built the
+// first time the page is opened rather than at boot: a panel that hangs on a
+// wall for weeks never pays for them. Built with the page and not with the
+// panel, so a tap has nothing to wait for. Kept once built -- freeing them on
+// the way out churned the pool enough to fragment it, and the AES driver
+// started failing to get DMA descriptors.
+void build_setup_widgets()
+{
+    for (int i = 0; i < INFO_CARD_COUNT; ++i) {
+        build_detail_panel(i);
+    }
+    build_log_lines();
+}
 
 void detail_clicked_cb(lv_event_t *e)
 {
@@ -1740,11 +1760,10 @@ void detail_clicked_cb(lv_event_t *e)
         return;
     }
     for (int i = 0; i < INFO_CARD_COUNT; ++i) {
-        if (i != index) {
-            release_detail_panel(i);
+        if (s_detail[i] != nullptr) {
+            lv_obj_set_hidden(s_detail[i], i != index);
         }
     }
-    build_detail_panel(index);
     if (s_detail[index] == nullptr) {
         return;
     }
@@ -1985,24 +2004,10 @@ void build_detail_panel(int i)
         theme::make_label(button, INFO_CARDS[i].setting_label, theme::text, fonts::size_20());
         s_setting_value[index] =
             theme::make_label(button, "Off", theme::secondary, fonts::size_20());
+        apply_setting(index, s_setting_on[index]);
     }
 
     s_detail[i] = panel;
-}
-
-void release_detail_panel(int i)
-{
-    if (s_detail[i] == nullptr) {
-        return;
-    }
-    for (int r = 0; r < INFO_CARDS[i].count; ++r) {
-        s_info[static_cast<int>(INFO_CARDS[i].rows[r].field)] = nullptr;
-    }
-    if (INFO_CARDS[i].has_setting) {
-        s_setting_value[static_cast<int>(INFO_CARDS[i].setting)] = nullptr;
-    }
-    lv_obj_delete(s_detail[i]);
-    s_detail[i] = nullptr;
 }
 
 void build_log_overlay(lv_obj_t *parent)
