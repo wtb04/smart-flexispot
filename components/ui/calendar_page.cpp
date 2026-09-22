@@ -6,20 +6,22 @@
 #include "travel.h"
 
 #include <cstdio>
+#include <cstring>
 #include <ctime>
 
 namespace ui {
 namespace {
 
 // What fits under the hero card. Nobody reads past the end of the day on a wall.
-constexpr int ROWS = 8;
+constexpr int ROWS = 4;
+constexpr int TRIPS = 2;
 
 constexpr std::int32_t ROW_H   = 46;
 constexpr std::int32_t TIME_W  = 84;
 constexpr std::int32_t PLACE_W = 150;
 constexpr std::int32_t GAP     = 10;
 constexpr std::int32_t MARK_W  = 4;
-constexpr std::int32_t HERO_H  = 168;
+constexpr std::int32_t HERO_H  = 336;
 
 // Fixed rather than drawn from the theme: which feed an event came from is not
 // a matter of taste, and the accent colour moves.
@@ -39,7 +41,24 @@ lv_obj_t *s_hero_when  = nullptr;
 lv_obj_t *s_hero_title = nullptr;
 lv_obj_t *s_hero_where = nullptr;
 lv_obj_t *s_hero_in    = nullptr;
-lv_obj_t *s_hero_travel = nullptr;
+constexpr std::uint32_t INK_TRAIN = 0x63a9e8;
+constexpr std::uint32_t INK_BUS   = 0x74c97a;
+
+struct LegView {
+    lv_obj_t *pill  = nullptr;
+    lv_obj_t *mode  = nullptr;
+    lv_obj_t *text  = nullptr;
+};
+
+struct TripView {
+    lv_obj_t *root   = nullptr;
+    lv_obj_t *leave  = nullptr;
+    lv_obj_t *arrive = nullptr;
+    LegView   legs[travel::kLegsMax];
+};
+
+TripView  s_trip[TRIPS];
+lv_obj_t *s_travel_none = nullptr;
 Row       s_row[ROWS];
 
 std::uint32_t feed_ink(std::uint8_t feed)
@@ -88,38 +107,85 @@ Row make_row(lv_obj_t *parent, std::int32_t width)
     return row;
 }
 
-// One line under the hero: when to leave, and what to take.
+void clock_of(std::int64_t at, char *out, std::size_t size)
+{
+    std::tm     when{};
+    const auto  stamp = static_cast<std::time_t>(at);
+    localtime_r(&stamp, &when);
+    std::snprintf(out, size, "%02d:%02d", when.tm_hour, when.tm_min);
+}
+
+// How to get there, under the event itself: two ways, each with when to go, when
+// you are there, and where every leg puts you down.
 void show_travel(std::int64_t start, std::int64_t now)
 {
-    if (s_hero_travel == nullptr) {
+    if (s_trip[0].root == nullptr) {
         return;
     }
     static travel::Option options[travel::kOptionsMax];
     const int found = start == 0 ? 0 : travel::options(options, travel::kOptionsMax);
 
-    const travel::Option *best = nullptr;
-    for (int i = 0; i < found; ++i) {
-        if (options[i].leave >= now) {
-            best = &options[i];
-            break;
+    int shown = 0;
+    for (int i = 0; i < found && shown < TRIPS; ++i) {
+        const travel::Option &option = options[i];
+        if (option.leave < now) {
+            continue;
         }
-    }
-    if (best == nullptr) {
-        theme::set_text(s_hero_travel, "");
-        return;
+        TripView &trip = s_trip[shown];
+
+        char leave[16];
+        char arrive[16];
+        clock_of(option.leave, leave, sizeof(leave));
+        clock_of(option.arrive, arrive, sizeof(arrive));
+
+        char text[48];
+        const int minutes = static_cast<int>((option.leave - now) / 60);
+        if (minutes <= 0) {
+            std::snprintf(text, sizeof(text), "LEAVE %s  now", leave);
+        } else if (minutes < 60) {
+            std::snprintf(text, sizeof(text), "LEAVE %s  in %d min", leave, minutes);
+        } else {
+            std::snprintf(text, sizeof(text), "LEAVE %s  in %dh%02dm", leave, minutes / 60,
+                          minutes % 60);
+        }
+        theme::set_text(trip.leave, text);
+
+        std::snprintf(text, sizeof(text), "arrive %s", arrive);
+        theme::set_text(trip.arrive, text);
+
+        for (int l = 0; l < travel::kLegsMax; ++l) {
+            const bool real = l < option.leg_count;
+            lv_obj_set_hidden(trip.legs[l].pill, !real);
+            lv_obj_set_hidden(trip.legs[l].text, !real);
+            if (!real) {
+                continue;
+            }
+            const travel::Leg &leg = option.legs[l];
+            const bool train = std::strcmp(leg.mode, "train") == 0;
+
+            theme::set_text(trip.legs[l].mode, train ? "TRAIN" : "BUS");
+            lv_obj_set_style_bg_color(trip.legs[l].pill,
+                                      lv_color_hex(train ? INK_TRAIN : INK_BUS), 0);
+
+            char from[16];
+            char to[16];
+            clock_of(leg.depart, from, sizeof(from));
+            clock_of(leg.arrive, to, sizeof(to));
+            std::snprintf(text, sizeof(text), "%s", leg.line);
+            char line[128];
+            std::snprintf(line, sizeof(line), "%-4s %s %s  to  %s %s", leg.line, leg.from, from,
+                          leg.to, to);
+            theme::set_text(trip.legs[l].text, line);
+        }
+
+        lv_obj_set_hidden(trip.root, false);
+        ++shown;
     }
 
-    std::tm when{};
-    const auto at = static_cast<std::time_t>(best->leave);
-    localtime_r(&at, &when);
-
-    char text[96];
-    int  used = std::snprintf(text, sizeof(text), "Leave %02d:%02d", when.tm_hour, when.tm_min);
-    for (int i = 0; i < best->leg_count && used < static_cast<int>(sizeof(text)) - 1; ++i) {
-        used += std::snprintf(text + used, sizeof(text) - static_cast<std::size_t>(used),
-                              "  %s %s", best->legs[i].mode, best->legs[i].line);
+    for (int i = shown; i < TRIPS; ++i) {
+        lv_obj_set_hidden(s_trip[i].root, true);
     }
-    theme::set_text(s_hero_travel, text);
+    theme::set_text(s_travel_none, shown > 0 ? "" : "No way there yet");
 }
 
 }  // namespace
@@ -221,8 +287,54 @@ void build_calendar_page(lv_obj_t *page, std::int32_t width, std::int32_t height
     s_hero_where = theme::make_label(hero, "", theme::secondary, fonts::size_20());
     lv_obj_set_pos(s_hero_where, 0, 116);
 
-    s_hero_travel = theme::make_accent_label(hero, "", fonts::size_20());
-    lv_obj_align(s_hero_travel, LV_ALIGN_TOP_RIGHT, 0, 116);
+    const std::int32_t inner = width - 40;
+
+    lv_obj_t *rule = lv_obj_create(hero);
+    lv_obj_set_pos(rule, 0, 152);
+    lv_obj_set_size(rule, inner, 1);
+    theme::style_panel(rule, theme::panel_light, 0);
+    quiet(rule);
+
+    s_travel_none = theme::make_label(hero, "", theme::secondary, fonts::size_20());
+    lv_obj_set_pos(s_travel_none, 0, 168);
+    quiet(s_travel_none);
+
+    for (int i = 0; i < TRIPS; ++i) {
+        TripView &trip = s_trip[i];
+        trip.root = lv_obj_create(hero);
+        lv_obj_set_pos(trip.root, 0, 166 + i * 84);
+        lv_obj_set_size(trip.root, inner, 78);
+        lv_obj_set_style_bg_opa(trip.root, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(trip.root, 0, 0);
+        lv_obj_set_style_pad_all(trip.root, 0, 0);
+        lv_obj_set_hidden(trip.root, true);
+        quiet(trip.root);
+
+        trip.leave = theme::make_accent_label(trip.root, "", fonts::size_20());
+        lv_obj_set_pos(trip.leave, 0, 0);
+
+        trip.arrive = theme::make_label(trip.root, "", theme::secondary, fonts::size_20());
+        lv_obj_align(trip.arrive, LV_ALIGN_TOP_RIGHT, 0, 0);
+
+        for (int l = 0; l < travel::kLegsMax; ++l) {
+            LegView &leg = trip.legs[l];
+            leg.pill = lv_obj_create(trip.root);
+            lv_obj_set_size(leg.pill, 62, 22);
+            lv_obj_set_pos(leg.pill, 0, 30 + l * 24);
+            theme::style_panel(leg.pill, theme::panel_light, 11);
+            lv_obj_set_hidden(leg.pill, true);
+            quiet(leg.pill);
+
+            leg.mode = theme::make_label(leg.pill, "", theme::background, fonts::size_16());
+            lv_obj_center(leg.mode);
+
+            leg.text = theme::make_label(trip.root, "", theme::text, fonts::size_16());
+            lv_obj_set_pos(leg.text, 72, 32 + l * 24);
+            lv_obj_set_width(leg.text, inner - 72);
+            lv_label_set_long_mode(leg.text, LV_LABEL_LONG_MODE_DOTS);
+            lv_obj_set_hidden(leg.text, true);
+        }
+    }
 
     lv_obj_t *rest = lv_obj_create(page);
     lv_obj_set_pos(rest, 0, TOP + HERO_H + 16);

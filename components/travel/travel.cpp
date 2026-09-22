@@ -168,6 +168,15 @@ esp_err_t start(UpdateHandler on_update)
 
 void want(std::int64_t arrive_by)
 {
+#if TRAVEL_FAKE_MINUTES > 0
+    if (arrive_by != 0) {
+        // Rounded to the minute so that asking again is the same question and
+        // does not set off a fetch every time the page redraws.
+        const auto soon = static_cast<std::int64_t>(std::time(nullptr)) +
+                          TRAVEL_FAKE_MINUTES * 60;
+        arrive_by = soon - soon % 60;
+    }
+#endif
     if (s_wanted.exchange(arrive_by, std::memory_order_relaxed) == arrive_by) {
         return;
     }
