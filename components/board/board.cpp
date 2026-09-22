@@ -18,7 +18,9 @@ constexpr TickType_t LCD_RAIL_SETTLE   = pdMS_TO_TICKS(200);
 constexpr TickType_t TOUCH_RAIL_SETTLE = pdMS_TO_TICKS(500);
 
 constexpr int LVGL_TASK_PRIORITY  = 4;
-constexpr int LVGL_TASK_STACK     = 8192;
+// Measured: a page change over the Setup page's tree leaves 2 KB of an 8 KB
+// stack, which is not margin.
+constexpr int LVGL_TASK_STACK     = 12288;
 constexpr int LVGL_TASK_CORE      = 1;
 constexpr int LVGL_TICK_PERIOD_MS = 5;
 constexpr int LVGL_MAX_SLEEP_MS   = 500;

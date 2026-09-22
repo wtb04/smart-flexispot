@@ -1437,8 +1437,6 @@ bool page_available(int index)
     return !NAV_ITEMS[index].needs_presence || !s_presence_gate || !s_presence_known || s_present;
 }
 
-void build_setup_widgets();
-
 void select_page(int index)
 {
     if (!page_available(index)) {
@@ -1447,9 +1445,6 @@ void select_page(int index)
     s_page = index;
     s_setup_visible.store(index == SETUP_PAGE, std::memory_order_relaxed);
 
-    if (index == SETUP_PAGE) {
-        build_setup_widgets();
-    }
     if (index == SETUP_PAGE && s_handlers.diagnostics != nullptr) {
         s_handlers.diagnostics();
     }
@@ -1739,12 +1734,12 @@ void log_tick(lv_timer_t *)
 void build_detail_panel(int i);
 void build_log_lines();
 
-// Forty kilobytes of the internal pool the Wi-Fi transport draws on, built the
-// first time the page is opened rather than at boot: a panel that hangs on a
-// wall for weeks never pays for them. Built with the page and not with the
-// panel, so a tap has nothing to wait for. Kept once built -- freeing them on
-// the way out churned the pool enough to fragment it, and the AES driver
-// started failing to get DMA descriptors.
+// Built at boot, with everything else. Deferring these forty kilobytes to the
+// first time the page is opened measured far better at rest -- 73 KB of internal
+// free against 37 -- but allocating them once the radios are up left too little
+// contiguous room behind them: the AES driver stopped getting DMA descriptors
+// and the Wi-Fi transport asserted. Early, into a clean heap, is worth more
+// here than late and less.
 void build_setup_widgets()
 {
     for (int i = 0; i < INFO_CARD_COUNT; ++i) {
@@ -2364,6 +2359,7 @@ void build_settings_page(lv_obj_t *page)
     build_detail_overlay(page);
     build_log_overlay(page);
     build_colour_picker(page);
+    build_setup_widgets();
     refresh_diag_summary();
 }
 
