@@ -19,7 +19,7 @@ constexpr float DEG  = 3.14159265f / 180.0f;
 // outside the scope object and were clipped against the ring.
 constexpr int MARK = 36;
 
-constexpr int SPOKES = 4;
+constexpr int SPOKES = 8;
 constexpr int RINGS  = 4;
 
 constexpr int BOX = 24;  // local frame each outline is drawn in
@@ -290,6 +290,17 @@ void compass(lv_obj_t *parent, const char *text, char side)
     quiet(label);
 }
 
+constexpr float LABEL_ANGLE = 45.0f * DEG;
+
+void place_ring_label(lv_obj_t *label, std::int32_t radius)
+{
+    const std::int32_t w = text_width(lv_label_get_text(label), fonts::size_16()) + 8;
+    const std::int32_t h = fonts::size_16()->line_height;
+    const auto         x = static_cast<std::int32_t>(s_centre + std::sin(LABEL_ANGLE) * radius);
+    const auto         y = static_cast<std::int32_t>(s_centre - std::cos(LABEL_ANGLE) * radius);
+    lv_obj_set_pos(label, x - w / 2, y - h / 2);
+}
+
 void build_chart(lv_obj_t *scope, int range_km)
 {
     for (int i = 0; i < SPOKES; ++i) {
@@ -318,7 +329,10 @@ void build_chart(lv_obj_t *scope, int range_km)
         std::snprintf(text, sizeof(text), "%d", range_km * i / RINGS);
         lv_obj_t *label = theme::make_label(scope, text, theme::secondary, fonts::size_16());
         lv_obj_set_style_text_opa(label, LV_OPA_40, 0);
-        lv_obj_set_pos(label, s_centre + 8, s_centre - radius - fonts::size_16()->line_height - 2);
+        lv_obj_set_style_bg_color(label, lv_color_hex(theme::background), 0);
+        lv_obj_set_style_bg_opa(label, LV_OPA_COVER, 0);
+        lv_obj_set_style_pad_hor(label, 4, 0);
+        place_ring_label(label, radius);
         quiet(label);
         s_rings[i - 1] = label;
     }
@@ -621,6 +635,7 @@ void apply_range(int from_km)
         char text[12];
         std::snprintf(text, sizeof(text), "%d", settled * i / RINGS);
         theme::set_text(s_rings[i - 1], text);
+        place_ring_label(s_rings[i - 1], s_radius * i / RINGS);
     }
     paint_range_buttons();
 

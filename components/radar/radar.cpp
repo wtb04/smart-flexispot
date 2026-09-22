@@ -42,6 +42,7 @@ constexpr int PHOTO_MAX_H = 240;
 
 constexpr std::int64_t FIRST_FETCH_DELAY_US = 6 * 1000000LL;
 
+// Measured: three seconds runs into the feed's rate limit and gets 429s.
 constexpr std::int64_t POLL_ACTIVE_US = 5 * 1000000LL;
 constexpr std::int64_t POLL_IDLE_US   = 60 * 1000000LL;
 
@@ -59,7 +60,8 @@ std::size_t  s_body_len = 0;
 
 constexpr std::int64_t IDLE_CLOSE_US = 20 * 1000000LL;
 
-constexpr std::int64_t PHOTO_IDLE_US = 5 * 1000000LL;
+// A socket, not a TLS session: the image host is plain http.
+constexpr std::int64_t PHOTO_IDLE_US = 30 * 1000000LL;
 
 esp_http_client_handle_t s_feed_client     = nullptr;
 esp_http_client_handle_t s_lookup_client   = nullptr;
@@ -71,7 +73,7 @@ bool         s_lookups_open = false;
 std::int64_t s_photo_at_us  = 0;
 bool         s_photo_open   = false;
 
-constexpr int PREFETCH_PER_SWEEP = 3;
+constexpr int PREFETCH_PER_SWEEP = 6;
 
 std::atomic<bool> s_drop_cache{false};
 
@@ -234,6 +236,7 @@ bool fetch(float lat, float lon)
                   static_cast<double>(lat), static_cast<double>(lon),
                   static_cast<int>(std::lround(static_cast<float>(range_km) * NM_PER_KM)));
     const int status = get(s_feed_client, url, "feed");
+    // Measured: holding this open doubled the share the feed refused.
     esp_http_client_close(s_feed_client);
     if (status != 200) {
         s_feed_backoff = status == 429;
@@ -427,6 +430,14 @@ void warm_photo(const char *hex, const char *callsign)
     resolve_photo(hex, entry->details);
 }
 
+bool tap_waiting()
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    const bool waiting = s_want_pending;
+    xSemaphoreGive(s_lock);
+    return waiting;
+}
+
 void prefetch_visible()
 {
     struct Want {
@@ -456,6 +467,9 @@ void prefetch_visible()
     int chosen[PREFETCH_PER_SWEEP];
     int fetched = 0;
     for (int i = 0; i < count && fetched < PREFETCH_PER_SWEEP; ++i) {
+        if (tap_waiting()) {
+            break;
+        }
         if (cache_find(wanted[i].hex, wanted[i].flight) != nullptr) {
             continue;
         }
@@ -468,6 +482,9 @@ void prefetch_visible()
 
     esp_http_client_close(s_lookup_client);
     for (int i = 0; i < fetched; ++i) {
+        if (tap_waiting()) {
+            break;
+        }
         warm_photo(wanted[chosen[i]].hex, wanted[chosen[i]].flight);
     }
     esp_http_client_close(s_photoapi_client);
@@ -547,6 +564,8 @@ void expire_cache()
             due *= 2;
         }
         if (last_fetch == 0 || esp_timer_get_time() - last_fetch >= due) {
+            // Stamped before, so warming falls inside the interval.
+            const std::int64_t began = esp_timer_get_time();
             if (fetch(lat, lon)) {
                 expire_cache();
                 if (active) {
@@ -557,7 +576,7 @@ void expire_cache()
                 s_ok = false;
                 xSemaphoreGive(s_lock);
             }
-            last_fetch = esp_timer_get_time();
+            last_fetch = began;
         }
 
         close_idle_lookups();
