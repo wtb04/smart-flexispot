@@ -259,6 +259,9 @@ enum class Info : std::uint8_t {
 /** Strings are copied. The level colours the value; a null value clears the row. */
 esp_err_t set_info(Info field, const char *value, Level level = Level::Neutral);
 
+/** Re-reads the calendar and redraws its page. Thread-safe. */
+esp_err_t set_calendar();
+
 /** True while the Setup page is showing. Nothing needs pushing when it is not. */
 bool diagnostics_open();
 

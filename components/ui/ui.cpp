@@ -8,6 +8,7 @@
 #include "esp_lvgl_port.h"
 #include "lvgl.h"
 #include "modal_overlay.h"
+#include "calendar_page.h"
 #include "radar_page.h"
 #include "segment_display.h"
 #include "theme.h"
@@ -1417,7 +1418,7 @@ struct NavItem {
     bool        needs_presence;
 };
 constexpr NavItem NAV_ITEMS[PAGE_COUNT] = {
-    {LV_SYMBOL_HOME, "Home", false},    {LV_SYMBOL_LIST, "Stats", true},
+    {LV_SYMBOL_HOME, "Home", false},    {LV_SYMBOL_LIST, "Calendar", true},
     {LV_SYMBOL_BELL, "Alerts", true},   {LV_SYMBOL_GPS, "Radar", true},
     {LV_SYMBOL_SETTINGS, "Setup", false},
 };
@@ -1426,6 +1427,7 @@ bool s_presence_known = false;
 bool s_present        = false;
 int  s_page           = 0;
 
+constexpr int CALENDAR_PAGE = 1;
 constexpr int RADAR_PAGE = 3;
 constexpr int SETUP_PAGE = 4;
 std::atomic<bool> s_setup_visible{false};
@@ -1450,6 +1452,9 @@ void select_page(int index)
     }
     if (index == RADAR_PAGE) {
         radar_page_opened();
+    }
+    if (index == CALENDAR_PAGE) {
+        show_calendar();
     }
     if (s_handlers.radar != nullptr) {
         s_handlers.radar(index == RADAR_PAGE, page_available(RADAR_PAGE));
@@ -2375,7 +2380,12 @@ void create_content(lv_obj_t *parent)
     }
 
     build_home_page(s_pages[0]);
-    build_placeholder_page(s_pages[1], "Stats", "Height over time, hours stood, that sort of thing.");
+    {
+        const Layout cl = layout();
+        lv_obj_set_style_pad_all(s_pages[1], PANEL_PAD, 0);
+        build_calendar_page(s_pages[1], cl.content_w - 2 * PANEL_PAD,
+                            cl.content_h - 2 * PANEL_PAD);
+    }
     build_placeholder_page(s_pages[2], "Alerts", "Reminders to stand, and whatever Home Assistant sends.");
     {
         const Layout rl = layout();
@@ -2985,6 +2995,14 @@ esp_err_t set_info(Info field, const char *value, Level level)
         theme::set_text(s_tile_value[card], text);
     }
 
+    lvgl_port_unlock();
+    return ESP_OK;
+}
+
+esp_err_t set_calendar()
+{
+    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
+    show_calendar();
     lvgl_port_unlock();
     return ESP_OK;
 }
