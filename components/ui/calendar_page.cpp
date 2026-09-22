@@ -134,7 +134,9 @@ void show_calendar()
     const int          count = ical::upcoming(ahead, ROWS + 1);
     const auto         now   = static_cast<std::int64_t>(std::time(nullptr));
 
-    constexpr std::int64_t ASK_WITHIN = 4 * 3600;
+    // Wide enough to cover the night before: the train is worth knowing then
+    // even though the bus is not, and the service answers with the train alone.
+    constexpr std::int64_t ASK_WITHIN = 18 * 3600;
     travel::want(count > 0 && ahead[0].start - now < ASK_WITHIN ? ahead[0].start : 0);
     show_travel(count > 0 ? ahead[0].start : 0, now);
 

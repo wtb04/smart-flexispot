@@ -15,6 +15,7 @@
 #include <atomic>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 
 namespace travel {
 namespace {
@@ -24,9 +25,12 @@ constexpr char TAG[] = "travel";
 // panel never meets a journey planner's own JSON.
 constexpr std::size_t BODY_MAX = 8 * 1024;
 
-// Departures move. Not so fast that this has to be a live feed, but fast enough
-// that an answer from ten minutes ago is worth replacing.
-constexpr std::int64_t REFRESH_US = 180 * 1000000LL;
+// Departures move, but only the imminent ones move in a way anybody acts on.
+// Far from the event the train is the whole answer and it hardly changes, so
+// asking every few minutes all evening would be asking for nothing.
+constexpr std::int64_t NEAR_REFRESH_US = 180 * 1000000LL;
+constexpr std::int64_t FAR_REFRESH_US  = 20 * 60 * 1000000LL;
+constexpr std::int64_t NEAR_SECONDS    = 90 * 60;
 
 constexpr std::uint32_t TASK_STACK    = 5120;
 constexpr UBaseType_t   TASK_PRIORITY = 3;
@@ -122,8 +126,11 @@ bool fetch(std::int64_t arrive_by)
         const std::int64_t wanted = s_wanted.load(std::memory_order_relaxed);
         const std::int64_t now    = esp_timer_get_time();
 
+        const auto away = wanted - static_cast<std::int64_t>(std::time(nullptr));
+        const auto due  = away < NEAR_SECONDS ? NEAR_REFRESH_US : FAR_REFRESH_US;
+
         const bool changed = wanted != s_asked_for;
-        const bool stale   = wanted != 0 && now - s_asked_at >= REFRESH_US;
+        const bool stale   = wanted != 0 && now - s_asked_at >= due;
 
         if (wanted != 0 && wifi::connected() && (changed || stale)) {
             s_asked_for = wanted;
