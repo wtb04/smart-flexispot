@@ -9,6 +9,11 @@
 #include "lvgl.h"
 #include "modal_overlay.h"
 #include "calendar_page.h"
+#include "screenshot.h"
+
+#ifndef SHOT_ENABLED
+#define SHOT_ENABLED 0
+#endif
 #include "radar_page.h"
 #include "segment_display.h"
 #include "theme.h"
@@ -2556,6 +2561,19 @@ void build_screen()
 
     create_rail(scr);
     create_content(scr);
+    // Development: hands a picture of the screen to tools/screenshot.py a little
+    // after boot. SHOT_PAGE picks what to look at; -1 leaves the panel alone.
+    // It holds the LVGL lock for several seconds, so it is off unless wanted.
+    constexpr int SHOT_PAGE = -1;
+    if (SHOT_PAGE >= -1 && SHOT_ENABLED) {
+        lv_timer_t *shot = lv_timer_create([](lv_timer_t *) {
+            if (SHOT_PAGE >= 0) {
+                lv_obj_send_event(s_nav_tabs[SHOT_PAGE], LV_EVENT_CLICKED, nullptr);
+            }
+            screenshot();
+        }, 25000, nullptr);
+        lv_timer_set_repeat_count(shot, 1);
+    }
     create_drawer(scr);  // after the content, so it overlays it when open
     create_notice_card();
     build_splash();  // last, so it covers everything until startup finishes

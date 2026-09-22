@@ -205,3 +205,7 @@ CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 # Debug lines are compiled in but off at runtime, so a chatty subsystem can be
 # turned up with esp_log_level_set() without a reflash.
 CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y
+
+# Lets the panel hand back a picture of its own screen over the console, so a
+# layout can be looked at rather than guessed at. See tools/screenshot.py.
+CONFIG_LV_USE_SNAPSHOT=y
