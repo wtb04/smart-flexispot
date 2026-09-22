@@ -60,6 +60,8 @@ lv_obj_t *s_when   = nullptr;
 lv_obj_t *s_title  = nullptr;
 lv_obj_t *s_span   = nullptr;
 lv_obj_t *s_where  = nullptr;
+lv_obj_t *s_trip   = nullptr;   // the whole getting-there band
+lv_obj_t *s_rule   = nullptr;
 PointView s_point[POINTS];
 HopView   s_hop[travel::kLegsMax];
 lv_obj_t *s_lead  = nullptr;
@@ -92,6 +94,15 @@ lv_obj_t *bare(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int32_t w,
     lv_obj_set_style_pad_all(box, 0, 0);
     quiet(box);
     return box;
+}
+
+lv_obj_t *heading(lv_obj_t *parent, const char *text)
+{
+    lv_obj_t *label = theme::make_label(parent, text, theme::secondary, fonts::size_16());
+    lv_obj_set_style_text_letter_space(label, 2, 0);
+    lv_obj_set_style_text_opa(label, LV_OPA_70, 0);
+    quiet(label);
+    return label;
 }
 
 void clock_of(std::int64_t at, char *out, std::size_t size)
@@ -169,24 +180,24 @@ void show_calendar()
         lv_obj_set_hidden(s_hop[i].root, true);
     }
 
-    if (going == nullptr) {
-        theme::set_text(s_lead, count == 0 ? "" : "No way there yet");
-        theme::set_text_color(s_lead, theme::secondary);
-        theme::set_text(s_after, "");
-    } else {
+    const bool travelling = going != nullptr;
+    lv_obj_set_hidden(s_trip, !travelling);
+    lv_obj_set_hidden(s_rule, !travelling);
+
+    if (travelling) {
         const int minutes = static_cast<int>((going->leave - now) / 60);
         if (minutes <= 0) {
-            std::snprintf(text, sizeof(text), "LEAVE NOW");
+            std::snprintf(text, sizeof(text), "leave now");
         } else if (minutes < 60) {
-            std::snprintf(text, sizeof(text), "LEAVE IN %d MIN", minutes);
+            std::snprintf(text, sizeof(text), "leave in %d min", minutes);
         } else {
-            std::snprintf(text, sizeof(text), "LEAVE IN %dH %02dM", minutes / 60, minutes % 60);
+            std::snprintf(text, sizeof(text), "leave in %dh %02dm", minutes / 60, minutes % 60);
         }
         theme::set_text(s_lead, text);
         theme::set_text_color(s_lead, going->cancelled ? theme::red : theme::primary);
 
         // A place the journey passes through is one place, whatever it is the end
-        // of and the start of. Its two times sit together rather than twice over.
+        // of and the start of. Where it is both, the two times are told apart.
         const int legs = going->leg_count;
         for (int i = 0; i <= legs && i < POINTS; ++i) {
             const char *name = i < legs ? going->legs[i].from : going->legs[legs - 1].to;
@@ -202,9 +213,11 @@ void show_calendar()
             }
 
             if (into[0] != '\0' && away[0] != '\0') {
-                std::snprintf(text, sizeof(text), "%s  %s", into, away);
+                std::snprintf(text, sizeof(text), "%s dep %s", into, away);
+            } else if (away[0] != '\0') {
+                std::snprintf(text, sizeof(text), "dep %s", away);
             } else {
-                std::snprintf(text, sizeof(text), "%s", into[0] != '\0' ? into : away);
+                std::snprintf(text, sizeof(text), "arr %s", into);
             }
             theme::set_text(s_point[i].when, text);
             theme::set_text(s_point[i].name, name);
@@ -224,7 +237,7 @@ void show_calendar()
         if (after != nullptr) {
             char next[16];
             clock_of(after->leave, next, sizeof(next));
-            std::snprintf(text, sizeof(text), "then %s", next);
+            std::snprintf(text, sizeof(text), "or the one after at %s", next);
             theme::set_text(s_after, text);
         } else {
             theme::set_text(s_after, "");
@@ -254,50 +267,68 @@ void build_calendar_page(lv_obj_t *page, std::int32_t width, std::int32_t height
     (void)height;
 
     lv_obj_set_flex_flow(page, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(page, GAP, 0);
+    lv_obj_set_style_pad_row(page, STEP, 0);
 
-    // --- what is next, and beside it how to get there
+    // --- what is next, and under it how to get there
     lv_obj_t *hero = lv_obj_create(page);
     lv_obj_set_width(hero, LV_PCT(100));
-    lv_obj_set_height(hero, HERO_H);
+    lv_obj_set_height(hero, LV_SIZE_CONTENT);
     theme::style_panel(hero, theme::panel, 16);
     lv_obj_set_style_pad_all(hero, PAD, 0);
-    lv_obj_set_style_pad_column(hero, GAP, 0);
-    lv_obj_set_flex_flow(hero, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_row(hero, STEP, 0);
+    lv_obj_set_flex_flow(hero, LV_FLEX_FLOW_COLUMN);
     quiet(hero);
 
-    lv_obj_t *left = bare(hero, 0, 0, 0, 0);
-    lv_obj_set_height(left, LV_PCT(100));
-    lv_obj_set_flex_grow(left, 45);
-    lv_obj_set_flex_flow(left, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(left, STEP, 0);
+    heading(hero, "NEXT");
 
-    s_when = theme::make_accent_label(left, "", fonts::size_20());
-
-    s_title = theme::make_label(left, "", theme::text, fonts::size_28());
+    s_title = theme::make_label(hero, "", theme::text, fonts::size_28());
     lv_obj_set_width(s_title, LV_PCT(100));
-    lv_obj_set_height(s_title, 2 * fonts::size_28()->line_height);
-    lv_label_set_long_mode(s_title, LV_LABEL_LONG_MODE_WRAP);
+    lv_obj_set_height(s_title, fonts::size_28()->line_height);
+    lv_label_set_long_mode(s_title, LV_LABEL_LONG_MODE_DOTS);
 
-    s_span  = theme::make_label(left, "", theme::secondary, fonts::size_20());
-    s_where = theme::make_label(left, "", theme::secondary, fonts::size_20());
+    lv_obj_t *meta = bare(hero, 0, 0, 0, 0);
+    lv_obj_set_width(meta, LV_PCT(100));
+    lv_obj_set_height(meta, fonts::size_20()->line_height);
+    lv_obj_set_flex_flow(meta, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(meta, GAP, 0);
+    lv_obj_set_flex_align(meta, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
 
-    lv_obj_t *rule = lv_obj_create(hero);
-    lv_obj_set_size(rule, 1, LV_PCT(100));
-    theme::style_panel(rule, theme::panel_light, 0);
-    quiet(rule);
+    s_span  = theme::make_label(meta, "", theme::secondary, fonts::size_20());
+    s_where = theme::make_label(meta, "", theme::secondary, fonts::size_20());
+    lv_obj_set_flex_grow(s_where, 1);
+    lv_obj_set_height(s_where, fonts::size_20()->line_height);
+    lv_label_set_long_mode(s_where, LV_LABEL_LONG_MODE_DOTS);
 
-    lv_obj_t *right = bare(hero, 0, 0, 0, 0);
-    lv_obj_set_height(right, LV_PCT(100));
-    lv_obj_set_flex_grow(right, 55);
-    lv_obj_set_flex_flow(right, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(right, STEP / 2, 0);
+    s_when = theme::make_accent_label(meta, "", fonts::size_20());
 
-    s_lead = theme::make_accent_label(right, "", fonts::size_20());
+    // The journey only takes room when there is one. A half-empty card with a
+    // rule down the middle said nothing most of the day.
+    s_rule = lv_obj_create(hero);
+    lv_obj_set_width(s_rule, LV_PCT(100));
+    lv_obj_set_height(s_rule, 1);
+    theme::style_panel(s_rule, theme::panel_light, 0);
+    lv_obj_set_style_margin_ver(s_rule, STEP / 2, 0);
+    quiet(s_rule);
+
+    s_trip = bare(hero, 0, 0, 0, 0);
+    lv_obj_set_width(s_trip, LV_PCT(100));
+    lv_obj_set_height(s_trip, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(s_trip, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(s_trip, STEP / 2, 0);
+
+    lv_obj_t *band = bare(s_trip, 0, 0, 0, 0);
+    lv_obj_set_width(band, LV_PCT(100));
+    lv_obj_set_height(band, fonts::size_16()->line_height);
+    lv_obj_set_flex_flow(band, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(band, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    heading(band, "GETTING THERE");
+    s_lead = theme::make_accent_label(band, "", fonts::size_16());
 
     for (int i = 0; i < POINTS; ++i) {
         PointView &point = s_point[i];
-        point.root       = bare(right, 0, 0, 0, 0);
+        point.root       = bare(s_trip, 0, 0, 0, 0);
         lv_obj_set_width(point.root, LV_PCT(100));
         lv_obj_set_height(point.root, fonts::size_20()->line_height);
         lv_obj_set_flex_flow(point.root, LV_FLEX_FLOW_ROW);
@@ -318,10 +349,10 @@ void build_calendar_page(lv_obj_t *page, std::int32_t width, std::int32_t height
             continue;
         }
         HopView &hop = s_hop[i];
-        hop.root     = bare(right, 0, 0, 0, 0);
+        hop.root     = bare(s_trip, 0, 0, 0, 0);
         lv_obj_set_width(hop.root, LV_PCT(100));
         lv_obj_set_height(hop.root, ICON);
-        lv_obj_set_style_pad_left(hop.root, STOP_W - ICON, 0);
+        lv_obj_set_style_pad_left(hop.root, STOP_W - ICON - STEP, 0);
         lv_obj_set_flex_flow(hop.root, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(hop.root, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
                               LV_FLEX_ALIGN_CENTER);
@@ -334,10 +365,12 @@ void build_calendar_page(lv_obj_t *page, std::int32_t width, std::int32_t height
         quiet(hop.icon);
     }
 
-    s_after = theme::make_label(right, "", theme::secondary, fonts::size_16());
+    s_after = theme::make_label(s_trip, "", theme::secondary, fonts::size_16());
     quiet(s_after);
 
     // --- what follows it
+    heading(page, "LATER");
+
     lv_obj_t *rest = bare(page, 0, 0, 0, 0);
     lv_obj_set_width(rest, LV_PCT(100));
     lv_obj_set_flex_grow(rest, 1);
