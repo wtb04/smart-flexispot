@@ -73,9 +73,12 @@ std::int64_t s_photo_at_us  = 0;
 bool         s_photo_open   = false;
 
 constexpr int PREFETCH_PER_SWEEP = 6;
+// Fewer than the cache holds: prefetching every aircraft in range evicted what
+// the next sweep fetched again, forever.
+constexpr int PREFETCH_NEAREST = 20;
 
-
-constexpr int CACHE_SIZE = 24;
+constexpr int CACHE_SIZE = 48;
+static_assert(PREFETCH_NEAREST < CACHE_SIZE, "the prefetched set has to fit, or it churns");
 
 struct CacheEntry {
     char         hex[kHexLen];
@@ -464,7 +467,7 @@ void prefetch_visible()
 
     int chosen[PREFETCH_PER_SWEEP];
     int fetched = 0;
-    for (int i = 0; i < count && fetched < PREFETCH_PER_SWEEP; ++i) {
+    for (int i = 0; i < count && i < PREFETCH_NEAREST && fetched < PREFETCH_PER_SWEEP; ++i) {
         if (tap_waiting()) {
             break;
         }
