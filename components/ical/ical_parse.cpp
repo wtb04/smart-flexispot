@@ -42,9 +42,11 @@ bool digits(const char *text, int count, int &out)
 }
 
 // YYYYMMDD, or YYYYMMDDTHHMMSS with an optional trailing Z. A value carrying no
-// zone is taken as UTC: these feeds write everything in it, and guessing the
-// other way would move an event by an hour twice a year.
-bool stamp(const char *value, std::size_t length, std::int64_t &out)
+// zone is taken as UTC: the timetable feeds write everything in it, and guessing
+// the other way would move an event by an hour twice a year. One in a named zone
+// (TZID=...) is wall-clock time in the panel's own zone: Outlook calls it
+// "Customized Time Zone", but it is this one.
+bool stamp(const char *value, std::size_t length, std::int64_t &out, bool zoned = false)
 {
     std::tm when{};
     int     year = 0;
@@ -70,8 +72,24 @@ bool stamp(const char *value, std::size_t length, std::int64_t &out)
         when.tm_min  = min;
         when.tm_sec  = sec;
     }
+    const bool utc = length >= 16 && value[15] == 'Z';
+    if (zoned && !utc) {
+        when.tm_isdst = -1;
+        out           = static_cast<std::int64_t>(std::mktime(&when));
+        return true;
+    }
     out = static_cast<std::int64_t>(rtc::utc_seconds(when));
     return true;
+}
+
+bool zoned(const char *line, const char *value)
+{
+    for (const char *at = line; at + 5 <= value; ++at) {
+        if (std::strncmp(at, ";TZID=", 6) == 0) {
+            return true;
+        }
+    }
+    return false;
 }
 
 // Commas, semicolons and backslashes arrive escaped, and a literal \n stands
@@ -168,9 +186,9 @@ int parse(char *body, std::size_t length, std::uint8_t feed, Event *out, int cap
         } else if (named(line, line_len, "LOCATION", value, value_len)) {
             copy_text(value, value_len, current.location, sizeof(current.location));
         } else if (named(line, line_len, "DTSTART", value, value_len)) {
-            stamp(value, value_len, current.start);
+            stamp(value, value_len, current.start, zoned(line, value));
         } else if (named(line, line_len, "DTEND", value, value_len)) {
-            stamp(value, value_len, current.end);
+            stamp(value, value_len, current.end, zoned(line, value));
         }
     }
     return stored;

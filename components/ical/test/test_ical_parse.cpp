@@ -1,7 +1,9 @@
 #include "ical_parse.cpp"
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <string>
 
 namespace {
@@ -130,5 +132,32 @@ int main()
     if (failures == 0) {
         std::printf("ALL PASS\n");
     }
+    {
+        // Outlook writes wall-clock times in a zone it names after itself; the
+        // panel reads them in its own. 08:00 in September is 06:00Z, and in
+        // December, after the clocks go back, 07:00Z.
+        setenv("TZ", "CET-1CEST,M3.5.0,M10.5.0/3", 1);
+        tzset();
+        const int n = run("BEGIN:VCALENDAR\r\n"
+                          "BEGIN:VEVENT\r\n"
+                          "DTSTART;TZID=Customized Time Zone:20260911T080000\r\n"
+                          "DTEND;TZID=Customized Time Zone:20260911T120000\r\n"
+                          "SUMMARY:Werken\r\n"
+                          "END:VEVENT\r\n"
+                          "BEGIN:VEVENT\r\n"
+                          "DTSTART;TZID=Customized Time Zone:20261211T080000\r\n"
+                          "DTEND;TZID=Customized Time Zone:20261211T120000\r\n"
+                          "SUMMARY:Werken\r\n"
+                          "END:VEVENT\r\n"
+                          "END:VCALENDAR\r\n",
+                          events, 8, 4);
+        check(n == 2, "zoned events parsed");
+        check(events[0].start == 1789106400, "summer: 08:00 local is 06:00Z");
+        check(events[1].start == 1796972400, "winter: 08:00 local is 07:00Z");
+        check(events[1].end - events[1].start == 4 * 3600, "zoned end");
+        setenv("TZ", "UTC0", 1);
+        tzset();
+    }
+
     return failures == 0 ? 0 : 1;
 }

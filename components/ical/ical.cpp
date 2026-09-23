@@ -1,6 +1,11 @@
 #include "ical.h"
 
 #include "esp_check.h"
+#include "ical_secrets.h"
+
+#ifndef ICAL_WORK_URL
+#define ICAL_WORK_URL ""
+#endif
 #include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
 #include "esp_http_client.h"
@@ -13,6 +18,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <cstring>
 #include <cstdio>
 #include <ctime>
@@ -23,21 +29,45 @@ constexpr char TAG[] = "ical";
 
 constexpr char HOST[] = "https://calendar.example.org";
 
-constexpr const char *FEEDS[kFeedCount] = {"Lectures", "Practicals", "Exams", "Other"};
+// The timetable's four come from CalendarChanger by name. Work is a shared
+// Outlook calendar, of which only the shifts belong here.
+struct Feed {
+    const char *name;
+    const char *url;   // null: HOST/name
+    const char *keep;  // when set, only events whose summary starts with it
+};
+constexpr Feed FEEDS[kFeedCount] = {
+    {"Lectures", nullptr, nullptr},
+    {"Practicals", nullptr, nullptr},
+    {"Exams", nullptr, nullptr},
+    {"Other", nullptr, nullptr},
+    {"Work", ICAL_WORK_URL, "werk"},
+};
+
+// Case aside, so "Werk" and "Werken" both count.
+bool starts_with(const char *text, const char *prefix)
+{
+    for (; *prefix != '\0'; ++text, ++prefix) {
+        if (std::tolower(static_cast<unsigned char>(*text)) != *prefix) {
+            return false;
+        }
+    }
+    return true;
+}
 
 // A timetable is not a live feed; it changes when somebody edits it, which is
 // rarely and never urgently.
 constexpr TickType_t POLL_INTERVAL = pdMS_TO_TICKS(30 * 60 * 1000);
 
-// The largest feed is 22 kB today. In PSRAM, where being generous costs nothing.
-constexpr std::size_t BODY_MAX = 128 * 1024;
+// The work calendar is 158 kB, the timetable feeds 22 kB at most. In PSRAM.
+constexpr std::size_t BODY_MAX = 256 * 1024;
 
 // Nothing is fetched until the clock is right, or every event is filed against
 // 1970 and the page shows the wrong things in the wrong order.
 constexpr std::time_t CLOCK_SET_AFTER = 1600000000;
 
-// A round that came back with nothing is usually the network still coming up,
-// which is not worth half an hour of silence.
+// A feed that did not come back is usually the network still coming up, or a
+// server hanging up early; neither is worth half an hour of silence.
 constexpr TickType_t RETRY_INTERVAL = pdMS_TO_TICKS(20 * 1000);
 
 constexpr std::uint32_t TASK_STACK    = 6144;
@@ -57,7 +87,8 @@ std::size_t s_body_len = 0;
 Event *s_events = nullptr;
 int    s_count  = 0;
 
-Event *s_scratch = nullptr;
+Event *s_scratch  = nullptr;
+Event *s_building = nullptr;
 
 UpdateHandler s_on_update = nullptr;
 
@@ -78,8 +109,16 @@ esp_err_t on_event(esp_http_client_event_t *event)
 
 int fetch_feed(int index)
 {
-    char url[128];
-    std::snprintf(url, sizeof(url), "%s/%s", HOST, FEEDS[index]);
+    const Feed &feed = FEEDS[index];
+    if (feed.url != nullptr && feed.url[0] == '\0') {
+        return -1;  // not configured
+    }
+    char url[256];
+    if (feed.url != nullptr) {
+        std::snprintf(url, sizeof(url), "%s", feed.url);
+    } else {
+        std::snprintf(url, sizeof(url), "%s/%s", HOST, feed.name);
+    }
 
     esp_http_client_config_t cfg{};
     cfg.url               = url;
@@ -100,45 +139,68 @@ int fetch_feed(int index)
     esp_http_client_cleanup(client);
 
     if (status != 200) {
-        ESP_LOGW(TAG, "%s: %s", FEEDS[index],
+        ESP_LOGW(TAG, "%s: %s", feed.name,
                  err == ESP_OK ? "refused" : esp_err_to_name(err));
         return -1;
     }
-    return parse(s_body, s_body_len, static_cast<std::uint8_t>(index), s_scratch, kMaxEvents);
+    int count = parse(s_body, s_body_len, static_cast<std::uint8_t>(index), s_scratch, kMaxEvents);
+    if (feed.keep != nullptr) {
+        int kept = 0;
+        for (int i = 0; i < count; ++i) {
+            if (starts_with(s_scratch[i].summary, feed.keep)) {
+                s_scratch[kept++] = s_scratch[i];
+            }
+        }
+        count = kept;
+    }
+    return count;
 }
 
+// Each round is built aside and swapped in whole, and a feed that fails keeps
+// its last events rather than vanishing from the page until the next round.
 bool fetch_all()
 {
-    int gathered = 0;
-    for (int i = 0; i < kFeedCount && gathered < kMaxEvents; ++i) {
+    constexpr int ATTEMPTS = 3;
+    int  built  = 0;
+    bool all_ok = true;
+    for (int i = 0; i < kFeedCount; ++i) {
         const std::int64_t began = esp_timer_get_time();
-        const int          n     = fetch_feed(i);
+        int                n     = -1;
+        for (int attempt = 0; attempt < ATTEMPTS && n < 0; ++attempt) {
+            n = fetch_feed(i);
+        }
         if (n < 0) {
+            all_ok   = false;
+            int kept = 0;
+            xSemaphoreTake(s_lock, portMAX_DELAY);
+            for (int e = 0; e < s_count && built < kMaxEvents; ++e) {
+                if (s_events[e].feed == i) {
+                    s_building[built++] = s_events[e];
+                    ++kept;
+                }
+            }
+            xSemaphoreGive(s_lock);
+            ESP_LOGW(TAG, "%s: keeping the %d events from before", FEEDS[i].name, kept);
             continue;
         }
-        const int room = kMaxEvents - gathered;
-        const int take = n < room ? n : room;
-
-        xSemaphoreTake(s_lock, portMAX_DELAY);
-        std::memcpy(s_events + gathered, s_scratch, sizeof(Event) * static_cast<std::size_t>(take));
-        gathered += take;
-        s_count = gathered;
-        xSemaphoreGive(s_lock);
-
-        ESP_LOGI(TAG, "%s: %d events in %d ms", FEEDS[i], take,
+        const int take = std::min(n, kMaxEvents - built);
+        std::memcpy(s_building + built, s_scratch, sizeof(Event) * static_cast<std::size_t>(take));
+        built += take;
+        ESP_LOGI(TAG, "%s: %d events in %d ms", FEEDS[i].name, take,
                  static_cast<int>((esp_timer_get_time() - began) / 1000));
     }
 
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    s_count = gathered;
-    std::sort(s_events, s_events + s_count,
+    std::sort(s_building, s_building + built,
               [](const Event &a, const Event &b) { return a.start < b.start; });
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    std::swap(s_events, s_building);
+    s_count = built;
     xSemaphoreGive(s_lock);
 
     if (s_on_update != nullptr) {
         s_on_update();
     }
-    return gathered > 0;
+    return all_ok;
 }
 
 [[noreturn]] void ical_task(void *)
@@ -156,7 +218,7 @@ bool fetch_all()
 
 const char *feed_name(std::uint8_t feed)
 {
-    return feed < kFeedCount ? FEEDS[feed] : "";
+    return feed < kFeedCount ? FEEDS[feed].name : "";
 }
 
 esp_err_t start(UpdateHandler on_update)
@@ -171,7 +233,10 @@ esp_err_t start(UpdateHandler on_update)
         heap_caps_calloc(kMaxEvents, sizeof(Event), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     s_scratch = static_cast<Event *>(
         heap_caps_calloc(kMaxEvents, sizeof(Event), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    ESP_RETURN_ON_FALSE(s_body != nullptr && s_events != nullptr && s_scratch != nullptr,
+    s_building = static_cast<Event *>(
+        heap_caps_calloc(kMaxEvents, sizeof(Event), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    ESP_RETURN_ON_FALSE(s_body != nullptr && s_events != nullptr && s_scratch != nullptr &&
+                            s_building != nullptr,
                         ESP_ERR_NO_MEM, TAG, "buffers");
 
     s_on_update = on_update;
@@ -193,6 +258,22 @@ int upcoming(Event *out, int capacity)
     int written = 0;
     for (int i = 0; i < s_count && written < capacity; ++i) {
         if (s_events[i].end >= now) {
+            out[written++] = s_events[i];
+        }
+    }
+    xSemaphoreGive(s_lock);
+    return written;
+}
+
+int between(std::int64_t from, std::int64_t to, Event *out, int capacity)
+{
+    if (out == nullptr || capacity <= 0 || s_lock == nullptr) {
+        return 0;
+    }
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    int written = 0;
+    for (int i = 0; i < s_count && written < capacity; ++i) {
+        if (s_events[i].end > from && s_events[i].start < to) {
             out[written++] = s_events[i];
         }
     }
