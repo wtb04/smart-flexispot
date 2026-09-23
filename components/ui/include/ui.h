@@ -185,7 +185,8 @@ struct Handlers {
 esp_err_t init(const Handlers &handlers, int initial_brightness, std::uint32_t accent,
                bool rail_right, bool flipped);
 
-esp_err_t splash_step(const char *label, int percent);
+/** A part of the boot has finished: "desk" or "network". */
+esp_err_t splash_step(const char *label);
 
 esp_err_t splash_done();
 
