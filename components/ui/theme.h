@@ -1,9 +1,12 @@
 #pragma once
 
+#include "icons.h"
 #include "lvgl.h"
 #include "units_font.h"
 
 #include <array>
+#include <algorithm>
+#include <climits>
 #include <cstdint>
 #include <cstring>
 
@@ -25,19 +28,6 @@ inline constexpr std::array<std::uint32_t, 10> primaries{
     0x3fd0c0, 0x4fb0f5, 0x8b93ff, 0xb579f0, 0xff6fd0,
 };
 
-// The accent laid thinly over a card: warm enough to draw the eye, far enough
-// from the full accent that it never reads as something being on.
-inline constexpr std::uint32_t tint_of(std::uint32_t colour, std::uint32_t over = 0x382820)
-{
-    constexpr std::uint32_t PART = 22;
-    auto mix = [&](int shift) {
-        const std::uint32_t a = (colour >> shift) & 0xff;
-        const std::uint32_t b = (over >> shift) & 0xff;
-        return ((a * PART + b * (100 - PART)) / 100) << shift;
-    };
-    return mix(16) | mix(8) | mix(0);
-}
-
 inline constexpr std::uint32_t dim_of(std::uint32_t colour)
 {
     constexpr std::uint32_t PART = 78;
@@ -56,10 +46,12 @@ inline std::uint32_t &orange_dim = primary_dim;
 //
 // Surfaces, measured off the pages that already work: the screen is
 // `background`, every page sits in a content area of `panel`, and cards on it
-// are `panel_light`. One card per page -- the thing to look at first -- is
-// tinted with the accent instead. A full accent fill means one thing only, that
-// something is on. Nothing is boxed inside anything else; within a card, space
-// and type do the grouping.
+// are `panel_light`. What to look at first is found by type, not colour: the one
+// display-size number on a page. A full accent fill means one thing only, that
+// something is on, and accent text is for a selection, never for emphasis.
+// Nothing is boxed inside anything else; within a card, space and type do the
+// grouping. Labels are in sentence case and sit on what they name, not in a
+// legend.
 
 namespace space {
 inline constexpr std::int32_t xs = 4;
@@ -150,7 +142,6 @@ inline lv_style_t accent_fill_style;
 inline lv_style_t accent_dim_style;
 inline lv_style_t accent_ink_style;
 inline lv_style_t accent_arc_style;
-inline lv_style_t accent_tint_style;
 
 inline void set_primary(std::uint32_t colour)
 {
@@ -160,7 +151,6 @@ inline void set_primary(std::uint32_t colour)
     lv_style_set_bg_color(&accent_dim_style, lv_color_hex(primary_dim));
     lv_style_set_text_color(&accent_ink_style, lv_color_hex(primary));
     lv_style_set_arc_color(&accent_arc_style, lv_color_hex(primary));
-    lv_style_set_bg_color(&accent_tint_style, lv_color_hex(tint_of(primary)));
     lv_obj_report_style_change(nullptr);
 }
 
@@ -168,8 +158,7 @@ inline void set_primary(std::uint32_t colour)
 inline void init_accents()
 {
     for (lv_style_t *style :
-         {&accent_fill_style, &accent_dim_style, &accent_ink_style, &accent_arc_style,
-          &accent_tint_style}) {
+         {&accent_fill_style, &accent_dim_style, &accent_ink_style, &accent_arc_style}) {
         lv_style_init(style);
     }
     set_primary(primary);
@@ -348,17 +337,6 @@ inline lv_obj_t *make_card(lv_obj_t *parent)
     return card;
 }
 
-/** The focal card: one per page, for whatever should be read first. Tinted
- *  rather than filled -- a full accent fill means something is on, as the
- *  lights are, and this is never a state. */
-inline lv_obj_t *make_focus_card(lv_obj_t *parent)
-{
-    lv_obj_t *card = make_card(parent);
-    lv_obj_remove_local_style_prop(card, LV_STYLE_BG_COLOR, 0);
-    lv_obj_add_style(card, &accent_tint_style, 0);
-    return card;
-}
-
 /** The small capitals over a reading or a block: CURRENT, LIGHTS, NEXT. */
 inline lv_obj_t *make_eyebrow(lv_obj_t *parent, const char *value,
                               std::uint32_t colour = secondary)
@@ -401,35 +379,85 @@ inline Stat make_stat(lv_obj_t *parent, const char *name)
 /** A Pozidriv screw head: the cross, and a finer one turned between its arms.
  *  Decoration that says a card is an instrument; it does nothing, so it is the
  *  quietest thing on it. The chips that do something are the same dot. */
+/** Centres a short label by the ink of its glyphs rather than its line box,
+ *  which leaves a plus or a digit visibly off the middle of a small chip. */
+inline void center_ink(lv_obj_t *label)
+{
+    const lv_font_t *font = lv_obj_get_style_text_font(label, LV_PART_MAIN);
+    const char      *text = lv_label_get_text(label);
+    const std::int32_t ascent = font->line_height - font->base_line;
+
+    std::int32_t pen = 0;
+    std::int32_t left = INT32_MAX, right = INT32_MIN, top = INT32_MAX, bottom = INT32_MIN;
+    for (std::uint32_t i = 0; text[i] != '\0';) {
+        // UTF-8 by hand: LVGL keeps its decoder in a private header.
+        const auto    lead   = static_cast<unsigned char>(text[i]);
+        const int     extra  = lead >= 0xf0 ? 3 : lead >= 0xe0 ? 2 : lead >= 0xc0 ? 1 : 0;
+        std::uint32_t letter = extra == 0 ? lead : lead & (0x3f >> extra);
+        ++i;
+        for (int k = 0; k < extra && text[i] != '\0'; ++k, ++i) {
+            letter = (letter << 6) | (static_cast<unsigned char>(text[i]) & 0x3f);
+        }
+        lv_font_glyph_dsc_t glyph;
+        if (!lv_font_get_glyph_dsc(font, &glyph, letter, 0)) {
+            continue;
+        }
+        if (glyph.box_w > 0 && glyph.box_h > 0) {
+            const std::int32_t glyph_top = ascent - (glyph.ofs_y + glyph.box_h);
+            left   = std::min<std::int32_t>(left, pen + glyph.ofs_x);
+            right  = std::max<std::int32_t>(right, pen + glyph.ofs_x + glyph.box_w);
+            top    = std::min(top, glyph_top);
+            bottom = std::max<std::int32_t>(bottom, glyph_top + glyph.box_h);
+        }
+        pen += glyph.adv_w;
+    }
+    if (left > right) {
+        lv_obj_center(label);
+        return;
+    }
+    lv_obj_align(label, LV_ALIGN_CENTER, pen / 2 - (left + right) / 2,
+                 font->line_height / 2 - (top + bottom) / 2);
+}
+
+inline constexpr lv_opa_t mark_opa = LV_OPA_60;
+
+inline lv_obj_t *make_mark(lv_obj_t *parent, const lv_image_dsc_t *mark, lv_opa_t opa = mark_opa)
+{
+    lv_obj_t *image = lv_image_create(parent);
+    lv_image_set_src(image, mark);
+    lv_obj_set_style_image_recolor(image, lv_color_hex(secondary), 0);
+    lv_obj_set_style_image_recolor_opa(image, LV_OPA_COVER, 0);
+    lv_obj_set_style_image_opa(image, opa, 0);
+    lv_obj_center(image);
+    lv_obj_set_clickable(image, false);
+    return image;
+}
+
 inline lv_obj_t *make_screw(lv_obj_t *parent, std::int32_t size)
 {
     lv_obj_t *head = lv_obj_create(parent);
     lv_obj_set_size(head, size, size);
     style_panel(head, panel, size / 2);
     lv_obj_set_clickable(head, false);
-
-    // A plus, and a smaller times sign laid over it. Glyphs rather than one mark
-    // turned by a transform, which needs the mark laid out before it can be
-    // turned about its middle and so came out off centre.
-    auto mark = [&](const char *text, const lv_font_t *font, lv_opa_t opa) {
-        lv_obj_t *glyph = make_label(head, text, secondary, font);
-        lv_obj_set_style_text_opa(glyph, opa, 0);
-        lv_obj_center(glyph);
-        lv_obj_set_clickable(glyph, false);
-    };
-    mark("+", type_title(), LV_OPA_60);
-    mark("\xc3\x97", type_value(), LV_OPA_50);
+    // A plus with a smaller times sign over it: a Pozidriv head.
+    make_mark(head, &icons::plus_icon);
+    make_mark(head, &icons::times_icon, LV_OPA_50);
     return head;
 }
 
 /** A chip: a round button in a card's corner. The glyph is the screws' grey,
  *  so a row of chips and screws reads as one set, and lights when pressed. */
-inline lv_obj_t *make_chip(lv_obj_t *parent, const char *value)
+/** The default font's digits stand as tall as the drawn plus on the screws. */
+inline lv_obj_t *make_chip(lv_obj_t *parent, const char *value,
+                           const lv_font_t *font = type_body())
 {
-    lv_obj_t *chip = make_button(parent, value, panel, type_value());
+    lv_obj_t *chip = make_button(parent, value, panel, font);
     lv_obj_set_size(chip, chip::size, chip::size);
     lv_obj_set_style_radius(chip, chip::size / 2, 0);
-    set_text_color(lv_obj_get_child(chip, 0), secondary);
+    lv_obj_t *label = lv_obj_get_child(chip, 0);
+    set_text_color(label, secondary);
+    lv_obj_set_style_text_opa(label, mark_opa, 0);
+    center_ink(label);
     return chip;
 }
 

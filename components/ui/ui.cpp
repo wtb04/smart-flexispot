@@ -15,10 +15,11 @@
 #define SHOT_DRAWER 0
 #endif
 #ifndef SHOT_ENABLED
-#define SHOT_ENABLED 1
+#define SHOT_ENABLED 0
 #endif
 #include "radar_page.h"
 #include "segment_display.h"
+#include "icons.h"
 #include "theme.h"
 
 #include <algorithm>
@@ -142,9 +143,7 @@ lv_obj_t *s_clock_box     = nullptr;
 lv_obj_t *s_side_buttons[2] = {};
 lv_obj_t *s_flip_buttons[2] = {};
 lv_obj_t *s_wifi_icon     = nullptr;
-lv_obj_t *s_wifi_slash    = nullptr;
 lv_obj_t *s_phone_icon    = nullptr;
-lv_obj_t *s_phone_slash   = nullptr;
 lv_obj_t *s_clock_hours   = nullptr;
 lv_obj_t *s_clock_colon   = nullptr;
 lv_obj_t *s_clock_minutes = nullptr;
@@ -359,8 +358,6 @@ void place_strip()
     theme::align(s_wifi_icon, right ? LV_ALIGN_LEFT_MID : LV_ALIGN_RIGHT_MID, 0, 0);
     theme::align(s_phone_icon, right ? LV_ALIGN_LEFT_MID : LV_ALIGN_RIGHT_MID, right ? 44 : -44,
                  0);
-    lv_obj_align_to(s_wifi_slash, s_wifi_icon, LV_ALIGN_CENTER, 0, -2);
-    lv_obj_align_to(s_phone_slash, s_phone_icon, LV_ALIGN_CENTER, 0, -2);
 }
 
 lv_obj_t *make_rail_button(lv_obj_t *parent, const char *text)
@@ -442,22 +439,16 @@ void create_rail(lv_obj_t *parent)
     s_clock_minutes = theme::make_label(clock, "--", theme::text, fonts::size_28());
     lv_timer_create(clock_blink, 1000, nullptr);
 
-    s_wifi_icon = theme::make_label(strip, LV_SYMBOL_WIFI, theme::text, fonts::size_22());
-
-    s_wifi_slash = theme::make_label(strip, "/", theme::text, fonts::size_32());
-
-    s_phone_icon = lv_obj_create(strip);
-    lv_obj_set_size(s_phone_icon, 18, 26);
-    theme::style_panel(s_phone_icon, theme::text, 4);
-    lv_obj_set_clickable(s_phone_icon, false);
-
-    lv_obj_t *phone_screen = lv_obj_create(s_phone_icon);
-    lv_obj_set_size(phone_screen, 13, 18);
-    lv_obj_align(phone_screen, LV_ALIGN_TOP_MID, 0, 3);
-    theme::style_panel(phone_screen, theme::panel, 2);
-    lv_obj_set_clickable(phone_screen, false);
-
-    s_phone_slash = theme::make_label(strip, "/", theme::text, fonts::size_32());
+    auto status_icon = [&](const lv_image_dsc_t *src) {
+        lv_obj_t *icon = lv_image_create(strip);
+        lv_image_set_src(icon, src);
+        lv_obj_set_style_image_recolor(icon, lv_color_hex(theme::text), 0);
+        lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
+        lv_obj_set_clickable(icon, false);
+        return icon;
+    };
+    s_wifi_icon  = status_icon(&icons::wifi_off_icon);
+    s_phone_icon = status_icon(&icons::phone_off_icon);
     place_strip();
 
     lv_obj_t *heading = theme::make_label(rail, "DESK HEIGHT", theme::secondary,
@@ -498,28 +489,17 @@ void create_rail(lv_obj_t *parent)
 constexpr std::int32_t DRAWER_W  = 340;
 constexpr std::uint32_t DRAWER_MS = 200;
 
-// The drawer is the rail widening. Its inner edge is tucked under the rail's
-// rounded corners, so the two surfaces meet without a seam and the outer corners
-// are the only ones anybody sees.
-constexpr std::int32_t DRAWER_TUCK = theme::radius::card;
-
+// A card of its own beside the rail: tucked under it, it showed through the
+// rail's rounded corners.
 void place_drawer(std::int32_t width)
 {
     const Layout l = layout();
-    lv_obj_set_width(s_drawer, width > 0 ? width + DRAWER_TUCK : 0);
-    lv_obj_set_x(s_drawer, l.rail_right ? l.screen_w - RAIL_W - width : RAIL_W - DRAWER_TUCK);
+    lv_obj_set_width(s_drawer, width);
+    lv_obj_set_x(s_drawer, l.rail_right ? l.screen_w - RAIL_W - GAP - width : RAIL_W + GAP);
+    lv_obj_set_hidden(s_drawer, width <= 0);
 }
 
-void pad_drawer()
-{
-    const Layout l = layout();
-    lv_obj_set_style_pad_all(s_drawer, PANEL_PAD, 0);
-    if (l.rail_right) {
-        lv_obj_set_style_pad_right(s_drawer, PANEL_PAD + DRAWER_TUCK, 0);
-    } else {
-        lv_obj_set_style_pad_left(s_drawer, PANEL_PAD + DRAWER_TUCK, 0);
-    }
-}
+void pad_drawer() { lv_obj_set_style_pad_all(s_drawer, PANEL_PAD, 0); }
 
 void drawer_width_cb(void *, std::int32_t value) { place_drawer(value); }
 
@@ -551,6 +531,10 @@ void create_drawer(lv_obj_t *parent)
     lv_obj_set_height(s_drawer, l.screen_h - 2 * GAP);
     place_drawer(0);
     theme::style_panel(s_drawer, theme::panel, theme::radius::card);
+    // It lies over the same surface, so a ring of background makes the card gap.
+    lv_obj_set_style_outline_width(s_drawer, GAP, 0);
+    lv_obj_set_style_outline_color(s_drawer, lv_color_hex(theme::background), 0);
+    lv_obj_set_style_outline_opa(s_drawer, LV_OPA_COVER, 0);
     pad_drawer();
     lv_obj_set_flex_flow(s_drawer, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(s_drawer, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
@@ -1443,13 +1427,14 @@ lv_obj_t *s_pages[PAGE_COUNT]    = {};
 lv_obj_t *s_nav_tabs[PAGE_COUNT] = {};
 
 struct NavItem {
-    const char *icon;
-    const char *caption;
-    bool        needs_presence;
+    const char           *icon;
+    const char           *caption;
+    bool                  needs_presence;
+    const lv_image_dsc_t *image = nullptr;  // drawn here, where the fonts have no glyph
 };
 constexpr NavItem NAV_ITEMS[PAGE_COUNT] = {
-    {LV_SYMBOL_HOME, "Home", false},    {LV_SYMBOL_LIST, "Calendar", true},
-    {LV_SYMBOL_BELL, "Alerts", true},   {LV_SYMBOL_GPS, "Radar", true},
+    {LV_SYMBOL_HOME, "Home", false},    {"", "Calendar", true, &icons::calendar_icon},
+    {LV_SYMBOL_BELL, "Alerts", true},   {"", "Radar", true, &icons::plane_icon},
     {LV_SYMBOL_SETTINGS, "Setup", false},
 };
 
@@ -1856,7 +1841,8 @@ void volume_changed_cb(lv_event_t *e)
 // with the explanation under it: the other way round, a description ends up the
 // biggest thing on the card.
 lv_obj_t *build_tile(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int32_t w,
-                     std::int32_t h, const char *icon, const char *title, bool titled = false)
+                     std::int32_t h, const char *icon, const char *title, bool titled = false,
+                     const lv_image_dsc_t *image = nullptr)
 {
     lv_obj_t *tile = lv_button_create(parent);
     lv_obj_set_pos(tile, x, y);
@@ -1864,7 +1850,16 @@ lv_obj_t *build_tile(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int3
     theme::style_button(tile, theme::panel_light);
     lv_obj_set_style_pad_all(tile, 20, 0);
 
-    lv_obj_t *glyph = theme::make_accent_label(tile, icon, fonts::size_28());
+    lv_obj_t *glyph = nullptr;
+    if (image != nullptr) {
+        glyph = lv_image_create(tile);
+        lv_image_set_src(glyph, image);
+        lv_obj_set_style_image_recolor(glyph, lv_color_hex(theme::primary), 0);
+        lv_obj_set_style_image_recolor_opa(glyph, LV_OPA_COVER, 0);
+        lv_obj_set_clickable(glyph, false);
+    } else {
+        glyph = theme::make_accent_label(tile, icon, fonts::size_28());
+    }
     lv_obj_align(glyph, LV_ALIGN_TOP_LEFT, 0, 0);
 
     const lv_font_t *font = titled ? theme::type_title() : fonts::size_22();
@@ -1923,7 +1918,10 @@ void build_info_tile(lv_obj_t *parent, int index, std::int32_t x, std::int32_t y
                      std::int32_t h)
 {
     lv_obj_t *tile =
-        build_tile(parent, x, y, w, h, INFO_CARDS[index].icon, INFO_CARDS[index].title);
+        build_tile(parent, x, y, w, h, INFO_CARDS[index].icon, INFO_CARDS[index].title, false,
+                   INFO_CARDS[index].subsystem == Subsystem::Radar      ? &icons::plane_icon
+                   : INFO_CARDS[index].subsystem == Subsystem::Calendar ? &icons::calendar_icon
+                                                                        : nullptr);
     lv_obj_add_event_cb(tile, detail_clicked_cb, LV_EVENT_CLICKED,
                         reinterpret_cast<void *>(static_cast<std::intptr_t>(index)));
     lv_obj_add_event_cb(tile, log_held_cb, LV_EVENT_LONG_PRESSED,
@@ -2406,8 +2404,15 @@ void create_content(lv_obj_t *parent)
         lv_obj_add_event_cb(tab, nav_event_cb, LV_EVENT_CLICKED,
                             reinterpret_cast<void *>(static_cast<std::intptr_t>(i)));
 
-        lv_obj_t *icon = theme::make_label(tab, NAV_ITEMS[i].icon, theme::secondary,
-                                           fonts::size_28());
+        lv_obj_t *icon = nullptr;
+        if (NAV_ITEMS[i].image != nullptr) {
+            icon = lv_image_create(tab);
+            lv_image_set_src(icon, NAV_ITEMS[i].image);
+            lv_obj_set_style_image_recolor(icon, lv_color_hex(theme::secondary), 0);
+            lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
+        } else {
+            icon = theme::make_label(tab, NAV_ITEMS[i].icon, theme::secondary, fonts::size_28());
+        }
         lv_obj_align(icon, LV_ALIGN_CENTER, 0, -12);
         lv_obj_t *caption = theme::make_label(tab, NAV_ITEMS[i].caption, theme::secondary,
                                               fonts::size_16());
@@ -2424,6 +2429,7 @@ void create_content(lv_obj_t *parent)
     }
 
     build_home_page(s_pages[0]);
+
     {
         const Layout cl = layout();
         lv_obj_set_style_pad_all(s_pages[1], PANEL_PAD, 0);
@@ -2610,7 +2616,7 @@ void build_screen()
         // looking at, so the gate is lifted for as long as the pictures take.
         lv_timer_t *shot = lv_timer_create([](lv_timer_t *timer) {
             // Only the pages being worked on: every one adds about a minute.
-            static const int PAGES[] = {0, RADAR_PAGE};
+            static const int PAGES[] = {CALENDAR_PAGE};
             static int       step    = -1;
             static bool      gated   = false;
             if (step >= 0) {
@@ -2951,8 +2957,10 @@ esp_err_t set_dial_toggle(int index, const char *label, bool on)
     if (!empty) {
         lv_obj_t *text = lv_obj_get_child(chip, 0);
         theme::set_text(text, label);
+        theme::center_ink(text);
         lv_obj_set_state(chip, LV_STATE_CHECKED, on);
         theme::set_text_color(text, on ? theme::text : theme::secondary);
+        lv_obj_set_style_text_opa(text, on ? LV_OPA_COVER : theme::mark_opa, 0);
     }
     lvgl_port_unlock();
     return ESP_OK;
@@ -2994,11 +3002,11 @@ esp_err_t set_thermostat(float current_c, float target_c, const char *mode, Hvac
 
 esp_err_t set_presence(bool has_key, bool present, bool ever_seen)
 {
-    ESP_RETURN_ON_FALSE(s_phone_slash != nullptr, ESP_ERR_INVALID_STATE, TAG, "not initialised");
+    ESP_RETURN_ON_FALSE(s_phone_icon != nullptr, ESP_ERR_INVALID_STATE, TAG, "not initialised");
     ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
 
     const bool here = has_key && present;
-    lv_obj_set_hidden(s_phone_slash, here);
+    lv_image_set_src(s_phone_icon, here ? &icons::phone_icon : &icons::phone_off_icon);
 
     const bool known = has_key && ever_seen;
     if (known != s_presence_known || here != s_present) {
@@ -3042,8 +3050,7 @@ esp_err_t set_links(bool wifi, bool mqtt)
     }
     last = wifi ? 1 : 0;
     ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
-    lv_obj_set_hidden(s_wifi_slash, wifi);
-
+    lv_image_set_src(s_wifi_icon, wifi ? &icons::wifi_icon : &icons::wifi_off_icon);
     lvgl_port_unlock();
     return ESP_OK;
 }
