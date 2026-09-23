@@ -142,28 +142,47 @@ inline std::uint16_t grey_to_rgb565(std::uint8_t level)
     return static_cast<std::uint16_t>(((level >> 3) << 11) | ((level >> 2) << 5) | (level >> 3));
 }
 
+/** The card's frame is square; a wide episode still shows its middle. */
+struct Square {
+    int left;
+    int top;
+    int side;
+};
+
+Square middle(int width, int height)
+{
+    const int side = width < height ? width : height;
+    return {(width - side) / 2, (height - side) / 2, side};
+}
+
 /** Nearest neighbour: a box filter would read every source pixel, not one in 16. */
-void shrink(const std::uint16_t *src, int side, int stride, std::uint16_t *dst)
+void shrink(const std::uint16_t *src, Square from, int stride, std::uint16_t *dst)
 {
     for (int y = 0; y < kArtSize; ++y) {
-        const std::uint16_t *row = src + static_cast<std::size_t>(y * side / kArtSize) * stride;
-        std::uint16_t       *out = dst + static_cast<std::size_t>(y) * kArtSize;
+        const std::uint16_t *row =
+            src + static_cast<std::size_t>(from.top + y * from.side / kArtSize) * stride + from.left;
+        std::uint16_t *out = dst + static_cast<std::size_t>(y) * kArtSize;
         for (int x = 0; x < kArtSize; ++x) {
-            out[x] = row[x * side / kArtSize];
+            out[x] = row[x * from.side / kArtSize];
         }
     }
 }
 
-void shrink_grey(const std::uint8_t *src, int side, int stride, std::uint16_t *dst)
+void shrink_grey(const std::uint8_t *src, Square from, int stride, std::uint16_t *dst)
 {
     for (int y = 0; y < kArtSize; ++y) {
-        const std::uint8_t *row = src + static_cast<std::size_t>(y * side / kArtSize) * stride;
-        std::uint16_t      *out = dst + static_cast<std::size_t>(y) * kArtSize;
+        const std::uint8_t *row =
+            src + static_cast<std::size_t>(from.top + y * from.side / kArtSize) * stride + from.left;
+        std::uint16_t *out = dst + static_cast<std::size_t>(y) * kArtSize;
         for (int x = 0; x < kArtSize; ++x) {
-            out[x] = grey_to_rgb565(row[x * side / kArtSize]);
+            out[x] = grey_to_rgb565(row[x * from.side / kArtSize]);
         }
     }
 }
+
+bool baseline(const std::uint8_t *jpeg, std::size_t length);
+bool decode_soft(const void *jpeg, std::size_t length, std::uint16_t *out, int max_w, int max_h,
+                 int &out_w, int &out_h);
 
 bool decode_locked(std::size_t bytes)
 {
@@ -172,9 +191,31 @@ bool decode_locked(std::size_t bytes)
         ESP_LOGW(TAG, "not a readable jpeg");
         return false;
     }
-    if (info.width != info.height || static_cast<int>(info.width) > MAX_DECODE_SIDE) {
+    if (static_cast<int>(info.width) > MAX_DECODE_SIDE ||
+        static_cast<int>(info.height) > MAX_DECODE_SIDE) {
         ESP_LOGW(TAG, "cover is %ux%u, skipping", info.width, info.height);
         return false;
+    }
+    const Square from = middle(static_cast<int>(info.width), static_cast<int>(info.height));
+
+    // The engine takes baseline pictures whose pixel count divides by eight;
+    // anything else goes through software.
+    if (!baseline(s_jpeg, bytes) || (info.width * info.height) % 8 != 0) {
+        int width  = 0;
+        int height = 0;
+        auto *full = reinterpret_cast<std::uint16_t *>(s_full);
+        if (!decode_soft(s_jpeg, bytes, full, MAX_DECODE_SIDE, MAX_DECODE_SIDE, width, height)) {
+            ESP_LOGW(TAG, "cover %ux%u would not decode", info.width, info.height);
+            return false;
+        }
+        std::uint16_t *art = s_art[s_next];
+        shrink(full, middle(width, height), width, art);
+        s_next = 1 - s_next;
+        if (s_on_art != nullptr) {
+            s_on_art(Art::Ready, art);
+        }
+        ESP_LOGI(TAG, "cover %dx%d, in software -> %d", width, height, kArtSize);
+        return true;
     }
 
     const bool grey = info.sample_method == JPEG_DOWN_SAMPLING_GRAY;
@@ -193,10 +234,9 @@ bool decode_locked(std::size_t bytes)
 
     std::uint16_t *art = s_art[s_next];
     if (grey) {
-        shrink_grey(s_full, static_cast<int>(info.width), decoded_stride(info), art);
+        shrink_grey(s_full, from, decoded_stride(info), art);
     } else {
-        shrink(reinterpret_cast<const std::uint16_t *>(s_full), static_cast<int>(info.width),
-               decoded_stride(info), art);
+        shrink(reinterpret_cast<const std::uint16_t *>(s_full), from, decoded_stride(info), art);
     }
     s_next = 1 - s_next;
 
