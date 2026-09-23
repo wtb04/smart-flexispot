@@ -9,4 +9,4 @@ cmake_minimum_required(VERSION 3.16)
 set(EXTRA_COMPONENT_DIRS "../components/loctek" "../components/deskproto")
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-project(desk_proxy)
+project(desk_companion)

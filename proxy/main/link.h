@@ -10,4 +10,11 @@ esp_err_t start();
 /** The desk driver reports heights; the link passes them on. */
 void note_height(int height_mm);
 
+/** True while a panel is connected over BLE. */
+bool panel_connected();
+
+/** True while the control box is answering -- the same flag the status
+ *  notifications carry, so the indicator LED and the panel never disagree. */
+bool box_up();
+
 }  // namespace desklink

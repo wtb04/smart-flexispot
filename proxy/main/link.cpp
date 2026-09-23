@@ -25,7 +25,7 @@
 namespace desklink {
 namespace {
 constexpr char TAG[]  = "desklink";
-constexpr char NAME[] = "desk-proxy";
+constexpr char NAME[] = "desk-companion";
 
 int          s_height_mm  = -1;
 TaskHandle_t s_status_task = nullptr;
@@ -397,6 +397,16 @@ void host_task(void *)
 }
 
 }  // namespace
+
+bool panel_connected()
+{
+    return s_conn != BLE_HS_CONN_HANDLE_NONE;
+}
+
+bool box_up()
+{
+    return s_box_up.load(std::memory_order_relaxed);
+}
 
 void note_height(int height_mm)
 {

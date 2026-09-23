@@ -2,6 +2,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "leds.h"
 #include "link.h"
 #include "loctek.h"
 
@@ -35,6 +36,10 @@ extern "C" void app_main(void)
         ESP_ERROR_CHECK_WITHOUT_ABORT(nvs_flash_erase());
         ESP_ERROR_CHECK_WITHOUT_ABORT(nvs_flash_init());
     }
+
+    // Before the desk and the radio: if either fails to come up the LEDs are
+    // how you find out, so they must already be running.
+    ESP_ERROR_CHECK_WITHOUT_ABORT(deskled::start());
 
     ESP_ERROR_CHECK(loctek::start(on_height));
     ESP_LOGI(TAG, "desk link up, listening");

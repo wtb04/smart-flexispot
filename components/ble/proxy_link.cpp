@@ -17,7 +17,7 @@
 namespace ble::proxy {
 namespace {
 constexpr char TAG[]  = "desklink";
-constexpr char NAME[] = "desk-proxy";
+constexpr char NAME[] = "desk-companion";
 
 constexpr ble_uuid128_t SERVICE_UUID = BLE_UUID128_INIT(0x2d, 0x71, 0x9a, 0x4c, 0x8e, 0x3b, 0x4f,
                                                         0x6a, 0x9c, 0x1d, 0x5e, 0x77, 0x01, 0x00,

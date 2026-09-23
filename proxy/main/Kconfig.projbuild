@@ -9,4 +9,32 @@ menu "Desk proxy"
             back and logged instead. For testing the whole path with the desk
             standing still.
 
+    config PROXY_LED_BT_GPIO
+        int "BT indicator LED GPIO ('BT' on the silkscreen), -1 if unwired"
+        default 32
+        help
+            Drives one of the two LEDs inside the RJ45 jack through a 220R
+            series resistor. GPIO32 on the carrier board (row B pin 6, D32).
+            Solid while a panel is connected, heartbeat while advertising.
+
+            GPIO32/33 double as the external 32 kHz crystal pins. They are free
+            as GPIO only while the RTC runs off the internal RC, which is the
+            default and what this build uses.
+
+    config PROXY_LED_DESK_GPIO
+        int "Desk indicator LED GPIO ('LINK' on the silkscreen), -1 if unwired"
+        default 33
+        help
+            The other jack LED. GPIO33 on the carrier board (row B pin 7, D33).
+            Solid while the control box answers; fast blink when bytes arrive
+            but no frame decodes, which is a baud or wiring fault rather than
+            silence.
+
+    config PROXY_LED_SELFTEST
+        bool "Blink both LEDs at boot"
+        default y
+        help
+            Each LED on its own, then both together. Lets a loose LED clipped to
+            one pin prove that pin before the board exists.
+
 endmenu
