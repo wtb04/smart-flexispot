@@ -372,6 +372,8 @@ void update_desk()
     push_height(Info::DeskSit, desk::preset_height_mm(3));
     push_height(Info::DeskOne, desk::preset_height_mm(0));
     push_height(Info::DeskTwo, desk::preset_height_mm(1));
+    push_height(Info::DeskFive, desk::preset_height_mm(4));
+    push_height(Info::DeskSix, desk::preset_height_mm(5));
 }
 
 void update_system()

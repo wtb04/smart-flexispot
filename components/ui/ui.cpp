@@ -523,6 +523,8 @@ void animate_drawer(bool open)
 
 void manual_clicked_cb(lv_event_t *) { animate_drawer(!s_drawer_open); }
 
+void show_guest_presets();
+
 void create_drawer(lv_obj_t *parent)
 {
     const Layout l = layout();
@@ -545,8 +547,9 @@ void create_drawer(lv_obj_t *parent)
     create_move_button(s_drawer, LV_SYMBOL_UP, Move::Up, DRAWER_W - 2 * PANEL_PAD, RAIL_BTN_H);
     create_move_button(s_drawer, LV_SYMBOL_DOWN, Move::Down, DRAWER_W - 2 * PANEL_PAD, RAIL_BTN_H);
 
-    for (int index = 0; index < 2; ++index) {
-        char label[16];
+    // 3 and 4 are Stand and Sit on the rail.
+    for (const int index : {0, 1, 4, 5}) {
+        char label[24];
         std::snprintf(label, sizeof(label), "PRESET %d", index + 1);
         lv_obj_t *btn = theme::make_button(s_drawer, label);
         lv_obj_set_size(btn, DRAWER_W - 2 * PANEL_PAD, RAIL_BTN_H);
@@ -554,6 +557,7 @@ void create_drawer(lv_obj_t *parent)
         bind_preset(btn, index);
         register_desk_control(btn);
     }
+    show_guest_presets();
 }
 
 void place_for_side()
@@ -1459,6 +1463,25 @@ std::atomic<bool> s_setup_visible{false};
 
 bool s_presence_gate = true;
 
+// Presets 5 and 6 are for whoever uses the desk while the phone is away.
+void show_guest_presets()
+{
+    if (s_drawer == nullptr || s_preset_buttons[4] == nullptr) {
+        return;
+    }
+    const bool shown = !s_presence_gate || !s_present;
+    lv_obj_set_hidden(s_preset_buttons[4], !shown);
+    lv_obj_set_hidden(s_preset_buttons[5], !shown);
+    const Layout       l      = layout();
+    const int          count  = shown ? 6 : 4;
+    const std::int32_t inner  = l.screen_h - 2 * GAP - 2 * PANEL_PAD;
+    const std::int32_t height = std::min<std::int32_t>(RAIL_BTN_H, (inner - (count - 1) * BUTTON_GAP) / count);
+    for (std::uint32_t i = 0; i < lv_obj_get_child_count(s_drawer); ++i) {
+        lv_obj_set_height(lv_obj_get_child(s_drawer, i), height);
+    }
+}
+
+
 bool page_available(int index)
 {
     return !NAV_ITEMS[index].needs_presence || !s_presence_gate || !s_presence_known || s_present;
@@ -1484,13 +1507,19 @@ void select_page(int index)
     if (s_handlers.radar != nullptr) {
         s_handlers.radar(index == RADAR_PAGE, page_available(RADAR_PAGE));
     }
+    show_guest_presets();
     for (int i = 0; i < PAGE_COUNT; ++i) {
         lv_obj_set_hidden(s_nav_tabs[i], !page_available(i));
         lv_obj_set_hidden(s_pages[i], i != index);
         const bool active = (i == index);
         lv_obj_set_state(s_nav_tabs[i], LV_STATE_CHECKED, active);
         const std::uint32_t ink = active ? theme::text : theme::secondary;
-        theme::set_text_color(lv_obj_get_child(s_nav_tabs[i], 0), ink);
+        lv_obj_t *icon = lv_obj_get_child(s_nav_tabs[i], 0);
+        if (NAV_ITEMS[i].image != nullptr) {
+            lv_obj_set_style_image_recolor(icon, lv_color_hex(ink), 0);
+        } else {
+            theme::set_text_color(icon, ink);
+        }
         theme::set_text_color(lv_obj_get_child(s_nav_tabs[i], 1), ink);
     }
 }
@@ -1578,6 +1607,7 @@ constexpr InfoRow DESK_ROWS[] = {
     {Info::DeskHeight, "Height"},         {Info::DeskActive, "Standing at"},
     {Info::DeskStand, "Stand"},           {Info::DeskSit, "Sit"},
     {Info::DeskOne, "Preset 1"},          {Info::DeskTwo, "Preset 2"},
+    {Info::DeskFive, "Preset 5"},         {Info::DeskSix, "Preset 6"},
 };
 constexpr InfoRow RADAR_ROWS[] = {
     {Info::RadarFeed, "Feed"},

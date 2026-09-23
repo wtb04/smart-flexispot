@@ -25,7 +25,10 @@ using SetpointHandler = void (*)(float celsius);
 
 using ModeHandler = void (*)();
 
-inline constexpr int kPresetCount = 4;
+inline constexpr int kPresetCount = 6;
+/** The first four are the control box's own; 5 and 6 are kept by the panel and
+ *  reached by driving the desk there. */
+inline constexpr int kBoxPresets = 4;
 
 enum class MediaAction : std::uint8_t {
     PlayPause,
@@ -242,6 +245,8 @@ enum class Info : std::uint8_t {
     DeskSit,
     DeskOne,
     DeskTwo,
+    DeskFive,
+    DeskSix,
     RadarFeed,
     RadarAircraft,
     RadarRange,
