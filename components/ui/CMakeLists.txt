@@ -1,6 +1,10 @@
 file(GLOB UI_FONTS "fonts/lv_font_*.c")
 idf_component_register(
-    SRCS "ui.cpp" "radar_page.cpp" "calendar_page.cpp" "screenshot.cpp" "segment_display.cpp" "modal_overlay.cpp" "fonts/units_font.cpp" ${UI_FONTS}
+    SRCS "ui.cpp" "lv_mem_psram.c" "radar_page.cpp" "calendar_page.cpp" "screenshot.cpp" "segment_display.cpp" "modal_overlay.cpp" "fonts/units_font.cpp" ${UI_FONTS}
     INCLUDE_DIRS "include" "fonts"
-    REQUIRES lvgl__lvgl espressif__esp_lvgl_port board media radar ical travel
+    REQUIRES esp_app_format lvgl__lvgl espressif__esp_lvgl_port board media radar ical travel
 )
+
+# The allocator is only referred to by LVGL, which links after this component;
+# without this the linker has passed it by before anything asks for it.
+target_link_libraries(${COMPONENT_LIB} INTERFACE "-u lv_mem_init")

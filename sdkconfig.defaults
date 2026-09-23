@@ -104,7 +104,8 @@ CONFIG_MQTT_TRANSPORT_WEBSOCKET=n
 # reported -- the radius mask dereferences it and the panic lands in the drawing
 # code, far from the real cause. Hand LVGL the system heap instead, which has the
 # board's PSRAM behind it.
-CONFIG_LV_USE_CLIB_MALLOC=y
+# LVGL allocates through components/ui/lv_mem_psram.c, in PSRAM.
+CONFIG_LV_USE_CUSTOM_MALLOC=y
 CONFIG_LV_USE_CLIB_STRING=y
 CONFIG_LV_USE_CLIB_SPRINTF=y
 # Rounded corners are cached per distinct radius, and the screen now uses about
@@ -209,3 +210,9 @@ CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y
 # Lets the panel hand back a picture of its own screen over the console, so a
 # layout can be looked at rather than guessed at. See tools/screenshot.py.
 CONFIG_LV_USE_SNAPSHOT=y
+
+# Software AES: the hardware engine copies each chunk into fresh internal DMA
+# memory, and with that pool this tight Outlook's downloads failed halfway.
+# CONFIG_MBEDTLS_HARDWARE_AES is not set
+# Without DMA, TLS needs no internal memory; a large download took it to 1 KB.
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
