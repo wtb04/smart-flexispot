@@ -1,0 +1,3 @@
+Designator,Qty,Value,LCSC,MPN,KiCad footprint
+RJ45_1,1,RJ45 8P8C 2xLED,C386757,R-RJ45R08P-C000,Connector_RJ:RJ45_Connfly_DS1128-09-S8xx-S_Horizontal
+"U1A,U1B",2,Socket 1x15 2.54mm,C124408,1x15 female header 2.54mm,Connector_PinSocket_2.54mm:PinSocket_1x15_P2.54mm_Vertical

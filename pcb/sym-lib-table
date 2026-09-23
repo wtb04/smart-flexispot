@@ -1,0 +1,4 @@
+(sym_lib_table
+  (version 7)
+  (lib (name "tab5-desk-ctrl")(type "KiCad")(uri "${KIPRJMOD}/symbols/tab5-desk-ctrl.kicad_sym")(options "")(descr "project symbols"))
+)

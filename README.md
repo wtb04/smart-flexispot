@@ -104,8 +104,8 @@ the failsafes and their tests have one home.
 
 | Signal | ESP32 GPIO | Control box RJ45 |
 | --- | --- | --- |
-| TX (ESP32 → box) | 16 | pin 6 |
-| RX (box → ESP32) | 17 | pin 5 |
+| TX (ESP32 → box) | 16 | pin 5 |
+| RX (box → ESP32) | 17 | pin 6 |
 | Wake ("PIN 20") | 23 | pin 4 |
 | GND | GND | pin 7 |
 

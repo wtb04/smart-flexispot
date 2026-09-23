@@ -1,0 +1,4 @@
+# For gen_pcb.py, route.py, gen_sch.py, check_sch.py.
+# finish.py and link_sch.py use KiCad's bundled python (pcbnew) instead.
+kiutils>=1.4
+numpy

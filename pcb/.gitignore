@@ -1,0 +1,14 @@
+# KiCad's own scratch: autosave archives, footprint cache, per-user view prefs,
+# lock files. Regenerated on open; none of it is the design.
+*-backups/
+fp-info-cache
+*.kicad_prl
+*.lck
+~*.lck
+_autosave-*
+*-save.kicad_*
+# DRC/ERC reports are re-run, not kept
+*.rpt
+# make_fab.sh plots into fab/gerbers/ then zips it; the zip is the artifact
+# that was uploaded, the loose plots are rebuilt every run.
+fab/gerbers/
