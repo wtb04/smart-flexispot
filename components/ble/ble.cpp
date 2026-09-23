@@ -218,10 +218,30 @@ void start_scanning()
     }
 }
 
+// Scanning restarted from inside a disconnect can be refused while the old link
+// is torn down, and nothing retried it. This puts it back every two seconds.
+constexpr std::uint32_t RETRY_MS = 2000;
+ble_npl_callout         s_retry;
+
+void retry(ble_npl_event *)
+{
+    proxy::recover();
+    if (!ble_gap_disc_active() && !ble_gap_conn_active()) {
+        start_scanning();
+    }
+    ble_npl_callout_reset(&s_retry, ble_npl_time_ms_to_ticks32(RETRY_MS));
+}
+
 void on_sync()
 {
     proxy::set_rescan(start_scanning);
     start_scanning();
+    static bool armed = false;
+    if (!armed) {
+        armed = true;
+        ble_npl_callout_init(&s_retry, nimble_port_get_dflt_eventq(), retry, nullptr);
+    }
+    ble_npl_callout_reset(&s_retry, ble_npl_time_ms_to_ticks32(RETRY_MS));
 }
 
 void on_reset(int reason)

@@ -16,6 +16,9 @@ bool consider(const ble_gap_disc_desc &advert);
  *  belonged to this link and the scanner should leave it alone. */
 bool handle(ble_gap_event *event);
 
+/** Clears a connection attempt that ended without saying so. Host task only. */
+void recover();
+
 /** Scanning is stopped while connecting and has to be put back afterwards. */
 void set_rescan(void (*rescan)());
 

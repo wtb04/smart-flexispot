@@ -226,6 +226,14 @@ void set_rescan(void (*rescan)())
     s_rescan = rescan;
 }
 
+void recover()
+{
+    if (s_connecting && !ble_gap_conn_active()) {
+        ESP_LOGW(TAG, "connection attempt went quiet; looking again");
+        s_connecting = false;
+    }
+}
+
 bool consider(const ble_gap_disc_desc &advert)
 {
     if (s_up.load(std::memory_order_relaxed) || s_connecting || !advert_is_proxy(advert)) {
@@ -274,7 +282,8 @@ bool handle(ble_gap_event *event)
             return true;
 
         case BLE_GAP_EVENT_DISCONNECT:
-            ESP_LOGW(TAG, "link lost (reason %d)", event->disconnect.reason);
+            ESP_LOGW(TAG, "link lost (reason %d); looking again", event->disconnect.reason);
+            s_connecting = false;
             s_up.store(false, std::memory_order_relaxed);
             s_conn = BLE_HS_CONN_HANDLE_NONE;
             s_echo = 0;
