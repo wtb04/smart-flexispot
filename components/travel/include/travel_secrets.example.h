@@ -10,6 +10,10 @@
 // No trailing slash. An empty host leaves travel out altogether.
 #define TRAVEL_HOST "https://travel.example.org"
 
+// What the service expects as X-Api-Key; the same value as reis_api_key in the
+// Ansible vault. Empty sends none, which a local run does not ask for.
+#define TRAVEL_API_KEY ""
+
 // For working on the panel rather than for using it. Anything above zero makes
 // it ask about being somewhere that many minutes from now instead of about the
 // next thing in the calendar, which is the only way to see a bus without

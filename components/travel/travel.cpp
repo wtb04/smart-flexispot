@@ -12,6 +12,10 @@
 #include "travel_secrets.h"
 #include "wifi.h"
 
+#ifndef TRAVEL_API_KEY
+#define TRAVEL_API_KEY ""
+#endif
+
 #include <atomic>
 #include <cstdio>
 #include <cstring>
@@ -51,6 +55,8 @@ int     s_count   = 0;
 bool    s_ok      = false;
 
 std::atomic<std::int64_t> s_wanted{0};
+std::atomic<Place>        s_place{Place::Study};
+Place                     s_asked_place = Place::Study;
 std::int64_t              s_asked_for  = 0;
 std::int64_t              s_asked_at   = 0;
 
@@ -71,11 +77,11 @@ esp_err_t on_event(esp_http_client_event_t *event)
     return ESP_OK;
 }
 
-bool fetch(std::int64_t arrive_by)
+bool fetch(std::int64_t arrive_by, Place place)
 {
-    char url[160];
-    std::snprintf(url, sizeof(url), "%s/v1/leave?arriveBy=%lld", TRAVEL_HOST,
-                  static_cast<long long>(arrive_by));
+    char url[176];
+    std::snprintf(url, sizeof(url), "%s/v1/leave?arriveBy=%lld%s", TRAVEL_HOST,
+                  static_cast<long long>(arrive_by), place == Place::Work ? "&to=work" : "");
 
     esp_http_client_config_t cfg{};
     cfg.url           = url;
@@ -89,6 +95,9 @@ bool fetch(std::int64_t arrive_by)
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
     if (client == nullptr) {
         return false;
+    }
+    if (TRAVEL_API_KEY[0] != '\0') {
+        esp_http_client_set_header(client, "X-Api-Key", TRAVEL_API_KEY);
     }
 
     s_body_len = 0;
@@ -124,18 +133,20 @@ bool fetch(std::int64_t arrive_by)
 {
     for (;;) {
         const std::int64_t wanted = s_wanted.load(std::memory_order_relaxed);
+        const Place        place  = s_place.load(std::memory_order_relaxed);
         const std::int64_t now    = esp_timer_get_time();
 
         const auto away = wanted - static_cast<std::int64_t>(std::time(nullptr));
         const auto due  = away < NEAR_SECONDS ? NEAR_REFRESH_US : FAR_REFRESH_US;
 
-        const bool changed = wanted != s_asked_for;
+        const bool changed = wanted != s_asked_for || place != s_asked_place;
         const bool stale   = wanted != 0 && now - s_asked_at >= due;
 
         if (wanted != 0 && wifi::connected() && (changed || stale)) {
-            s_asked_for = wanted;
-            s_asked_at  = now;
-            if (fetch(wanted) && s_on_update != nullptr) {
+            s_asked_for   = wanted;
+            s_asked_place = place;
+            s_asked_at    = now;
+            if (fetch(wanted, place) && s_on_update != nullptr) {
                 s_on_update();
             }
         }
@@ -166,7 +177,7 @@ esp_err_t start(UpdateHandler on_update)
     return ESP_OK;
 }
 
-void want(std::int64_t arrive_by)
+void want(std::int64_t arrive_by, Place place)
 {
 #if TRAVEL_FAKE_MINUTES > 0
     if (arrive_by != 0) {
@@ -177,7 +188,8 @@ void want(std::int64_t arrive_by)
         arrive_by = soon - soon % 60;
     }
 #endif
-    if (s_wanted.exchange(arrive_by, std::memory_order_relaxed) == arrive_by) {
+    const bool moved = s_place.exchange(place, std::memory_order_relaxed) != place;
+    if (s_wanted.exchange(arrive_by, std::memory_order_relaxed) == arrive_by && !moved) {
         return;
     }
     if (s_task != nullptr) {
