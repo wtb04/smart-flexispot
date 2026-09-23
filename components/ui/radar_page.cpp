@@ -5,6 +5,7 @@
 #include "esp_timer.h"
 #include "map_data.h"
 #include "theme.h"
+#include "icons.h"
 
 #include <algorithm>
 #include <cmath>
@@ -37,7 +38,7 @@ constexpr int RIM_SIZE = 6;
 
 struct Blip;
 
-constexpr int READINGS = 5;
+constexpr int READINGS = 3;
 
 constexpr int MAP_POINTS     = 2400;
 constexpr int MASK_MAX_EDGES = 64;
@@ -70,8 +71,7 @@ constexpr float KM_PER_NM = 1.852f;
 
 constexpr std::int32_t COLUMN_W   = 294;
 constexpr std::int32_t COLUMN_GAP = theme::space::m;
-constexpr std::int32_t ROW_H      = 30;
-constexpr std::int32_t ROWS_Y     = 208;
+constexpr std::int32_t PHOTO_H    = 174;  // a 3:2 photograph across the card
 
 // Both cards in the column are inset by the same amount, so the callsign, the
 // readings and the photograph all start on one edge.
@@ -86,10 +86,19 @@ constexpr int DOT_SIZE = 5;
 
 enum class Shape : std::uint8_t { Airliner, Heavy, Light, Rotor, Other };
 
-// Nose towards negative y: up, before the track rotation.
-constexpr float OUTLINE_AIRLINER[][2] = {{0, -9}, {7, 4}, {0, 1}, {-7, 4}};
-constexpr float OUTLINE_HEAVY[][2]    = {{0, -11}, {10, 5}, {0, 1}, {-10, 5}};
-constexpr float OUTLINE_LIGHT[][2]    = {{0, -6}, {4, 5}, {-4, 5}};
+// Seen from above, nose towards negative y before the track turns it.
+constexpr float OUTLINE_AIRLINER[][2] = {
+    {0, -9},   {1.4f, -7}, {1.4f, -2}, {8, 2.5f},  {8, 4},     {1.4f, 2},
+    {1.2f, 6}, {3.5f, 8},  {3.5f, 9},  {0, 8},     {-3.5f, 9}, {-3.5f, 8},
+    {-1.2f, 6}, {-1.4f, 2}, {-8, 4},   {-8, 2.5f}, {-1.4f, -2}, {-1.4f, -7}};
+constexpr float OUTLINE_HEAVY[][2] = {
+    {0, -11.5f}, {1.8f, -9},  {1.8f, -2.5f}, {10, 3},  {10, 5},      {1.8f, 2.5f},
+    {1.5f, 7.5f}, {4.5f, 10}, {4.5f, 11},    {0, 10},  {-4.5f, 11},  {-4.5f, 10},
+    {-1.5f, 7.5f}, {-1.8f, 2.5f}, {-10, 5},  {-10, 3}, {-1.8f, -2.5f}, {-1.8f, -9}};
+constexpr float OUTLINE_LIGHT[][2] = {
+    {0, -6},  {1, -5},     {1, -2},   {6.5f, -1.5f}, {6.5f, 0.5f}, {1, 0.5f},
+    {0.8f, 4}, {2.8f, 5},  {2.8f, 6}, {-2.8f, 6},    {-2.8f, 5},   {-0.8f, 4},
+    {-1, 0.5f}, {-6.5f, 0.5f}, {-6.5f, -1.5f}, {-1, -2}, {-1, -5}};
 constexpr float OUTLINE_OTHER[][2]    = {{0, -6}, {6, 0}, {0, 6}, {-6, 0}};
 // One stroke through both diameters, because a line is a single polyline.
 constexpr float OUTLINE_ROTOR[][2] = {{-7, -7}, {7, 7}, {0, 0}, {7, -7}, {-7, 7}};
@@ -98,6 +107,7 @@ struct Outline {
     const float (*points)[2];
     int  count;
     bool closed;
+    bool dotted = false;  // a mark at the centre, for the shapes that are not a plane
 };
 
 Outline outline_for(const char *category)
@@ -120,9 +130,9 @@ Outline outline_for(const char *category)
         case Shape::Light:
             return {OUTLINE_LIGHT, static_cast<int>(std::size(OUTLINE_LIGHT)), true};
         case Shape::Rotor:
-            return {OUTLINE_ROTOR, static_cast<int>(std::size(OUTLINE_ROTOR)), false};
+            return {OUTLINE_ROTOR, static_cast<int>(std::size(OUTLINE_ROTOR)), false, true};
         default:
-            return {OUTLINE_OTHER, static_cast<int>(std::size(OUTLINE_OTHER)), true};
+            return {OUTLINE_OTHER, static_cast<int>(std::size(OUTLINE_OTHER)), true, true};
     }
 }
 
@@ -167,10 +177,10 @@ lv_obj_t *s_cities     = nullptr;
 lv_obj_t *s_summary    = nullptr;
 lv_obj_t *s_photo       = nullptr;
 lv_obj_t *s_photo_frame = nullptr;
-lv_obj_t *s_photo_note  = nullptr;
+lv_obj_t *s_photo_wait  = nullptr;
+lv_obj_t *s_photo_none  = nullptr;
 
-std::int32_t s_photo_box_y = 0;
-std::int32_t s_photo_box_h = 0;
+lv_obj_t *s_identity   = nullptr;
 lv_obj_t *s_nearby     = nullptr;
 
 lv_image_dsc_t s_photo_dsc     = {};
@@ -595,6 +605,9 @@ void set_button_enabled(lv_obj_t *button, bool enabled)
     if (button == nullptr) {
         return;
     }
+    for (std::uint32_t i = 0; i < lv_obj_get_child_count(button); ++i) {
+        lv_obj_set_state(lv_obj_get_child(button, i), LV_STATE_DISABLED, !enabled);
+    }
     if (enabled) {
         lv_obj_remove_state(button, LV_STATE_DISABLED);
         return;
@@ -705,9 +718,11 @@ void range_clicked(lv_event_t *event)
 // Round chips in the top corners, the same as the heating card's: a dot of the
 // darker surface on the lighter card is what makes it read as something to
 // press. The hit area reaches past the dot, so a finger does not have to find it.
-lv_obj_t *zoom_chip(lv_obj_t *bezel, std::int32_t x, const char *text, int step)
+lv_obj_t *zoom_chip(lv_obj_t *bezel, std::int32_t x, const lv_image_dsc_t *mark, int step)
 {
-    lv_obj_t *chip = theme::make_chip(bezel, text);
+    lv_obj_t *chip = theme::make_chip(bezel, "");
+    lv_obj_t *image = theme::make_mark(chip, mark);
+    lv_obj_set_style_image_opa(image, LV_OPA_20, LV_STATE_DISABLED);
     lv_obj_set_pos(chip, x, EDGE);
     lv_obj_set_ext_click_area(chip, (CORNER - ZOOM_D) / 2);
     lv_obj_add_event_cb(chip, range_clicked, LV_EVENT_PRESSED,
@@ -717,8 +732,8 @@ lv_obj_t *zoom_chip(lv_obj_t *bezel, std::int32_t x, const char *text, int step)
 
 void build_zoom(lv_obj_t *bezel, std::int32_t side)
 {
-    s_zoom_out = zoom_chip(bezel, EDGE, LV_SYMBOL_MINUS, 1);
-    s_zoom_in  = zoom_chip(bezel, side - ZOOM_D - EDGE, LV_SYMBOL_PLUS, -1);
+    s_zoom_out = zoom_chip(bezel, EDGE, &icons::minus_icon, 1);
+    s_zoom_in  = zoom_chip(bezel, side - ZOOM_D - EDGE, &icons::plus_icon, -1);
 }
 
 
@@ -830,70 +845,18 @@ lv_obj_t *stacked(lv_obj_t *parent, std::int32_t y, std::uint32_t colour, const 
 
 void build_column(lv_obj_t *parent, std::int32_t x, std::int32_t height)
 {
-    lv_obj_t *column = lv_obj_create(parent);
-    lv_obj_set_pos(column, x, 0);
-    lv_obj_set_size(column, COLUMN_W, height);
-    lv_obj_set_style_bg_opa(column, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(column, 0, 0);
-    lv_obj_set_style_pad_all(column, 0, 0);
-    quiet(column);
+    lv_obj_t *card = theme::make_card(parent);
+    lv_obj_set_pos(card, x, 0);
+    lv_obj_set_size(card, COLUMN_W, height);
+    lv_obj_set_style_pad_all(card, INSET, 0);
+    quiet(card);
 
-    // One aircraft is one card: who it is, where it is going, the readings and the
-    // photograph. The same surface as the scope beside it -- neither half of the
-    // page is louder than the other.
-    lv_obj_t *identity = theme::make_card(column);
-    lv_obj_set_pos(identity, 0, 0);
-    lv_obj_set_size(identity, COLUMN_W, height);
-    lv_obj_set_style_pad_all(identity, INSET, 0);
-    quiet(identity);
-
-    auto put = [&](std::int32_t y, std::uint32_t colour, const lv_font_t *font) {
-        lv_obj_t *label = theme::make_label(identity, "", colour, font);
-        lv_obj_set_pos(label, 0, y);
-        lv_obj_set_width(label, INNER_W);
-        lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_DOTS);
-        lv_obj_set_height(label, font->line_height);
-        quiet(label);
-        return label;
-    };
-    s_title = put(0, theme::text, fonts::size_32());
-    theme::ink_accent(s_title);
-    s_operator = put(42, theme::text, fonts::size_20());
-    s_airframe = put(68, theme::secondary, fonts::size_16());
-    s_route    = put(98, theme::text, fonts::size_28());
-    s_cities   = put(134, theme::secondary, fonts::size_16());
-
-    const std::int32_t card_bottom = height;
-
-    for (int i = 0; i < READINGS; ++i) {
-        const std::int32_t y = ROWS_Y + INSET + i * ROW_H;
-
-        s_rows[i].name = theme::make_label(column, "", theme::secondary, fonts::size_16());
-        lv_obj_set_pos(s_rows[i].name, INSET, y + 4);
-        quiet(s_rows[i].name);
-
-        s_rows[i].value = theme::make_label(column, "--", theme::text, fonts::size_22());
-        lv_obj_set_pos(s_rows[i].value, INSET, y);
-        lv_obj_set_width(s_rows[i].value, INNER_W);
-        lv_obj_set_style_text_align(s_rows[i].value, LV_TEXT_ALIGN_RIGHT, 0);
-        lv_label_set_long_mode(s_rows[i].value, LV_LABEL_LONG_MODE_DOTS);
-        lv_obj_set_height(s_rows[i].value, fonts::size_22()->line_height);
-        quiet(s_rows[i].value);
-    }
-
-    const std::int32_t photo_y = ROWS_Y + INSET + READINGS * ROW_H + theme::space::s;
-    const std::int32_t photo_h = card_bottom - INSET - photo_y;
-
-    s_photo_box_y = photo_y;
-    s_photo_box_h = photo_h;
-
-    s_photo_frame = lv_obj_create(column);
-    lv_obj_set_pos(s_photo_frame, INSET, photo_y);
-    lv_obj_set_size(s_photo_frame, INNER_W, photo_h);
-    lv_obj_set_style_bg_opa(s_photo_frame, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(s_photo_frame, 0, 0);
+    // There from the tap on, so the text under it does not jump when it loads.
+    s_photo_frame = lv_obj_create(card);
+    lv_obj_set_pos(s_photo_frame, 0, 0);
+    lv_obj_set_size(s_photo_frame, INNER_W, PHOTO_H);
+    theme::style_panel(s_photo_frame, theme::panel, theme::radius::row);
     lv_obj_set_style_pad_all(s_photo_frame, 0, 0);
-    lv_obj_set_style_radius(s_photo_frame, 12, 0);
     lv_obj_set_style_clip_corner(s_photo_frame, true, 0);
     lv_obj_set_hidden(s_photo_frame, true);
     quiet(s_photo_frame);
@@ -903,33 +866,110 @@ void build_column(lv_obj_t *parent, std::int32_t x, std::int32_t height)
     lv_image_set_inner_align(s_photo, LV_IMAGE_ALIGN_CONTAIN);
     quiet(s_photo);
 
-    s_nearby = theme::make_label(column, "", theme::secondary, fonts::size_20());
-    lv_obj_set_pos(s_nearby, INSET, photo_y);
+    // Not LVGL's spinner: its eased ends stutter whenever a frame is late. And
+    // outside the frame, whose clipped corners would force a layer per frame.
+    s_photo_wait = lv_arc_create(card);
+    lv_obj_set_size(s_photo_wait, 40, 40);
+    lv_obj_set_pos(s_photo_wait, (INNER_W - 40) / 2, (PHOTO_H - 40) / 2);
+    lv_arc_set_bg_angles(s_photo_wait, 0, 360);
+    lv_arc_set_angles(s_photo_wait, 0, 90);
+    lv_obj_remove_style(s_photo_wait, nullptr, LV_PART_KNOB);
+    lv_obj_set_style_pad_all(s_photo_wait, 0, 0);
+    lv_obj_set_style_arc_width(s_photo_wait, 4, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(s_photo_wait, 4, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(s_photo_wait, lv_color_hex(theme::panel_light), LV_PART_MAIN);
+    lv_obj_set_style_arc_color(s_photo_wait, lv_color_hex(theme::secondary), LV_PART_INDICATOR);
+    lv_obj_set_hidden(s_photo_wait, true);
+    quiet(s_photo_wait);
+
+    s_photo_none = lv_image_create(s_photo_frame);
+    lv_image_set_src(s_photo_none, &icons::no_photo_icon);
+    lv_obj_set_style_image_recolor(s_photo_none, lv_color_hex(theme::secondary), 0);
+    lv_obj_set_style_image_recolor_opa(s_photo_none, LV_OPA_COVER, 0);
+    lv_obj_set_style_image_opa(s_photo_none, LV_OPA_60, 0);
+    lv_obj_center(s_photo_none);
+    quiet(s_photo_none);
+
+    s_identity = lv_obj_create(card);
+    lv_obj_set_size(s_identity, INNER_W, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(s_identity, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(s_identity, 0, 0);
+    lv_obj_set_style_pad_all(s_identity, 0, 0);
+    lv_obj_set_flex_flow(s_identity, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(s_identity, theme::space::xs, 0);
+    quiet(s_identity);
+
+    auto put = [&](std::uint32_t colour, const lv_font_t *font) {
+        lv_obj_t *label = theme::make_label(s_identity, "", colour, font);
+        lv_obj_set_width(label, INNER_W);
+        lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_DOTS);
+        lv_obj_set_height(label, font->line_height);
+        quiet(label);
+        return label;
+    };
+    s_title = put(theme::text, theme::type_title());
+    theme::ink_accent(s_title);
+    s_operator = put(theme::text, theme::type_body());
+    s_airframe = put(theme::secondary, theme::type_label());
+    s_route    = put(theme::text, theme::type_value());
+    lv_obj_set_style_margin_top(s_route, theme::space::m, 0);
+    s_cities = put(theme::secondary, theme::type_label());
+
+    s_nearby = theme::make_label(s_identity, "", theme::secondary, theme::type_body());
     lv_obj_set_width(s_nearby, INNER_W);
-    lv_obj_set_style_text_line_space(s_nearby, 8, 0);
+    lv_obj_set_style_margin_top(s_nearby, theme::space::m, 0);
+    lv_obj_set_style_text_line_space(s_nearby, theme::space::s, 0);
     lv_obj_set_hidden(s_nearby, true);
     quiet(s_nearby);
 
-    s_photo_note = theme::make_label(column, "", theme::secondary, fonts::size_16());
-    lv_obj_set_style_text_opa(s_photo_note, LV_OPA_60, 0);
-    lv_obj_set_pos(s_photo_note, INSET, photo_y + photo_h / 2 - 10);
-    lv_obj_set_width(s_photo_note, INNER_W);
-    lv_obj_set_style_text_align(s_photo_note, LV_TEXT_ALIGN_CENTER, 0);
-    quiet(s_photo_note);
+    // The altitude carries a trend arrow, so it gets the wider column.
+    static constexpr std::int32_t WIDTHS[READINGS] = {INNER_W - 2 * 78, 78, 78};
+    const std::int32_t name_y  = height - 2 * INSET - theme::type_label()->line_height;
+    const std::int32_t value_y = name_y - theme::type_value()->line_height;
+    std::int32_t       left    = 0;
+    for (int i = 0; i < READINGS; ++i) {
+        s_rows[i].value = theme::make_label(card, "--", theme::text, theme::type_value());
+        lv_obj_set_pos(s_rows[i].value, left, value_y);
+        lv_obj_set_width(s_rows[i].value, WIDTHS[i]);
+        lv_label_set_long_mode(s_rows[i].value, LV_LABEL_LONG_MODE_CLIP);
+        quiet(s_rows[i].value);
 
+        s_rows[i].name = theme::make_label(card, "", theme::secondary, theme::type_label());
+        lv_obj_set_pos(s_rows[i].name, left, name_y);
+        quiet(s_rows[i].name);
+        left += WIDTHS[i];
+    }
 }
 
 void show_picture()
 {
-    const char *note = nullptr;
-    switch (s_picture) {
-        case Picture::Looking: note = "looking up"; break;
-        case Picture::Loading: note = "loading photo"; break;
-        case Picture::Missing: note = "no photo on file"; break;
-        default: break;
+    const bool shown = s_picture == Picture::Shown;
+    if (!shown) {
+        lv_obj_set_size(s_photo_frame, INNER_W, PHOTO_H);
     }
-    theme::set_text(s_photo_note, note != nullptr ? note : "");
-    lv_obj_set_hidden(s_photo_frame, s_picture != Picture::Shown);
+    lv_obj_set_hidden(s_photo_frame, s_picture == Picture::Idle);
+    lv_obj_set_hidden(s_photo, !shown);
+    const bool waiting = s_picture == Picture::Looking || s_picture == Picture::Loading;
+    if (waiting != !lv_obj_has_flag(s_photo_wait, LV_OBJ_FLAG_HIDDEN)) {
+        lv_obj_set_hidden(s_photo_wait, !waiting);
+        if (waiting) {
+            lv_anim_t anim;
+            lv_anim_init(&anim);
+            lv_anim_set_var(&anim, s_photo_wait);
+            lv_anim_set_exec_cb(&anim, [](void *arc, std::int32_t angle) {
+                lv_arc_set_rotation(static_cast<lv_obj_t *>(arc), angle);
+            });
+            lv_anim_set_values(&anim, 0, 360);
+            lv_anim_set_duration(&anim, 900);
+            lv_anim_set_path_cb(&anim, lv_anim_path_linear);
+            lv_anim_set_repeat_count(&anim, LV_ANIM_REPEAT_INFINITE);
+            lv_anim_start(&anim);
+        } else {
+            lv_anim_delete(s_photo_wait, nullptr);
+        }
+    }
+    lv_obj_set_hidden(s_photo_none, s_picture != Picture::Missing);
+    lv_obj_set_y(s_identity, s_picture == Picture::Idle ? 0 : PHOTO_H + theme::space::m);
 }
 
 const char *blip_name(const radar::Aircraft &aircraft)
@@ -1024,7 +1064,7 @@ void raster_blip(const Plot &plot)
     const float cos_t = std::cos(track * DEG);
 
     const Outline      outline = outline_for(plot.aircraft->category);
-    lv_point_precise_t shape[8];
+    lv_point_precise_t shape[20];
     for (int i = 0; i < outline.count; ++i) {
         const float px = outline.points[i][0] * cos_t - outline.points[i][1] * sin_t;
         const float py = outline.points[i][0] * sin_t + outline.points[i][1] * cos_t;
@@ -1038,6 +1078,9 @@ void raster_blip(const Plot &plot)
 
     if (outline.closed) {
         fill_blip(shape, outline.count, ink);
+    }
+    if (!outline.dotted) {
+        return;
     }
 
     for (std::int32_t dy = -DOT_SIZE / 2; dy <= DOT_SIZE / 2; ++dy) {
@@ -1087,56 +1130,45 @@ void show_summary(const radar::Snapshot &snapshot)
 
     std::snprintf(text, sizeof(text), "%d aircraft", s_shown);
     theme::set_text(s_title, s_shown > 0 ? text : "Quiet sky");
-    theme::set_text(s_operator, s_shown > 0 ? "overhead now" : "nothing within range");
-
+    theme::set_text(s_operator, s_shown > 0 ? "Tap one for its details" : "Nothing within range");
     theme::set_text(s_airframe, "");
     theme::set_text(s_route, "");
-    theme::set_text(s_cities, s_shown > 0 ? "Tap one for its details" : "");
+    theme::set_text(s_cities, "");
+    lv_obj_set_hidden(s_route, true);
+    lv_obj_set_hidden(s_cities, true);
+    lv_obj_set_hidden(s_airframe, true);
 
     const radar::Aircraft *highest = nullptr;
-    const radar::Aircraft *lowest  = nullptr;
     const radar::Aircraft *fastest = nullptr;
     for (int i = 0; i < s_shown; ++i) {
         const radar::Aircraft *a = s_plots[i].aircraft;
         if (a->altitude_ft >= 0 && (highest == nullptr || a->altitude_ft > highest->altitude_ft)) {
             highest = a;
         }
-        if (a->altitude_ft >= 0 && (lowest == nullptr || a->altitude_ft < lowest->altitude_ft)) {
-            lowest = a;
-        }
         if (fastest == nullptr || a->speed_kt > fastest->speed_kt) {
             fastest = a;
         }
     }
 
-    if (s_shown > 0) {
-        set_row(0, "Nearest", blip_name(*s_plots[0].aircraft));
-        std::snprintf(text, sizeof(text), "%.1f km",
-                      static_cast<double>(s_plots[0].aircraft->distance_nm * KM_PER_NM));
-        set_row(1, "Distance", text);
-        if (highest != nullptr) {
-            std::snprintf(text, sizeof(text), "%d ft", highest->altitude_ft);
-        }
-        set_row(2, "Highest", highest != nullptr ? text : "--");
-        if (lowest != nullptr) {
-            std::snprintf(text, sizeof(text), "%d ft", lowest->altitude_ft);
-        }
-        set_row(3, "Lowest", lowest != nullptr ? text : "--");
-        std::snprintf(text, sizeof(text), "%.0f kt", static_cast<double>(fastest->speed_kt));
-        set_row(4, "Fastest", text);
-    } else {
-        static const char *IDLE[READINGS] = {"Nearest", "Distance", "Highest", "Lowest",
-                                             "Fastest"};
-        for (int i = 0; i < READINGS; ++i) {
-            set_row(i, IDLE[i], "--");
-        }
+    if (highest != nullptr) {
+        std::snprintf(text, sizeof(text), "%d", highest->altitude_ft);
     }
+    set_row(0, "feet, top", highest != nullptr ? text : "--");
+    if (fastest != nullptr) {
+        std::snprintf(text, sizeof(text), "%.0f", static_cast<double>(fastest->speed_kt));
+    }
+    set_row(1, "knots, top", fastest != nullptr ? text : "--");
+    if (s_shown > 0) {
+        std::snprintf(text, sizeof(text), "%.1f",
+                      static_cast<double>(s_plots[0].aircraft->distance_nm * KM_PER_NM));
+    }
+    set_row(2, "km, closest", s_shown > 0 ? text : "--");
 
     text[0]    = '\0';
     int length = 0;
-    for (int i = 0; i < s_shown && i < 4; ++i) {
+    for (int i = 0; i < s_shown && i < 5; ++i) {
         const radar::Aircraft *a = s_plots[i].aircraft;
-        length += std::snprintf(text + length, sizeof(text) - length, "%s%-9s%.0f km",
+        length += std::snprintf(text + length, sizeof(text) - length, "%s%s  %.0f km",
                                 i > 0 ? "\n" : "", blip_name(*a),
                                 static_cast<double>(a->distance_nm * KM_PER_NM));
     }
@@ -1157,6 +1189,7 @@ void show_selected(const radar::Aircraft &aircraft)
     char text[96];
 
     lv_obj_set_hidden(s_nearby, true);
+    lv_obj_set_hidden(s_airframe, false);
     theme::set_text(s_title, aircraft.flight[0] != '\0' ? aircraft.flight : aircraft.hex);
 
     const bool mine = std::strcmp(s_details_hex, aircraft.hex) == 0;
@@ -1200,46 +1233,34 @@ void show_selected(const radar::Aircraft &aircraft)
         theme::set_text(s_route, mine ? "No route known" : "");
         theme::set_text(s_cities, "");
     }
+    lv_obj_set_hidden(s_route, lv_label_get_text(s_route)[0] == '\0');
+    lv_obj_set_hidden(s_cities, lv_label_get_text(s_cities)[0] == '\0');
 
-    static const char *NAMES[READINGS] = {"Distance", "Altitude", "Speed", "Track", "Squawk"};
-    for (int i = 0; i < READINGS; ++i) {
-        theme::set_text(s_rows[i].name, NAMES[i]);
-    }
-
-    std::snprintf(text, sizeof(text), "%.1f km",
-                  static_cast<double>(aircraft.distance_nm * KM_PER_NM));
-    theme::set_text(s_rows[0].value, text);
+    theme::set_text(s_rows[0].name, "feet");
+    theme::set_text(s_rows[1].name, "knots");
+    theme::set_text(s_rows[2].name, "km away");
 
     if (aircraft.altitude_ft >= 0) {
         const char *trend = aircraft.vertical_fpm > 245    ? " " LV_SYMBOL_UP
                             : aircraft.vertical_fpm < -245 ? " " LV_SYMBOL_DOWN
                                                            : "";
-        std::snprintf(text, sizeof(text), "%d ft%s", aircraft.altitude_ft, trend);
+        std::snprintf(text, sizeof(text), "%d%s", aircraft.altitude_ft, trend);
     } else {
         std::snprintf(text, sizeof(text), "--");
     }
+    theme::set_text(s_rows[0].value, text);
+    theme::set_text_color(s_rows[0].value, altitude_ink(aircraft.altitude_ft));
+
+    std::snprintf(text, sizeof(text), "%.0f", static_cast<double>(aircraft.speed_kt));
     theme::set_text(s_rows[1].value, text);
-    theme::set_text_color(s_rows[1].value, altitude_ink(aircraft.altitude_ft));
+    theme::set_text_color(s_rows[1].value, theme::text);
 
-    std::snprintf(text, sizeof(text), "%.0f kt", static_cast<double>(aircraft.speed_kt));
+    std::snprintf(text, sizeof(text), "%.1f",
+                  static_cast<double>(aircraft.distance_nm * KM_PER_NM));
     theme::set_text(s_rows[2].value, text);
-
-    if (aircraft.track_deg >= 0.0f) {
-        std::snprintf(text, sizeof(text), "%.0f°", static_cast<double>(aircraft.track_deg));
-    } else {
-        std::snprintf(text, sizeof(text), "--");
-    }
-    theme::set_text(s_rows[3].value, text);
+    theme::set_text_color(s_rows[2].value, theme::text);
 
     const char *shout = emergency(aircraft.squawk);
-    if (aircraft.squawk >= 0) {
-        std::snprintf(text, sizeof(text), "%04d", aircraft.squawk);
-    } else {
-        std::snprintf(text, sizeof(text), "--");
-    }
-    theme::set_text(s_rows[4].value, text);
-    theme::set_text_color(s_rows[4].value, shout != nullptr ? theme::red : theme::text);
-
     show_picture();
 
     theme::set_text(s_summary, shout != nullptr ? shout : (s_last->ok ? "" : "feed unreachable"));
@@ -1291,10 +1312,13 @@ void build_radar_page(lv_obj_t *page, std::int32_t width, std::int32_t height)
     show_radar(*s_last);
 }
 
+// Keeps what was on show: asking again only blanked the photograph while it
+// was fetched anew.
 void radar_page_opened()
 {
-    s_following      = true;
-    s_details_hex[0] = '\0';
+    if (s_chosen[0] == '\0') {
+        s_following = true;
+    }
 }
 
 void show_radar(const radar::Snapshot &snapshot)
@@ -1461,12 +1485,10 @@ void show_radar_photo(const char *hex, const void *pixels, int width, int height
     s_photo_dsc.data_size     = static_cast<std::uint32_t>(width * height * 2);
     s_photo_dsc.data          = static_cast<const std::uint8_t *>(pixels);
 
-    const std::int32_t fit_w = std::min(INNER_W, width * s_photo_box_h / height);
-    const std::int32_t fit_h = std::min(s_photo_box_h, height * INNER_W / width);
-    lv_obj_set_size(s_photo_frame, fit_w, fit_h);
-    lv_obj_set_pos(s_photo_frame, INSET + (INNER_W - fit_w) / 2,
-                   s_photo_box_y + (s_photo_box_h - fit_h) / 2);
-    lv_obj_set_size(s_photo, fit_w, fit_h);
+    const std::int32_t fit_h = height * INNER_W / width;
+    lv_obj_set_size(s_photo_frame, INNER_W, std::min(PHOTO_H, fit_h));
+    lv_obj_set_size(s_photo, INNER_W, fit_h);
+    lv_obj_set_y(s_photo, std::min<std::int32_t>(0, (PHOTO_H - fit_h) / 2));
 
     lv_image_set_src(s_photo, &s_photo_dsc);
     s_picture = Picture::Shown;
