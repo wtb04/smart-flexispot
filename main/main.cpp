@@ -5,6 +5,7 @@
 #include "diagnostics.h"
 #include "ical.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "esp_system.h"
 #include "logbuf.h"
 #include "nvs_flash.h"
@@ -32,6 +33,8 @@ void on_brightness_changed(int percent)
     settings::set(settings::Key::Brightness, percent);
 }
 
+void restart_for_desk(bool bluetooth);
+
 void on_setting(ui::Setting setting, bool on)
 {
     switch (setting) {
@@ -44,6 +47,7 @@ void on_setting(ui::Setting setting, bool on)
             break;
         case ui::Setting::DeskBluetooth:
             settings::set(settings::Key::DeskBluetooth, on);
+            restart_for_desk(on);
             break;
         default:
             break;
@@ -98,6 +102,31 @@ void on_calendar()
 void on_travel()
 {
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_calendar());
+}
+
+void restart_now(void *)
+{
+    ESP_ERROR_CHECK_WITHOUT_ABORT(board::display_off());
+    esp_restart();
+}
+
+// Wire or Bluetooth is settled at boot, when each claims the desk, so switching
+// is a restart, announced so it is not mistaken for a crash.
+void restart_for_desk(bool bluetooth)
+{
+    settings::flush();
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::notify(
+        "", bluetooth ? "Switching the desk to Bluetooth" : "Switching the desk to the wire",
+        "info", 1500));
+    static esp_timer_handle_t timer = nullptr;
+    if (timer == nullptr) {
+        const esp_timer_create_args_t args{.callback = restart_now, .name = "desk-restart"};
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_timer_create(&args, &timer));
+    }
+    if (timer != nullptr) {
+        esp_timer_stop(timer);
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_timer_start_once(timer, 1500 * 1000));
+    }
 }
 
 void on_restart()

@@ -28,4 +28,7 @@ bool enabled(Key key);
  *  such as a slider being dragged, costs one write rather than one per step. */
 void set(Key key, int value);
 
+/** Writes back now whatever is waiting, for when the panel is about to restart. */
+void flush();
+
 }  // namespace settings

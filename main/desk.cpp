@@ -331,13 +331,17 @@ const char *link_status(const loctek::Stats &stats, bool link_up, int wake_attem
 #endif
         }
         const bool never_read = s_height_mm.load(std::memory_order_relaxed) < 0;
-        if (never_read && status != kConnected && (last_wake == 0 || now - last_wake > WAKE_RETRY)) {
+        // Over Bluetooth a wake needs the proxy there to carry it.
+        const bool can_wake = !over_ble() || ble::desk::connected();
+        if (never_read && can_wake && status != kConnected &&
+            (last_wake == 0 || now - last_wake > WAKE_RETRY)) {
             last_wake = now;
             ++wake_attempts;
-            ESP_LOGI(TAG, "waking panel");
             if (over_ble()) {
+                ESP_LOGI(TAG, "waking the desk through the proxy");
                 ble::desk::wake();
             } else {
+                ESP_LOGI(TAG, "waking the desk on the wire");
                 ESP_ERROR_CHECK_WITHOUT_ABORT(loctek::wake());
             }
         }

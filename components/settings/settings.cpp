@@ -81,6 +81,11 @@ void commit()
 
 }  // namespace
 
+void flush()
+{
+    commit();
+}
+
 esp_err_t load()
 {
     nvs_handle_t handle = 0;

@@ -1543,6 +1543,9 @@ struct InfoCard {
     bool           has_setting;
     Setting        setting;
     const char    *setting_label;
+    // A setting that picks between two ways, shown as both. Off first, then on.
+    const char    *choice_off = nullptr;
+    const char    *choice_on  = nullptr;
 };
 
 constexpr InfoRow NETWORK_ROWS[] = {
@@ -1611,7 +1614,7 @@ constexpr InfoCard INFO_CARDS[] = {
     {Subsystem::Power, "Power", LV_SYMBOL_BATTERY_FULL, POWER_ROWS, static_cast<int>(std::size(POWER_ROWS)),
      Info::PowerCharge, true, Setting::Charging, "Charge the battery"},
     {Subsystem::Desk, "Desk", LV_SYMBOL_UP, DESK_ROWS, static_cast<int>(std::size(DESK_ROWS)), Info::DeskLink,
-     true, Setting::DeskBluetooth, "Drive it over Bluetooth"},
+     true, Setting::DeskBluetooth, "Drive it over", "Wire", "Bluetooth"},
     {Subsystem::Radar, "Radar", LV_SYMBOL_GPS, RADAR_ROWS, static_cast<int>(std::size(RADAR_ROWS)),
      Info::RadarFeed, false, Setting::Charging, nullptr},
     {Subsystem::Media, "Media", LV_SYMBOL_AUDIO, MEDIA_ROWS, static_cast<int>(std::size(MEDIA_ROWS)),
@@ -1668,6 +1671,7 @@ std::int32_t s_detail_height[INFO_CARD_COUNT] = {};
 bool s_tile_long = false;
 
 lv_obj_t *s_setting_value[SETTING_COUNT] = {};
+lv_obj_t *s_setting_choice[SETTING_COUNT][2] = {};
 bool      s_setting_on[SETTING_COUNT]    = {};
 
 int s_summary_card[INFO_COUNT] = {};
@@ -1805,6 +1809,14 @@ void show_settings_cb(lv_event_t *)
 void apply_setting(int index, bool on)
 {
     s_setting_on[index] = on;
+    for (int side = 0; side < 2; ++side) {
+        lv_obj_t *choice = s_setting_choice[index][side];
+        if (choice != nullptr) {
+            const bool picked = (side == 1) == on;
+            lv_obj_set_state(choice, LV_STATE_CHECKED, picked);
+            theme::set_text_color(lv_obj_get_child(choice, 0), picked ? theme::text : theme::secondary);
+        }
+    }
     if (s_setting_value[index] != nullptr) {
         theme::set_text(s_setting_value[index], on ? "On" : "Off");
         theme::ink_accent_or(s_setting_value[index], on, theme::secondary);
@@ -1819,6 +1831,20 @@ void setting_clicked_cb(lv_event_t *e)
 {
     const int index = static_cast<int>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e)));
     const bool next = !s_setting_on[index];
+    apply_setting(index, next);
+    if (s_handlers.setting != nullptr) {
+        s_handlers.setting(static_cast<Setting>(index), next);
+    }
+}
+
+void choice_clicked_cb(lv_event_t *e)
+{
+    const int  code  = static_cast<int>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e)));
+    const int  index = code / 2;
+    const bool next  = code % 2 == 1;
+    if (next == s_setting_on[index]) {
+        return;
+    }
     apply_setting(index, next);
     if (s_handlers.setting != nullptr) {
         s_handlers.setting(static_cast<Setting>(index), next);
@@ -1992,7 +2018,31 @@ void build_detail_overlay(lv_obj_t *parent)
                 build_info_row(panel, row.label, fonts::size_20(), DETAIL_ROW_H);
         }
 
-        if (INFO_CARDS[i].has_setting) {
+        if (INFO_CARDS[i].has_setting && INFO_CARDS[i].choice_on != nullptr) {
+            const int index = static_cast<int>(INFO_CARDS[i].setting);
+            lv_obj_t *pair  = lv_obj_create(panel);
+            theme::style_panel(pair, theme::panel, 0);
+            lv_obj_set_style_bg_opa(pair, LV_OPA_TRANSP, 0);
+            lv_obj_set_size(pair, LV_PCT(100), DETAIL_SET_H);
+            lv_obj_set_style_margin_top(pair, DETAIL_SET_TOP, 0);
+            lv_obj_set_flex_flow(pair, LV_FLEX_FLOW_ROW);
+            lv_obj_set_style_pad_column(pair, BUTTON_GAP, 0);
+            const char *names[2] = {INFO_CARDS[i].choice_off, INFO_CARDS[i].choice_on};
+            for (int side = 0; side < 2; ++side) {
+                lv_obj_t *button = lv_button_create(pair);
+                lv_obj_set_height(button, LV_PCT(100));
+                lv_obj_set_flex_grow(button, 1);
+                theme::style_button(button, theme::panel_light);
+                theme::fill_accent(button, LV_STATE_CHECKED);
+                lv_obj_add_event_cb(
+                    button, choice_clicked_cb, LV_EVENT_CLICKED,
+                    reinterpret_cast<void *>(static_cast<std::intptr_t>(index * 2 + side)));
+                lv_obj_center(theme::make_label(button, names[side], theme::secondary,
+                                                fonts::size_20()));
+                s_setting_choice[index][side] = button;
+            }
+            apply_setting(index, s_setting_on[index]);
+        } else if (INFO_CARDS[i].has_setting) {
             const int index  = static_cast<int>(INFO_CARDS[i].setting);
             lv_obj_t *button = lv_button_create(panel);
             lv_obj_set_size(button, LV_PCT(100), DETAIL_SET_H);
@@ -3385,7 +3435,8 @@ esp_err_t set_setting(Setting setting, bool on)
     const int index = static_cast<int>(setting);
     ESP_RETURN_ON_FALSE(index >= 0 && index < SETTING_COUNT, ESP_ERR_INVALID_ARG, TAG, "setting %d",
                         index);
-    ESP_RETURN_ON_FALSE(s_setting_value[index] != nullptr, ESP_ERR_INVALID_STATE, TAG,
+    ESP_RETURN_ON_FALSE(s_setting_value[index] != nullptr || s_setting_choice[index][0] != nullptr,
+                        ESP_ERR_INVALID_STATE, TAG,
                         "not initialised");
     ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
     apply_setting(index, on);
