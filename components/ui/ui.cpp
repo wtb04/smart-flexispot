@@ -1037,6 +1037,8 @@ void build_light_picker(lv_obj_t *parent)
 }
 
 lv_obj_t *s_media_card   = nullptr;
+int       s_media_hold   = -1;  // a preset, or -1 for the media panel
+bool      s_media_off    = true;  // nothing to control, so holding does nothing
 lv_obj_t *s_media_frame  = nullptr;
 lv_obj_t *s_media_art    = nullptr;
 lv_obj_t *s_media_source = nullptr;
@@ -1256,7 +1258,14 @@ void media_card_cb(lv_event_t *e)
 
     if (code == LV_EVENT_LONG_PRESSED) {
         s_media_long = true;
-        if (s_media_panel.has_value()) {
+        if (s_media_off) {
+            return;
+        }
+        if (s_media_hold >= 0) {
+            if (s_handlers.preset != nullptr) {
+                s_handlers.preset(s_media_hold, false);
+            }
+        } else if (s_media_panel.has_value()) {
             s_media_panel->open(s_media_card);
         }
         return;
@@ -2972,6 +2981,7 @@ esp_err_t set_media(const char *source, const char *title, const char *artist, c
     ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
 
     const bool has_track = title != nullptr && title[0] != '\0';
+    s_media_off = state == nullptr || std::strcmp(state, "OFF") == 0 || std::strcmp(state, "--") == 0;
     theme::set_text(s_media_source, source != nullptr && source[0] != '\0' ? source : "SPEAKER");
     theme::set_text(s_media_title, has_track ? title : (state != nullptr ? state : "--"));
     theme::set_text(s_media_artist, has_track && artist != nullptr ? artist : "");
@@ -3332,6 +3342,17 @@ esp_err_t set_health(Subsystem which, Level level)
         refresh_diag_summary();
     }
 
+    lvgl_port_unlock();
+    return ESP_OK;
+}
+
+esp_err_t set_media_hold_preset(int preset)
+{
+    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
+    s_media_hold = preset;
+    if (preset >= 0 && s_media_panel.has_value()) {
+        s_media_panel->close();  // what it controlled is no longer on the card
+    }
     lvgl_port_unlock();
     return ESP_OK;
 }

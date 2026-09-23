@@ -131,6 +131,10 @@ using LogHandler = int (*)(Subsystem subsystem, LogLine *out, int max);
 esp_err_t set_media(const char *source, const char *title, const char *artist, const char *state,
                     bool playing);
 
+/** What holding the media card does: -1 opens the media panel, as for the
+ *  speaker; a preset index sends the desk there instead, as for Jellyfin. */
+esp_err_t set_media_hold_preset(int preset);
+
 /** RGB565, media::kArtSize square. Null hides the art; the buffer must live until it is replaced. */
 esp_err_t set_album_art(const void *pixels, bool placeholder);
 

@@ -66,7 +66,11 @@ const char *toggle_label(const ToggleSpec &spec, bool on)
     return on ? spec.on_label : spec.off_label;
 }
 
-constexpr char MEDIA_ENTITY[] = "media_player.office_speaker";
+// Two players, one card: Jellyfin shows only while the speaker has nothing going.
+constexpr char MEDIA_SPEAKER[]  = "media_player.office_speaker";
+constexpr char MEDIA_JELLYFIN[] = "media_player.macbook_pro";
+constexpr int  JELLYFIN_PRESET  = 1;  // holding the card for Jellyfin: Preset 2
+std::atomic<const char *> s_player{MEDIA_SPEAKER};
 
 /** Fraction of full scale, per press. */
 constexpr float VOLUME_STEP = 0.05f;
@@ -239,9 +243,22 @@ void render_thermostat(const hass::ws::EntityStore &store)
                            upper(climate->state).c_str(), state));
 }
 
+bool going(const hass::ws::Entity *player)
+{
+    return known(player) &&
+           (player->state == "playing" || player->state == "paused" || player->state == "buffering");
+}
+
 void render_media(const hass::ws::EntityStore &store)
 {
-    const hass::ws::Entity *player = store.find(MEDIA_ENTITY);
+    const hass::ws::Entity *speaker  = store.find(MEDIA_SPEAKER);
+    const hass::ws::Entity *jellyfin = store.find(MEDIA_JELLYFIN);
+    const bool              laptop   = !going(speaker) && going(jellyfin);
+    const hass::ws::Entity *player   = laptop ? jellyfin : speaker;
+    if (s_player.exchange(laptop ? MEDIA_JELLYFIN : MEDIA_SPEAKER) !=
+        (laptop ? MEDIA_JELLYFIN : MEDIA_SPEAKER)) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_hold_preset(laptop ? JELLYFIN_PRESET : -1));
+    }
 
     const bool bare = known(player) && player->state != "off" && player->state != "idle" &&
                       attribute(*player, "media_title").empty();
@@ -267,8 +284,17 @@ void render_media(const hass::ws::EntityStore &store)
 
     const bool        playing = player->state == "playing";
     const std::string title   = attribute(*player, "media_title");
-    const std::string artist  = attribute(*player, "media_artist");
-    const std::string source  = upper(attribute(*player, "app_name"));
+    std::string       artist  = attribute(*player, "media_artist");
+    // An episode has a series where a song has an artist.
+    if (artist.empty()) {
+        artist = attribute(*player, "media_series_title");
+        const int season  = static_cast<int>(attribute_number(*player, "media_season"));
+        const int episode = static_cast<int>(attribute_number(*player, "media_episode"));
+        if (!artist.empty() && season > 0 && episode > 0) {
+            artist += "\nSeason " + std::to_string(season) + ", episode " + std::to_string(episode);
+        }
+    }
+    const std::string source = laptop ? "JELLYFIN" : upper(attribute(*player, "app_name"));
     const std::string state   = upper(player->state);
 
     s_muted.store(attribute(*player, "is_volume_muted") == "true", std::memory_order_relaxed);
@@ -306,7 +332,11 @@ void render_media(const hass::ws::EntityStore &store)
 
     static std::string s_art_title;
     static bool        s_art_asked = false;
-    const std::string  picture     = attribute(*player, "entity_picture_local");
+    // Jellyfin's poster is only in entity_picture.
+    std::string picture = attribute(*player, "entity_picture_local");
+    if (picture.empty()) {
+        picture = attribute(*player, "entity_picture");
+    }
 
     if (title != s_art_title) {
         s_art_title = title;
@@ -328,7 +358,7 @@ void send_volume(void *)
     char value[16];
     std::snprintf(value, sizeof(value), "%.2f", static_cast<double>(percent) / 100.0);
     ESP_ERROR_CHECK_WITHOUT_ABORT(hass::ws::call_service_with("media_player", "volume_set",
-                                                              MEDIA_ENTITY, "volume_level", value));
+                                                              s_player.load(), "volume_level", value));
 }
 
 }  // namespace
@@ -369,13 +399,13 @@ void on_media(ui::MediaAction action)
 {
     switch (action) {
         case ui::MediaAction::PlayPause:
-            hass::ws::call_service("media_player", "media_play_pause", MEDIA_ENTITY);
+            hass::ws::call_service("media_player", "media_play_pause", s_player.load());
             break;
         case ui::MediaAction::Previous:
-            hass::ws::call_service("media_player", "media_previous_track", MEDIA_ENTITY);
+            hass::ws::call_service("media_player", "media_previous_track", s_player.load());
             break;
         case ui::MediaAction::Next:
-            hass::ws::call_service("media_player", "media_next_track", MEDIA_ENTITY);
+            hass::ws::call_service("media_player", "media_next_track", s_player.load());
             break;
         case ui::MediaAction::VolumeDown:
             nudge_volume(-VOLUME_STEP);
@@ -386,7 +416,7 @@ void on_media(ui::MediaAction action)
         case ui::MediaAction::Mute: {
             const bool muted = s_muted.load(std::memory_order_relaxed);
             ESP_ERROR_CHECK_WITHOUT_ABORT(
-                hass::ws::call_service_with("media_player", "volume_mute", MEDIA_ENTITY,
+                hass::ws::call_service_with("media_player", "volume_mute", s_player.load(),
                                             "is_volume_muted", muted ? "false" : "true"));
             break;
         }
