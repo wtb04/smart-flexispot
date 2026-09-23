@@ -46,7 +46,16 @@ constexpr std::uint32_t INK_WATER = 0x5d93b8;
 
 constexpr int RANGES[]     = {20, 40, 60, 80, 100, 120, 140, 160};
 constexpr int RANGE_COUNT  = static_cast<int>(std::size(RANGES));
-constexpr int RANGE_BUTTON = 72;
+// The scope sits in a card the way the thermostat dial does, and the card's
+// corners -- the room a circle leaves in a square -- carry the instrument's own
+// controls and scale, set into the bezel like the distances are set on the rings.
+constexpr std::int32_t BEZEL     = 20;
+constexpr std::int32_t CORNER    = 88;
+constexpr std::int32_t ZOOM_D    = theme::chip::size;
+constexpr std::int32_t EDGE      = theme::chip::inset;  // as in every other card
+constexpr float        KEY_FROM  = 120.0f;
+constexpr float        KEY_TO    = 150.0f;
+constexpr std::int32_t KEY_WIDTH = 5;
 
 constexpr std::uint32_t ZOOM_MS = 260;
 
@@ -56,16 +65,18 @@ constexpr float KM_PER_LON = 111.320f;
 
 constexpr int          SCALE_TOP_FT = 40000;
 constexpr int          LEGEND_STEPS = 18;
-constexpr std::int32_t LEGEND_W     = 108;
-constexpr std::int32_t LEGEND_H     = 8;
 
 constexpr float KM_PER_NM = 1.852f;
 
 constexpr std::int32_t COLUMN_W   = 294;
-constexpr std::int32_t COLUMN_GAP = 28;
+constexpr std::int32_t COLUMN_GAP = theme::space::m;
 constexpr std::int32_t ROW_H      = 30;
-constexpr std::int32_t ROWS_Y     = 206;
-constexpr std::int32_t FOOT_H     = 22;
+constexpr std::int32_t ROWS_Y     = 208;
+
+// Both cards in the column are inset by the same amount, so the callsign, the
+// readings and the photograph all start on one edge.
+constexpr std::int32_t INSET   = 16;
+constexpr std::int32_t INNER_W = COLUMN_W - 2 * INSET;
 
 struct Blip {
     lv_obj_t *label;
@@ -384,31 +395,52 @@ void scope_clicked(lv_event_t *event)
     show_radar(*s_last);
 }
 
-void build_legend(lv_obj_t *parent, std::int32_t side)
+// The altitude scale runs along the rim band, the ring outside the last range
+// ring where N, S, E and W already sit -- part of the scope rather than a key
+// beside it. 0 at the steep end, 40k along the flatter bottom where a longer
+// label lies easily, and the labels continue the arc instead of standing apart.
+void build_key(lv_obj_t *scope)
 {
-    const std::int32_t line = fonts::size_16()->line_height;
-    const std::int32_t x = 4;
-    const std::int32_t y = side - line - LEGEND_H - 4;
-    const std::int32_t step = LEGEND_W / LEGEND_STEPS;
+    // Centred in the rim band on the same circle as the compass letters, so the
+    // scale and N, S, E, W read as one set of markings.
+    const std::int32_t mid   = s_radius + COMPASS_GAP + fonts::size_16()->line_height / 2;
+    const std::int32_t outer = mid + KEY_WIDTH / 2;
+    const float        step  = (KEY_TO - KEY_FROM) / LEGEND_STEPS;
 
     for (int i = 0; i < LEGEND_STEPS; ++i) {
-        s_legend[i] = lv_obj_create(parent);
-        lv_obj_set_size(s_legend[i], step + 1, LEGEND_H);
-        lv_obj_set_pos(s_legend[i], x + i * step, y);
-        theme::style_panel(s_legend[i], theme::panel, 0);
-        quiet(s_legend[i]);
+        lv_obj_t *seg = lv_arc_create(scope);
+        lv_obj_set_size(seg, 2 * outer, 2 * outer);
+        lv_obj_set_pos(seg, s_centre - outer, s_centre - outer);
+        lv_arc_set_bg_angles(seg, static_cast<lv_value_precise_t>(KEY_TO - (i + 1) * step - 0.6f),
+                             static_cast<lv_value_precise_t>(KEY_TO - i * step));
+        lv_obj_set_style_arc_width(seg, KEY_WIDTH, LV_PART_MAIN);
+        lv_obj_set_style_arc_rounded(seg, false, LV_PART_MAIN);
+        lv_obj_set_style_arc_opa(seg, LV_OPA_TRANSP, LV_PART_INDICATOR);
+        lv_obj_set_style_bg_opa(seg, LV_OPA_TRANSP, LV_PART_KNOB);
+        lv_obj_set_style_pad_all(seg, 0, LV_PART_KNOB);
+        quiet(seg);
+        s_legend[i] = seg;
     }
 
-    lv_obj_t *low = theme::make_label(parent, "0", theme::secondary, fonts::size_16());
-    lv_obj_set_style_text_opa(low, LV_OPA_50, 0);
-    lv_obj_set_pos(low, x, y + LEGEND_H + 2);
-    quiet(low);
-
-    lv_obj_t *high = theme::make_label(parent, "40 000 ft", theme::secondary, fonts::size_16());
-    lv_obj_set_style_text_opa(high, LV_OPA_50, 0);
-    lv_obj_set_pos(high, x + LEGEND_W - text_width("40 000 ft", fonts::size_16()),
-                   y + LEGEND_H + 2);
-    quiet(high);
+    // Set just past each end of the arc, on the same circle, turned to follow it.
+    auto end_label = [&](const char *text, float beyond, float sign) {
+        const std::int32_t w     = text_width(text, fonts::size_16());
+        const std::int32_t h     = fonts::size_16()->line_height;
+        const float        half  = static_cast<float>(w) / 2.0f / static_cast<float>(mid) / DEG;
+        const float        angle = beyond + sign * (half + 2.0f);
+        const float        rad   = angle * DEG;
+        lv_obj_t *label = theme::make_label(scope, text, theme::secondary, fonts::size_16());
+        lv_obj_set_style_text_opa(label, LV_OPA_60, 0);
+        lv_obj_set_pos(label, s_centre + static_cast<std::int32_t>(std::cos(rad) * mid) - w / 2,
+                       s_centre + static_cast<std::int32_t>(std::sin(rad) * mid) - h / 2);
+        lv_obj_set_style_transform_pivot_x(label, w / 2, 0);
+        lv_obj_set_style_transform_pivot_y(label, h / 2, 0);
+        lv_obj_set_style_transform_rotation(
+            label, static_cast<std::int32_t>((angle - 90.0f) * 10.0f), 0);
+        quiet(label);
+    };
+    end_label("0", KEY_TO, 1.0f);
+    end_label("40k ft", KEY_FROM, -1.0f);
 }
 
 void mask_line(std::uint8_t *mask, std::int32_t x0, std::int32_t y0, std::int32_t x1,
@@ -670,24 +702,25 @@ void range_clicked(lv_event_t *event)
     apply_range(from);
 }
 
-lv_obj_t *build_range_button(lv_obj_t *parent, std::int32_t x, const char *text, int step)
+// Round chips in the top corners, the same as the heating card's: a dot of the
+// darker surface on the lighter card is what makes it read as something to
+// press. The hit area reaches past the dot, so a finger does not have to find it.
+lv_obj_t *zoom_chip(lv_obj_t *bezel, std::int32_t x, const char *text, int step)
 {
-    lv_obj_t *button = lv_button_create(parent);
-    lv_obj_set_size(button, RANGE_BUTTON, RANGE_BUTTON);
-    lv_obj_set_pos(button, x, 4);
-    theme::style_button(button, theme::panel_light);
-    lv_obj_set_style_radius(button, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(button, lv_color_hex(theme::disabled), LV_STATE_DISABLED);
-    lv_obj_add_event_cb(button, range_clicked, LV_EVENT_PRESSED,
+    lv_obj_t *chip = theme::make_chip(bezel, text);
+    lv_obj_set_pos(chip, x, EDGE);
+    lv_obj_set_ext_click_area(chip, (CORNER - ZOOM_D) / 2);
+    lv_obj_add_event_cb(chip, range_clicked, LV_EVENT_PRESSED,
                         reinterpret_cast<void *>(static_cast<std::intptr_t>(step)));
-
-    lv_obj_t *label = theme::make_label(button, text, theme::secondary, fonts::size_28());
-    lv_obj_set_style_text_color(label, lv_color_hex(theme::text), LV_STATE_PRESSED);
-    lv_obj_set_style_text_color(label, lv_color_hex(theme::disabled_ink), LV_STATE_DISABLED);
-    lv_obj_center(label);
-    quiet(label);
-    return button;
+    return chip;
 }
+
+void build_zoom(lv_obj_t *bezel, std::int32_t side)
+{
+    s_zoom_out = zoom_chip(bezel, EDGE, LV_SYMBOL_MINUS, 1);
+    s_zoom_in  = zoom_chip(bezel, side - ZOOM_D - EDGE, LV_SYMBOL_PLUS, -1);
+}
+
 
 void build_scope(lv_obj_t *parent, std::int32_t side, int range_km)
 {
@@ -805,45 +838,58 @@ void build_column(lv_obj_t *parent, std::int32_t x, std::int32_t height)
     lv_obj_set_style_pad_all(column, 0, 0);
     quiet(column);
 
-    s_title = stacked(column, 0, theme::text, fonts::size_32());
-    theme::ink_accent(s_title);
-    s_operator  = stacked(column, 46, theme::text, fonts::size_20());
-    s_airframe  = stacked(column, 76, theme::secondary, fonts::size_16());
-    s_route     = stacked(column, 112, theme::text, fonts::size_28());
-    s_cities    = stacked(column, 150, theme::secondary, fonts::size_16());
+    // One aircraft is one card: who it is, where it is going, the readings and the
+    // photograph. The same surface as the scope beside it -- neither half of the
+    // page is louder than the other.
+    lv_obj_t *identity = theme::make_card(column);
+    lv_obj_set_pos(identity, 0, 0);
+    lv_obj_set_size(identity, COLUMN_W, height);
+    lv_obj_set_style_pad_all(identity, INSET, 0);
+    quiet(identity);
 
-    lv_obj_t *rule = lv_obj_create(column);
-    lv_obj_set_size(rule, COLUMN_W, 1);
-    lv_obj_set_pos(rule, 0, ROWS_Y - 16);
-    theme::style_panel(rule, theme::secondary, 0);
-    lv_obj_set_style_bg_opa(rule, LV_OPA_20, 0);
-    quiet(rule);
+    auto put = [&](std::int32_t y, std::uint32_t colour, const lv_font_t *font) {
+        lv_obj_t *label = theme::make_label(identity, "", colour, font);
+        lv_obj_set_pos(label, 0, y);
+        lv_obj_set_width(label, INNER_W);
+        lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_DOTS);
+        lv_obj_set_height(label, font->line_height);
+        quiet(label);
+        return label;
+    };
+    s_title = put(0, theme::text, fonts::size_32());
+    theme::ink_accent(s_title);
+    s_operator = put(42, theme::text, fonts::size_20());
+    s_airframe = put(68, theme::secondary, fonts::size_16());
+    s_route    = put(98, theme::text, fonts::size_28());
+    s_cities   = put(134, theme::secondary, fonts::size_16());
+
+    const std::int32_t card_bottom = height;
 
     for (int i = 0; i < READINGS; ++i) {
-        const std::int32_t y = ROWS_Y + i * ROW_H;
+        const std::int32_t y = ROWS_Y + INSET + i * ROW_H;
 
         s_rows[i].name = theme::make_label(column, "", theme::secondary, fonts::size_16());
-        lv_obj_set_pos(s_rows[i].name, 0, y + 4);
+        lv_obj_set_pos(s_rows[i].name, INSET, y + 4);
         quiet(s_rows[i].name);
 
         s_rows[i].value = theme::make_label(column, "--", theme::text, fonts::size_22());
-        lv_obj_set_pos(s_rows[i].value, 0, y);
-        lv_obj_set_width(s_rows[i].value, COLUMN_W);
+        lv_obj_set_pos(s_rows[i].value, INSET, y);
+        lv_obj_set_width(s_rows[i].value, INNER_W);
         lv_obj_set_style_text_align(s_rows[i].value, LV_TEXT_ALIGN_RIGHT, 0);
         lv_label_set_long_mode(s_rows[i].value, LV_LABEL_LONG_MODE_DOTS);
         lv_obj_set_height(s_rows[i].value, fonts::size_22()->line_height);
         quiet(s_rows[i].value);
     }
 
-    const std::int32_t photo_y = ROWS_Y + READINGS * ROW_H + 16;
-    const std::int32_t photo_h = height - photo_y - FOOT_H - 4;
+    const std::int32_t photo_y = ROWS_Y + INSET + READINGS * ROW_H + theme::space::s;
+    const std::int32_t photo_h = card_bottom - INSET - photo_y;
 
     s_photo_box_y = photo_y;
     s_photo_box_h = photo_h;
 
     s_photo_frame = lv_obj_create(column);
-    lv_obj_set_pos(s_photo_frame, 0, photo_y);
-    lv_obj_set_size(s_photo_frame, COLUMN_W, photo_h);
+    lv_obj_set_pos(s_photo_frame, INSET, photo_y);
+    lv_obj_set_size(s_photo_frame, INNER_W, photo_h);
     lv_obj_set_style_bg_opa(s_photo_frame, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(s_photo_frame, 0, 0);
     lv_obj_set_style_pad_all(s_photo_frame, 0, 0);
@@ -858,24 +904,19 @@ void build_column(lv_obj_t *parent, std::int32_t x, std::int32_t height)
     quiet(s_photo);
 
     s_nearby = theme::make_label(column, "", theme::secondary, fonts::size_20());
-    lv_obj_set_pos(s_nearby, 0, photo_y);
-    lv_obj_set_width(s_nearby, COLUMN_W);
+    lv_obj_set_pos(s_nearby, INSET, photo_y);
+    lv_obj_set_width(s_nearby, INNER_W);
     lv_obj_set_style_text_line_space(s_nearby, 8, 0);
     lv_obj_set_hidden(s_nearby, true);
     quiet(s_nearby);
 
     s_photo_note = theme::make_label(column, "", theme::secondary, fonts::size_16());
     lv_obj_set_style_text_opa(s_photo_note, LV_OPA_60, 0);
-    lv_obj_set_pos(s_photo_note, 0, photo_y + photo_h / 2 - 10);
-    lv_obj_set_width(s_photo_note, COLUMN_W);
+    lv_obj_set_pos(s_photo_note, INSET, photo_y + photo_h / 2 - 10);
+    lv_obj_set_width(s_photo_note, INNER_W);
     lv_obj_set_style_text_align(s_photo_note, LV_TEXT_ALIGN_CENTER, 0);
     quiet(s_photo_note);
 
-    s_summary = theme::make_label(column, "", theme::amber, fonts::size_16());
-    lv_obj_set_width(s_summary, COLUMN_W);
-    lv_label_set_long_mode(s_summary, LV_LABEL_LONG_MODE_DOTS);
-    lv_obj_set_height(s_summary, fonts::size_16()->line_height);
-    lv_obj_align(s_summary, LV_ALIGN_BOTTOM_LEFT, 0, 0);
 }
 
 void show_picture()
@@ -1219,14 +1260,34 @@ void build_radar_page(lv_obj_t *page, std::int32_t width, std::int32_t height)
         return;
     }
 
-    const std::int32_t side = std::min(width - COLUMN_W - COLUMN_GAP, height);
+    const std::int32_t card_w = width - COLUMN_W - COLUMN_GAP;
+    const std::int32_t side   = std::min(card_w, height);
+    const std::int32_t disc   = side - 2 * BEZEL;
     s_shown_range = static_cast<float>(RANGES[s_range_step]);
-    build_scope(page, side, RANGES[s_range_step]);
-    build_legend(page, side);
-    s_zoom_out = build_range_button(page, 4, LV_SYMBOL_MINUS, 1);
-    s_zoom_in  = build_range_button(page, side - RANGE_BUTTON - 4, LV_SYMBOL_PLUS, -1);
+    lv_obj_t *bezel = theme::make_card(page);
+    lv_obj_set_pos(bezel, 0, 0);
+    lv_obj_set_size(bezel, card_w, height);
+    lv_obj_set_style_pad_all(bezel, 0, 0);
+    quiet(bezel);
+
+    build_scope(bezel, disc, RANGES[s_range_step]);
+    lv_obj_set_pos(s_scope, (card_w - disc) / 2, (height - disc) / 2);
+    build_key(s_scope);
+    build_zoom(bezel, card_w);
+    lv_obj_set_pos(theme::make_screw(bezel, ZOOM_D), EDGE, height - ZOOM_D - EDGE);
+    lv_obj_set_pos(theme::make_screw(bezel, ZOOM_D), card_w - ZOOM_D - EDGE,
+                   height - ZOOM_D - EDGE);
+
+    s_summary = theme::make_label(bezel, "", theme::amber, fonts::size_16());
+    lv_obj_set_width(s_summary, CORNER + 60);
+    lv_obj_set_style_text_align(s_summary, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_label_set_long_mode(s_summary, LV_LABEL_LONG_MODE_DOTS);
+    lv_obj_set_height(s_summary, fonts::size_16()->line_height);
+    lv_obj_align(s_summary, LV_ALIGN_BOTTOM_RIGHT, -(EDGE + ZOOM_D + theme::space::s),
+                 -(EDGE + (ZOOM_D - fonts::size_16()->line_height) / 2));
+    quiet(s_summary);
     paint_range_buttons();
-    build_column(page, side + COLUMN_GAP, height);
+    build_column(page, card_w + COLUMN_GAP, height);
     show_radar(*s_last);
 }
 
@@ -1281,7 +1342,9 @@ void show_radar(const radar::Snapshot &snapshot)
     s_beyond = rim_used;
 
     for (int i = 0; i < LEGEND_STEPS; ++i) {
-        theme::set_bg_color(s_legend[i], altitude_ink(SCALE_TOP_FT * i / (LEGEND_STEPS - 1)));
+        lv_obj_set_style_arc_color(
+            s_legend[i], lv_color_hex(altitude_ink(SCALE_TOP_FT * i / (LEGEND_STEPS - 1))),
+            LV_PART_MAIN);
     }
 
     std::sort(s_plots, s_plots + s_shown, [](const Plot &a, const Plot &b) {
@@ -1398,10 +1461,10 @@ void show_radar_photo(const char *hex, const void *pixels, int width, int height
     s_photo_dsc.data_size     = static_cast<std::uint32_t>(width * height * 2);
     s_photo_dsc.data          = static_cast<const std::uint8_t *>(pixels);
 
-    const std::int32_t fit_w = std::min(COLUMN_W, width * s_photo_box_h / height);
-    const std::int32_t fit_h = std::min(s_photo_box_h, height * COLUMN_W / width);
+    const std::int32_t fit_w = std::min(INNER_W, width * s_photo_box_h / height);
+    const std::int32_t fit_h = std::min(s_photo_box_h, height * INNER_W / width);
     lv_obj_set_size(s_photo_frame, fit_w, fit_h);
-    lv_obj_set_pos(s_photo_frame, (COLUMN_W - fit_w) / 2,
+    lv_obj_set_pos(s_photo_frame, INSET + (INNER_W - fit_w) / 2,
                    s_photo_box_y + (s_photo_box_h - fit_h) / 2);
     lv_obj_set_size(s_photo, fit_w, fit_h);
 

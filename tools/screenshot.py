@@ -80,7 +80,7 @@ def main():
                     "".join(body.get(i, "A" * 120) for i in range(want)))
                 rgb = bytearray()
                 # The panel packs each pixel as a native uint16, low byte first.
-                for i in range(0, min(len(data), width * height * 2), 2):
+                for i in range(0, min(len(data), width * height * 2) // 2 * 2, 2):
                     pixel = data[i] | (data[i + 1] << 8)
                     rgb += bytes(((pixel >> 8) & 0xf8, (pixel >> 3) & 0xfc, (pixel << 3) & 0xf8))
                 name = OUT if taken == 0 else OUT.replace(".png", f"-{taken}.png")

@@ -3,8 +3,8 @@
 #include "fonts/units_font.h"
 #include "ical.h"
 #include "theme.h"
-#include "travel_icons.h"
 #include "travel.h"
+#include "travel_icons.h"
 
 #include <cstdio>
 #include <cstring>
@@ -13,23 +13,19 @@
 namespace ui {
 namespace {
 
-constexpr int ROWS  = 4;
+namespace space  = theme::space;
+namespace radius = theme::radius;
 
-// One scale, and the layout is flex all the way down, so spacing comes from
-// these four numbers rather than from offsets typed into each object.
-constexpr std::int32_t PAD   = 20;  // inside a card
-constexpr std::int32_t GAP   = 16;  // between cards, and between blocks
-constexpr std::int32_t STEP  = 8;   // between lines of a block
-constexpr std::int32_t MARK  = 4;   // the colour down a row's edge
+constexpr int ROWS   = 4;
+constexpr int POINTS = travel::kLegsMax + 1;
 
-constexpr std::int32_t ROW_H  = 48;
-constexpr std::int32_t HERO_H = 250;
-constexpr std::int32_t KEY_H  = 22;
-constexpr std::int32_t ICON   = 22;
-
+constexpr std::int32_t ROW_H   = 48;
+constexpr std::int32_t ICON    = 22;
 constexpr std::int32_t TIME_W  = 78;
-constexpr std::int32_t STOP_W  = 112;
 constexpr std::int32_t PLACE_W = 150;
+constexpr std::int32_t STOP_W  = 132;
+constexpr std::int32_t MARK    = 4;
+constexpr std::int32_t KEY_H   = 22;
 
 constexpr std::uint32_t INK_LECTURES   = 0x74c97a;
 constexpr std::uint32_t INK_PRACTICALS = 0x63a9e8;
@@ -43,29 +39,23 @@ struct Row {
     lv_obj_t *place = nullptr;
 };
 
-constexpr int POINTS = travel::kLegsMax + 1;
-
-struct PointView {
+struct Stop {
     lv_obj_t *root = nullptr;
+    lv_obj_t *icon = nullptr;
     lv_obj_t *when = nullptr;
     lv_obj_t *name = nullptr;
 };
 
-struct HopView {
-    lv_obj_t *root = nullptr;
-    lv_obj_t *icon = nullptr;
-};
-
-lv_obj_t *s_when   = nullptr;
-lv_obj_t *s_title  = nullptr;
-lv_obj_t *s_span   = nullptr;
-lv_obj_t *s_where  = nullptr;
-lv_obj_t *s_trip   = nullptr;   // the whole getting-there band
-PointView s_point[POINTS];
-HopView   s_hop[travel::kLegsMax];
-lv_obj_t *s_lead  = nullptr;
-lv_obj_t *s_after = nullptr;
+lv_obj_t *s_countdown = nullptr;
+lv_obj_t *s_start     = nullptr;
+lv_obj_t *s_title     = nullptr;
+lv_obj_t *s_meta      = nullptr;
+lv_obj_t *s_journey   = nullptr;
+lv_obj_t *s_leave     = nullptr;
+lv_obj_t *s_then      = nullptr;
+Stop      s_stop[POINTS];
 Row       s_row[ROWS];
+lv_obj_t *s_rest = nullptr;
 
 std::uint32_t feed_ink(std::uint8_t feed)
 {
@@ -83,25 +73,32 @@ void quiet(lv_obj_t *obj)
     lv_obj_set_scrollable(obj, false);
 }
 
-lv_obj_t *bare(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int32_t w, std::int32_t h)
+// A row of things laid out left to right, with nothing drawn behind it.
+lv_obj_t *line_of(lv_obj_t *parent, std::int32_t height, lv_flex_align_t main)
 {
-    lv_obj_t *box = lv_obj_create(parent);
-    lv_obj_set_pos(box, x, y);
-    lv_obj_set_size(box, w, h);
-    lv_obj_set_style_bg_opa(box, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(box, 0, 0);
-    lv_obj_set_style_pad_all(box, 0, 0);
-    quiet(box);
-    return box;
+    lv_obj_t *line = lv_obj_create(parent);
+    theme::style_panel(line, theme::panel, 0);
+    lv_obj_set_style_bg_opa(line, LV_OPA_TRANSP, 0);
+    lv_obj_set_width(line, LV_PCT(100));
+    lv_obj_set_height(line, height);
+    lv_obj_set_flex_flow(line, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(line, main, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(line, space::s + 2, 0);
+    quiet(line);
+    return line;
 }
 
-lv_obj_t *heading(lv_obj_t *parent, const char *text)
+lv_obj_t *column_of(lv_obj_t *parent, std::int32_t gap)
 {
-    lv_obj_t *label = theme::make_label(parent, text, theme::secondary, fonts::size_16());
-    lv_obj_set_style_text_letter_space(label, 2, 0);
-    lv_obj_set_style_text_opa(label, LV_OPA_70, 0);
-    quiet(label);
-    return label;
+    lv_obj_t *column = lv_obj_create(parent);
+    theme::style_panel(column, theme::panel, 0);
+    lv_obj_set_style_bg_opa(column, LV_OPA_TRANSP, 0);
+    lv_obj_set_width(column, LV_PCT(100));
+    lv_obj_set_height(column, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(column, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(column, gap, 0);
+    quiet(column);
+    return column;
 }
 
 void clock_of(std::int64_t at, char *out, std::size_t size)
@@ -110,6 +107,99 @@ void clock_of(std::int64_t at, char *out, std::size_t size)
     const auto stamp = static_cast<std::time_t>(at);
     localtime_r(&stamp, &when);
     std::snprintf(out, size, "%02d:%02d", when.tm_hour, when.tm_min);
+}
+
+void span_of(std::int64_t from_now, char *out, std::size_t size)
+{
+    const int minutes = static_cast<int>(from_now / 60);
+    if (minutes <= 0) {
+        std::snprintf(out, size, "now");
+    } else if (minutes < 60) {
+        std::snprintf(out, size, "in %d min", minutes);
+    } else {
+        std::snprintf(out, size, "in %dh %02dm", minutes / 60, minutes % 60);
+    }
+}
+
+void show_journey(const ical::Event *next, std::int64_t now)
+{
+    static travel::Option options[travel::kOptionsMax];
+    const int found = next == nullptr ? 0 : travel::options(options, travel::kOptionsMax);
+
+    const travel::Option *going = nullptr;
+    const travel::Option *after = nullptr;
+    for (int i = 0; i < found; ++i) {
+        if (options[i].leave < now) {
+            continue;
+        }
+        if (going == nullptr) {
+            going = &options[i];
+        } else if (after == nullptr) {
+            after = &options[i];
+        }
+    }
+
+    lv_obj_set_hidden(s_journey, going == nullptr);
+    if (going == nullptr) {
+        return;
+    }
+
+    char text[96];
+    char span[32];
+    span_of(going->leave - now, span, sizeof(span));
+    std::snprintf(text, sizeof(text), "leave %s", span);
+    theme::set_text(s_leave, text);
+    theme::set_text_color(s_leave, going->cancelled ? theme::red : theme::primary);
+
+    // One row per place. The mode sits on the row it leaves from, and where a
+    // journey changes, that place's arrival and departure share its row.
+    const int legs = going->leg_count;
+    for (int i = 0; i < POINTS; ++i) {
+        const bool real = i <= legs;
+        lv_obj_set_hidden(s_stop[i].root, !real);
+        if (!real) {
+            continue;
+        }
+
+        char into[16] = "";
+        char away[16] = "";
+        if (i > 0) {
+            clock_of(going->legs[i - 1].arrive, into, sizeof(into));
+        }
+        if (i < legs) {
+            clock_of(going->legs[i].depart, away, sizeof(away));
+        }
+        if (into[0] != '\0' && away[0] != '\0') {
+            std::snprintf(text, sizeof(text), "%s  %s", into, away);
+        } else {
+            std::snprintf(text, sizeof(text), "%s", into[0] != '\0' ? into : away);
+        }
+        theme::set_text(s_stop[i].when, text);
+        theme::set_text(s_stop[i].name, i < legs ? going->legs[i].from
+                                                 : going->legs[legs - 1].to);
+
+        const bool leaves = i < legs;
+        lv_obj_set_style_image_opa(s_stop[i].icon, leaves ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+        if (leaves) {
+            const travel::Leg &leg = going->legs[i];
+            lv_image_set_src(s_stop[i].icon, std::strcmp(leg.mode, "train") == 0
+                                                 ? &icons::train_icon
+                                                 : &icons::bus_icon);
+            lv_obj_set_style_image_recolor(
+                s_stop[i].icon, lv_color_hex(leg.cancelled ? theme::red : theme::secondary), 0);
+        }
+        theme::set_text_color(s_stop[i].when,
+                              i < legs && going->legs[i].cancelled ? theme::red : theme::text);
+    }
+
+    if (after != nullptr) {
+        char next[16];
+        clock_of(after->leave, next, sizeof(next));
+        std::snprintf(text, sizeof(text), "next one at %s", next);
+        theme::set_text(s_then, text);
+    } else {
+        theme::set_text(s_then, "");
+    }
 }
 
 }  // namespace
@@ -129,120 +219,28 @@ void show_calendar()
 
     char text[96];
     if (count == 0) {
-        theme::set_text(s_when, "");
+        theme::set_text(s_countdown, "");
+        theme::set_text(s_start, "");
         theme::set_text(s_title, "Nothing scheduled");
-        theme::set_text(s_span, "");
-        theme::set_text(s_where, "");
+        theme::set_text(s_meta, "");
     } else {
-        const ical::Event &first   = ahead[0];
-        const int          minutes = static_cast<int>((first.start - now) / 60);
-        if (minutes <= 0) {
-            std::snprintf(text, sizeof(text), "NOW");
-        } else if (minutes < 60) {
-            std::snprintf(text, sizeof(text), "IN %d MIN", minutes);
-        } else {
-            std::snprintf(text, sizeof(text), "IN %dH %02dM", minutes / 60, minutes % 60);
-        }
-        theme::set_text(s_when, text);
+        const ical::Event &first = ahead[0];
+        char               span[32];
+        span_of(first.start - now, span, sizeof(span));
+        theme::set_text(s_countdown, span);
         theme::set_text(s_title, first.summary);
 
         char from[16];
         char to[16];
         clock_of(first.start, from, sizeof(from));
         clock_of(first.end, to, sizeof(to));
-        std::snprintf(text, sizeof(text), "%s - %s", from, to);
-        theme::set_text(s_span, text);
-        theme::set_text(s_where, first.location);
+        theme::set_text(s_start, from);
+        std::snprintf(text, sizeof(text), "%s  \xc2\xb7  until %s", first.location, to);
+        theme::set_text(s_meta, text);
     }
 
-    // --- how to get there
-    static travel::Option options[travel::kOptionsMax];
-    const int found = count == 0 ? 0 : travel::options(options, travel::kOptionsMax);
+    show_journey(count > 0 ? &ahead[0] : nullptr, now);
 
-    const travel::Option *going = nullptr;
-    const travel::Option *after = nullptr;
-    for (int i = 0; i < found; ++i) {
-        if (options[i].leave < now) {
-            continue;
-        }
-        if (going == nullptr) {
-            going = &options[i];
-        } else if (after == nullptr) {
-            after = &options[i];
-        }
-    }
-
-    for (int i = 0; i < POINTS; ++i) {
-        lv_obj_set_hidden(s_point[i].root, true);
-    }
-    for (int i = 0; i < travel::kLegsMax; ++i) {
-        lv_obj_set_hidden(s_hop[i].root, true);
-    }
-
-    const bool travelling = going != nullptr;
-    lv_obj_set_hidden(s_trip, !travelling);
-
-    if (travelling) {
-        const int minutes = static_cast<int>((going->leave - now) / 60);
-        if (minutes <= 0) {
-            std::snprintf(text, sizeof(text), "leave now");
-        } else if (minutes < 60) {
-            std::snprintf(text, sizeof(text), "leave in %d min", minutes);
-        } else {
-            std::snprintf(text, sizeof(text), "leave in %dh %02dm", minutes / 60, minutes % 60);
-        }
-        theme::set_text(s_lead, text);
-        theme::set_text_color(s_lead, going->cancelled ? theme::red : theme::primary);
-
-        // A place the journey passes through is one place, whatever it is the end
-        // of and the start of. Where it is both, the two times are told apart.
-        const int legs = going->leg_count;
-        for (int i = 0; i <= legs && i < POINTS; ++i) {
-            const char *name = i < legs ? going->legs[i].from : going->legs[legs - 1].to;
-            char        into[16];
-            char        away[16];
-            into[0] = '\0';
-            away[0] = '\0';
-            if (i > 0) {
-                clock_of(going->legs[i - 1].arrive, into, sizeof(into));
-            }
-            if (i < legs) {
-                clock_of(going->legs[i].depart, away, sizeof(away));
-            }
-
-            if (into[0] != '\0' && away[0] != '\0') {
-                std::snprintf(text, sizeof(text), "%s dep %s", into, away);
-            } else if (away[0] != '\0') {
-                std::snprintf(text, sizeof(text), "dep %s", away);
-            } else {
-                std::snprintf(text, sizeof(text), "arr %s", into);
-            }
-            theme::set_text(s_point[i].when, text);
-            theme::set_text(s_point[i].name, name);
-            lv_obj_set_hidden(s_point[i].root, false);
-
-            if (i < legs) {
-                const travel::Leg &leg = going->legs[i];
-                lv_image_set_src(s_hop[i].icon, std::strcmp(leg.mode, "train") == 0
-                                                    ? &icons::train_icon
-                                                    : &icons::bus_icon);
-                lv_obj_set_style_image_recolor(
-                    s_hop[i].icon, lv_color_hex(leg.cancelled ? theme::red : theme::secondary), 0);
-                lv_obj_set_hidden(s_hop[i].root, false);
-            }
-        }
-
-        if (after != nullptr) {
-            char next[16];
-            clock_of(after->leave, next, sizeof(next));
-            std::snprintf(text, sizeof(text), "or the one after at %s", next);
-            theme::set_text(s_after, text);
-        } else {
-            theme::set_text(s_after, "");
-        }
-    }
-
-    // --- what follows
     for (int i = 0; i < ROWS; ++i) {
         const int at = i + 1;
         if (at >= count) {
@@ -257,6 +255,17 @@ void show_calendar()
         lv_obj_set_style_border_color(s_row[i].root, lv_color_hex(feed_ink(ahead[at].feed)), 0);
         lv_obj_set_hidden(s_row[i].root, false);
     }
+
+    // A row is shown whole or not at all. How many fit depends on whether the
+    // journey card is there, and a sliver of one reads as something broken.
+    lv_obj_update_layout(s_rest);
+    const std::int32_t room = lv_obj_get_content_height(s_rest);
+    for (int i = 0; i < ROWS; ++i) {
+        if (!lv_obj_has_flag(s_row[i].root, LV_OBJ_FLAG_HIDDEN) &&
+            lv_obj_get_y(s_row[i].root) + lv_obj_get_height(s_row[i].root) > room) {
+            lv_obj_set_hidden(s_row[i].root, true);
+        }
+    }
 }
 
 void build_calendar_page(lv_obj_t *page, std::int32_t width, std::int32_t height)
@@ -265,120 +274,95 @@ void build_calendar_page(lv_obj_t *page, std::int32_t width, std::int32_t height
     (void)height;
 
     lv_obj_set_flex_flow(page, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(page, STEP, 0);
+    lv_obj_set_style_pad_row(page, space::m, 0);
 
-    // --- what is next, and under it how to get there
-    lv_obj_t *hero = lv_obj_create(page);
-    lv_obj_set_width(hero, LV_PCT(100));
-    lv_obj_set_height(hero, LV_SIZE_CONTENT);
-    theme::style_panel(hero, theme::panel_light, 16);
-    lv_obj_set_style_pad_all(hero, PAD, 0);
-    lv_obj_set_style_pad_row(hero, STEP, 0);
-    lv_obj_set_flex_flow(hero, LV_FLEX_FLOW_COLUMN);
-    quiet(hero);
+    // --- the next thing: the one card on this page to read first
+    // What it is on the left, when on the right -- the way every calendar's
+    // "up next" is laid out, so it reads without being learned.
+    lv_obj_t *next = theme::make_focus_card(page);
+    lv_obj_set_width(next, LV_PCT(100));
+    lv_obj_set_height(next, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(next, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(next, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(next, space::l, 0);
+    quiet(next);
 
-    heading(hero, "NEXT");
+    lv_obj_t *what = column_of(next, space::xs);
+    lv_obj_set_width(what, 0);
+    lv_obj_set_flex_grow(what, 1);
+    theme::make_eyebrow(what, "NEXT");
 
-    s_title = theme::make_label(hero, "", theme::text, fonts::size_28());
+    s_title = theme::make_label(what, "", theme::text, theme::type_title());
     lv_obj_set_width(s_title, LV_PCT(100));
-    lv_obj_set_height(s_title, fonts::size_28()->line_height);
+    lv_obj_set_height(s_title, theme::type_title()->line_height);
     lv_label_set_long_mode(s_title, LV_LABEL_LONG_MODE_DOTS);
 
-    lv_obj_t *meta = bare(hero, 0, 0, 0, 0);
-    lv_obj_set_width(meta, LV_PCT(100));
-    lv_obj_set_height(meta, fonts::size_20()->line_height);
-    lv_obj_set_flex_flow(meta, LV_FLEX_FLOW_ROW);
-    lv_obj_set_style_pad_column(meta, GAP, 0);
-    lv_obj_set_flex_align(meta, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
+    s_meta = theme::make_label(what, "", theme::secondary, theme::type_body());
 
-    s_span  = theme::make_label(meta, "", theme::secondary, fonts::size_20());
-    s_where = theme::make_label(meta, "", theme::secondary, fonts::size_20());
-    lv_obj_set_flex_grow(s_where, 1);
-    lv_obj_set_height(s_where, fonts::size_20()->line_height);
-    lv_label_set_long_mode(s_where, LV_LABEL_LONG_MODE_DOTS);
+    lv_obj_t *when = column_of(next, 0);
+    lv_obj_set_width(when, LV_SIZE_CONTENT);
+    lv_obj_set_style_flex_cross_place(when, LV_FLEX_ALIGN_END, 0);
+    lv_obj_set_flex_align(when, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
 
-    s_when = theme::make_accent_label(meta, "", fonts::size_20());
+    s_start = theme::make_label(when, "", theme::text, theme::type_display());
+    s_countdown = theme::make_accent_label(when, "", theme::type_body());
 
-    // The journey only takes room when there is one. A half-empty card with a
-    // rule down the middle said nothing most of the day.
-    s_trip = bare(hero, 0, 0, 0, 0);
-    lv_obj_set_width(s_trip, LV_PCT(100));
-    lv_obj_set_height(s_trip, LV_SIZE_CONTENT);
-    lv_obj_set_style_margin_top(s_trip, STEP, 0);
-    lv_obj_set_flex_flow(s_trip, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(s_trip, 2, 0);
+    // --- how to get there, only when there is a way
+    s_journey = theme::make_card(page);
+    lv_obj_set_width(s_journey, LV_PCT(100));
+    lv_obj_set_height(s_journey, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(s_journey, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(s_journey, space::s, 0);
+    lv_obj_set_hidden(s_journey, true);
+    quiet(s_journey);
 
-    lv_obj_t *band = bare(s_trip, 0, 0, 0, 0);
-    lv_obj_set_width(band, LV_PCT(100));
-    lv_obj_set_height(band, fonts::size_16()->line_height);
-    lv_obj_set_flex_flow(band, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(band, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
-    heading(band, "GETTING THERE");
-    s_lead = theme::make_accent_label(band, "", fonts::size_16());
+    lv_obj_t *band =
+        line_of(s_journey, theme::type_label()->line_height, LV_FLEX_ALIGN_SPACE_BETWEEN);
+    theme::make_eyebrow(band, "GETTING THERE");
+    s_leave = theme::make_eyebrow(band, "");
 
+    lv_obj_t *stops = column_of(s_journey, space::xs);
     for (int i = 0; i < POINTS; ++i) {
-        PointView &point = s_point[i];
-        point.root       = bare(s_trip, 0, 0, 0, 0);
-        lv_obj_set_width(point.root, LV_PCT(100));
-        lv_obj_set_height(point.root, fonts::size_20()->line_height);
-        lv_obj_set_flex_flow(point.root, LV_FLEX_FLOW_ROW);
-        lv_obj_set_style_pad_column(point.root, STEP + 2, 0);
-        lv_obj_set_flex_align(point.root, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
-                              LV_FLEX_ALIGN_CENTER);
-        lv_obj_set_hidden(point.root, true);
+        Stop &stop = s_stop[i];
+        stop.root  = line_of(stops, ICON + 4, LV_FLEX_ALIGN_START);
+        lv_obj_set_hidden(stop.root, true);
 
-        point.when = theme::make_label(point.root, "", theme::text, fonts::size_20());
-        lv_obj_set_width(point.when, STOP_W);
+        stop.icon = lv_image_create(stop.root);
+        lv_image_set_src(stop.icon, &icons::bus_icon);
+        lv_obj_set_style_image_recolor(stop.icon, lv_color_hex(theme::secondary), 0);
+        lv_obj_set_style_image_recolor_opa(stop.icon, LV_OPA_COVER, 0);
+        quiet(stop.icon);
 
-        point.name = theme::make_label(point.root, "", theme::secondary, fonts::size_20());
-        lv_obj_set_flex_grow(point.name, 1);
-        lv_obj_set_height(point.name, fonts::size_20()->line_height);
-        lv_label_set_long_mode(point.name, LV_LABEL_LONG_MODE_DOTS);
+        stop.when = theme::make_label(stop.root, "", theme::text, theme::type_value());
+        lv_obj_set_width(stop.when, STOP_W);
 
-        if (i >= travel::kLegsMax) {
-            continue;
-        }
-        HopView &hop = s_hop[i];
-        hop.root     = bare(s_trip, 0, 0, 0, 0);
-        lv_obj_set_width(hop.root, LV_PCT(100));
-        lv_obj_set_height(hop.root, ICON - 6);
-        lv_obj_set_style_pad_left(hop.root, STOP_W - ICON / 2, 0);
-        lv_obj_set_flex_flow(hop.root, LV_FLEX_FLOW_ROW);
-        lv_obj_set_flex_align(hop.root, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
-                              LV_FLEX_ALIGN_CENTER);
-        lv_obj_set_hidden(hop.root, true);
-
-        hop.icon = lv_image_create(hop.root);
-        lv_image_set_src(hop.icon, &icons::bus_icon);
-        lv_obj_set_style_image_recolor(hop.icon, lv_color_hex(theme::secondary), 0);
-        lv_obj_set_style_image_recolor_opa(hop.icon, LV_OPA_COVER, 0);
-        quiet(hop.icon);
+        stop.name = theme::make_label(stop.root, "", theme::secondary, theme::type_body());
+        lv_obj_set_flex_grow(stop.name, 1);
+        lv_obj_set_height(stop.name, theme::type_body()->line_height);
+        lv_label_set_long_mode(stop.name, LV_LABEL_LONG_MODE_DOTS);
     }
 
-    s_after = theme::make_label(s_trip, "", theme::secondary, fonts::size_16());
-    quiet(s_after);
+    s_then = theme::make_label(s_journey, "", theme::secondary, theme::type_label());
+    quiet(s_then);
 
-    // --- what follows it
-    heading(page, "LATER");
+    // --- what follows
+    theme::make_eyebrow(page, "LATER");
 
-    lv_obj_t *rest = bare(page, 0, 0, 0, 0);
-    lv_obj_set_width(rest, LV_PCT(100));
+    lv_obj_t *rest = column_of(page, space::s);
+    s_rest         = rest;
+    lv_obj_set_height(rest, 0);
     lv_obj_set_flex_grow(rest, 1);
-    lv_obj_set_flex_flow(rest, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(rest, STEP, 0);
-    lv_obj_set_scrollable(rest, true);
-    lv_obj_set_scroll_dir(rest, LV_DIR_VER);
+
 
     for (int i = 0; i < ROWS; ++i) {
         Row &row = s_row[i];
         row.root = lv_obj_create(rest);
+        theme::style_panel(row.root, theme::panel_light, radius::row);
         lv_obj_set_width(row.root, LV_PCT(100));
         lv_obj_set_height(row.root, ROW_H);
-        theme::style_panel(row.root, theme::panel, 10);
-        lv_obj_set_style_pad_hor(row.root, PAD, 0);
-        lv_obj_set_style_pad_column(row.root, GAP, 0);
+        lv_obj_set_style_pad_hor(row.root, space::l, 0);
+        lv_obj_set_style_pad_column(row.root, space::m, 0);
         lv_obj_set_style_border_side(row.root, LV_BORDER_SIDE_LEFT, 0);
         lv_obj_set_style_border_width(row.root, MARK, 0);
         lv_obj_set_flex_flow(row.root, LV_FLEX_FLOW_ROW);
@@ -387,37 +371,31 @@ void build_calendar_page(lv_obj_t *page, std::int32_t width, std::int32_t height
         lv_obj_set_hidden(row.root, true);
         quiet(row.root);
 
-        row.time = theme::make_label(row.root, "", theme::text, fonts::size_20());
+        row.time = theme::make_label(row.root, "", theme::text, theme::type_body());
         lv_obj_set_width(row.time, TIME_W);
 
-        row.title = theme::make_label(row.root, "", theme::text, fonts::size_20());
+        row.title = theme::make_label(row.root, "", theme::text, theme::type_body());
         lv_obj_set_flex_grow(row.title, 1);
-        lv_obj_set_height(row.title, fonts::size_20()->line_height);
+        lv_obj_set_height(row.title, theme::type_body()->line_height);
         lv_label_set_long_mode(row.title, LV_LABEL_LONG_MODE_DOTS);
 
-        row.place = theme::make_label(row.root, "", theme::secondary, fonts::size_20());
+        row.place = theme::make_label(row.root, "", theme::secondary, theme::type_body());
         lv_obj_set_width(row.place, PLACE_W);
         lv_obj_set_style_text_align(row.place, LV_TEXT_ALIGN_RIGHT, 0);
         lv_label_set_long_mode(row.place, LV_LABEL_LONG_MODE_DOTS);
     }
 
     // --- what the colours mean
-    lv_obj_t *key = bare(page, 0, 0, 0, 0);
-    lv_obj_set_width(key, LV_PCT(100));
-    lv_obj_set_height(key, KEY_H);
-    lv_obj_set_style_pad_column(key, STEP, 0);
-    lv_obj_set_flex_flow(key, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(key, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-
+    lv_obj_t *key = line_of(page, KEY_H, LV_FLEX_ALIGN_START);
     for (int i = 0; i < ical::kFeedCount; ++i) {
         lv_obj_t *chip = lv_obj_create(key);
         lv_obj_set_size(chip, 12, 12);
-        theme::style_panel(chip, feed_ink(static_cast<std::uint8_t>(i)), 6);
+        theme::style_panel(chip, feed_ink(static_cast<std::uint8_t>(i)), radius::pill);
         quiet(chip);
 
         lv_obj_t *name = theme::make_label(key, ical::feed_name(static_cast<std::uint8_t>(i)),
-                                           theme::secondary, fonts::size_16());
-        lv_obj_set_style_margin_right(name, GAP, 0);
+                                           theme::secondary, theme::type_label());
+        lv_obj_set_style_margin_right(name, space::m, 0);
         quiet(name);
     }
 

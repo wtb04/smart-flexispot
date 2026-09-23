@@ -11,8 +11,11 @@
 #include "calendar_page.h"
 #include "screenshot.h"
 
+#ifndef SHOT_DRAWER
+#define SHOT_DRAWER 0
+#endif
 #ifndef SHOT_ENABLED
-#define SHOT_ENABLED 0
+#define SHOT_ENABLED 1
 #endif
 #include "radar_page.h"
 #include "segment_display.h"
@@ -36,6 +39,9 @@ constexpr std::uint32_t LOCK_TIMEOUT_MS = 500;
 // Sized from the real display rather than with percentages: LV_PCT() returns an
 // encoded sentinel, so LV_PCT(100) - something lays out as nonsense.
 constexpr std::int32_t RAIL_W      = 330;
+// The rail is a panel like the content beside it, set in by the same gap on its
+// outer sides rather than running flush to the edge of the glass.
+constexpr std::int32_t RAIL_CARD_W = RAIL_W - 16;
 constexpr std::int32_t NAV_H       = 92;
 constexpr std::int32_t RAIL_BTN_H  = 124;
 constexpr std::int32_t GAP        = 16;
@@ -360,7 +366,7 @@ void place_strip()
 lv_obj_t *make_rail_button(lv_obj_t *parent, const char *text)
 {
     lv_obj_t *btn = theme::make_button(parent, text);
-    lv_obj_set_size(btn, RAIL_W - 2 * PANEL_PAD, RAIL_BTN_H);
+    lv_obj_set_size(btn, RAIL_CARD_W - 2 * PANEL_PAD, RAIL_BTN_H);
     theme::fill_accent(btn, LV_STATE_CHECKED);
     register_desk_control(btn);
     return btn;
@@ -404,17 +410,16 @@ void create_rail(lv_obj_t *parent)
 
     lv_obj_t *rail = lv_obj_create(parent);
     s_rail         = rail;
-    lv_obj_set_pos(rail, l.rail_x, 0);
-    lv_obj_set_size(rail, RAIL_W, l.screen_h);
-    theme::style_panel(rail);
-    lv_obj_set_style_radius(rail, 0, 0);
+    lv_obj_set_pos(rail, l.rail_right ? l.rail_x : GAP, GAP);
+    lv_obj_set_size(rail, RAIL_CARD_W, l.screen_h - 2 * GAP);
+    theme::style_panel(rail, theme::panel, theme::radius::card);
     lv_obj_set_style_pad_all(rail, PANEL_PAD, 0);
     lv_obj_set_flex_flow(rail, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(rail, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_row(rail, BUTTON_GAP, 0);
 
     lv_obj_t *strip = lv_obj_create(rail);
-    lv_obj_set_size(strip, RAIL_W - 2 * PANEL_PAD, 44);
+    lv_obj_set_size(strip, RAIL_CARD_W - 2 * PANEL_PAD, 44);
     lv_obj_set_style_bg_opa(strip, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(strip, 0, 0);
     lv_obj_set_style_pad_all(strip, 0, 0);
@@ -493,11 +498,27 @@ void create_rail(lv_obj_t *parent)
 constexpr std::int32_t DRAWER_W  = 340;
 constexpr std::uint32_t DRAWER_MS = 200;
 
+// The drawer is the rail widening. Its inner edge is tucked under the rail's
+// rounded corners, so the two surfaces meet without a seam and the outer corners
+// are the only ones anybody sees.
+constexpr std::int32_t DRAWER_TUCK = theme::radius::card;
+
 void place_drawer(std::int32_t width)
 {
     const Layout l = layout();
-    lv_obj_set_width(s_drawer, width);
-    lv_obj_set_x(s_drawer, l.rail_right ? l.screen_w - RAIL_W - width : RAIL_W);
+    lv_obj_set_width(s_drawer, width > 0 ? width + DRAWER_TUCK : 0);
+    lv_obj_set_x(s_drawer, l.rail_right ? l.screen_w - RAIL_W - width : RAIL_W - DRAWER_TUCK);
+}
+
+void pad_drawer()
+{
+    const Layout l = layout();
+    lv_obj_set_style_pad_all(s_drawer, PANEL_PAD, 0);
+    if (l.rail_right) {
+        lv_obj_set_style_pad_right(s_drawer, PANEL_PAD + DRAWER_TUCK, 0);
+    } else {
+        lv_obj_set_style_pad_left(s_drawer, PANEL_PAD + DRAWER_TUCK, 0);
+    }
 }
 
 void drawer_width_cb(void *, std::int32_t value) { place_drawer(value); }
@@ -526,11 +547,11 @@ void create_drawer(lv_obj_t *parent)
     const Layout l = layout();
 
     s_drawer = lv_obj_create(parent);
-    lv_obj_set_y(s_drawer, 0);
-    lv_obj_set_height(s_drawer, l.screen_h);
+    lv_obj_set_y(s_drawer, GAP);
+    lv_obj_set_height(s_drawer, l.screen_h - 2 * GAP);
     place_drawer(0);
-    theme::style_panel(s_drawer, theme::panel, 0);
-    lv_obj_set_style_pad_all(s_drawer, PANEL_PAD, 0);
+    theme::style_panel(s_drawer, theme::panel, theme::radius::card);
+    pad_drawer();
     lv_obj_set_flex_flow(s_drawer, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(s_drawer, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
                           LV_FLEX_ALIGN_CENTER);
@@ -553,14 +574,15 @@ void create_drawer(lv_obj_t *parent)
 void place_for_side()
 {
     const Layout l = layout();
-    lv_obj_set_pos(s_rail, l.rail_x, 0);
+    lv_obj_set_pos(s_rail, l.rail_right ? l.rail_x : GAP, GAP);
     lv_obj_set_pos(s_content, l.content_x, GAP);
+    pad_drawer();
+    place_drawer(s_drawer_open ? DRAWER_W : 0);
     theme::align(s_drawer_toggle,
                  l.rail_right ? LV_ALIGN_BOTTOM_LEFT : LV_ALIGN_BOTTOM_RIGHT, 0, 0);
     theme::set_text(lv_obj_get_child(s_drawer_toggle, 0),
                     s_drawer_open != l.rail_right ? LV_SYMBOL_LEFT : LV_SYMBOL_RIGHT);
     place_strip();
-    place_drawer(lv_obj_get_width(s_drawer));
     lv_obj_set_pos(s_notice_scrim, l.rail_right ? 0 : RAIL_W, 0);
     lv_obj_align(s_notice_card, LV_ALIGN_CENTER, l.content_x + l.content_w / 2 - l.screen_w / 2,
                  GAP + l.content_h / 2 - l.screen_h / 2);
@@ -595,7 +617,7 @@ constexpr float DEFAULT_STEP_C = 0.5f;
 
 constexpr std::int32_t DIAL_CARD_W = 480;
 constexpr std::int32_t DIAL_INSET    = 100;
-constexpr std::int32_t DIAL_CHIP     = 56;
+constexpr std::int32_t DIAL_CHIP     = theme::chip::size;
 constexpr std::int32_t DIAL_CHIP_GAP = 10;
 
 lv_obj_t *s_dial         = nullptr;
@@ -670,11 +692,16 @@ void build_thermostat(lv_obj_t *parent, std::int32_t y, std::int32_t w, std::int
     lv_obj_t *card = lv_obj_create(parent);
     lv_obj_set_pos(card, 0, y);
     lv_obj_set_size(card, w, h);
-    theme::style_panel(card, theme::panel_light, 24);
+    theme::style_panel(card, theme::panel_light, theme::radius::card);
     lv_obj_set_style_pad_all(card, PANEL_PAD, 0);
 
     const std::int32_t inner   = w - 2 * PANEL_PAD;
     const std::int32_t inner_h = h - 2 * PANEL_PAD;
+
+    // Screwed down in every corner the chips leave free, like the radar's scope.
+    lv_obj_set_pos(theme::make_screw(card, DIAL_CHIP), 0, 0);
+    lv_obj_set_pos(theme::make_screw(card, DIAL_CHIP), 0, inner_h - DIAL_CHIP);
+    lv_obj_set_pos(theme::make_screw(card, DIAL_CHIP), inner - DIAL_CHIP, inner_h - DIAL_CHIP);
     const std::int32_t ring   = std::min(w - DIAL_INSET, inner_h);
     const std::int32_t ring_y = (inner_h - ring) / 2;
 
@@ -708,10 +735,8 @@ void build_thermostat(lv_obj_t *parent, std::int32_t y, std::int32_t w, std::int
     lv_obj_align(s_dial_target, LV_ALIGN_TOP_MID, 0, centre + 46);
 
     for (int i = 0; i < kDialToggleCount; ++i) {
-        lv_obj_t *chip = theme::make_button(card, "", theme::panel, fonts::size_16());
-        lv_obj_set_size(chip, DIAL_CHIP, DIAL_CHIP);
+        lv_obj_t *chip = theme::make_chip(card, "");
         theme::fill_accent(chip, LV_STATE_CHECKED);
-        lv_obj_set_style_radius(chip, DIAL_CHIP / 2, 0);
         lv_obj_set_pos(chip, inner - DIAL_CHIP - i * (DIAL_CHIP + DIAL_CHIP_GAP), 0);
         lv_obj_add_event_cb(chip, dial_toggle_cb, LV_EVENT_CLICKED,
                             reinterpret_cast<void *>(static_cast<std::intptr_t>(i)));
@@ -1826,8 +1851,12 @@ void volume_changed_cb(lv_event_t *e)
     }
 }
 
+// A tile names a reading and shows it large, as the diagnostics grid does. A
+// tile that is a way somewhere or a thing to do is led by its title instead,
+// with the explanation under it: the other way round, a description ends up the
+// biggest thing on the card.
 lv_obj_t *build_tile(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int32_t w,
-                     std::int32_t h, const char *icon, const char *title)
+                     std::int32_t h, const char *icon, const char *title, bool titled = false)
 {
     lv_obj_t *tile = lv_button_create(parent);
     lv_obj_set_pos(tile, x, y);
@@ -1838,12 +1867,24 @@ lv_obj_t *build_tile(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int3
     lv_obj_t *glyph = theme::make_accent_label(tile, icon, fonts::size_28());
     lv_obj_align(glyph, LV_ALIGN_TOP_LEFT, 0, 0);
 
-    lv_obj_t *caption = theme::make_label(tile, title, theme::secondary, fonts::size_22());
-    lv_obj_align(caption, LV_ALIGN_TOP_LEFT, 44, 4);
+    const lv_font_t *font = titled ? theme::type_title() : fonts::size_22();
+    lv_obj_t *caption     = theme::make_label(tile, title,
+                                              titled ? theme::text : theme::secondary, font);
+    lv_obj_align(caption, LV_ALIGN_TOP_LEFT, 44, titled ? 0 : 4);
     lv_obj_set_width(caption, w - 96);
-    lv_obj_set_height(caption, fonts::size_22()->line_height);
+    lv_obj_set_height(caption, font->line_height);
     lv_label_set_long_mode(caption, LV_LABEL_LONG_MODE_DOTS);
     return tile;
+}
+
+lv_obj_t *tile_note(lv_obj_t *tile, std::int32_t w, const char *initial)
+{
+    lv_obj_t *note = theme::make_label(tile, initial, theme::secondary, theme::type_body());
+    lv_obj_align(note, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    lv_obj_set_width(note, w - 40);
+    lv_obj_set_height(note, theme::type_body()->line_height);
+    lv_label_set_long_mode(note, LV_LABEL_LONG_MODE_DOTS);
+    return note;
 }
 
 lv_obj_t *tile_value(lv_obj_t *tile, std::int32_t w, const char *initial)
@@ -2228,7 +2269,7 @@ void build_sub_header(lv_obj_t *view, const char *title)
 lv_obj_t *build_page_tile(lv_obj_t *parent, std::int32_t y, std::int32_t w, std::int32_t h,
                           const char *icon, const char *title, lv_event_cb_t clicked)
 {
-    lv_obj_t *tile = build_tile(parent, 0, y, w, h, icon, title);
+    lv_obj_t *tile = build_tile(parent, 0, y, w, h, icon, title, true);
     lv_obj_add_event_cb(tile, clicked, LV_EVENT_CLICKED, nullptr);
     lv_obj_t *chevron = theme::make_label(tile, LV_SYMBOL_RIGHT, theme::secondary,
                                           fonts::size_28());
@@ -2250,23 +2291,21 @@ void build_settings_view(lv_obj_t *parent, std::int32_t w, std::int32_t h)
 
     lv_obj_t *look = build_page_tile(view, tiles_y, w, tile_h, LV_SYMBOL_IMAGE, "Appearance",
                                      show_appearance_cb);
-    theme::set_text_color(tile_value(look, w, "Colour, sidebar, orientation, brightness"),
-                          theme::secondary);
+    tile_note(look, w, "Colour, sidebar, orientation, brightness");
 
     lv_obj_t *diag = build_page_tile(view, tiles_y + pitch, w, tile_h, LV_SYMBOL_LIST,
                                      "Diagnostics", show_diagnostics_cb);
-    s_diag_summary = tile_value(diag, w, "");
-    theme::set_text_color(s_diag_summary, theme::secondary);
+    s_diag_summary = tile_note(diag, w, "");
 
     lv_obj_t *screen = build_tile(view, 0, tiles_y + 2 * pitch, half, tile_h,
-                                  LV_SYMBOL_EYE_CLOSE, "Screen off");
+                                  LV_SYMBOL_EYE_CLOSE, "Screen off", true);
     lv_obj_add_event_cb(screen, screen_off_cb, LV_EVENT_CLICKED, nullptr);
-    theme::set_text_color(tile_value(screen, half, "Tap to bring it back"), theme::secondary);
+    tile_note(screen, half, "Tap anywhere to bring it back");
 
     lv_obj_t *restart = build_tile(view, half + BUTTON_GAP, tiles_y + 2 * pitch, half, tile_h,
-                                   LV_SYMBOL_POWER, "Restart");
+                                   LV_SYMBOL_POWER, "Restart", true);
     lv_obj_add_event_cb(restart, restart_held_cb, LV_EVENT_LONG_PRESSED, nullptr);
-    theme::set_text_color(tile_value(restart, half, "Hold to restart"), theme::secondary);
+    tile_note(restart, half, "Hold to restart");
 
     s_settings_view = view;
 }
@@ -2565,17 +2604,37 @@ void build_screen()
     // after boot. SHOT_PAGE picks what to look at; -1 leaves the panel alone.
     // It holds the LVGL lock for several seconds, so it is off unless wanted.
     if (SHOT_ENABLED) {
-        lv_timer_t *shot = lv_timer_create([](lv_timer_t *) {
-            static const int PAGES[] = {0, CALENDAR_PAGE, RADAR_PAGE, SETUP_PAGE};
-            for (int page : PAGES) {
-                lv_obj_send_event(s_nav_tabs[page], LV_EVENT_CLICKED, nullptr);
-                lv_refr_now(nullptr);
+        // One page per tick rather than all at once: a tab's colour eases in,
+        // and a picture taken straight after the switch shows the old tab lit.
+        // Pages hidden while the phone is away are the ones most often worth
+        // looking at, so the gate is lifted for as long as the pictures take.
+        lv_timer_t *shot = lv_timer_create([](lv_timer_t *timer) {
+            // Only the pages being worked on: every one adds about a minute.
+            static const int PAGES[] = {0, RADAR_PAGE};
+            static int       step    = -1;
+            static bool      gated   = false;
+            if (step >= 0) {
                 screenshot();
+            } else {
+                gated           = s_presence_gate;
+                s_presence_gate = false;
             }
+            if (++step < static_cast<int>(std::size(PAGES))) {
+                select_page(PAGES[step]);
+                if (SHOT_DRAWER) {
+                    place_drawer(DRAWER_W);
+                }
+                lv_timer_set_period(timer, 2000);
+                return;
+            }
+            s_presence_gate = gated;
+            select_page(0);
+            lv_timer_delete(timer);
         }, 25000, nullptr);
-        lv_timer_set_repeat_count(shot, 1);
+        (void)shot;
     }
     create_drawer(scr);  // after the content, so it overlays it when open
+    lv_obj_move_foreground(s_rail);  // and under the rail, which it slides out from
     create_notice_card();
     build_splash();  // last, so it covers everything until startup finishes
 }
