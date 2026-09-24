@@ -118,7 +118,7 @@ void test_charge_state()
 
 void test_discovery_document()
 {
-    const std::string doc = discovery_document("tab5_desk", "1.0.0");
+    const std::string doc = discovery_document("tab5_desk", "1.0.0", 20);
     cJSON            *root = cJSON_Parse(doc.c_str());
     check(root != nullptr, "discovery payload parses");
     if (root == nullptr) {

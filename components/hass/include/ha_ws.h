@@ -3,12 +3,16 @@
 #include "esp_err.h"
 #include "ha_ws_protocol.h"
 
+#include <string>
+#include <vector>
+
 namespace hass::ws {
 /** Invoked from the socket task whenever the entity store changes. */
 using UpdateHandler = void (*)(const EntityStore &store);
 
-/** Safe to call before Wi-Fi is up; the client retries on its own. */
-esp_err_t start(UpdateHandler on_update);
+/** Safe to call before Wi-Fi is up; the client retries on its own. Subscribes
+ *  to `entities` and nothing else. */
+esp_err_t start(UpdateHandler on_update, std::vector<std::string> entities);
 
 /** True once authenticated and subscribed. */
 bool connected();

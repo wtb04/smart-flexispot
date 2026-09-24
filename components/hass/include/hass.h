@@ -13,8 +13,9 @@ struct Handlers {
     void (*on_screen)(bool on);
 };
 
-/** Safe to call before Wi-Fi is up. */
-esp_err_t start(const Handlers &handlers);
+/** Safe to call before Wi-Fi is up. `brightness_floor` is the dimmest the
+ *  panel goes, for Home Assistant's slider. */
+esp_err_t start(const Handlers &handlers, int brightness_floor);
 
 /** Publishes only what has changed, so it is cheap to call often. */
 esp_err_t publish(const protocol::Telemetry &telemetry);

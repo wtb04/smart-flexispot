@@ -545,6 +545,23 @@ void on_dial_toggle(int index)
         hass::ws::call_service("input_boolean", "toggle", TOGGLES[index].entity));
 }
 
+std::vector<std::string> entities()
+{
+    std::vector<std::string> out = {CLIMATE_ENTITY, ALL_LIGHTS_ENTITY, ALL_LIGHTS_ON,
+                                    ALL_LIGHTS_OFF, MEDIA_SPEAKER,     MEDIA_JELLYFIN,
+                                    "zone.home"};  // the radar's centre
+    for (const PillSpec &pill : PILLS) {
+        out.emplace_back(pill.entity);
+    }
+    for (const LightSpec &light : LIGHTS) {
+        out.emplace_back(light.entity);
+    }
+    for (const ToggleSpec &toggle : TOGGLES) {
+        out.emplace_back(toggle.entity);
+    }
+    return out;
+}
+
 int entity_count()
 {
     return s_entity_count.load(std::memory_order_relaxed);

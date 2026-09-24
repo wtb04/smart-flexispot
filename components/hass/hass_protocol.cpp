@@ -132,7 +132,8 @@ std::string state_document(const Telemetry &t)
     return out;
 }
 
-std::string discovery_document(const std::string &device_id, const std::string &sw_version)
+std::string discovery_document(const std::string &device_id, const std::string &sw_version,
+                               int brightness_floor)
 {
     const Topics topics = topics_for(device_id);
 
@@ -251,7 +252,7 @@ std::string discovery_document(const std::string &device_id, const std::string &
     cJSON_AddStringToObject(brightness, "stat_t", topics.state.c_str());
     cJSON_AddStringToObject(brightness, "val_tpl", "{{ value_json.brightness }}");
     cJSON_AddStringToObject(brightness, "cmd_t", topics.cmd_brightness.c_str());
-    cJSON_AddNumberToObject(brightness, "min", 20);  // panel floor
+    cJSON_AddNumberToObject(brightness, "min", brightness_floor);
     cJSON_AddNumberToObject(brightness, "max", 100);
     cJSON_AddNumberToObject(brightness, "step", 5);
     cJSON_AddStringToObject(brightness, "unit_of_meas", "%");

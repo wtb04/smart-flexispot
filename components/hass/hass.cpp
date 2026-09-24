@@ -31,6 +31,7 @@ Handlers                 s_handlers{};
 protocol::Topics         s_topics;
 std::string              s_last_state;   // telemetry task only
 std::atomic<bool>        s_force_publish{false};
+int                      s_brightness_floor = 0;
 
 struct Inbound {
     std::string topic;
@@ -40,7 +41,8 @@ Inbound s_inbound;
 
 void publish_discovery()
 {
-    const std::string payload = protocol::discovery_document(HASS_DEVICE_ID, SW_VERSION);
+    const std::string payload =
+        protocol::discovery_document(HASS_DEVICE_ID, SW_VERSION, s_brightness_floor);
     esp_mqtt_client_publish(s_client, s_topics.discovery.c_str(), payload.c_str(),
                             static_cast<int>(payload.size()), QOS_AT_LEAST_ONCE, RETAIN);
     ESP_LOGI(TAG, "published discovery (%u bytes)", static_cast<unsigned>(payload.size()));
@@ -140,8 +142,9 @@ void on_mqtt_event(void *, esp_event_base_t, std::int32_t id, void *data)
 
 }  // namespace
 
-esp_err_t start(const Handlers &handlers)
+esp_err_t start(const Handlers &handlers, int brightness_floor)
 {
+    s_brightness_floor = brightness_floor;
     if (std::string(HASS_MQTT_URI).empty()) {
         ESP_LOGW(TAG, "no broker configured, not starting - see hass_secrets.example.h");
         return ESP_OK;
@@ -201,7 +204,8 @@ bool connected()
 esp_err_t restart()
 {
     if (s_client == nullptr) {
-        return std::string(HASS_MQTT_URI).empty() ? ESP_ERR_INVALID_STATE : start(s_handlers);
+        return std::string(HASS_MQTT_URI).empty() ? ESP_ERR_INVALID_STATE
+                                                  : start(s_handlers, s_brightness_floor);
     }
     // First the cheap nudge, which only helps a client waiting to retry; then
     // the full stop and start, which can block for as long as a connect takes.

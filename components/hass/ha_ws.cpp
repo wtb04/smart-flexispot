@@ -12,6 +12,7 @@
 
 #include <atomic>
 #include <string>
+#include <utility>
 #include <vector>
 
 #if __has_include("hass_secrets.h")
@@ -20,7 +21,6 @@
 #ifndef HASS_WS_URI
 #define HASS_WS_URI ""
 #define HASS_WS_TOKEN ""
-#define HASS_WS_ENTITIES ""
 #endif
 
 namespace hass::ws {
@@ -115,26 +115,7 @@ void refused(const char *reason)
     }
 }
 
-std::vector<std::string> configured_entities()
-{
-    std::vector<std::string> out;
-    std::string              list = HASS_WS_ENTITIES;
-    std::size_t              start = 0;
-    while (start < list.size()) {
-        std::size_t comma = list.find(',', start);
-        if (comma == std::string::npos) {
-            comma = list.size();
-        }
-        std::string id = list.substr(start, comma - start);
-        while (!id.empty() && id.front() == ' ') id.erase(id.begin());
-        while (!id.empty() && id.back() == ' ') id.pop_back();
-        if (!id.empty()) {
-            out.push_back(id);
-        }
-        start = comma + 1;
-    }
-    return out;
-}
+std::vector<std::string> s_entities;
 
 bool send_text(const std::string &text)
 {
@@ -161,12 +142,12 @@ void handle_message(const std::string &text)
             break;
 
         case MessageType::AuthOk: {
-            const std::vector<std::string> entities = configured_entities();
+            const std::vector<std::string> &entities = s_entities;
             ESP_LOGI(TAG, "authenticated, subscribing to %u entities",
                      static_cast<unsigned>(entities.size()));
             const std::string subscribe = subscribe_entities_message(SUBSCRIBE_ID, entities);
             if (subscribe.empty()) {
-                ESP_LOGW(TAG, "no entities configured - see hass_secrets.example.h");
+                ESP_LOGW(TAG, "no entities to subscribe to");
             } else {
                 s_next_command_id.store(SUBSCRIBE_ID + 1, std::memory_order_relaxed);
                 if (send_text(subscribe)) {
@@ -317,8 +298,9 @@ void on_event(void *, esp_event_base_t, std::int32_t id, void *data)
 
 }  // namespace
 
-esp_err_t start(UpdateHandler on_update)
+esp_err_t start(UpdateHandler on_update, std::vector<std::string> entities)
 {
+    s_entities = std::move(entities);
     if (std::string(HASS_WS_URI).empty()) {
         ESP_LOGW(TAG, "no Home Assistant URL configured, not starting");
         return ESP_OK;
@@ -365,7 +347,8 @@ bool connected()
 esp_err_t restart()
 {
     if (s_client == nullptr) {
-        return std::string(HASS_WS_URI).empty() ? ESP_ERR_INVALID_STATE : start(s_on_update);
+        return std::string(HASS_WS_URI).empty() ? ESP_ERR_INVALID_STATE
+                                                : start(s_on_update, s_entities);
     }
     begin_again_in(1, "restart asked for");
     return ESP_OK;

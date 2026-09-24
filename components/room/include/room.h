@@ -2,11 +2,18 @@
 
 #include "esp_err.h"
 #include "ha_ws_protocol.h"
+
+#include <string>
+#include <vector>
 #include "ui.h"
 
 namespace room {
 /** Scaffolds the home screen before any connect. */
 void init();
+
+/** Every entity the page shows or acts on, for the websocket to subscribe to:
+ *  one list, rather than a second copy to keep in step by hand. */
+std::vector<std::string> entities();
 
 /** Runs on the WebSocket task. */
 void render(const hass::ws::EntityStore &store);

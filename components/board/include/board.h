@@ -26,7 +26,6 @@ esp_err_t display_on(int percent);
  *  above all -- has to put it to sleep rather than only dim it. */
 esp_err_t display_off();
 
-inline constexpr int kDefaultBrightness = 80;
 
 /** Below this the panel does not get any dimmer, so offering the range is just a
  *  control that appears broken. */

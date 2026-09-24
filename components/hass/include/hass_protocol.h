@@ -46,7 +46,10 @@ std::string state_document(const Telemetry &telemetry);
  * One retained message for all entities; Home Assistant 2024.11 and later.
  * Emits no `object_id`: deprecated in 2025.10, removed in 2026.4.
  */
-std::string discovery_document(const std::string &device_id, const std::string &sw_version);
+/** `brightness_floor` is the dimmest the panel goes, which Home Assistant's
+ *  slider must not offer to go below. */
+std::string discovery_document(const std::string &device_id, const std::string &sw_version,
+                               int brightness_floor);
 
 /** Shown on screen. Attacker-controlled text; treat as data. */
 struct Notification {
