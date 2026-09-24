@@ -193,6 +193,82 @@ lv_obj_t *build_page_tile(lv_obj_t *parent, std::int32_t y, std::int32_t w, std:
     return tile;
 }
 
+}  // namespace
+
+namespace {
+lv_obj_t *s_behaviour_view = nullptr;
+
+// Each setting is two ways, painted like the sidebar and orientation choices.
+lv_obj_t *s_setting_choice[SETTING_COUNT][2] = {};
+bool      s_setting_on[SETTING_COUNT]        = {};
+
+void pick_setting(Setting setting, bool on)
+{
+    const int index = static_cast<int>(setting);
+    if (on == s_setting_on[index]) {
+        return;
+    }
+    apply_setting(index, on);
+    if (s_handlers.setting != nullptr) {
+        s_handlers.setting(setting, on);
+    }
+}
+
+void gate_clicked_cb(lv_event_t *e)
+{
+    pick_setting(Setting::PresenceGate, lv_event_get_user_data(e) != nullptr);
+}
+
+void charge_clicked_cb(lv_event_t *e)
+{
+    pick_setting(Setting::Charging, lv_event_get_user_data(e) != nullptr);
+}
+
+void link_clicked_cb(lv_event_t *e)
+{
+    pick_setting(Setting::DeskBluetooth, lv_event_get_user_data(e) != nullptr);
+}
+}  // namespace
+
+void apply_setting(int index, bool on)
+{
+    s_setting_on[index] = on;
+    if (s_setting_choice[index][0] != nullptr) {
+        paint_choice(s_setting_choice[index], on);
+    }
+    if (static_cast<Setting>(index) == Setting::PresenceGate) {
+        s_presence_gate = on;
+        select_page(s_page);
+    }
+}
+
+void show_diagnostics_cb(lv_event_t *)
+{
+    lv_obj_set_hidden(s_settings_view, true);
+    lv_obj_set_hidden(s_diag_view, false);
+}
+
+void show_appearance_cb(lv_event_t *)
+{
+    lv_obj_set_hidden(s_settings_view, true);
+    lv_obj_set_hidden(s_appearance_view, false);
+}
+
+void show_behaviour_cb(lv_event_t *)
+{
+    lv_obj_set_hidden(s_settings_view, true);
+    lv_obj_set_hidden(s_behaviour_view, false);
+}
+
+void show_settings_cb(lv_event_t *)
+{
+    lv_obj_set_hidden(s_diag_view, true);
+    lv_obj_set_hidden(s_appearance_view, true);
+    lv_obj_set_hidden(s_behaviour_view, true);
+    lv_obj_set_hidden(s_settings_view, false);
+}
+
+namespace {
 void build_settings_view(lv_obj_t *parent, std::int32_t w, std::int32_t h)
 {
     lv_obj_t *view = build_sub_view(parent, w, h);
@@ -204,10 +280,16 @@ void build_settings_view(lv_obj_t *parent, std::int32_t w, std::int32_t h)
     const std::int32_t tile_h  = (h - tiles_y - 2 * BUTTON_GAP) / 3;
     const std::int32_t pitch   = tile_h + BUTTON_GAP;
     const std::int32_t half    = (w - BUTTON_GAP) / 2;
+    const std::int32_t right   = half + BUTTON_GAP;
 
-    lv_obj_t *look = build_page_tile(view, tiles_y, w, tile_h, LV_SYMBOL_IMAGE, "Appearance",
+    lv_obj_t *look = build_page_tile(view, tiles_y, half, tile_h, LV_SYMBOL_IMAGE, "Appearance",
                                      show_appearance_cb);
-    tile_note(look, w, "Colour, sidebar, orientation, brightness");
+    tile_note(look, half, "Colour, layout, brightness");
+
+    lv_obj_t *behave = build_page_tile(view, tiles_y, half, tile_h, LV_SYMBOL_SETTINGS,
+                                       "Behaviour", show_behaviour_cb);
+    lv_obj_set_x(behave, right);
+    tile_note(behave, half, "Presence, charging, desk link");
 
     lv_obj_t *diag = build_page_tile(view, tiles_y + pitch, w, tile_h, LV_SYMBOL_LIST,
                                      "Diagnostics", show_diagnostics_cb);
@@ -218,12 +300,38 @@ void build_settings_view(lv_obj_t *parent, std::int32_t w, std::int32_t h)
     lv_obj_add_event_cb(screen, screen_off_cb, LV_EVENT_CLICKED, nullptr);
     tile_note(screen, half, "Tap anywhere to bring it back");
 
-    lv_obj_t *restart = build_tile(view, half + BUTTON_GAP, tiles_y + 2 * pitch, half, tile_h,
+    lv_obj_t *restart = build_tile(view, right, tiles_y + 2 * pitch, half, tile_h,
                                    LV_SYMBOL_POWER, "Restart", true);
     lv_obj_add_event_cb(restart, restart_held_cb, LV_EVENT_LONG_PRESSED, nullptr);
     tile_note(restart, half, "Hold to restart");
 
     s_settings_view = view;
+}
+
+void build_behaviour_view(lv_obj_t *parent, std::int32_t w, std::int32_t h)
+{
+    lv_obj_t *view = build_sub_view(parent, w, h);
+    lv_obj_set_hidden(view, true);
+    build_sub_header(view, "Behaviour");
+
+    const std::int32_t body_y = DIAG_HEADER_H + BUTTON_GAP;
+    const std::int32_t pitch  = ROW_CARD_H + BUTTON_GAP;
+
+    // Off first, then on, as the settings count them.
+    build_choice_card(view, body_y, w, LV_SYMBOL_EYE_OPEN, "Pages while away", "SHOW", "HIDE",
+                      gate_clicked_cb,
+                      s_setting_choice[static_cast<int>(Setting::PresenceGate)]);
+    build_choice_card(view, body_y + pitch, w, LV_SYMBOL_BATTERY_FULL, "Battery charging", "OFF",
+                      "ON", charge_clicked_cb,
+                      s_setting_choice[static_cast<int>(Setting::Charging)]);
+    build_choice_card(view, body_y + 2 * pitch, w, LV_SYMBOL_UP, "Desk link", "WIRE",
+                      "BLUETOOTH", link_clicked_cb,
+                      s_setting_choice[static_cast<int>(Setting::DeskBluetooth)]);
+    for (int i = 0; i < SETTING_COUNT; ++i) {
+        apply_setting(i, s_setting_on[i]);
+    }
+
+    s_behaviour_view = view;
 }
 
 void build_appearance_view(lv_obj_t *parent, std::int32_t w, std::int32_t h)
@@ -282,6 +390,7 @@ void build_settings_page(lv_obj_t *page)
 
     build_settings_view(page, inner_w, inner_h);
     build_appearance_view(page, inner_w, inner_h);
+    build_behaviour_view(page, inner_w, inner_h);
     build_diagnostics_view(page, inner_w, inner_h);
     build_detail_overlay(page);
     build_log_overlay(page);

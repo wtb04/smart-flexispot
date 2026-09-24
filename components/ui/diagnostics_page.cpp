@@ -18,8 +18,6 @@ constexpr std::int32_t LOG_W        = 800;
 constexpr std::int32_t LOG_H        = 520;
 constexpr std::int32_t DETAIL_W     = 660;
 constexpr std::int32_t DETAIL_ROW_GAP = 2;
-constexpr std::int32_t DETAIL_SET_TOP = 14;
-constexpr std::int32_t DETAIL_SET_H   = 56;
 constexpr std::int32_t DETAIL_MAX_FRAC = 80;
 constexpr std::int32_t DETAIL_ROW_H = 30;
 constexpr std::int32_t TILE_DOT     = 14;
@@ -45,9 +43,6 @@ lv_obj_t *s_detail_title                = nullptr;
 std::int32_t s_detail_height[INFO_CARD_COUNT] = {};
 bool s_tile_long = false;
 
-lv_obj_t *s_setting_value[SETTING_COUNT] = {};
-lv_obj_t *s_setting_choice[SETTING_COUNT][2] = {};
-bool      s_setting_on[SETTING_COUNT]    = {};
 }  // namespace
 
 int s_summary_card[INFO_COUNT] = {};
@@ -161,71 +156,6 @@ void log_held_cb(lv_event_t *e)
     refresh_log();
     lv_obj_scroll_to_y(s_log_pane, 0, LV_ANIM_OFF);
     s_log_modal->open();
-}
-}  // namespace
-
-void show_diagnostics_cb(lv_event_t *)
-{
-    lv_obj_set_hidden(s_settings_view, true);
-    lv_obj_set_hidden(s_diag_view, false);
-}
-
-void show_appearance_cb(lv_event_t *)
-{
-    lv_obj_set_hidden(s_settings_view, true);
-    lv_obj_set_hidden(s_appearance_view, false);
-}
-
-void show_settings_cb(lv_event_t *)
-{
-    lv_obj_set_hidden(s_diag_view, true);
-    lv_obj_set_hidden(s_appearance_view, true);
-    lv_obj_set_hidden(s_settings_view, false);
-}
-
-void apply_setting(int index, bool on)
-{
-    s_setting_on[index] = on;
-    for (int side = 0; side < 2; ++side) {
-        lv_obj_t *choice = s_setting_choice[index][side];
-        if (choice != nullptr) {
-            const bool picked = (side == 1) == on;
-            lv_obj_set_state(choice, LV_STATE_CHECKED, picked);
-            theme::set_text_color(lv_obj_get_child(choice, 0), picked ? theme::text : theme::secondary);
-        }
-    }
-    if (s_setting_value[index] != nullptr) {
-        theme::set_text(s_setting_value[index], on ? "On" : "Off");
-        theme::ink_accent_or(s_setting_value[index], on, theme::secondary);
-    }
-    if (static_cast<Setting>(index) == Setting::PresenceGate) {
-        s_presence_gate = on;
-        select_page(s_page);
-    }
-}
-namespace {
-void setting_clicked_cb(lv_event_t *e)
-{
-    const int index = static_cast<int>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e)));
-    const bool next = !s_setting_on[index];
-    apply_setting(index, next);
-    if (s_handlers.setting != nullptr) {
-        s_handlers.setting(static_cast<Setting>(index), next);
-    }
-}
-
-void choice_clicked_cb(lv_event_t *e)
-{
-    const int  code  = static_cast<int>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e)));
-    const int  index = code / 2;
-    const bool next  = code % 2 == 1;
-    if (next == s_setting_on[index]) {
-        return;
-    }
-    apply_setting(index, next);
-    if (s_handlers.setting != nullptr) {
-        s_handlers.setting(static_cast<Setting>(index), next);
-    }
 }
 }  // namespace
 
@@ -355,10 +285,7 @@ void build_info_tile(lv_obj_t *parent, int index, std::int32_t x, std::int32_t y
 namespace {
 std::int32_t detail_height(const InfoCard &card)
 {
-    std::int32_t body = card.count * DETAIL_ROW_H + (card.count - 1) * DETAIL_ROW_GAP;
-    if (card.has_setting) {
-        body += DETAIL_ROW_GAP + DETAIL_SET_TOP + DETAIL_SET_H;
-    }
+    const std::int32_t body = card.count * DETAIL_ROW_H + (card.count - 1) * DETAIL_ROW_GAP;
 
     const Layout       l   = layout();
     const std::int32_t cap = std::min(l.screen_h * DETAIL_MAX_FRAC / 100, l.content_h - 2 * GAP);
@@ -396,48 +323,6 @@ void build_detail_overlay(lv_obj_t *parent)
             const InfoRow &row = INFO_CARDS[i].rows[r];
             s_info[static_cast<int>(row.field)] =
                 build_info_row(panel, row.label, fonts::size_20(), DETAIL_ROW_H);
-        }
-
-        if (INFO_CARDS[i].has_setting && INFO_CARDS[i].choice_on != nullptr) {
-            const int index = static_cast<int>(INFO_CARDS[i].setting);
-            lv_obj_t *pair  = lv_obj_create(panel);
-            theme::style_panel(pair, theme::panel, 0);
-            lv_obj_set_style_bg_opa(pair, LV_OPA_TRANSP, 0);
-            lv_obj_set_size(pair, LV_PCT(100), DETAIL_SET_H);
-            lv_obj_set_style_margin_top(pair, DETAIL_SET_TOP, 0);
-            lv_obj_set_flex_flow(pair, LV_FLEX_FLOW_ROW);
-            lv_obj_set_style_pad_column(pair, BUTTON_GAP, 0);
-            const char *names[2] = {INFO_CARDS[i].choice_off, INFO_CARDS[i].choice_on};
-            for (int side = 0; side < 2; ++side) {
-                lv_obj_t *button = lv_button_create(pair);
-                lv_obj_set_height(button, LV_PCT(100));
-                lv_obj_set_flex_grow(button, 1);
-                theme::style_button(button, theme::panel_light);
-                theme::fill_accent(button, LV_STATE_CHECKED);
-                lv_obj_add_event_cb(
-                    button, choice_clicked_cb, LV_EVENT_CLICKED,
-                    reinterpret_cast<void *>(static_cast<std::intptr_t>(index * 2 + side)));
-                lv_obj_center(theme::make_label(button, names[side], theme::secondary,
-                                                fonts::size_20()));
-                s_setting_choice[index][side] = button;
-            }
-            apply_setting(index, s_setting_on[index]);
-        } else if (INFO_CARDS[i].has_setting) {
-            const int index  = static_cast<int>(INFO_CARDS[i].setting);
-            lv_obj_t *button = lv_button_create(panel);
-            lv_obj_set_size(button, LV_PCT(100), DETAIL_SET_H);
-            lv_obj_set_style_margin_top(button, DETAIL_SET_TOP, 0);
-            theme::style_button(button, theme::panel_light);
-            lv_obj_set_style_pad_hor(button, 16, 0);
-            lv_obj_set_flex_flow(button, LV_FLEX_FLOW_ROW);
-            lv_obj_set_flex_align(button, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
-                                  LV_FLEX_ALIGN_CENTER);
-            lv_obj_add_event_cb(button, setting_clicked_cb, LV_EVENT_CLICKED,
-                                reinterpret_cast<void *>(static_cast<std::intptr_t>(index)));
-
-            theme::make_label(button, INFO_CARDS[i].setting_label, theme::text, fonts::size_20());
-            s_setting_value[index] =
-                theme::make_label(button, "Off", theme::secondary, fonts::size_20());
         }
 
         s_detail[i] = panel;

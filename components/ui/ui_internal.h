@@ -188,11 +188,11 @@ constexpr InfoCard INFO_CARDS[] = {
      static_cast<int>(std::size(BLUETOOTH_ROWS)), Info::BleLink, false, Setting::Charging,
      nullptr},
     {Subsystem::Presence, "Presence", LV_SYMBOL_EYE_OPEN, PRESENCE_ROWS, static_cast<int>(std::size(PRESENCE_ROWS)),
-     Info::PhoneState, true, Setting::PresenceGate, "Hide pages while away"},
+     Info::PhoneState, false, Setting::Charging, nullptr},
     {Subsystem::Power, "Power", LV_SYMBOL_BATTERY_FULL, POWER_ROWS, static_cast<int>(std::size(POWER_ROWS)),
-     Info::PowerCharge, true, Setting::Charging, "Charge the battery"},
+     Info::PowerCharge, false, Setting::Charging, nullptr},
     {Subsystem::Desk, "Desk", LV_SYMBOL_UP, DESK_ROWS, static_cast<int>(std::size(DESK_ROWS)), Info::DeskLink,
-     true, Setting::DeskBluetooth, "Drive it over", "Wire", "Bluetooth"},
+     false, Setting::Charging, nullptr},
     {Subsystem::Radar, "Radar", LV_SYMBOL_GPS, RADAR_ROWS, static_cast<int>(std::size(RADAR_ROWS)),
      Info::RadarFeed, false, Setting::Charging, nullptr},
     {Subsystem::Media, "Media", LV_SYMBOL_AUDIO, MEDIA_ROWS, static_cast<int>(std::size(MEDIA_ROWS)),
@@ -330,6 +330,7 @@ void refresh_diag_summary();
 void show_diagnostics_cb(lv_event_t *);
 void show_appearance_cb(lv_event_t *);
 void show_settings_cb(lv_event_t *);
+void show_behaviour_cb(lv_event_t *);
 void apply_setting(int index, bool on);
 void restart_held_cb(lv_event_t *);
 void volume_changed_cb(lv_event_t *e);
