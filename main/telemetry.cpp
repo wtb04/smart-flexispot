@@ -68,6 +68,13 @@ void on_brightness(int percent)
     settings::set(settings::Key::Brightness, percent);
 }
 
+void on_refusal(const char *reason)
+{
+    char message[96];
+    std::snprintf(message, sizeof(message), "Home Assistant did not do that: %s", reason);
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::notify("", message, "warning", 4000));
+}
+
 void on_entities(const hass::ws::EntityStore &store)
 {
     room::render(store);
@@ -165,6 +172,7 @@ void nudge_links()
 
     const hass::Handlers handlers{on_preset, on_brightness, on_notify, on_move, on_screen};
     ESP_ERROR_CHECK_WITHOUT_ABORT(hass::start(handlers));
+    hass::ws::on_refusal(on_refusal);
     ESP_ERROR_CHECK_WITHOUT_ABORT(hass::ws::start(on_entities));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ble::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(media::start(on_album_art));

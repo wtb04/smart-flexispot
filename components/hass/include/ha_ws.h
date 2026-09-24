@@ -17,6 +17,12 @@ bool connected();
  *  Creates it if it never was. */
 esp_err_t restart();
 
+/** Called when a service call did not happen: refused by Home Assistant, or
+ *  not sent because the socket was down. From the socket or the caller's task. */
+using RefusalHandler = void (*)(const char *reason);
+
+void on_refusal(RefusalHandler handler);
+
 esp_err_t call_service(const char *domain, const char *service, const char *entity_id);
 
 esp_err_t call_service_with(const char *domain, const char *service, const char *entity_id,

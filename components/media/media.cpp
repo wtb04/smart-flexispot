@@ -13,6 +13,7 @@
 #include "esp_heap_caps.h"
 #include "jpeglib.h"
 
+#include <algorithm>
 #include <csetjmp>
 #include <cstdio>
 #include <cstring>
@@ -256,8 +257,17 @@ bool decode(std::size_t bytes)
     return ok;
 }
 
+// A cover that failed is tried again, the wait doubling each time, rather than
+// left blank until the track changes.
+constexpr std::int64_t RETRY_FIRST_US = 20 * 1000000LL;
+constexpr std::int64_t RETRY_MAX_US   = 5 * 60 * 1000000LL;
+
 [[noreturn]] void media_task(void *)
 {
+    char         failed[sizeof(s_wanted)] = {};
+    std::int64_t retry_at                 = 0;
+    std::int64_t retry_wait               = RETRY_FIRST_US;
+
     for (;;) {
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(10000));
 
@@ -268,6 +278,10 @@ bool decode(std::size_t bytes)
         xSemaphoreGive(s_lock);
 
         if (std::strcmp(wanted, s_loaded) == 0) {
+            continue;
+        }
+        const bool again = std::strcmp(wanted, failed) == 0;
+        if (again && esp_timer_get_time() < retry_at) {
             continue;
         }
         ESP_LOGD(TAG, "cover path changed");
@@ -286,11 +300,25 @@ bool decode(std::size_t bytes)
         record(true, true, got, true,
                got ? static_cast<int>((esp_timer_get_time() - began) / 1000) : -1);
 
-        std::strncpy(s_loaded, wanted, sizeof(s_loaded));
-        s_loaded[sizeof(s_loaded) - 1] = '\0';
-        if (!got && s_on_art != nullptr) {
-            s_on_art(Art::Failed, nullptr);
+        if (got) {
+            std::strncpy(s_loaded, wanted, sizeof(s_loaded));
+            s_loaded[sizeof(s_loaded) - 1] = '\0';
+            failed[0]  = '\0';
+            retry_wait = RETRY_FIRST_US;
+            continue;
         }
+        if (!again) {
+            std::strncpy(failed, wanted, sizeof(failed));
+            failed[sizeof(failed) - 1] = '\0';
+            retry_wait                 = RETRY_FIRST_US;
+            if (s_on_art != nullptr) {
+                s_on_art(Art::Failed, nullptr);
+            }
+        } else {
+            retry_wait = std::min(retry_wait * 2, RETRY_MAX_US);
+        }
+        retry_at = esp_timer_get_time() + retry_wait;
+        ESP_LOGW(TAG, "cover failed, trying again in %d s", static_cast<int>(retry_wait / 1000000));
     }
 }
 

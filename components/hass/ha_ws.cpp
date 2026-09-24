@@ -104,7 +104,15 @@ esp_err_t enqueue(const char *domain, const char *service, const char *entity_id
 
 std::string   s_rx;
 EntityStore   s_store;
-UpdateHandler s_on_update = nullptr;
+UpdateHandler  s_on_update  = nullptr;
+RefusalHandler s_on_refusal = nullptr;
+
+void refused(const char *reason)
+{
+    if (s_on_refusal != nullptr) {
+        s_on_refusal(reason);
+    }
+}
 
 std::vector<std::string> configured_entities()
 {
@@ -190,10 +198,12 @@ void handle_message(const std::string &text)
                 const cJSON *error = cJSON_GetObjectItemCaseSensitive(root, "error");
                 const cJSON *msg =
                     cJSON_GetObjectItemCaseSensitive(error, "message");
-                ESP_LOGW(TAG, "command %d refused: %s", message_id(root),
-                         cJSON_IsString(msg) ? msg->valuestring : "unknown");
+                const char *why = cJSON_IsString(msg) ? msg->valuestring : "unknown";
+                ESP_LOGW(TAG, "command %d refused: %s", message_id(root), why);
                 if (message_id(root) == SUBSCRIBE_ID) {
                     begin_again_in(RETRY_SUBSCRIBE, "subscription refused");
+                } else {
+                    refused(why);
                 }
             }
             break;
@@ -282,6 +292,7 @@ void on_event(void *, esp_event_base_t, std::int32_t id, void *data)
                                                      cmd.entity));
             } else {
                 ESP_LOGW(TAG, "dropped %s.%s, not connected", cmd.domain, cmd.service);
+                refused("not connected");
             }
         }
 
@@ -359,17 +370,28 @@ esp_err_t restart()
     return ESP_OK;
 }
 
+void on_refusal(RefusalHandler handler)
+{
+    s_on_refusal = handler;
+}
+
 esp_err_t call_service(const char *domain, const char *service, const char *entity_id)
 {
-    ESP_RETURN_ON_FALSE(connected(), ESP_ERR_INVALID_STATE, TAG, "not connected");
-    return enqueue(domain, service, entity_id, nullptr, nullptr);
+    return call_service_with(domain, service, entity_id, nullptr, nullptr);
 }
 
 esp_err_t call_service_with(const char *domain, const char *service, const char *entity_id,
                             const char *field, const char *value)
 {
-    ESP_RETURN_ON_FALSE(connected(), ESP_ERR_INVALID_STATE, TAG, "not connected");
-    return enqueue(domain, service, entity_id, field, value);
+    if (!connected()) {
+        refused("not connected");
+        return ESP_ERR_INVALID_STATE;
+    }
+    const esp_err_t err = enqueue(domain, service, entity_id, field, value);
+    if (err != ESP_OK) {
+        refused("too many at once");
+    }
+    return err;
 }
 
 }  // namespace hass::ws
