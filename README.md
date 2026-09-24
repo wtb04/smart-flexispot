@@ -49,12 +49,21 @@ force download mode.
 
 | Path | Purpose |
 | --- | --- |
-| `components/board/` | Power rails, panel, touch, LVGL port task — `board::init()` |
-| `components/ui/` | Screen construction and thread-safe updates |
-| `components/loctek/` | Desk protocol and the UART link — `loctek::` |
-| `components/loctek/test/` | Host-side protocol tests, no hardware needed |
-| `main/desk.cpp` | Glue plus the link supervisor |
-| `main/main.cpp` | `app_main`: wire the three together |
+| `main/` | `app_main` and the glue: wiring handlers, telemetry to Home Assistant, diagnostics, the clock |
+| `components/board/` | Power rails, panel, touch, LVGL port task |
+| `components/ui/` | The screen: `ui.h` is its interface, one file per part, updates applied on the LVGL task |
+| `components/desk/` | Presets, the link supervisor and what the desk is doing, over the wire or Bluetooth |
+| `components/loctek/` | The control box's frames and the one driver task that writes them; shared with the companion |
+| `components/deskproto/` | The panel-to-companion protocol and the desk's vocabulary; shared with the companion |
+| `components/ble/` | Phone presence (`ble.h`) and the companion's client (`ble_desk.h`) |
+| `components/hass/` | MQTT discovery and state, and the websocket for entities and service calls |
+| `components/room/` | The home page's presenter: Home Assistant entities in, taps out |
+| `components/wifi/` | Joining and staying joined |
+| `components/jpeg/` | The one JPEG engine and its software fallback |
+| `components/media/`, `radar/`, `ical/`, `travel/` | Cover art, planes overhead, calendars, journeys |
+| `components/power/`, `rtc/`, `sound/`, `settings/`, `logbuf/` | Battery, backup clock, chime, saved settings, the log ring |
+| `components/*/test/` | Host-side tests, no hardware needed: `sh components/<name>/test/run.sh` |
+| `proxy/` | The desk companion's firmware |
 | `sdkconfig.defaults` | Target, chip revision, flash, PSRAM, PPA, LVGL |
 
 `idf.py menuconfig` is authoritative for config; `sdkconfig` is generated and

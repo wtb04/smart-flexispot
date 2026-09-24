@@ -18,7 +18,6 @@ namespace {
 constexpr char TAG[] = "sound";
 
 constexpr int SAMPLE_RATE = 16000;
-constexpr int VOLUME      = CONFIG_SOUND_VOLUME;
 
 constexpr float NOTE_HZ[] = {880.0f, 1320.0f};
 constexpr int   NOTE_MS   = 110;
@@ -34,7 +33,7 @@ StackType_t  s_task_stack[TASK_STACK];
 TaskHandle_t s_task = nullptr;
 
 esp_codec_dev_handle_t s_speaker = nullptr;
-std::atomic<int>       s_volume{VOLUME};
+std::atomic<int>       s_volume{0};  // silent until set_volume says otherwise
 std::vector<std::int16_t> s_chime;
 
 void build_chime()

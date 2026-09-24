@@ -179,12 +179,12 @@ esp_err_t start(UpdateHandler on_update)
 
 void want(std::int64_t arrive_by, Place place)
 {
-#if TRAVEL_FAKE_MINUTES > 0
+#if CONFIG_TRAVEL_FAKE_MINUTES > 0
     if (arrive_by != 0) {
         // Rounded to the minute so that asking again is the same question and
         // does not set off a fetch every time the page redraws.
         const auto soon = static_cast<std::int64_t>(std::time(nullptr)) +
-                          TRAVEL_FAKE_MINUTES * 60;
+                          CONFIG_TRAVEL_FAKE_MINUTES * 60;
         arrive_by = soon - soon % 60;
     }
 #endif

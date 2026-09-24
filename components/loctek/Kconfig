@@ -12,23 +12,25 @@ menu "Loctek desk control"
         int "TX GPIO (to control box RJ45 pin 6)"
         default 37
         help
-            Default is the Tab5 M5-Bus TXD0 on connector pin 14.
-            GPIO6 (PC_TX, bus pin 16) is the alternative if you would rather
-            keep the console on UART0.
+            The defaults are the panel's: M5-Bus TXD0, connector pin 14, with
+            GPIO6 (PC_TX, bus pin 16) the alternative if the console is to stay
+            on UART0. The companion sets its own in proxy/sdkconfig.defaults.
 
     config LOCTEK_RX_GPIO
         int "RX GPIO (from control box RJ45 pin 5)"
         default 38
         help
-            Default is the Tab5 M5-Bus RXD0 on connector pin 13.
-            GPIO7 (PC_RX, bus pin 15) is the alternative.
+            The defaults are the panel's: M5-Bus RXD0, connector pin 13, with
+            GPIO7 (PC_RX, bus pin 15) the alternative. The companion sets its
+            own in proxy/sdkconfig.defaults.
 
     config LOCTEK_WAKE_GPIO
         int "Wake GPIO (to control box RJ45 pin 4, 'PIN 20'), -1 if unwired"
         default 47
         help
-            M5-Bus pin 23. Must match where the wake wire actually is: driving
-            the wrong pin looks exactly like a control box that will not wake.
+            The default is the panel's M5-Bus pin 23; the companion sets its
+            own. Must match where the wake wire actually is: driving the wrong
+            pin looks exactly like a control box that will not wake.
 
     config LOCTEK_WAKE_PULSE_MS
         int "Wake pulse, line held high (ms)"

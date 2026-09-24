@@ -14,9 +14,3 @@
 // Ansible vault. Empty sends none, which a local run does not ask for.
 #define TRAVEL_API_KEY ""
 
-// For working on the panel rather than for using it. Anything above zero makes
-// it ask about being somewhere that many minutes from now instead of about the
-// next thing in the calendar, which is the only way to see a bus without
-// waiting for the morning: OVapi reports what is running rather than a
-// timetable, so a journey tomorrow has no buses to name yet.
-#define TRAVEL_FAKE_MINUTES 0
