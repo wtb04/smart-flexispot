@@ -11,20 +11,27 @@
 #include "host/ble_hs.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstring>
 
 namespace ble::proxy {
 namespace {
 constexpr char TAG[]  = "desklink";
-constexpr char NAME[] = "desk-companion";
+constexpr const char *NAME = deskproto::kDeviceName;
 
-constexpr ble_uuid128_t SERVICE_UUID = BLE_UUID128_INIT(0x2d, 0x71, 0x9a, 0x4c, 0x8e, 0x3b, 0x4f,
-                                                        0x6a, 0x9c, 0x1d, 0x5e, 0x77, 0x01, 0x00,
-                                                        0xa5, 0xde);
-constexpr ble_uuid128_t ECHO_UUID    = BLE_UUID128_INIT(0x2d, 0x71, 0x9a, 0x4c, 0x8e, 0x3b, 0x4f,
-                                                        0x6a, 0x9c, 0x1d, 0x5e, 0x77, 0x02, 0x00,
-                                                        0xa5, 0xde);
+constexpr ble_uuid128_t uuid128(const std::array<std::uint8_t, 16> &bytes)
+{
+    ble_uuid128_t uuid{};
+    uuid.u.type = BLE_UUID_TYPE_128;
+    for (std::size_t i = 0; i < bytes.size(); ++i) {
+        uuid.value[i] = bytes[i];
+    }
+    return uuid;
+}
+
+constexpr ble_uuid128_t SERVICE_UUID = uuid128(deskproto::kServiceUuid);
+constexpr ble_uuid128_t ECHO_UUID    = uuid128(deskproto::kEchoUuid);
 
 constexpr std::uint16_t ITVL_MIN_UNITS = 6;   // 7.5 ms, the floor the spec allows
 constexpr std::uint16_t ITVL_MAX_UNITS = 8;   // 10 ms
@@ -119,7 +126,7 @@ bool advert_is_proxy(const ble_gap_disc_desc &advert)
     if (ble_hs_adv_parse_fields(&fields, advert.data, advert.length_data) != 0) {
         return false;
     }
-    return fields.name != nullptr && fields.name_len == sizeof(NAME) - 1 &&
+    return fields.name != nullptr && fields.name_len == std::strlen(NAME) &&
            std::memcmp(fields.name, NAME, fields.name_len) == 0;
 }
 
@@ -197,7 +204,7 @@ void drop_if_silent()
     ble_gap_terminate(s_conn, BLE_ERR_REM_USER_CONN_TERM);
 }
 
-constexpr TickType_t HOLD_PERIOD = pdMS_TO_TICKS(100);
+constexpr TickType_t HOLD_PERIOD = pdMS_TO_TICKS(deskproto::kHoldPeriodMs);
 
 TaskHandle_t s_hold_task = nullptr;
 

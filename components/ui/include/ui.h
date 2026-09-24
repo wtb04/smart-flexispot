@@ -1,5 +1,6 @@
 #pragma once
 
+#include "deskproto.h"
 #include "esp_err.h"
 #include "radar.h"
 
@@ -25,10 +26,8 @@ using SetpointHandler = void (*)(float celsius);
 
 using ModeHandler = void (*)();
 
-inline constexpr int kPresetCount = 6;
-/** The first four are the control box's own; 5 and 6 are kept by the panel and
- *  reached by driving the desk there. */
-inline constexpr int kBoxPresets = 4;
+inline constexpr int kPresetCount = deskproto::kPresetCount;
+inline constexpr int kBoxPresets  = deskproto::kBoxPresets;
 
 /** What the screen calls a preset, or "Between" for no preset. Everything off
  *  the screen calls them Preset 1 to 6. */

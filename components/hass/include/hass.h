@@ -6,7 +6,7 @@
 namespace hass {
 /** Called on the MQTT task when Home Assistant asks for something. */
 struct Handlers {
-    void (*on_preset)(int preset);                            // 1-6
+    void (*on_preset)(int preset);                            // 1 to kPresetCount
     void (*on_brightness)(int percent);                       // 0-100
     void (*on_notify)(const protocol::Notification &notice);
     void (*on_move)(protocol::Move direction);

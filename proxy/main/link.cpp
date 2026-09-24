@@ -18,6 +18,7 @@
 #include "freertos/queue.h"
 #include "freertos/task.h"
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <cstring>
@@ -25,7 +26,7 @@
 namespace desklink {
 namespace {
 constexpr char TAG[]  = "desklink";
-constexpr char NAME[] = "desk-companion";
+constexpr const char *NAME = deskproto::kDeviceName;
 
 int          s_height_mm  = -1;
 TaskHandle_t s_status_task = nullptr;
@@ -34,18 +35,24 @@ constexpr std::int64_t BOX_QUIET_US = 4000000;
 
 std::atomic<bool> s_box_up{false};
 
-constexpr ble_uuid128_t SERVICE_UUID = BLE_UUID128_INIT(0x2d, 0x71, 0x9a, 0x4c, 0x8e, 0x3b, 0x4f,
-                                                        0x6a, 0x9c, 0x1d, 0x5e, 0x77, 0x01, 0x00,
-                                                        0xa5, 0xde);
-constexpr ble_uuid128_t ECHO_UUID    = BLE_UUID128_INIT(0x2d, 0x71, 0x9a, 0x4c, 0x8e, 0x3b, 0x4f,
-                                                        0x6a, 0x9c, 0x1d, 0x5e, 0x77, 0x02, 0x00,
-                                                        0xa5, 0xde);
+constexpr ble_uuid128_t uuid128(const std::array<std::uint8_t, 16> &bytes)
+{
+    ble_uuid128_t uuid{};
+    uuid.u.type = BLE_UUID_TYPE_128;
+    for (std::size_t i = 0; i < bytes.size(); ++i) {
+        uuid.value[i] = bytes[i];
+    }
+    return uuid;
+}
+
+constexpr ble_uuid128_t SERVICE_UUID = uuid128(deskproto::kServiceUuid);
+constexpr ble_uuid128_t ECHO_UUID    = uuid128(deskproto::kEchoUuid);
 
 std::uint16_t s_echo_handle = 0;
 std::uint16_t s_conn        = BLE_HS_CONN_HANDLE_NONE;
 std::uint8_t  s_address_type = 0;
 
-constexpr std::int64_t HOLD_GOOD_FOR_US = 300000;
+constexpr std::int64_t HOLD_GOOD_FOR_US = deskproto::kHoldTimeoutMs * 1000LL;
 
 // Written on the host task, read by the deadman and the status task.
 std::atomic<std::int64_t>      s_hold_until{0};
@@ -74,20 +81,13 @@ void drive(deskproto::Motion motion)
         return;
     }
 
-    const loctek::Move move = motion == deskproto::Motion::Up     ? loctek::Move::Up
-                              : motion == deskproto::Motion::Down ? loctek::Move::Down
-                                                                  : loctek::Move::Stop;
+    const auto move = static_cast<loctek::Move>(deskproto::direction_of(motion));
     ESP_ERROR_CHECK_WITHOUT_ABORT(loctek::request_move(move));
 }
 
 deskproto::Motion motion_now()
 {
-    switch (loctek::motion()) {
-        case loctek::Move::Up:   return deskproto::Motion::Up;
-        case loctek::Move::Down: return deskproto::Motion::Down;
-        case loctek::Move::Stop: break;
-    }
-    return deskproto::Motion::Idle;
+    return deskproto::motion_of(static_cast<int>(loctek::motion()));
 }
 
 void send_status()
@@ -383,7 +383,7 @@ void advertise()
     ble_hs_adv_fields fields{};
     fields.flags            = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
     fields.name             = reinterpret_cast<const std::uint8_t *>(NAME);
-    fields.name_len         = sizeof(NAME) - 1;
+    fields.name_len         = std::strlen(NAME);
     fields.name_is_complete = 1;
     if (const int err = ble_gap_adv_set_fields(&fields); err != 0) {
         ESP_LOGE(TAG, "advertising fields: %d", err);

@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
@@ -89,6 +90,49 @@ StackType_t  s_task_stack[TASK_STACK];
 TaskHandle_t s_task = nullptr;
 
 std::atomic<bool> s_dropped{false};  // wants a connect
+
+portMUX_TYPE s_info_lock = portMUX_INITIALIZER_UNLOCKED;
+Info         s_info;
+
+constexpr TickType_t INFO_REFRESH = pdMS_TO_TICKS(5000);
+
+void refresh_info(bool connected)
+{
+    Info next;
+    {
+        portENTER_CRITICAL(&s_info_lock);
+        next = s_info;
+        portEXIT_CRITICAL(&s_info_lock);
+    }
+    next.connected = connected;
+    if (next.mac[0] == '\0') {
+        std::uint8_t mac[6]{};
+        if (esp_wifi_get_mac(WIFI_IF_STA, mac) == ESP_OK) {
+            std::snprintf(next.mac, sizeof(next.mac), "%02x:%02x:%02x:%02x:%02x:%02x", mac[0],
+                          mac[1], mac[2], mac[3], mac[4], mac[5]);
+        }
+    }
+    next.have_ap = false;
+    next.ssid[0] = '\0';
+    next.ip[0]   = '\0';
+    if (connected) {
+        wifi_ap_record_t ap{};
+        if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+            next.have_ap = true;
+            std::snprintf(next.ssid, sizeof(next.ssid), "%s", reinterpret_cast<const char *>(ap.ssid));
+            next.rssi_dbm = ap.rssi;
+            next.channel  = ap.primary;
+        }
+        esp_netif_t        *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+        esp_netif_ip_info_t ip{};
+        if (netif != nullptr && esp_netif_get_ip_info(netif, &ip) == ESP_OK && ip.ip.addr != 0) {
+            std::snprintf(next.ip, sizeof(next.ip), IPSTR, IP2STR(&ip.ip));
+        }
+    }
+    portENTER_CRITICAL(&s_info_lock);
+    s_info = next;
+    portEXIT_CRITICAL(&s_info_lock);
+}
 std::atomic<bool> s_got_ip{false};
 
 void wake_task()
@@ -183,6 +227,8 @@ esp_err_t bring_up()
     TickType_t backoff     = FIRST_BACKOFF;
     TickType_t lost_since  = xTaskGetTickCount();
     bool       kicked      = false;
+    TickType_t info_at     = 0;
+    bool       info_was_up = false;
 
     for (;;) {
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
@@ -212,7 +258,13 @@ esp_err_t bring_up()
                 lost_since = now;
             }
         }
-        if (s_connected.load(std::memory_order_relaxed)) {
+        const bool is_up = s_connected.load(std::memory_order_relaxed);
+        if (is_up != info_was_up || now - info_at > INFO_REFRESH) {
+            refresh_info(is_up);
+            info_was_up = is_up;
+            info_at     = now;
+        }
+        if (is_up) {
             lost_since = 0;
             continue;
         }
@@ -285,6 +337,14 @@ esp_err_t start()
 bool connected()
 {
     return s_connected.load(std::memory_order_relaxed);
+}
+
+Info info()
+{
+    portENTER_CRITICAL(&s_info_lock);
+    Info copy = s_info;
+    portEXIT_CRITICAL(&s_info_lock);
+    return copy;
 }
 
 bool wait_for_ip(int timeout_ms)

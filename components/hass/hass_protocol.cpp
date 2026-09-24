@@ -1,5 +1,7 @@
 #include "hass_protocol.h"
 
+#include "deskproto.h"
+
 #include "cJSON.h"
 
 #include <cctype>
@@ -220,10 +222,10 @@ std::string discovery_document(const std::string &device_id, const std::string &
     cJSON_AddStringToObject(preset, "val_tpl", "{{ value_json.preset | default('none') }}");
     cJSON_AddStringToObject(preset, "dev_cla", "enum");
     cJSON *preset_options = cJSON_AddArrayToObject(preset, "options");
-    for (const char *option : {"Preset 1", "Preset 2", "Preset 3", "Preset 4", "Preset 5",
-                               "Preset 6", "Between"}) {
-        cJSON_AddItemToArray(preset_options, cJSON_CreateString(option));
+    for (int i = 0; i < deskproto::kPresetCount; ++i) {
+        cJSON_AddItemToArray(preset_options, cJSON_CreateString(deskproto::preset_label(i)));
     }
+    cJSON_AddItemToArray(preset_options, cJSON_CreateString(deskproto::kBetween));
 
     add_entity(cmps, "presence", "binary_sensor", "Presence", device_id + "_presence");
     cJSON *presence = cJSON_GetObjectItem(cmps, "presence");
@@ -298,15 +300,14 @@ std::string discovery_document(const std::string &device_id, const std::string &
         cJSON_AddStringToObject(entity, "ic", button.icon);
     }
 
-    for (int preset = 1; preset <= 6; ++preset) {
+    for (int preset = 1; preset <= deskproto::kPresetCount; ++preset) {
         char key[16];
-        char name[16];
         char payload[4];
         std::snprintf(key, sizeof(key), "preset%d", preset);
-        std::snprintf(name, sizeof(name), "Preset %d", preset);
         std::snprintf(payload, sizeof(payload), "%d", preset);
 
-        add_entity(cmps, key, "button", name, device_id + "_" + key);
+        add_entity(cmps, key, "button", deskproto::preset_label(preset - 1),
+                   device_id + "_" + key);
         cJSON *button = cJSON_GetObjectItem(cmps, key);
         cJSON_AddStringToObject(button, "cmd_t", topics.cmd_preset.c_str());
         cJSON_AddStringToObject(button, "pl_prs", payload);
@@ -403,7 +404,7 @@ Move parse_move(const std::string &payload)
 
 int parse_preset(const std::string &payload)
 {
-    if (payload.size() == 1 && payload[0] >= '1' && payload[0] <= '6') {
+    if (payload.size() == 1 && payload[0] >= '1' && payload[0] < '1' + deskproto::kPresetCount) {
         return payload[0] - '0';
     }
     return 0;

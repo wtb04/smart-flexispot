@@ -1,6 +1,7 @@
 #include "deskproto.h"
 
 #include <cstdio>
+#include <cstring>
 
 namespace {
 using namespace deskproto;
@@ -100,10 +101,29 @@ void test_rejects()
           "unknown motion reads as idle");
 }
 
+void test_vocabulary()
+{
+    check(std::strcmp(preset_label(0), "Preset 1") == 0 &&
+              std::strcmp(preset_label(kPresetCount - 1), "Preset 6") == 0,
+          "presets are labelled 1 to 6");
+    check(std::strcmp(preset_label(-1), kBetween) == 0 &&
+              std::strcmp(preset_label(kPresetCount), kBetween) == 0,
+          "anything else is between");
+    check(direction_of(Motion::Up) == 1 && direction_of(Motion::Down) == -1 &&
+              direction_of(Motion::Idle) == 0,
+          "motion to direction");
+    check(motion_of(1) == Motion::Up && motion_of(-1) == Motion::Down && motion_of(0) == Motion::Idle,
+          "direction to motion");
+}
+
+static_assert(kBoxPresets < kPresetCount);
+static_assert(kServiceUuid != kEchoUuid);
+
 }  // namespace
 
 int main()
 {
+    test_vocabulary();
     test_command_round_trip();
     test_status_round_trip();
     test_rejects();

@@ -373,6 +373,11 @@ lv_obj_t *make_rail_button(lv_obj_t *parent, const char *text)
 
 void preset_clicked_cb(lv_event_t *e);
 
+// What the screen calls each preset. Everything off the screen says Preset 1 to 6.
+constexpr const char *PRESET_NAMES[kPresetCount] = {
+    "Preset 1", "Preset 2", "Stand", "Sit", "Sit 2", "Stand 2",
+};
+
 lv_obj_t *s_preset_buttons[kPresetCount] = {};
 bool      s_preset_active[kPresetCount]  = {};
 
@@ -1607,11 +1612,11 @@ constexpr InfoRow POWER_ROWS[] = {
     {Info::PowerStatus, "State"},
 };
 constexpr InfoRow DESK_ROWS[] = {
-    {Info::DeskTransport, "Driven over"}, {Info::DeskLink, "Controller"},
-    {Info::DeskHeight, "Height"},         {Info::DeskActive, "Standing at"},
-    {Info::DeskOne, "Preset 1"},          {Info::DeskTwo, "Preset 2"},
-    {Info::DeskStand, "Stand"},           {Info::DeskSit, "Sit"},
-    {Info::DeskFive, "Sit 2"},         {Info::DeskSix, "Stand 2"},
+    {Info::DeskTransport, "Driven over"},  {Info::DeskLink, "Controller"},
+    {Info::DeskHeight, "Height"},          {Info::DeskActive, "Standing at"},
+    {Info::DeskOne, PRESET_NAMES[0]},      {Info::DeskTwo, PRESET_NAMES[1]},
+    {Info::DeskStand, PRESET_NAMES[2]},    {Info::DeskSit, PRESET_NAMES[3]},
+    {Info::DeskFive, PRESET_NAMES[4]},     {Info::DeskSix, PRESET_NAMES[5]},
 };
 constexpr InfoRow RADAR_ROWS[] = {
     {Info::RadarFeed, "Feed"},
@@ -3007,10 +3012,7 @@ esp_err_t init(const Handlers &handlers, int initial_brightness, std::uint32_t a
 
 const char *preset_name(int index)
 {
-    static constexpr const char *NAMES[kPresetCount] = {
-        "Preset 1", "Preset 2", "Stand", "Sit", "Sit 2", "Stand 2",
-    };
-    return index >= 0 && index < kPresetCount ? NAMES[index] : "Between";
+    return index >= 0 && index < kPresetCount ? PRESET_NAMES[index] : deskproto::kBetween;
 }
 
 esp_err_t set_preset_active(int index, bool active)

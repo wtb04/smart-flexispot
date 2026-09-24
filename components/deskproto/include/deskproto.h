@@ -1,18 +1,48 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <cstring>
 
 namespace deskproto {
+/** Six presets, of which the control box keeps the first four; the panel keeps
+ *  5 and 6 and has the desk driven there. */
+inline constexpr int kPresetCount = 6;
+inline constexpr int kBoxPresets  = 4;
+
+inline constexpr const char *kBetween = "Between";
+
+/** What Home Assistant and anything else off the screen calls them. The screen
+ *  has its own names. */
+constexpr const char *preset_label(int index)
+{
+    constexpr const char *LABELS[kPresetCount] = {
+        "Preset 1", "Preset 2", "Preset 3", "Preset 4", "Preset 5", "Preset 6",
+    };
+    return index >= 0 && index < kPresetCount ? LABELS[index] : kBetween;
+}
+
+/** How the companion is found and spoken to. Bytes in the order
+ *  BLE_UUID128_INIT takes them. */
+inline constexpr char kDeviceName[] = "desk-companion";
+inline constexpr std::array<std::uint8_t, 16> kServiceUuid = {
+    0x2d, 0x71, 0x9a, 0x4c, 0x8e, 0x3b, 0x4f, 0x6a, 0x9c, 0x1d, 0x5e, 0x77, 0x01, 0x00, 0xa5, 0xde};
+inline constexpr std::array<std::uint8_t, 16> kEchoUuid = {
+    0x2d, 0x71, 0x9a, 0x4c, 0x8e, 0x3b, 0x4f, 0x6a, 0x9c, 0x1d, 0x5e, 0x77, 0x02, 0x00, 0xa5, 0xde};
+
+/** The panel repeats a hold this often; the companion lets go of a hold that has
+ *  not been repeated for this long. Two repeats may go missing, not three. */
+inline constexpr int kHoldPeriodMs  = 100;
+inline constexpr int kHoldTimeoutMs = 300;
+static_assert(kHoldTimeoutMs >= 2 * kHoldPeriodMs + kHoldPeriodMs / 2,
+              "a single late repeat must not stop the desk");
+
 inline constexpr std::uint8_t MAGIC0  = 'D';
 inline constexpr std::uint8_t MAGIC1  = 'K';
 inline constexpr std::uint8_t VERSION = 1;
 
 inline constexpr std::size_t COMMAND_LEN = 12;
 inline constexpr std::size_t STATUS_LEN  = 16;
-
-/** The control box has this many presets of its own. */
-inline constexpr std::uint8_t kBoxPresets = 4;
 
 enum class Op : std::uint8_t {
     Hold   = 1,
@@ -29,6 +59,17 @@ enum class Motion : std::uint8_t {
     Up   = 1,
     Down = 2,
 };
+
+/** To and from a signed direction, +1 up and -1 down, as the drivers count. */
+constexpr int direction_of(Motion motion)
+{
+    return motion == Motion::Up ? 1 : motion == Motion::Down ? -1 : 0;
+}
+
+constexpr Motion motion_of(int direction)
+{
+    return direction > 0 ? Motion::Up : direction < 0 ? Motion::Down : Motion::Idle;
+}
 
 struct Command {
     Op            op        = Op::Ping;

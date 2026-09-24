@@ -5,9 +5,7 @@
 #include "esp_app_desc.h"
 #include "esp_check.h"
 #include "esp_heap_caps.h"
-#include "esp_netif.h"
 #include "esp_timer.h"
-#include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "ha_ws.h"
@@ -97,12 +95,10 @@ void update_network()
         push_missing(Info::WifiChannel);
     }
 
-    char text[32];
-    std::uint8_t mac[6]{};
-    if (esp_wifi_get_mac(WIFI_IF_STA, mac) == ESP_OK) {
-        std::snprintf(text, sizeof(text), "%02x:%02x:%02x:%02x:%02x:%02x", mac[0], mac[1], mac[2],
-                      mac[3], mac[4], mac[5]);
-        push(Info::WifiMac, text);
+    char             text[32];
+    const wifi::Info info = wifi::info();
+    if (info.mac[0] != '\0') {
+        push(Info::WifiMac, info.mac);
     } else {
         push_missing(Info::WifiMac);
     }
@@ -111,20 +107,16 @@ void update_network()
         return;
     }
 
-    wifi_ap_record_t ap{};
-    if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
-        push(Info::WifiSsid, reinterpret_cast<const char *>(ap.ssid));
-        std::snprintf(text, sizeof(text), "%d dBm", ap.rssi);
-        push(Info::WifiSignal, text, signal_level(ap.rssi));
-        std::snprintf(text, sizeof(text), "%d", ap.primary);
+    if (info.have_ap) {
+        push(Info::WifiSsid, info.ssid);
+        std::snprintf(text, sizeof(text), "%d dBm", info.rssi_dbm);
+        push(Info::WifiSignal, text, signal_level(info.rssi_dbm));
+        std::snprintf(text, sizeof(text), "%d", info.channel);
         push(Info::WifiChannel, text);
     }
 
-    esp_netif_t        *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
-    esp_netif_ip_info_t ip{};
-    if (netif != nullptr && esp_netif_get_ip_info(netif, &ip) == ESP_OK && ip.ip.addr != 0) {
-        std::snprintf(text, sizeof(text), IPSTR, IP2STR(&ip.ip));
-        push(Info::WifiIp, text);
+    if (info.ip[0] != '\0') {
+        push(Info::WifiIp, info.ip);
     } else {
         push_missing(Info::WifiIp);
     }
@@ -412,12 +404,12 @@ constexpr const char *HASS_TAGS[] = {"hass",        "ha_ws",       "websocket_cl
 constexpr const char *BLUETOOTH_TAGS[] = {"NimBLE", "vhci_drv", "BTDM_INIT", "phy_init", "ble"};
 constexpr const char *PRESENCE_TAGS[]  = {"presence"};
 constexpr const char *POWER_TAGS[]     = {"power", "battery"};
-constexpr const char *DESK_TAGS[]      = {"desk", "loctek", "desklink", "deskproxy", "proxy"};
+constexpr const char *DESK_TAGS[]      = {"desk", "loctek", "desklink", "deskproxy", "proxy", "leds"};
 constexpr const char *RADAR_TAGS[]     = {"radar"};
 constexpr const char *MEDIA_TAGS[]     = {"media", "sound"};
 constexpr const char *CALENDAR_TAGS[]  = {"ical", "travel"};
 constexpr const char *SYSTEM_TAGS[]    = {
-    "tab5",  "ui",     "diag",   "clock",     "settings",  "logbuf",   "board",
+    "tab5",  "ui",     "shot",   "diag",      "clock",     "settings", "logbuf",   "board",
     "rtc",   "main_task", "cpu_start", "heap_init", "spiram", "esp_psram", "esp_image"};
 
 struct TagSet {

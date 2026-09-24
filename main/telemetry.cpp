@@ -7,9 +7,7 @@
 #include "media.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
-#include "esp_netif.h"
 #include "esp_timer.h"
-#include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "ha_ws.h"
@@ -97,17 +95,12 @@ void on_notify(const hass::protocol::Notification &notice)
 
 void fill_network(hass::protocol::Telemetry &out)
 {
-    wifi_ap_record_t ap{};
-    if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
-        out.rssi_dbm = ap.rssi;
+    const wifi::Info info = wifi::info();
+    if (info.have_ap) {
+        out.rssi_dbm = info.rssi_dbm;
     }
-
-    esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
-    esp_netif_ip_info_t ip{};
-    if (netif != nullptr && esp_netif_get_ip_info(netif, &ip) == ESP_OK && ip.ip.addr != 0) {
-        char text[16];
-        std::snprintf(text, sizeof(text), IPSTR, IP2STR(&ip.ip));
-        out.ip_address = text;
+    if (info.ip[0] != '\0') {
+        out.ip_address = info.ip;
     }
 }
 

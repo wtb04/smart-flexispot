@@ -62,9 +62,8 @@ constexpr TickType_t LEARN_TIMEOUT = pdMS_TO_TICKS(45000);
 constexpr TickType_t NETWORK_HOLD = pdMS_TO_TICKS(1500);
 std::atomic<TickType_t> s_network_hold_until{0};  // zero when no such hold is live
 
-static_assert(ui::kBoxPresets == deskproto::kBoxPresets, "the box has four presets everywhere");
 
-int  s_preset_mm[ui::kPresetCount] = {-1, -1, -1, -1, -1, -1};
+int  s_preset_mm[deskproto::kPresetCount] = {-1, -1, -1, -1, -1, -1};
 int  s_learning                    = -1;
 int  s_learn_from                  = -1;
 TickType_t s_learn_started         = 0;
@@ -78,11 +77,11 @@ void load_presets()
         return;
     }
     // A blob from before presets 5 and 6 holds four; those are kept.
-    int         stored[ui::kPresetCount];
+    int         stored[deskproto::kPresetCount];
     std::size_t size = sizeof(stored);
     const bool  read = nvs_get_blob(handle, NVS_PRESETS, stored, &size) == ESP_OK &&
                       size % sizeof(int) == 0 && size <= sizeof(stored);
-    for (int i = 0; i < ui::kPresetCount; ++i) {
+    for (int i = 0; i < deskproto::kPresetCount; ++i) {
         const bool have = read && static_cast<std::size_t>(i) < size / sizeof(int);
         s_preset_mm[i]  = have && loctek::in_range(stored[i]) ? stored[i] : -1;
     }
@@ -103,7 +102,7 @@ void save_presets()
 
 void remember_preset(int index, int height_mm)
 {
-    if (index < 0 || index >= ui::kPresetCount || height_mm < 0 ||
+    if (index < 0 || index >= deskproto::kPresetCount || height_mm < 0 ||
         s_preset_mm[index] == height_mm) {
         return;
     }
@@ -119,8 +118,8 @@ constexpr int OWN_PRESET_SLACK_MM = 10;
 void publish_active(int height_mm, bool linked, bool moving)
 {
     int standing_at = -1;
-    for (int i = 0; i < ui::kPresetCount; ++i) {
-        const int  slack  = i >= ui::kBoxPresets ? OWN_PRESET_SLACK_MM : 0;
+    for (int i = 0; i < deskproto::kPresetCount; ++i) {
+        const int  slack  = i >= deskproto::kBoxPresets ? OWN_PRESET_SLACK_MM : 0;
         const bool active = linked && !moving && height_mm >= 0 && s_preset_mm[i] >= 0 &&
                             std::abs(height_mm - s_preset_mm[i]) <= slack;
         if (active) {
@@ -134,7 +133,7 @@ void publish_active(int height_mm, bool linked, bool moving)
 void clear_active()
 {
     s_active_preset.store(-1, std::memory_order_relaxed);
-    for (int i = 0; i < ui::kPresetCount; ++i) {
+    for (int i = 0; i < deskproto::kPresetCount; ++i) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_preset_active(i, false));
     }
 }
@@ -165,16 +164,6 @@ int as_int(loctek::Move move)
         case loctek::Move::Up:   return 1;
         case loctek::Move::Down: return -1;
         case loctek::Move::Stop: break;
-    }
-    return 0;
-}
-
-int as_int(deskproto::Motion motion)
-{
-    switch (motion) {
-        case deskproto::Motion::Up:   return 1;
-        case deskproto::Motion::Down: return -1;
-        case deskproto::Motion::Idle: break;
     }
     return 0;
 }
@@ -223,12 +212,12 @@ void let_go()
 
 void run_preset(const PresetCommand &cmd)
 {
-    if (cmd.index < 0 || cmd.index >= ui::kPresetCount) {
+    if (cmd.index < 0 || cmd.index >= deskproto::kPresetCount) {
         return;
     }
     const int height = s_height_mm.load(std::memory_order_relaxed);
     if (cmd.store) {
-        if (cmd.index < ui::kBoxPresets) {
+        if (cmd.index < deskproto::kBoxPresets) {
             if (over_ble()) {
                 ble::desk::store(cmd.index);
             } else {
@@ -242,7 +231,7 @@ void run_preset(const PresetCommand &cmd)
     }
 
     const TickType_t now = xTaskGetTickCount();
-    if (cmd.index >= ui::kBoxPresets) {
+    if (cmd.index >= deskproto::kBoxPresets) {
         if (s_preset_mm[cmd.index] < 0) {
             ESP_ERROR_CHECK_WITHOUT_ABORT(
                 ui::notify("", "Hold it to save the height it goes to", "info", 3000));
@@ -283,7 +272,7 @@ StackType_t             s_pump_stack[PUMP_STACK];
 
 void on_proxy_status(const deskproto::Status &status)
 {
-    s_remote_motion.store(as_int(status.motion), std::memory_order_relaxed);
+    s_remote_motion.store(deskproto::direction_of(status.motion), std::memory_order_relaxed);
     s_remote_driving.store(status.driving, std::memory_order_relaxed);
     if (status.height_mm < 0) {
         return;
@@ -508,16 +497,12 @@ int active_preset_index()
 
 const char *active_preset_label()
 {
-    static constexpr const char *LABELS[ui::kPresetCount] = {
-        "Preset 1", "Preset 2", "Preset 3", "Preset 4", "Preset 5", "Preset 6",
-    };
-    const int index = active_preset_index();
-    return index >= 0 && index < ui::kPresetCount ? LABELS[index] : "Between";
+    return deskproto::preset_label(active_preset_index());
 }
 
 int preset_height_mm(int index)
 {
-    return index >= 0 && index < ui::kPresetCount ? s_preset_mm[index] : -1;
+    return index >= 0 && index < deskproto::kPresetCount ? s_preset_mm[index] : -1;
 }
 
 const char *motion()
@@ -541,7 +526,7 @@ void on_move(ui::Move direction)
             ble::desk::stop();  // even a hand that was never holding can end a travel
             return;
         }
-        ble::desk::hold(motion > 0 ? deskproto::Motion::Up : deskproto::Motion::Down);
+        ble::desk::hold(deskproto::motion_of(motion));
     } else {
         ESP_ERROR_CHECK_WITHOUT_ABORT(loctek::request_move(motion > 0   ? loctek::Move::Up
                                                            : motion < 0 ? loctek::Move::Down
