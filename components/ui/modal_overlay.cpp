@@ -5,9 +5,9 @@
 namespace ui {
 namespace {
 constexpr lv_opa_t     SCRIM_OPA = LV_OPA_70;
-constexpr std::int32_t  SLIDE    = 18;
-constexpr std::uint32_t OPEN_MS  = 130;
-constexpr std::uint32_t CLOSE_MS = 100;
+constexpr std::int32_t  SLIDE    = 48;
+constexpr std::uint32_t OPEN_MS  = 240;
+constexpr std::uint32_t CLOSE_MS = 160;
 
 constexpr std::int32_t CLOSE_SIZE = 48;
 
@@ -78,7 +78,11 @@ void ModalOverlay::open(lv_obj_t *)
     lv_anim_delete(this, nullptr);
     lv_obj_set_hidden(scrim_, false);
     lv_obj_move_foreground(scrim_);
+    slide(this, 0);
     visible_ = true;
+    // The first frame covers the whole page, far slower than the card's own:
+    // drawn before the slide starts, it does not eat the first frames of it.
+    lv_refr_now(nullptr);
     start(0, PROGRESS_MAX, OPEN_MS, false);
 }
 
