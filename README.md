@@ -100,7 +100,9 @@ Two naming traps worth knowing:
 The panel runs off a battery, so tying it to the desk by a cable defeats the
 point. `proxy/` is a second firmware for an ESP32 that stays behind with the
 desk and is driven over the air. It shares `components/loctek`, so the frames,
-the failsafes and their tests have one home.
+the failsafes and their tests have one home. So does the travel to presets 5
+and 6, which the box has no key for: whichever board holds the wire steers the
+desk there, and the panel only ever sends the height.
 
 | Signal | ESP32 GPIO | Control box RJ45 |
 | --- | --- | --- |
@@ -148,10 +150,21 @@ coast. While idle, that same frame doubles as a keep-awake poll — the control
 box only reports its height in reply to something, and its panel sleeps after
 about ten seconds.
 
-**Presets**: four buttons under the movement row. A tap sends the desk to that
-position -- the box runs the move itself and ignores a plain stop while it does,
-so tapping the same preset again is what cancels it. A long press stores the
-current height there, as the M key followed by the preset key.
+**Presets**: six, of which the control box has four. A tap sends the desk to
+one of those -- the box runs the move itself and ignores a plain stop while it
+does, so tapping the same preset again is what cancels it. A long press stores
+the current height there, as the M key followed by the preset key.
+
+Presets 5 and 6 are the panel's own. A long press remembers the height; a tap
+has the desk driven there by whichever board holds the wire, with one steering
+decision per height the box reports rather than on a clock. The desk runs on
+after the last key frame, so the keys are released early by a run-on the
+driver learns from where each travel comes to rest, per direction, kept in
+flash: the first travel after a fresh flash lands a few millimetres past, the
+next ones on it, as far as the display can be read -- above a metre it shows
+whole centimetres. Any key ends the travel, as does the height ceasing to
+change. Home Assistant knows them all as Preset 1 to 6, or Between; the screen
+has its own names for them.
 
 A key press is a stream of frames for as long as a finger is down, not a single
 frame; sending a preset once registers only sometimes. Presses repeat for

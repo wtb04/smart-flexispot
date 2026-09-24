@@ -18,6 +18,7 @@ enum class Op : std::uint8_t {
     Store  = 4,
     Wake   = 5,
     Ping   = 6,
+    GoTo   = 7,
 };
 
 enum class Motion : std::uint8_t {
@@ -30,6 +31,7 @@ struct Command {
     Op            op        = Op::Ping;
     Motion        direction = Motion::Idle;  // Hold only
     std::uint8_t  preset    = 0;             // Preset and Store only
+    std::uint16_t height_mm = 0;             // GoTo only
     std::uint32_t seq       = 0;
 };
 
@@ -38,6 +40,7 @@ struct Status {
     Motion        motion    = Motion::Idle;
     bool          linked    = false;  // the control box is answering
     bool          holding   = false;  // a hold is live, so the deadman is armed
+    bool          driving   = false;  // travelling to a height on its own
     std::uint32_t seq       = 0;      // the last command seen, echoed back
 };
 
@@ -65,6 +68,8 @@ inline void encode(const Command &command, std::uint8_t *out)
     put32(out + 4, command.seq);
     out[8] = static_cast<std::uint8_t>(command.direction);
     out[9] = command.preset;
+    out[10] = static_cast<std::uint8_t>(command.height_mm);
+    out[11] = static_cast<std::uint8_t>(command.height_mm >> 8);
 }
 
 inline bool decode(const std::uint8_t *in, std::size_t length, Command &out)
@@ -74,7 +79,7 @@ inline bool decode(const std::uint8_t *in, std::size_t length, Command &out)
         return false;
     }
     const std::uint8_t op = in[3];
-    if (op < static_cast<std::uint8_t>(Op::Hold) || op > static_cast<std::uint8_t>(Op::Ping)) {
+    if (op < static_cast<std::uint8_t>(Op::Hold) || op > static_cast<std::uint8_t>(Op::GoTo)) {
         return false;
     }
     const std::uint8_t direction = in[8];
@@ -86,6 +91,7 @@ inline bool decode(const std::uint8_t *in, std::size_t length, Command &out)
     out.seq       = get32(in + 4);
     out.direction = static_cast<Motion>(direction);
     out.preset    = in[9];
+    out.height_mm = static_cast<std::uint16_t>(in[10] | (in[11] << 8));
     return true;
 }
 
@@ -95,7 +101,8 @@ inline void encode(const Status &status, std::uint8_t *out)
     out[0] = MAGIC0;
     out[1] = MAGIC1;
     out[2] = VERSION;
-    out[3] = static_cast<std::uint8_t>((status.linked ? 1 : 0) | (status.holding ? 2 : 0));
+    out[3] = static_cast<std::uint8_t>((status.linked ? 1 : 0) | (status.holding ? 2 : 0) |
+                                       (status.driving ? 4 : 0));
     put32(out + 4, status.seq);
     put32(out + 8, static_cast<std::uint32_t>(status.height_mm));
     out[12] = static_cast<std::uint8_t>(status.motion);
@@ -109,6 +116,7 @@ inline bool decode(const std::uint8_t *in, std::size_t length, Status &out)
     }
     out.linked    = (in[3] & 1) != 0;
     out.holding   = (in[3] & 2) != 0;
+    out.driving   = (in[3] & 4) != 0;
     out.seq       = get32(in + 4);
     out.height_mm = static_cast<std::int32_t>(get32(in + 8));
     out.motion    = in[12] <= static_cast<std::uint8_t>(Motion::Down)

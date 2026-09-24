@@ -79,6 +79,16 @@ void drive(deskproto::Motion motion)
     ESP_ERROR_CHECK_WITHOUT_ABORT(loctek::request_move(move));
 }
 
+deskproto::Motion motion_now()
+{
+    switch (loctek::motion()) {
+        case loctek::Move::Up:   return deskproto::Motion::Up;
+        case loctek::Move::Down: return deskproto::Motion::Down;
+        case loctek::Move::Stop: break;
+    }
+    return deskproto::Motion::Idle;
+}
+
 void send_status()
 {
     if (s_conn == BLE_HS_CONN_HANDLE_NONE || s_echo_handle == 0) {
@@ -89,7 +99,8 @@ void send_status()
     status.height_mm = loctek::stats().heights_decoded > 0 ? s_height_mm : -1;
     status.linked    = s_box_up.load(std::memory_order_relaxed);
     status.holding   = s_holding != deskproto::Motion::Idle;
-    status.motion    = s_holding;
+    status.driving   = loctek::driving_to() >= 0;
+    status.motion    = motion_now();
     status.seq       = s_last_seq;
 
     std::uint8_t packet[deskproto::STATUS_LEN];
@@ -159,6 +170,19 @@ void apply(const deskproto::Command &command)
             if (s_holding != deskproto::Motion::Idle) {
                 s_holding = deskproto::Motion::Idle;
                 drive(s_holding);
+            } else if (loctek::driving_to() >= 0) {
+                drive(deskproto::Motion::Idle);
+            }
+            break;
+
+        case deskproto::Op::GoTo:
+            // Not held any more: a hold that keeps arriving takes over again.
+            s_hold_until = 0;
+            s_holding    = deskproto::Motion::Idle;
+            if (movement_allowed()) {
+                ESP_ERROR_CHECK_WITHOUT_ABORT(loctek::goto_height(command.height_mm));
+            } else {
+                ESP_LOGW(TAG, "dry run: would travel to %u mm", command.height_mm);
             }
             break;
 
@@ -211,9 +235,10 @@ constexpr TickType_t   STATUS_KEEPALIVE  = pdMS_TO_TICKS(1000);
 
 [[noreturn]] void status_task(void *)
 {
-    int           shown_height = -2;
-    int           shown_motion = -1;
-    bool          shown_up     = false;
+    int           shown_height  = -2;
+    int           shown_motion  = -1;
+    bool          shown_up      = false;
+    bool          shown_driving = false;
     std::int64_t  last_sent    = 0;
     std::uint32_t seen_frames  = 0;
     std::int64_t  seen_at      = 0;
@@ -247,9 +272,10 @@ constexpr TickType_t   STATUS_KEEPALIVE  = pdMS_TO_TICKS(1000);
             continue;
         }
 
-        const int  motion = static_cast<int>(s_holding);
-        const bool changed =
-            s_height_mm != shown_height || motion != shown_motion || box_up != shown_up;
+        const int  motion  = static_cast<int>(motion_now());
+        const bool driving = loctek::driving_to() >= 0;
+        const bool changed = s_height_mm != shown_height || motion != shown_motion ||
+                             box_up != shown_up || driving != shown_driving;
         const std::int64_t now = esp_timer_get_time();
         if (changed && now - last_sent < STATUS_MIN_GAP_US) {
             continue;  // the next report, or the keepalive, will carry it
@@ -257,10 +283,11 @@ constexpr TickType_t   STATUS_KEEPALIVE  = pdMS_TO_TICKS(1000);
         if (!changed && now - last_sent < 1000000) {
             continue;
         }
-        shown_height = s_height_mm;
-        shown_motion = motion;
-        shown_up     = box_up;
-        last_sent    = now;
+        shown_height  = s_height_mm;
+        shown_motion  = motion;
+        shown_up      = box_up;
+        shown_driving = driving;
+        last_sent     = now;
         send_status();
     }
 }
@@ -319,6 +346,8 @@ int on_gap(ble_gap_event *event, void *)
         case BLE_GAP_EVENT_DISCONNECT:
             ESP_LOGI(TAG, "panel gone (reason %d)", event->disconnect.reason);
             s_conn = BLE_HS_CONN_HANDLE_NONE;
+            // A travel carries on, as the box's own presets do; only a hold
+            // needs the hand that was on it.
             if (s_holding != deskproto::Motion::Idle) {
                 ESP_LOGW(TAG, "link lost mid-hold, stopping");
                 s_holding = deskproto::Motion::Idle;

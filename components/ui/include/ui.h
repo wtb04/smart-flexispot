@@ -30,6 +30,10 @@ inline constexpr int kPresetCount = 6;
  *  reached by driving the desk there. */
 inline constexpr int kBoxPresets = 4;
 
+/** What the screen calls a preset, or "Between" for no preset. Everything off
+ *  the screen calls them Preset 1 to 6. */
+const char *preset_name(int index);
+
 enum class MediaAction : std::uint8_t {
     PlayPause,
     Previous,

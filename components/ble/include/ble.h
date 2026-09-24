@@ -37,7 +37,7 @@ LinkStats link_stats();
 
 namespace ble::desk {
 /** Called from the Bluetooth host task on every status the proxy sends. */
-using StatusHandler = void (*)(int height_mm, bool linked, deskproto::Motion motion);
+using StatusHandler = void (*)(const deskproto::Status &status);
 
 void on_status(StatusHandler handler);
 
@@ -51,8 +51,11 @@ void preset(int index);
 void store(int index);
 void wake();
 
+/** The proxy drives the desk to this height itself and reports as it goes. */
+void goto_height(int height_mm);
+
 /** The last status the proxy sent. False if it has never sent one. */
-bool last(int &height_mm, bool &box_linked, deskproto::Motion &motion);
+bool last(deskproto::Status &out);
 
 }  // namespace ble::desk
 

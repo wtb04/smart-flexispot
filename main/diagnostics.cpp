@@ -341,22 +341,20 @@ void update_desk()
     const bool over_ble = settings::enabled(settings::Key::DeskBluetooth);
     push(Info::DeskTransport, over_ble ? "Bluetooth" : "Local wire");
 
-    bool              linked   = false;
-    int               height   = -1;
-    deskproto::Motion motion   = deskproto::Motion::Idle;
-    const char       *state    = "silent";
+    bool        linked = false;
+    int         height = -1;
+    const char *state  = "silent";
 
     if (over_ble) {
-        int  proxy_height = -1;
-        bool box_linked   = false;
+        deskproto::Status proxy{};
         if (!ble::desk::connected()) {
             state = "no proxy";
-        } else if (!ble::desk::last(proxy_height, box_linked, motion)) {
+        } else if (!ble::desk::last(proxy)) {
             state = "proxy quiet";
         } else {
-            linked = box_linked;
-            height = proxy_height;
-            state  = box_linked ? "responding" : "proxy up, box silent";
+            linked = proxy.linked;
+            height = proxy.height_mm;
+            state  = proxy.linked ? "responding" : "proxy up, box silent";
         }
     } else {
         linked = desk::linked();
@@ -367,11 +365,11 @@ void update_desk()
     ui::set_health(ui::Subsystem::Desk, linked ? Level::Good : Level::Bad);
     push(Info::DeskLink, state, linked ? Level::Good : Level::Bad);
     push_height(Info::DeskHeight, height);
-    push(Info::DeskActive, desk::active_preset_label());
-    push_height(Info::DeskStand, desk::preset_height_mm(2));
-    push_height(Info::DeskSit, desk::preset_height_mm(3));
+    push(Info::DeskActive, ui::preset_name(desk::active_preset_index()));
     push_height(Info::DeskOne, desk::preset_height_mm(0));
     push_height(Info::DeskTwo, desk::preset_height_mm(1));
+    push_height(Info::DeskStand, desk::preset_height_mm(2));
+    push_height(Info::DeskSit, desk::preset_height_mm(3));
     push_height(Info::DeskFive, desk::preset_height_mm(4));
     push_height(Info::DeskSix, desk::preset_height_mm(5));
 }

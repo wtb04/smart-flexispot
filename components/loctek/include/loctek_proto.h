@@ -46,6 +46,28 @@ constexpr Key key_for(Preset preset)
 
 using KeyFrame = std::array<std::uint8_t, 8>;
 
+enum class Move : std::int8_t {
+    Stop = 0,
+    Up   = 1,
+    Down = -1,
+};
+
+/** The key to send next while travelling to a height, given the height just
+ *  reported and the key being sent. Stops `stop_early_mm` short, since the desk
+ *  runs on for a few millimetres after the last frame, and stops rather than
+ *  reverses once the target has been passed. */
+constexpr Move steer(int target_mm, int height_mm, Move current, int stop_early_mm)
+{
+    const int away = target_mm - height_mm;
+    if (away <= stop_early_mm && away >= -stop_early_mm) {
+        return Move::Stop;
+    }
+    if ((current == Move::Up && away < 0) || (current == Move::Down && away > 0)) {
+        return Move::Stop;
+    }
+    return away > 0 ? Move::Up : Move::Down;
+}
+
 constexpr std::uint16_t crc16(std::span<const std::uint8_t> data)
 {
     std::uint16_t crc = 0xffff;

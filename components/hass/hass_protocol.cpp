@@ -220,7 +220,8 @@ std::string discovery_document(const std::string &device_id, const std::string &
     cJSON_AddStringToObject(preset, "val_tpl", "{{ value_json.preset | default('none') }}");
     cJSON_AddStringToObject(preset, "dev_cla", "enum");
     cJSON *preset_options = cJSON_AddArrayToObject(preset, "options");
-    for (const char *option : {"Preset 1", "Preset 2", "Preset 3", "Preset 4", "Between"}) {
+    for (const char *option : {"Preset 1", "Preset 2", "Preset 3", "Preset 4", "Preset 5",
+                               "Preset 6", "Between"}) {
         cJSON_AddItemToArray(preset_options, cJSON_CreateString(option));
     }
 
@@ -297,7 +298,7 @@ std::string discovery_document(const std::string &device_id, const std::string &
         cJSON_AddStringToObject(entity, "ic", button.icon);
     }
 
-    for (int preset = 1; preset <= 4; ++preset) {
+    for (int preset = 1; preset <= 6; ++preset) {
         char key[16];
         char name[16];
         char payload[4];
@@ -402,7 +403,7 @@ Move parse_move(const std::string &payload)
 
 int parse_preset(const std::string &payload)
 {
-    if (payload.size() == 1 && payload[0] >= '1' && payload[0] <= '4') {
+    if (payload.size() == 1 && payload[0] >= '1' && payload[0] <= '6') {
         return payload[0] - '0';
     }
     return 0;

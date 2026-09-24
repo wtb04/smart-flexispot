@@ -25,6 +25,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <cmath>
@@ -550,7 +551,10 @@ void create_drawer(lv_obj_t *parent)
     // 3 and 4 are Stand and Sit on the rail.
     for (const int index : {0, 1, 4, 5}) {
         char label[24];
-        std::snprintf(label, sizeof(label), "PRESET %d", index + 1);
+        std::snprintf(label, sizeof(label), "%s", preset_name(index));
+        for (char *c = label; *c != '\0'; ++c) {
+            *c = static_cast<char>(std::toupper(static_cast<unsigned char>(*c)));
+        }
         lv_obj_t *btn = theme::make_button(s_drawer, label);
         lv_obj_set_size(btn, DRAWER_W - 2 * PANEL_PAD, RAIL_BTN_H);
         theme::fill_accent(btn, LV_STATE_CHECKED);
@@ -1605,9 +1609,9 @@ constexpr InfoRow POWER_ROWS[] = {
 constexpr InfoRow DESK_ROWS[] = {
     {Info::DeskTransport, "Driven over"}, {Info::DeskLink, "Controller"},
     {Info::DeskHeight, "Height"},         {Info::DeskActive, "Standing at"},
-    {Info::DeskStand, "Stand"},           {Info::DeskSit, "Sit"},
     {Info::DeskOne, "Preset 1"},          {Info::DeskTwo, "Preset 2"},
-    {Info::DeskFive, "Preset 5"},         {Info::DeskSix, "Preset 6"},
+    {Info::DeskStand, "Stand"},           {Info::DeskSit, "Sit"},
+    {Info::DeskFive, "Sit 2"},         {Info::DeskSix, "Stand 2"},
 };
 constexpr InfoRow RADAR_ROWS[] = {
     {Info::RadarFeed, "Feed"},
@@ -2999,6 +3003,14 @@ esp_err_t init(const Handlers &handlers, int initial_brightness, std::uint32_t a
     lv_refr_now(nullptr);
     lvgl_port_unlock();
     return ESP_OK;
+}
+
+const char *preset_name(int index)
+{
+    static constexpr const char *NAMES[kPresetCount] = {
+        "Preset 1", "Preset 2", "Stand", "Sit", "Sit 2", "Stand 2",
+    };
+    return index >= 0 && index < kPresetCount ? NAMES[index] : "Between";
 }
 
 esp_err_t set_preset_active(int index, bool active)

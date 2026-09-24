@@ -178,8 +178,8 @@ void test_notification_parsing()
 
 void test_command_parsing()
 {
-    check(parse_preset("1") == 1 && parse_preset("4") == 4, "preset payloads");
-    check(parse_preset("0") == 0 && parse_preset("5") == 0 && parse_preset("") == 0,
+    check(parse_preset("1") == 1 && parse_preset("6") == 6, "preset payloads");
+    check(parse_preset("0") == 0 && parse_preset("7") == 0 && parse_preset("") == 0,
           "out-of-range presets rejected");
     check(parse_brightness("50") == 50, "brightness payload");
     check(parse_brightness("101") == -1 && parse_brightness("abc") == -1,

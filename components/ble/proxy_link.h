@@ -31,7 +31,7 @@ void collect(LinkStats &out);
 
 void set_status_handler(desk::StatusHandler handler);
 void set_hold(deskproto::Motion direction);
-void send_command(deskproto::Op op, std::uint8_t preset);
-bool last_status(int &height_mm, bool &box_linked, deskproto::Motion &motion);
+void send_command(deskproto::Op op, std::uint8_t preset, std::uint16_t height_mm = 0);
+bool last_status(deskproto::Status &out);
 
 }  // namespace ble::proxy

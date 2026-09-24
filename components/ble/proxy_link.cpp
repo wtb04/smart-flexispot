@@ -56,7 +56,8 @@ StaticSemaphore_t s_send_lock_ctrl;
 
 std::uint32_t s_last_sent_seq = 0;
 
-bool send(deskproto::Op op, deskproto::Motion direction, std::uint8_t preset)
+bool send(deskproto::Op op, deskproto::Motion direction, std::uint8_t preset,
+          std::uint16_t height_mm = 0)
 {
     if (!s_up.load(std::memory_order_relaxed) || s_echo == 0 || s_send_lock == nullptr) {
         return false;
@@ -65,6 +66,7 @@ bool send(deskproto::Op op, deskproto::Motion direction, std::uint8_t preset)
     command.op        = op;
     command.direction = direction;
     command.preset    = preset;
+    command.height_mm = height_mm;
     command.seq       = s_seq.fetch_add(1, std::memory_order_relaxed) + 1;
     s_last_sent_seq   = command.seq;
 
@@ -173,6 +175,7 @@ desk::StatusHandler s_on_status = nullptr;
 std::atomic<int>  s_last_height{-1};
 std::atomic<bool> s_box_linked{false};
 std::atomic<int>  s_last_motion{static_cast<int>(deskproto::Motion::Idle)};
+std::atomic<bool> s_last_driving{false};
 std::atomic<bool> s_ever_heard{false};
 
 constexpr TickType_t HOLD_PERIOD = pdMS_TO_TICKS(100);
@@ -312,9 +315,10 @@ bool handle(ble_gap_event *event)
                 s_last_height.store(status.height_mm, std::memory_order_relaxed);
                 s_box_linked.store(status.linked, std::memory_order_relaxed);
                 s_last_motion.store(static_cast<int>(status.motion), std::memory_order_relaxed);
+                s_last_driving.store(status.driving, std::memory_order_relaxed);
                 s_ever_heard.store(true, std::memory_order_relaxed);
                 if (s_on_status != nullptr) {
-                    s_on_status(status.height_mm, status.linked, status.motion);
+                    s_on_status(status);
                 }
             }
 
@@ -362,11 +366,12 @@ void collect(LinkStats &out)
     out.max_us    = copy[count - 1];
 }
 
-bool last_status(int &height_mm, bool &box_linked, deskproto::Motion &motion)
+bool last_status(deskproto::Status &out)
 {
-    height_mm  = s_last_height.load(std::memory_order_relaxed);
-    box_linked = s_box_linked.load(std::memory_order_relaxed);
-    motion     = static_cast<deskproto::Motion>(s_last_motion.load(std::memory_order_relaxed));
+    out.height_mm = s_last_height.load(std::memory_order_relaxed);
+    out.linked    = s_box_linked.load(std::memory_order_relaxed);
+    out.motion    = static_cast<deskproto::Motion>(s_last_motion.load(std::memory_order_relaxed));
+    out.driving   = s_last_driving.load(std::memory_order_relaxed);
     return s_ever_heard.load(std::memory_order_relaxed);
 }
 
@@ -389,9 +394,9 @@ void set_hold(deskproto::Motion direction)
     }
 }
 
-void send_command(deskproto::Op op, std::uint8_t preset)
+void send_command(deskproto::Op op, std::uint8_t preset, std::uint16_t height_mm)
 {
-    send(op, deskproto::Motion::Idle, preset);
+    send(op, deskproto::Motion::Idle, preset, height_mm);
 }
 
 esp_err_t start()
@@ -441,9 +446,17 @@ void wake()
     proxy::send_command(deskproto::Op::Wake, 0);
 }
 
-bool last(int &height_mm, bool &box_linked, deskproto::Motion &motion)
+void goto_height(int height_mm)
 {
-    return proxy::last_status(height_mm, box_linked, motion);
+    if (height_mm < 0 || height_mm > 0xffff) {
+        return;
+    }
+    proxy::send_command(deskproto::Op::GoTo, 0, static_cast<std::uint16_t>(height_mm));
+}
+
+bool last(deskproto::Status &out)
+{
+    return proxy::last_status(out);
 }
 
 }  // namespace ble::desk

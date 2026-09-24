@@ -19,10 +19,11 @@ bool linked();
 /** "idle", "moving_up" or "moving_down", as last commanded. */
 const char *motion();
 
-const char *active_preset();
+/** Which preset the desk is standing at, or negative when between. */
+int active_preset_index();
 
-/** The same thing named rather than slugged, for anywhere it is read by a
- *  person. */
+/** "Preset 1" to "Preset 6", or "Between": what Home Assistant is told. The
+ *  screen has its own names for them. */
 const char *active_preset_label();
 
 int preset_height_mm(int index);

@@ -4,18 +4,16 @@
 #include "esp_check.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 #include "freertos/task.h"
 #include "loctek.h"
-#include "settings.h"
 #include "nvs.h"
 #include "nvs_flash.h"
+#include "settings.h"
 
 #include <atomic>
-#include <cstring>
 #include <cstdlib>
-#include <ctime>
-
-#include "freertos/queue.h"
+#include <cstring>
 
 namespace desk {
 namespace {
@@ -67,19 +65,6 @@ TickType_t s_learn_started         = 0;
 bool s_presets_dirty               = false;
 std::atomic<int> s_active_preset{-1};
 
-const char *preset_name(int index)
-{
-    switch (index) {
-        case 0:  return "preset_1";
-        case 1:  return "preset_2";
-        case 2:  return "stand";
-        case 3:  return "sit";
-        case 4:  return "preset_5";
-        case 5:  return "preset_6";
-        default: return "none";
-    }
-}
-
 void load_presets()
 {
     nvs_handle_t handle;
@@ -120,8 +105,9 @@ void remember_preset(int index, int height_mm)
     ESP_LOGI(TAG, "preset %d is %d mm", index + 1, height_mm);
 }
 
-// The box lands on its own presets exactly; the panel's two within a centimetre.
-constexpr int OWN_PRESET_SLACK_MM = 12;
+// The box lands on its own presets exactly. The panel's two land as well as the
+// display lets them be read, which above a metre is to the centimetre.
+constexpr int OWN_PRESET_SLACK_MM = 10;
 
 void publish_active(int height_mm, bool linked, bool moving)
 {
@@ -146,7 +132,7 @@ void clear_active()
     }
 }
 
-std::atomic<int>  s_height_mm{-1};
+std::atomic<int> s_height_mm{-1};
 
 bool s_over_ble = false;
 
@@ -159,65 +145,57 @@ TickType_t s_commanded_at   = 0;  // zero when nothing is expected to move
 int        s_commanded_from = -1;
 
 std::atomic<bool> s_linked{false};
-std::atomic<int>  s_motion{0};  // -1 down, 0 idle, +1 up
 
-// Presets 5 and 6 are the panel's own, since the control box has four: the desk
-// is held up or down until the height reports say it is nearly there, stopping
-// short for the few millimetres it runs on.
-constexpr int        DRIVE_STOP_EARLY_MM = 8;
-constexpr TickType_t DRIVE_TIMEOUT       = pdMS_TO_TICKS(40000);
-std::atomic<int>     s_drive_to{-1};  // millimetres, or -1 when not driving
-TickType_t           s_drive_since = 0;
-int                  s_drive_dir   = 0;
+// -1 down, 0 idle, +1 up. The hold is what this panel asked for; the rest is
+// what the proxy reports, a round trip behind.
+std::atomic<int>  s_hold{0};
+std::atomic<int>  s_remote_motion{0};
+std::atomic<bool> s_remote_driving{false};
 
-void drive(int direction)
+int as_int(loctek::Move move)
 {
-    if (direction == s_drive_dir) {
-        return;
+    switch (move) {
+        case loctek::Move::Up:   return 1;
+        case loctek::Move::Down: return -1;
+        case loctek::Move::Stop: break;
     }
-    s_drive_dir = direction;
-    s_motion.store(direction, std::memory_order_relaxed);
+    return 0;
+}
+
+int as_int(deskproto::Motion motion)
+{
+    switch (motion) {
+        case deskproto::Motion::Up:   return 1;
+        case deskproto::Motion::Down: return -1;
+        case deskproto::Motion::Idle: break;
+    }
+    return 0;
+}
+
+int motion_now()
+{
+    if (!over_ble()) {
+        return as_int(loctek::motion());
+    }
+    const int hold = s_hold.load(std::memory_order_relaxed);
+    return hold != 0 ? hold : s_remote_motion.load(std::memory_order_relaxed);
+}
+
+bool travelling()
+{
+    return over_ble() ? s_remote_driving.load(std::memory_order_relaxed)
+                      : loctek::driving_to() >= 0;
+}
+
+// Presets 5 and 6 are the panel's own, since the control box has four. Whichever
+// board holds the wire steers the desk there on each height the box reports.
+void travel_to(int height_mm)
+{
     if (over_ble()) {
-        ble::desk::hold(direction > 0   ? deskproto::Motion::Up
-                        : direction < 0 ? deskproto::Motion::Down
-                                        : deskproto::Motion::Idle);
+        ble::desk::goto_height(height_mm);
     } else {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(loctek::request_move(direction > 0   ? loctek::Move::Up
-                                                           : direction < 0 ? loctek::Move::Down
-                                                                           : loctek::Move::Stop));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(loctek::goto_height(height_mm));
     }
-}
-
-void stop_driving()
-{
-    if (s_drive_to.exchange(-1, std::memory_order_relaxed) >= 0) {
-        drive(0);
-    }
-}
-
-void keep_driving(TickType_t now)
-{
-    const int target = s_drive_to.load(std::memory_order_relaxed);
-    if (target < 0) {
-        return;
-    }
-    const int height = s_height_mm.load(std::memory_order_relaxed);
-    if (!s_linked.load(std::memory_order_relaxed) || now - s_drive_since > DRIVE_TIMEOUT) {
-        ESP_LOGW(TAG, "stopped short of %d mm", target);
-        stop_driving();
-        return;
-    }
-    if (height < 0) {
-        return;
-    }
-    const int away = target - height;
-    if (std::abs(away) <= DRIVE_STOP_EARLY_MM ||
-        (s_drive_dir > 0 && away < 0) || (s_drive_dir < 0 && away > 0)) {
-        ESP_LOGI(TAG, "at %d mm for %d mm", height, target);
-        stop_driving();
-        return;
-    }
-    drive(away > 0 ? 1 : -1);
 }
 
 void run_preset(const PresetCommand &cmd)
@@ -225,48 +203,44 @@ void run_preset(const PresetCommand &cmd)
     if (cmd.index < 0 || cmd.index >= ui::kPresetCount) {
         return;
     }
-    stop_driving();
-    if (cmd.index >= ui::kBoxPresets) {
-        const int height = s_height_mm.load(std::memory_order_relaxed);
-        if (cmd.store) {
-            remember_preset(cmd.index, height);
-            ESP_ERROR_CHECK_WITHOUT_ABORT(ui::notify("", "Preset saved", "success", 2500));
-        } else if (s_preset_mm[cmd.index] < 0) {
-            ESP_ERROR_CHECK_WITHOUT_ABORT(
-                ui::notify("", "Hold it to save the height it goes to", "info", 3000));
-        } else {
-            clear_active();
-            s_drive_since = xTaskGetTickCount();
-            s_drive_to.store(s_preset_mm[cmd.index], std::memory_order_relaxed);
-            keep_driving(s_drive_since);
+    const int height = s_height_mm.load(std::memory_order_relaxed);
+    if (cmd.store) {
+        if (cmd.index < ui::kBoxPresets) {
+            if (over_ble()) {
+                ble::desk::store(cmd.index);
+            } else {
+                ESP_ERROR_CHECK_WITHOUT_ABORT(
+                    loctek::store_preset(static_cast<loctek::Preset>(cmd.index)));
+            }
         }
+        remember_preset(cmd.index, height);
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::notify("", "Preset saved", "success", 2500));
         return;
     }
-    const auto preset = static_cast<loctek::Preset>(cmd.index);
-    if (cmd.store) {
-        if (over_ble()) {
-            ble::desk::store(cmd.index);
-        } else {
-            ESP_ERROR_CHECK_WITHOUT_ABORT(loctek::store_preset(preset));
+
+    const TickType_t now = xTaskGetTickCount();
+    if (cmd.index >= ui::kBoxPresets) {
+        if (s_preset_mm[cmd.index] < 0) {
+            ESP_ERROR_CHECK_WITHOUT_ABORT(
+                ui::notify("", "Hold it to save the height it goes to", "info", 3000));
+            return;
         }
-        remember_preset(cmd.index, s_height_mm.load(std::memory_order_relaxed));
-        ESP_ERROR_CHECK_WITHOUT_ABORT(
-            ui::notify("", "Preset saved", "success", 2500));
+        travel_to(s_preset_mm[cmd.index]);
     } else {
-        clear_active();
         if (over_ble()) {
             ble::desk::preset(cmd.index);
         } else {
-            ESP_ERROR_CHECK_WITHOUT_ABORT(loctek::goto_preset(preset));
+            ESP_ERROR_CHECK_WITHOUT_ABORT(
+                loctek::goto_preset(static_cast<loctek::Preset>(cmd.index)));
         }
-        s_learning        = cmd.index;
-        s_learn_from      = s_height_mm.load(std::memory_order_relaxed);
-        s_learn_started   = xTaskGetTickCount();
-        s_commanded_from  = s_learn_from;
-        s_commanded_at    = s_learn_started;
+        s_learning      = cmd.index;
+        s_learn_from    = height;
+        s_learn_started = now;
     }
+    clear_active();
+    s_commanded_from = height;
+    s_commanded_at   = now;
 }
-
 
 void on_height(int height_mm);
 
@@ -277,14 +251,14 @@ constexpr std::uint32_t PUMP_STACK = 2048;  // measured: uses 0.7 KB
 StaticTask_t            s_pump_ctrl;
 StackType_t             s_pump_stack[PUMP_STACK];
 
-void on_proxy_status(int height_mm, bool box_linked, deskproto::Motion motion)
+void on_proxy_status(const deskproto::Status &status)
 {
-    (void)box_linked;
-    (void)motion;
-    if (height_mm < 0) {
+    s_remote_motion.store(as_int(status.motion), std::memory_order_relaxed);
+    s_remote_driving.store(status.driving, std::memory_order_relaxed);
+    if (status.height_mm < 0) {
         return;
     }
-    s_pending_height.store(height_mm, std::memory_order_relaxed);
+    s_pending_height.store(status.height_mm, std::memory_order_relaxed);
     if (s_height_pump != nullptr) {
         xTaskNotifyGive(s_height_pump);
     }
@@ -313,13 +287,11 @@ const char *proxy_status()
     if (!ble::desk::connected()) {
         return "no proxy in range";
     }
-    int               height     = -1;
-    bool              box_linked = false;
-    deskproto::Motion motion     = deskproto::Motion::Idle;
-    if (!ble::desk::last(height, box_linked, motion)) {
+    deskproto::Status status{};
+    if (!ble::desk::last(status)) {
         return "proxy not reporting";
     }
-    return box_linked ? kConnected : "proxy up, control box silent";
+    return status.linked ? kConnected : "proxy up, control box silent";
 }
 
 const char *link_status(const loctek::Stats &stats, bool link_up, int wake_attempts)
@@ -359,7 +331,6 @@ const char *link_status(const loctek::Stats &stats, bool link_up, int wake_attem
 
         const loctek::Stats stats = loctek::stats();
         const TickType_t    now   = xTaskGetTickCount();
-        keep_driving(now);
         if (stats.frames_decoded != previous.frames_decoded) {
             last_frame = now;
         }
@@ -395,7 +366,7 @@ const char *link_status(const loctek::Stats &stats, bool link_up, int wake_attem
                 s_commanded_at = 0;
             }
         }
-        const bool moving = commanded || s_motion.load(std::memory_order_relaxed) != 0 ||
+        const bool moving = commanded || motion_now() != 0 || travelling() ||
                             now - settled_since < STILL_TIME;
         publish_active(height, link_up, moving);
 
@@ -485,22 +456,18 @@ bool linked()
     return s_linked.load(std::memory_order_relaxed);
 }
 
-const char *active_preset()
+int active_preset_index()
 {
-    return preset_name(s_active_preset.load(std::memory_order_relaxed));
+    return s_active_preset.load(std::memory_order_relaxed);
 }
 
 const char *active_preset_label()
 {
-    switch (s_active_preset.load(std::memory_order_relaxed)) {
-        case 0:  return "Preset 1";
-        case 1:  return "Preset 2";
-        case 2:  return "Stand";
-        case 3:  return "Sit";
-        case 4:  return "Preset 5";
-        case 5:  return "Preset 6";
-        default: return "Between";
-    }
+    static constexpr const char *LABELS[ui::kPresetCount] = {
+        "Preset 1", "Preset 2", "Preset 3", "Preset 4", "Preset 5", "Preset 6",
+    };
+    const int index = active_preset_index();
+    return index >= 0 && index < ui::kPresetCount ? LABELS[index] : "Between";
 }
 
 int preset_height_mm(int index)
@@ -510,7 +477,7 @@ int preset_height_mm(int index)
 
 const char *motion()
 {
-    switch (s_motion.load(std::memory_order_relaxed)) {
+    switch (motion_now()) {
         case 1:  return "moving_up";
         case -1: return "moving_down";
         default: return "idle";
@@ -519,24 +486,19 @@ const char *motion()
 
 void on_move(ui::Move direction)
 {
-    stop_driving();  // a hand on the buttons takes over from preset 5 or 6
-    loctek::Move move   = loctek::Move::Stop;
-    int          motion = 0;
-    switch (direction) {
-        case ui::Move::Up:   move = loctek::Move::Up;   motion = 1;  break;
-        case ui::Move::Down: move = loctek::Move::Down; motion = -1; break;
-        case ui::Move::Stop: move = loctek::Move::Stop; motion = 0;  break;
-    }
-    s_motion.store(motion, std::memory_order_relaxed);
+    const int motion = direction == ui::Move::Up ? 1 : direction == ui::Move::Down ? -1 : 0;
     if (motion != 0) {
         clear_active();
     }
+    s_hold.store(motion, std::memory_order_relaxed);
     if (over_ble()) {
-        ble::desk::hold(direction == ui::Move::Up     ? deskproto::Motion::Up
-                        : direction == ui::Move::Down ? deskproto::Motion::Down
-                                                      : deskproto::Motion::Idle);
+        ble::desk::hold(motion > 0   ? deskproto::Motion::Up
+                        : motion < 0 ? deskproto::Motion::Down
+                                     : deskproto::Motion::Idle);
     } else {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(loctek::request_move(move));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(loctek::request_move(motion > 0   ? loctek::Move::Up
+                                                           : motion < 0 ? loctek::Move::Down
+                                                                        : loctek::Move::Stop));
     }
 }
 

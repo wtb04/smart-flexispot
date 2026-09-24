@@ -164,10 +164,25 @@ void test_rejects()
           "rejects oversized length and recovers");
 }
 
+void test_steer()
+{
+    check(steer(1000, 900, Move::Stop, 8) == Move::Up, "steers up from below");
+    check(steer(1000, 1100, Move::Stop, 8) == Move::Down, "steers down from above");
+    check(steer(1000, 991, Move::Up, 8) == Move::Up, "keeps going outside the margin");
+    check(steer(1000, 992, Move::Up, 8) == Move::Stop, "releases at the margin");
+    check(steer(1000, 1010, Move::Up, 8) == Move::Stop, "stops rather than reverses once past");
+    check(steer(1000, 990, Move::Down, 8) == Move::Stop, "same going down");
+    check(steer(1000, 1000, Move::Stop, 0) == Move::Stop, "zero margin stops on the number");
+    check(steer(1000, 1001, Move::Stop, 0) == Move::Down, "zero margin moves off by one");
+}
+
+static_assert(steer(500, 400, Move::Stop, 8) == Move::Up);
+
 }  // namespace
 
 int main()
 {
+    test_steer();
     test_key_frames();
     test_presets();
     test_height_decode();

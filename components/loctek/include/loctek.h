@@ -4,12 +4,6 @@
 #include "loctek_proto.h"
 
 namespace loctek {
-enum class Move : std::int8_t {
-    Stop = 0,
-    Up   = 1,
-    Down = -1,
-};
-
 /** Called on the receive task. */
 using HeightHandler = void (*)(int height_mm);
 
@@ -17,8 +11,22 @@ using HeightHandler = void (*)(int height_mm);
 esp_err_t start(HeightHandler on_height);
 
 /** Non-blocking, from any task. Move::Stop sends the release frame; going quiet
- *  would let the desk coast on. */
+ *  would let the desk coast on. A hand on the keys ends any travel. */
 esp_err_t request_move(Move direction);
+
+/** Travels to a height the box has no preset for, steering on each height it
+ *  reports: no clock, one decision per report. Releases early by the run-on
+ *  learned from where earlier travels came to rest. Fails if the box has not
+ *  said where it is yet. Bounded by the travel timeout, and by the height
+ *  ceasing to change, as at the end of the desk's range. Any key sent
+ *  afterwards ends it. */
+esp_err_t goto_height(int height_mm);
+
+/** The height being travelled to, or negative when not travelling. */
+int driving_to();
+
+/** The key being sent right now, as last requested. */
+Move motion();
 
 /** The box runs the move itself and ignores a plain stop while it does; sending
  *  the same preset again is what cancels it. */
