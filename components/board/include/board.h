@@ -9,6 +9,7 @@ esp_err_t init(bool flipped);
 
 /** Turns the picture and the touchscreen over together. Call with the LVGL
  *  lock held. */
+/** From any task. */
 void set_flipped(bool flipped);
 
 /** Panel backlight, 0-100. */

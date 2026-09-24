@@ -31,6 +31,11 @@ constexpr Spec SPECS[] = {
     {"accent", 0, 0, 0xffffff},
     {"rail_right", 0, 0, 1},
     {"flipped", 0, 0, 1},
+    {"orient_auto", 0, 0, 1},
+    // What M5's demo implies about how the IMU sits: x runs down the screen in
+    // landscape, so upright reads it negative. Replaced when Auto is picked
+    // with the panel standing, by whatever is upright then.
+    {"orient_sign", -1, -1, 1},
 };
 constexpr int COUNT = static_cast<int>(Key::Count);
 static_assert(std::size(SPECS) == COUNT, "every key needs a spec");

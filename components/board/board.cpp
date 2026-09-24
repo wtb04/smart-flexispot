@@ -82,7 +82,13 @@ esp_err_t init(bool flipped)
 
 void set_flipped(bool flipped)
 {
+    // Called from the orientation watcher as well as the screen's own task; the
+    // lock is recursive, so taking it there costs nothing.
+    if (!lvgl_port_lock(0)) {
+        return;
+    }
     bsp_display_rotate(s_disp, flipped ? LV_DISPLAY_ROTATION_270 : LV_DISPLAY_ROTATION_90);
+    lvgl_port_unlock();
 }
 
 esp_err_t set_brightness(int percent)

@@ -100,7 +100,9 @@ using ScreenHandler = void (*)(bool on);
 using RailSideHandler = void (*)(bool right);
 
 /** True while the panel is hung the other way up. */
-using OrientationHandler = void (*)(bool flipped);
+enum class Orientation : std::uint8_t { Normal, Flipped, Auto };
+
+using OrientationHandler = void (*)(Orientation orientation);
 
 /** showing is true while the scope is the page on screen, reachable is false
  *  once presence gating has hidden it away entirely. */
@@ -201,10 +203,12 @@ struct Handlers {
 
 /** Requires the LVGL port to be running. A zero accent keeps the built-in
  *  colour; rail_right puts the rail against the right edge instead of the left.
- *  flipped only tells the page which way board::init() already turned the
+ *  orientation only tells the page which choice to show; board::init() has
+ *  already turned the display, and turns it again as the choice asks. It was
+ *  the way board::init() already turned the
  *  panel. */
 esp_err_t init(const Handlers &handlers, int initial_brightness, std::uint32_t accent,
-               bool rail_right, bool flipped);
+               bool rail_right, Orientation orientation);
 
 /** A part of the boot has finished: "desk" or "network". */
 esp_err_t splash_step(const char *label);

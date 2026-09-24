@@ -300,6 +300,16 @@ void place_for_side()
 }
 }  // namespace
 
+void paint_pick(lv_obj_t *const *buttons, int count, int picked)
+{
+    for (int i = 0; i < count; ++i) {
+        const bool chosen = i == picked;
+        lv_obj_set_state(buttons[i], LV_STATE_CHECKED, chosen);
+        theme::set_text_color(lv_obj_get_child(buttons[i], 0),
+                              chosen ? theme::text : theme::secondary);
+    }
+}
+
 void paint_choice(lv_obj_t *const buttons[2], bool second)
 {
     for (int i = 0; i < 2; ++i) {

@@ -53,14 +53,15 @@ void side_clicked_cb(lv_event_t *e)
 
 void flip_clicked_cb(lv_event_t *e)
 {
-    const bool flipped = lv_event_get_user_data(e) != nullptr;
-    if (flipped == s_flipped) {
+    const auto picked = static_cast<Orientation>(
+        reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e)));
+    if (picked == s_orientation) {
         return;
     }
-    s_flipped = flipped;
-    paint_choice(s_flip_buttons, flipped);
+    s_orientation = picked;
+    paint_pick(s_flip_buttons, 3, static_cast<int>(picked));
     if (s_handlers.orientation != nullptr) {
-        s_handlers.orientation(flipped);
+        s_handlers.orientation(picked);
     }
 }
 
@@ -99,20 +100,27 @@ void build_accent_card(lv_obj_t *parent, std::int32_t y, std::int32_t w)
     theme::make_label(root, LV_SYMBOL_RIGHT, theme::secondary, fonts::size_28());
 }
 
-void build_choice_card(lv_obj_t *parent, std::int32_t y, std::int32_t w, const char *icon,
-                       const char *title, const char *first, const char *second,
-                       lv_event_cb_t clicked, lv_obj_t *out[2])
+void build_choices(lv_obj_t *parent, std::int32_t y, std::int32_t w, const char *icon,
+                   const char *title, const char *const *labels, int count,
+                   lv_event_cb_t clicked, lv_obj_t **out)
 {
-    lv_obj_t         *root    = build_row_card(parent, y, w, icon, title, nullptr);
-    const char *const text[2] = {first, second};
-    for (int i = 0; i < 2; ++i) {
-        lv_obj_t *btn = theme::make_button(root, text[i], theme::panel, fonts::size_22());
+    lv_obj_t *root = build_row_card(parent, y, w, icon, title, nullptr);
+    for (int i = 0; i < count; ++i) {
+        lv_obj_t *btn = theme::make_button(root, labels[i], theme::panel, fonts::size_22());
         lv_obj_set_size(btn, SIDE_BTN_W, SIDE_BTN_H);
         theme::fill_accent(btn, LV_STATE_CHECKED);
         lv_obj_add_event_cb(btn, clicked, LV_EVENT_CLICKED,
                             reinterpret_cast<void *>(static_cast<std::intptr_t>(i)));
         out[i] = btn;
     }
+}
+
+void build_choice_card(lv_obj_t *parent, std::int32_t y, std::int32_t w, const char *icon,
+                       const char *title, const char *first, const char *second,
+                       lv_event_cb_t clicked, lv_obj_t *out[2])
+{
+    const char *const labels[2] = {first, second};
+    build_choices(parent, y, w, icon, title, labels, 2, clicked, out);
 }
 
 void build_colour_picker(lv_obj_t *parent)
@@ -346,9 +354,11 @@ void build_appearance_view(lv_obj_t *parent, std::int32_t w, std::int32_t h)
     build_choice_card(view, body_y + 2 * pitch, w, LV_SYMBOL_BARS, "Sidebar", "LEFT", "RIGHT",
                       side_clicked_cb, s_side_buttons);
     paint_side_buttons();
-    build_choice_card(view, body_y + 3 * pitch, w, LV_SYMBOL_REFRESH, "Orientation", "NORMAL",
-                      "FLIPPED", flip_clicked_cb, s_flip_buttons);
-    paint_choice(s_flip_buttons, s_flipped);
+    // Auto turns the screen to however the panel stands, by the IMU.
+    const char *const facing[3] = {"NORMAL", "FLIPPED", "AUTO"};
+    build_choices(view, body_y + 3 * pitch, w, LV_SYMBOL_REFRESH, "Orientation", facing, 3,
+                  flip_clicked_cb, s_flip_buttons);
+    paint_pick(s_flip_buttons, 3, static_cast<int>(s_orientation));
 
     s_appearance_view = view;
 }

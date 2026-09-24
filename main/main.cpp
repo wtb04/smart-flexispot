@@ -4,6 +4,8 @@
 #include "desk.h"
 #include "diagnostics.h"
 #include "ical.h"
+#include "imu.h"
+#include "orientation.h"
 #include "cJSON.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -115,8 +117,15 @@ void on_rail_side(bool right)
     settings::set(settings::Key::RailSide, right);
 }
 
-void on_orientation(bool flipped)
+void on_orientation(ui::Orientation orientation)
 {
+    const bool automatic = orientation == ui::Orientation::Auto;
+    settings::set(settings::Key::OrientAuto, automatic);
+    if (automatic) {
+        orientation::calibrate_and_refresh();
+        return;
+    }
+    const bool flipped = orientation == ui::Orientation::Flipped;
     board::set_flipped(flipped);
     settings::set(settings::Key::Flipped, flipped);
 }
@@ -226,7 +235,10 @@ extern "C" void app_main(void)
     ui::set_cards(diagnostics::cards(), diagnostics::card_count());
     ESP_ERROR_CHECK(ui::init(handlers, brightness,
                              static_cast<std::uint32_t>(settings::get(settings::Key::Accent)),
-                             settings::enabled(settings::Key::RailSide), flipped));
+                             settings::enabled(settings::Key::RailSide),
+                             settings::enabled(settings::Key::OrientAuto) ? ui::Orientation::Auto
+                             : flipped                                    ? ui::Orientation::Flipped
+                                                                          : ui::Orientation::Normal));
     on_brightness_changed(brightness);
     ESP_ERROR_CHECK_WITHOUT_ABORT(board::display_on(brightness));
     ESP_ERROR_CHECK_WITHOUT_ABORT(
@@ -251,6 +263,8 @@ extern "C" void app_main(void)
                                                   : desk::Link::Wire,
                                               desk_view));
     ESP_ERROR_CHECK_WITHOUT_ABORT(rtc::start());
+    ESP_ERROR_CHECK_WITHOUT_ABORT(imu::start());
+    ESP_ERROR_CHECK_WITHOUT_ABORT(orientation::start());
 
     ESP_ERROR_CHECK_WITHOUT_ABORT(battery::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(sound::init());

@@ -16,7 +16,7 @@ constexpr std::int32_t NAV_GAP    = GAP;
 
 bool s_rail_right = false;
 
-bool s_flipped = false;
+Orientation s_orientation = Orientation::Normal;
 
 Layout layout()
 {
@@ -96,7 +96,7 @@ lv_obj_t *s_rail          = nullptr;
 lv_obj_t *s_content       = nullptr;
 lv_obj_t *s_clock_box     = nullptr;
 lv_obj_t *s_side_buttons[2] = {};
-lv_obj_t *s_flip_buttons[2] = {};
+lv_obj_t *s_flip_buttons[3] = {};
 lv_obj_t *s_wifi_icon     = nullptr;
 lv_obj_t *s_phone_icon    = nullptr;
 lv_obj_t *s_clock_hours   = nullptr;
@@ -1097,7 +1097,7 @@ esp_err_t notify(const char *title, const char *message, Level level, int timeou
 }
 
 esp_err_t init(const Handlers &handlers, int initial_brightness, std::uint32_t accent,
-               bool rail_right, bool flipped)
+               bool rail_right, Orientation orientation)
 {
     ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
     fonts::init();
@@ -1106,7 +1106,7 @@ esp_err_t init(const Handlers &handlers, int initial_brightness, std::uint32_t a
         theme::set_primary(accent);
     }
     s_rail_right         = rail_right;
-    s_flipped            = flipped;
+    s_orientation        = orientation;
     s_handlers           = handlers;
     s_initial_brightness = initial_brightness;
     build_screen();
