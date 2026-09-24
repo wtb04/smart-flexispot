@@ -577,7 +577,7 @@ int channels()
 int logs(int card, bool warnings, ui::LogLine *out, int max)
 {
     // One set of entries, kept rather than asked for every second.
-    constexpr int         ENTRIES = 64;
+    constexpr int         ENTRIES = 200;
     static logbuf::Entry *entries = static_cast<logbuf::Entry *>(
         heap_caps_malloc(sizeof(logbuf::Entry) * ENTRIES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     if (entries == nullptr) {

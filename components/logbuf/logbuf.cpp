@@ -19,7 +19,7 @@ namespace logbuf {
 namespace {
 constexpr char TAG[] = "logbuf";
 
-constexpr int         LINES_PER_CHANNEL = 64;
+constexpr int         LINES_PER_CHANNEL = 128;
 constexpr std::size_t LINE_BYTES        = 128;
 constexpr std::size_t TAG_BYTES         = 32;
 

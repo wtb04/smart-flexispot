@@ -37,7 +37,7 @@ constexpr std::int32_t DETAIL_ROW_GAP = 2;
 constexpr std::int32_t DETAIL_MAX_FRAC = 80;
 constexpr std::int32_t DETAIL_ROW_H = 30;
 constexpr std::int32_t TILE_DOT     = 14;
-constexpr int LOG_LINE_MAX = 48;
+constexpr int LOG_LINE_MAX = 200;
 }  // namespace
 
 lv_obj_t *s_settings_view   = nullptr;
@@ -70,6 +70,7 @@ lv_obj_t                   *s_log_empty = nullptr;
 lv_obj_t                   *s_log_pane  = nullptr;
 int                         s_log_shown = -2;  // a card, -1 for all of them, -2 when closed
 bool                        s_log_warnings = false;
+bool                        s_log_redraw   = false;  // the filter changed, so draw whatever comes
 lv_obj_t                   *s_log_chip[kMaxCards + 1] = {};  // All, then each card
 lv_obj_t                   *s_log_warn = nullptr;
 lv_timer_t                 *s_log_timer = nullptr;
@@ -118,7 +119,8 @@ void refresh_log()
     if (s_log_shown < -1 || s_handlers.log == nullptr) {
         return;
     }
-    auto *lines = static_cast<LogLine *>(heap_caps_malloc(
+    // Kept rather than asked for every second: two hundred lines are 40 KB.
+    static LogLine *lines = static_cast<LogLine *>(heap_caps_malloc(
         sizeof(LogLine) * LOG_LINE_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     if (lines == nullptr) {
         return;
@@ -127,6 +129,18 @@ void refresh_log()
     // Stay at the newest line unless someone has scrolled up to read.
     const bool at_end = lv_obj_get_scroll_bottom(s_log_pane) <= 8;
     const int  count  = s_handlers.log(s_log_shown, s_log_warnings, lines, LOG_LINE_MAX);
+
+    // A new line moves every label along one, so nothing new is nothing to do.
+    static int  shown_count = -1;
+    static char shown_last[kLogTextMax];
+    const char *last = count > 0 ? lines[count - 1].text : "";
+    if (!s_log_redraw && count == shown_count && std::strcmp(last, shown_last) == 0) {
+        return;
+    }
+    s_log_redraw = false;
+    shown_count  = count;
+    std::snprintf(shown_last, sizeof(shown_last), "%s", last);
+
     for (int i = 0; i < LOG_LINE_MAX; ++i) {
         lv_obj_set_hidden(s_log_line[i], i >= count);
         if (i < count) {
@@ -135,7 +149,6 @@ void refresh_log()
         }
     }
     lv_obj_set_hidden(s_log_empty, count > 0);
-    heap_caps_free(lines);
     if (at_end) {
         lv_obj_update_layout(s_log_pane);
         lv_obj_scroll_to_y(s_log_pane, LV_COORD_MAX, LV_ANIM_OFF);
@@ -161,6 +174,7 @@ void open_log(int card)
         return;
     }
     s_log_shown = card;
+    s_log_redraw = true;
     paint_log_filter();
     lv_obj_scroll_to_y(s_log_pane, LV_COORD_MAX, LV_ANIM_OFF);
     refresh_log();
@@ -173,6 +187,7 @@ void log_chip_cb(lv_event_t *e)
 {
     const int card = static_cast<int>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e)));
     s_log_shown    = card;
+    s_log_redraw = true;
     paint_log_filter();
     lv_obj_scroll_to_y(s_log_pane, LV_COORD_MAX, LV_ANIM_OFF);
     refresh_log();
@@ -181,6 +196,7 @@ void log_chip_cb(lv_event_t *e)
 void log_warnings_cb(lv_event_t *)
 {
     s_log_warnings = !s_log_warnings;
+    s_log_redraw = true;
     paint_log_filter();
     lv_obj_scroll_to_y(s_log_pane, LV_COORD_MAX, LV_ANIM_OFF);
     refresh_log();
