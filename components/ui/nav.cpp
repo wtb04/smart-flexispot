@@ -22,7 +22,6 @@ constexpr NavItem NAV_ITEMS[PAGE_COUNT] = {
 bool s_present        = false;
 int  s_page           = 0;
 namespace {
-constexpr int RADAR_PAGE = 3;
 constexpr int SETUP_PAGE = 4;
 }  // namespace
 

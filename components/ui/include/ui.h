@@ -109,9 +109,8 @@ using RadarHandler = void (*)(bool showing, bool reachable);
 /** A plane picked on the radar: find out who it is. */
 using DetailsHandler = void (*)(const char *hex, const char *callsign);
 
-/** What it takes to be at the next appointment by `arrive_by`, in unix
- *  seconds; zero forgets the question. */
-using JourneyHandler = void (*)(std::int64_t arrive_by, bool to_work);
+/** How long before an appointment its journey is asked for and shown. */
+inline constexpr std::int64_t kJourneyAhead = 5 * 3600;
 
 /** A card on the diagnostics view. What it covers is the caller's business:
  *  the screen draws a title, a glyph, a summary and named rows. */
@@ -142,9 +141,11 @@ struct LogLine {
  *  only warnings and errors. Runs on the LVGL task, so it must not block. */
 using LogHandler = int (*)(int card, bool warnings, LogLine *out, int max);
 
-/** An empty title means nothing is playing; the card then shows the state. Strings are copied. */
+/** An empty title means nothing is playing; the card then shows the state.
+ *  `controllable` is whether holding the card has anything to act on. Strings
+ *  are copied. */
 esp_err_t set_media(const char *source, const char *title, const char *artist, const char *state,
-                    bool playing);
+                    bool playing, bool controllable);
 
 /** What holding the media card does: -1 opens the media panel, as for the
  *  speaker; a preset index sends the desk there instead, as for Jellyfin. */
@@ -196,7 +197,6 @@ struct Handlers {
     OrientationHandler orientation;
     ScreenHandler      screen;
     DetailsHandler     details;
-    JourneyHandler     journey;
 };
 
 /** Requires the LVGL port to be running. A zero accent keeps the built-in
@@ -268,6 +268,6 @@ esp_err_t set_radar_photo(const char *hex, const void *pixels, int width, int he
 
 
 /** Queued rather than shown at once: they arrive in bursts. A full queue drops the oldest. */
-esp_err_t notify(const char *title, const char *message, const char *level, int timeout_ms);
+esp_err_t notify(const char *title, const char *message, Level level, int timeout_ms);
 
 }  // namespace ui

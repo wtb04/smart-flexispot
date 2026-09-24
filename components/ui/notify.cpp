@@ -22,12 +22,14 @@ struct NoticeInk {
     bool          accent;
 };
 
-NoticeInk notice_ink(const char *level)
+NoticeInk notice_ink(Level level)
 {
-    if (std::strcmp(level, "error") == 0) return {theme::red, false};
-    if (std::strcmp(level, "warning") == 0) return {theme::amber, false};
-    if (std::strcmp(level, "success") == 0) return {theme::green, false};
-    return {theme::primary, true};
+    switch (level) {
+        case Level::Bad:  return {theme::red, false};
+        case Level::Warn: return {theme::amber, false};
+        case Level::Good: return {theme::green, false};
+        default:          return {theme::primary, true};
+    }
 }
 
 void hide_notice()

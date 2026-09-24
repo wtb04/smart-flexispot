@@ -59,9 +59,10 @@ void show_desk_available(bool linked)
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_desk_available(linked));
 }
 
-void show_notice(const char *message, const char *level, int timeout_ms)
+void show_notice(const char *message, desk::Tone tone, int timeout_ms)
 {
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::notify("", message, level, timeout_ms));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::notify(
+        "", message, tone == desk::Tone::Done ? ui::Level::Good : ui::Level::Neutral, timeout_ms));
 }
 
 void on_setting(ui::Setting setting, bool on)
@@ -75,7 +76,7 @@ void on_setting(ui::Setting setting, bool on)
             if (power::State state{}; on && power::last(state) && !state.present) {
                 ESP_ERROR_CHECK_WITHOUT_ABORT(ui::notify(
                     "", "No battery to charge. If one is in, it is too flat: take it out and put it back",
-                    "warning", 6000));
+                    ui::Level::Warn, 6000));
             }
             break;
         case ui::Setting::PresenceGate:
@@ -130,11 +131,6 @@ void on_details(const char *hex, const char *callsign)
     radar::request_details(hex, callsign);
 }
 
-void on_journey(std::int64_t arrive_by, bool to_work)
-{
-    travel::want(arrive_by, to_work ? travel::Place::Work : travel::Place::Study);
-}
-
 void on_radar_page(bool showing, bool reachable)
 {
     radar::set_enabled(reachable);
@@ -153,6 +149,7 @@ void on_travel()
 
 void restart_now(void *)
 {
+    settings::flush();  // a flash write: here on the timer task, not on the screen's
     ESP_ERROR_CHECK_WITHOUT_ABORT(board::display_off());
     esp_restart();
 }
@@ -161,10 +158,9 @@ void restart_now(void *)
 // is a restart, announced so it is not mistaken for a crash.
 void restart_for_desk(bool bluetooth)
 {
-    settings::flush();
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::notify(
         "", bluetooth ? "Switching the desk to Bluetooth" : "Switching the desk to the wire",
-        "info", 1500));
+        ui::Level::Neutral, 1500));
     static esp_timer_handle_t timer = nullptr;
     if (timer == nullptr) {
         const esp_timer_create_args_t args{.callback = restart_now, .name = "desk-restart"};
@@ -230,7 +226,6 @@ extern "C" void app_main(void)
         .orientation = on_orientation,
         .screen      = on_screen,
         .details     = on_details,
-        .journey     = on_journey,
     };
     const int brightness = settings::get(settings::Key::Brightness);
     ui::set_cards(diagnostics::cards(), diagnostics::card_count());

@@ -36,7 +36,8 @@ Layout layout()
 
 Handlers s_handlers{};
 namespace {
-constexpr int DESK_CONTROL_MAX = 8;
+// The two move buttons and a button per preset, stand and sit among them.
+constexpr int DESK_CONTROL_MAX = 2 + kPresetCount;
 bool          s_desk_available                  = true;
 
 lv_obj_t     *s_desk_controls[DESK_CONTROL_MAX] = {};
@@ -237,6 +238,7 @@ struct MediaArgs {
     Text<128> artist;
     Text<24>  state;
     bool      playing;
+    bool      controllable;
 };
 struct ProgressArgs {
     int  position_s;
@@ -372,13 +374,13 @@ void apply_desk_available(bool available)
 }
 
 void apply_media(const char *source, const char *title, const char *artist, const char *state,
-                 bool playing)
+                 bool playing, bool controllable)
 {
     if (s_media_card == nullptr) {
         return;
     }
     const bool has_track = title != nullptr && title[0] != '\0';
-    s_media_off = state == nullptr || std::strcmp(state, "OFF") == 0 || std::strcmp(state, "--") == 0;
+    s_media_off = !controllable;
     theme::set_text(s_media_source, source != nullptr && source[0] != '\0' ? source : "SPEAKER");
     theme::set_text(s_media_title, has_track ? title : (state != nullptr ? state : "--"));
     theme::set_text(s_media_artist, has_track && artist != nullptr ? artist : "");
@@ -730,7 +732,7 @@ void apply_pending(lv_timer_t *)
     static MediaArgs media;  // large for the LVGL task's stack
     if (take(p_media, media)) {
         apply_media(media.source.get(), media.title.get(), media.artist.get(), media.state.get(),
-                    media.playing);
+                    media.playing, media.controllable);
     }
     if (ArtArgs art{}; take(p_art, art)) {
         apply_album_art(art.pixels, art.placeholder);
@@ -846,7 +848,7 @@ esp_err_t set_desk_available(bool available)
 }
 
 esp_err_t set_media(const char *source, const char *title, const char *artist, const char *state,
-                    bool playing)
+                    bool playing, bool controllable)
 {
     static MediaArgs args;  // too large to build on a caller's stack
     portENTER_CRITICAL(&s_pending_lock);
@@ -854,8 +856,9 @@ esp_err_t set_media(const char *source, const char *title, const char *artist, c
     args.title.set(title);
     args.artist.set(artist);
     args.state.set(state);
-    args.playing  = playing;
-    p_media.value = args;
+    args.playing      = playing;
+    args.controllable = controllable;
+    p_media.value     = args;
     p_media.dirty = true;
     portEXIT_CRITICAL(&s_pending_lock);
     s_pending.store(true, std::memory_order_release);
@@ -1074,7 +1077,7 @@ bool diagnostics_open()
     return s_setup_visible.load(std::memory_order_relaxed);
 }
 
-esp_err_t notify(const char *title, const char *message, const char *level, int timeout_ms)
+esp_err_t notify(const char *title, const char *message, Level level, int timeout_ms)
 {
     portENTER_CRITICAL(&s_pending_lock);
     if (s_inbox_count == NOTICE_INBOX_LEN) {
@@ -1086,7 +1089,7 @@ esp_err_t notify(const char *title, const char *message, const char *level, int 
     Notice &slot = s_inbox[s_inbox_count++];
     copy_text(slot.title, sizeof(slot.title), title);
     copy_text(slot.message, sizeof(slot.message), message);
-    copy_text(slot.level, sizeof(slot.level), level != nullptr ? level : "info");
+    slot.level = level;
     slot.timeout_ms = timeout_ms;
     portEXIT_CRITICAL(&s_pending_lock);
     s_pending.store(true, std::memory_order_release);

@@ -45,7 +45,6 @@ constexpr std::uint32_t INK_EXAMS      = 0xb07ce0;
 constexpr std::uint32_t INK_OTHER      = 0xb0805a;
 constexpr std::uint32_t INK_WORK       = 0xf0923c;
 
-constexpr std::uint8_t FEED_WORK = 4;
 
 std::uint32_t feed_ink(std::uint8_t feed)
 {
@@ -53,7 +52,7 @@ std::uint32_t feed_ink(std::uint8_t feed)
         case 0: return INK_LECTURES;
         case 1: return INK_PRACTICALS;
         case 2: return INK_EXAMS;
-        case FEED_WORK: return INK_WORK;
+        case ical::kWorkFeed: return INK_WORK;
         default: return INK_OTHER;
     }
 }
@@ -64,7 +63,7 @@ const char *feed_kind(std::uint8_t feed)
         case 0: return "Lecture";
         case 1: return "Practical";
         case 2: return "Exam";
-        case FEED_WORK: return "Work";
+        case ical::kWorkFeed: return "Work";
         default: return "Other";
     }
 }
@@ -1190,7 +1189,9 @@ void build_week(lv_obj_t *parent, std::int32_t width, std::int32_t height)
 
 void show_calendar()
 {
-    if (s_title == nullptr) {
+    // Rebuilt every thirty seconds and on every calendar fetch; nobody needs
+    // that while another page is up, and opening it draws it anew.
+    if (s_title == nullptr || detail::s_page != detail::CALENDAR_PAGE) {
         return;
     }
 
@@ -1198,13 +1199,8 @@ void show_calendar()
     const int          count = ical::upcoming(ahead, AHEAD);
     const auto         now   = static_cast<std::int64_t>(std::time(nullptr));
 
-    // Asked well before it is shown. Shifts go to work, the rest to the timetable.
-    constexpr std::int64_t ASK_WITHIN = 5 * 3600;
-    const bool want = count > 0 && ahead[0].start > now && ahead[0].start - now < ASK_WITHIN;
-    if (detail::s_handlers.journey != nullptr) {
-        detail::s_handlers.journey(want ? ahead[0].start : 0,
-                                   count > 0 && ahead[0].feed == FEED_WORK);
-    }
+    // Shown once asked for, which main does well before it starts.
+    const bool want = count > 0 && ahead[0].start > now && ahead[0].start - now < kJourneyAhead;
 
     pick_journey(want, now);
     show_next(count > 0 ? &ahead[0] : nullptr, now);

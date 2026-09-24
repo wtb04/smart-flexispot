@@ -45,6 +45,7 @@ constexpr Feed FEEDS[kFeedCount] = {
     {"Other", nullptr, nullptr},
     {"Work", ICAL_WORK_URL, "werk"},
 };
+static_assert(kWorkFeed < kFeedCount, "the work feed is one of the feeds");
 
 // Case aside, so "Werk" and "Werken" both count.
 bool starts_with(const char *text, const char *prefix)

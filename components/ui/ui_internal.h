@@ -65,8 +65,8 @@ constexpr int          NOTIFY_QUEUE_LEN  = 4;
 struct Notice {
     char title[64];
     char message[192];
-    char level[12];
-    int  timeout_ms;
+    Level level;
+    int   timeout_ms;
 };
 
 // What the screen calls each preset. Everything off the screen says Preset 1 to 6.
@@ -102,6 +102,7 @@ constexpr int PROGRESS_SCALE   = 10;  // bar units per second
 constexpr std::uint32_t PAUSE_SETTLE_MS = 1500;
 
 constexpr int CALENDAR_PAGE = 1;
+constexpr int RADAR_PAGE    = 3;
 
 
 constexpr int SETTING_COUNT = static_cast<int>(Setting::Count);

@@ -17,6 +17,10 @@
 
 namespace ui {
 namespace {
+// Every reading redraws the whole scope, a 290 KB clear and every blip; not
+// while another page is up. Opening the page catches up.
+bool s_radar_stale = false;
+
 void ask_details(const char *hex, const char *callsign)
 {
     if (detail::s_handlers.details != nullptr) {
@@ -1328,6 +1332,9 @@ void radar_page_opened()
     if (s_chosen[0] == '\0') {
         s_following = true;
     }
+    if (s_radar_stale) {
+        refresh_radar();
+    }
 }
 
 void show_radar(const radar::Snapshot &snapshot)
@@ -1479,6 +1486,11 @@ void refresh_radar()
     if (s_last == nullptr) {
         return;
     }
+    if (detail::s_page != detail::RADAR_PAGE) {
+        s_radar_stale = true;
+        return;
+    }
+    s_radar_stale = false;
     radar::snapshot(*s_last);
     show_radar(*s_last);
 }

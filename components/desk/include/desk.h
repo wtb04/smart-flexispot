@@ -18,11 +18,14 @@ enum class Link : std::uint8_t {
 
 /** How the desk shows itself. Each may be null. Called from the desk's own
  *  tasks, so each must return at once. */
+/** What a notice is: something done, or something to know. */
+enum class Tone : std::uint8_t { Done, Hint };
+
 struct View {
     void (*preset_active)(int index, bool active);
     void (*height)(int height_mm);  // negative when not known
     void (*available)(bool linked);
-    void (*notice)(const char *message, const char *level, int timeout_ms);
+    void (*notice)(const char *message, Tone tone, int timeout_ms);
 };
 
 esp_err_t start(Link link, const View &view);

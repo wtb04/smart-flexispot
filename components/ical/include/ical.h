@@ -12,6 +12,9 @@ inline constexpr int kMaxEvents = 320;
 
 inline constexpr int kFeedCount = 5;
 
+/** Shifts, which are travelled to work rather than to the timetable's rooms. */
+inline constexpr std::uint8_t kWorkFeed = 4;
+
 /** The name each feed is shown under, indexed by Event::feed. */
 const char *feed_name(std::uint8_t feed);
 

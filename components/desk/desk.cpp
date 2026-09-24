@@ -42,10 +42,10 @@ void show_available(bool linked)
     }
 }
 
-void show_notice(const char *message, const char *level, int timeout_ms)
+void show_notice(const char *message, Tone tone, int timeout_ms)
 {
     if (s_view.notice != nullptr) {
-        s_view.notice(message, level, timeout_ms);
+        s_view.notice(message, tone, timeout_ms);
     }
 }
 constexpr char kConnected[] = "connected";
@@ -251,14 +251,14 @@ void run_preset(const PresetCommand &cmd)
             }
         }
         remember_preset(cmd.index, height);
-        show_notice("Preset saved", "success", 2500);
+        show_notice("Preset saved", Tone::Done, 2500);
         return;
     }
 
     const TickType_t now = xTaskGetTickCount();
     if (cmd.index >= deskproto::kBoxPresets) {
         if (s_preset_mm[cmd.index] < 0) {
-            show_notice("Hold it to save the height it goes to", "info", 3000);
+            show_notice("Hold it to save the height it goes to", Tone::Hint, 3000);
             return;
         }
         if (travelling() && s_travel_index == cmd.index) {

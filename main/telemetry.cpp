@@ -13,6 +13,8 @@
 #include "freertos/task.h"
 #include "ha_ws.h"
 #include "hass.h"
+#include "travel.h"
+#include "ical.h"
 #include "power.h"
 #include "radar.h"
 #include "room.h"
@@ -23,6 +25,7 @@
 
 #include <atomic>
 #include <cstdio>
+#include <ctime>
 
 namespace telemetry {
 namespace {
@@ -73,7 +76,20 @@ void on_refusal(const char *reason)
 {
     char message[96];
     std::snprintf(message, sizeof(message), "Home Assistant did not do that: %s", reason);
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::notify("", message, "warning", 4000));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::notify("", message, ui::Level::Warn, 4000));
+}
+
+/** The journey to the next appointment is asked for well before it starts, so
+ *  it is there when the calendar shows it. Asking the same again costs nothing. */
+void ask_journey()
+{
+    ical::Event next[1];
+    const int   count = ical::upcoming(next, 1);
+    const auto  now   = static_cast<std::int64_t>(std::time(nullptr));
+    const bool  soon  = count > 0 && next[0].start > now && next[0].start - now < ui::kJourneyAhead;
+    travel::want(soon ? next[0].start : 0,
+                 count > 0 && next[0].feed == ical::kWorkFeed ? travel::Place::Work
+                                                              : travel::Place::Study);
 }
 
 void on_entities(const hass::ws::EntityStore &store)
@@ -97,8 +113,14 @@ void on_notify(const hass::protocol::Notification &notice)
 {
     ESP_LOGI(TAG, "showing notification: '%s'", notice.message.c_str());
     sound::ding();
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::notify(notice.title.c_str(), notice.message.c_str(),
-                                             notice.level.c_str(), notice.timeout_ms));
+    // Home Assistant says it in words; the screen takes a level.
+    const std::string &word  = notice.level;
+    const ui::Level    level = word == "error"     ? ui::Level::Bad
+                               : word == "warning" ? ui::Level::Warn
+                               : word == "success" ? ui::Level::Good
+                                                   : ui::Level::Neutral;
+    ESP_ERROR_CHECK_WITHOUT_ABORT(
+        ui::notify(notice.title.c_str(), notice.message.c_str(), level, notice.timeout_ms));
 }
 
 void fill_network(hass::protocol::Telemetry &out)
@@ -220,6 +242,7 @@ void nudge_links()
 
         hass::publish(out);
         nudge_links();
+        ask_journey();
 
         static bool settled = false;
         if (!settled && esp_timer_get_time() > 40000000) {

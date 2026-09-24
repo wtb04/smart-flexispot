@@ -263,7 +263,7 @@ void render_media(const hass::ws::EntityStore &store)
     }
 
     if (player == nullptr) {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media("SPEAKER", "", "", "--", false));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media("SPEAKER", "", "", "--", false, false));
         media::set_art_path("");
         return;
     }
@@ -291,7 +291,8 @@ void render_media(const hass::ws::EntityStore &store)
     if (shown != s_shown) {
         s_shown = shown;
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media(source.c_str(), title.c_str(), artist.c_str(),
-                                                    state.c_str(), playing));
+                                                    state.c_str(), playing,
+                                                    state != "OFF" && state != "--"));
     }
 
     const std::string stamp    = attribute(*player, "media_position_updated_at");
@@ -432,7 +433,7 @@ void init()
     for (int i = 0; i < LIGHT_COUNT; ++i) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_light(i, LIGHTS[i].name, "--", false));
     }
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media("SPEAKER", "", "", "--", false));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media("SPEAKER", "", "", "--", false, false));
 }
 
 void render(const hass::ws::EntityStore &store)
