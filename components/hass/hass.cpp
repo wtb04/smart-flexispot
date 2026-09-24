@@ -190,4 +190,14 @@ bool connected()
     return s_connected.load(std::memory_order_relaxed);
 }
 
+esp_err_t restart()
+{
+    if (s_client == nullptr) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    s_connected.store(false, std::memory_order_relaxed);
+    esp_mqtt_client_stop(s_client);  // not running is fine, that is what is being fixed
+    return esp_mqtt_client_start(s_client);
+}
+
 }  // namespace hass

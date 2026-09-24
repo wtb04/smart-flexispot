@@ -33,6 +33,10 @@ constexpr TickType_t PUBLISH_INTERVAL = pdMS_TO_TICKS(2000);
 
 constexpr int NETWORK_WAIT_MS = 30000;
 
+// Both clients retry on their own, yet once, after the server had been away for
+// minutes, neither came back until a reboot. This is the reboot, for one client.
+constexpr std::int64_t LINK_PATIENCE_US = 120 * 1000000LL;
+
 constexpr std::uint32_t TASK_STACK    = 6144;  // measured: uses 3.0 KB
 constexpr UBaseType_t   TASK_PRIORITY = 2;
 constexpr BaseType_t    TASK_CORE     = 0;
@@ -127,6 +131,39 @@ void on_album_art(media::Art state, const void *pixels)
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_album_art(pixels, state == media::Art::Failed));
 }
 
+void watch_link(bool up, std::int64_t &down_since, const char *what, esp_err_t (*restart)())
+{
+    if (up) {
+        down_since = 0;
+        return;
+    }
+    const std::int64_t now = esp_timer_get_time();
+    if (down_since == 0) {
+        down_since = now;
+        return;
+    }
+    if (now - down_since < LINK_PATIENCE_US) {
+        return;
+    }
+    down_since = now;
+    if (restart() == ESP_OK) {
+        ESP_LOGW(TAG, "%s down for two minutes with Wi-Fi up, restarted its client", what);
+    }
+}
+
+void nudge_links()
+{
+    static std::int64_t broker_down_since = 0;
+    static std::int64_t socket_down_since = 0;
+    if (!wifi::connected()) {
+        broker_down_since = 0;
+        socket_down_since = 0;
+        return;
+    }
+    watch_link(hass::connected(), broker_down_since, "broker", hass::restart);
+    watch_link(hass::ws::connected(), socket_down_since, "socket", hass::ws::restart);
+}
+
 [[noreturn]] void telemetry_task(void *)
 {
     if (!wifi::wait_for_ip(NETWORK_WAIT_MS)) {
@@ -178,6 +215,7 @@ void on_album_art(media::Art state, const void *pixels)
         }
 
         hass::publish(out);
+        nudge_links();
 
         static bool settled = false;
         if (!settled && esp_timer_get_time() > 40000000) {

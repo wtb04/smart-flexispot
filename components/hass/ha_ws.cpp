@@ -42,7 +42,26 @@ int next_command_id()
 {
     return s_next_command_id.fetch_add(1, std::memory_order_relaxed);
 }
-std::atomic<bool>             s_shutdown_wanted{false};
+std::atomic<bool>       s_stop_wanted{false};
+std::atomic<TickType_t> s_start_at{0};  // zero when no start is pending
+
+constexpr TickType_t RETRY_SUBSCRIBE = pdMS_TO_TICKS(10000);
+constexpr TickType_t RETRY_TOKEN     = pdMS_TO_TICKS(60000);
+
+/** The client's own reconnect only covers the socket; a refusal from the other
+ *  end needs the session torn down and begun again, after a pause. */
+void begin_again_in(TickType_t delay, const char *why)
+{
+    ESP_LOGW(TAG, "%s, beginning again in %u s", why,
+             static_cast<unsigned>(pdTICKS_TO_MS(delay) / 1000));
+    s_connected.store(false, std::memory_order_relaxed);
+    s_stop_wanted.store(true, std::memory_order_relaxed);
+    TickType_t at = xTaskGetTickCount() + delay;
+    if (at == 0) {
+        at = 1;
+    }
+    s_start_at.store(at, std::memory_order_relaxed);
+}
 
 struct Command {
     char domain[16];
@@ -146,8 +165,7 @@ void handle_message(const std::string &text)
         }
 
         case MessageType::AuthInvalid:
-            ESP_LOGE(TAG, "token rejected, not retrying");
-            s_shutdown_wanted.store(true, std::memory_order_relaxed);
+            begin_again_in(RETRY_TOKEN, "token rejected");
             break;
 
         case MessageType::Event: {
@@ -169,6 +187,9 @@ void handle_message(const std::string &text)
                     cJSON_GetObjectItemCaseSensitive(error, "message");
                 ESP_LOGW(TAG, "command %d refused: %s", message_id(root),
                          cJSON_IsString(msg) ? msg->valuestring : "unknown");
+                if (message_id(root) == SUBSCRIBE_ID) {
+                    begin_again_in(RETRY_SUBSCRIBE, "subscription refused");
+                }
             }
             break;
         }
@@ -231,7 +252,8 @@ void on_event(void *, esp_event_base_t, std::int32_t id, void *data)
         case WEBSOCKET_EVENT_CLOSED:
             s_rx.clear();
             if (s_connected.exchange(false, std::memory_order_relaxed)) {
-                ESP_LOGW(TAG, "disconnected, client retries on its own");
+                ESP_LOGW(TAG, "%s, client retries on its own",
+                         id == WEBSOCKET_EVENT_CLOSED ? "closed by the server" : "disconnected");
             }
             break;
         case WEBSOCKET_EVENT_DATA:
@@ -258,9 +280,18 @@ void on_event(void *, esp_event_base_t, std::int32_t id, void *data)
             }
         }
 
-        if (s_shutdown_wanted.exchange(false, std::memory_order_relaxed) && s_client != nullptr) {
+        if (s_client == nullptr) {
+            continue;
+        }
+        if (s_stop_wanted.exchange(false, std::memory_order_relaxed)) {
             esp_websocket_client_stop(s_client);
-            ESP_LOGW(TAG, "client stopped");
+        }
+        const TickType_t start_at = s_start_at.load(std::memory_order_relaxed);
+        if (start_at != 0 &&
+            static_cast<std::int32_t>(xTaskGetTickCount() - start_at) >= 0) {
+            s_start_at.store(0, std::memory_order_relaxed);
+            ESP_LOGI(TAG, "connecting again");
+            esp_websocket_client_start(s_client);
         }
     }
 }
@@ -283,6 +314,9 @@ esp_err_t start(UpdateHandler on_update)
     cfg.reconnect_timeout_ms = 5000;
     cfg.ping_interval_sec    = 25;
     cfg.pingpong_timeout_sec = 90;
+    // Home Assistant closes every socket cleanly when it restarts, and without
+    // this the client treats a clean close as the end and exits for good.
+    cfg.enable_close_reconnect = true;
 
     s_client = esp_websocket_client_init(&cfg);
     ESP_RETURN_ON_FALSE(s_client != nullptr, ESP_FAIL, TAG, "init");
@@ -307,6 +341,15 @@ esp_err_t start(UpdateHandler on_update)
 bool connected()
 {
     return s_connected.load(std::memory_order_relaxed);
+}
+
+esp_err_t restart()
+{
+    if (s_client == nullptr) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    begin_again_in(1, "restart asked for");
+    return ESP_OK;
 }
 
 esp_err_t call_service(const char *domain, const char *service, const char *entity_id)

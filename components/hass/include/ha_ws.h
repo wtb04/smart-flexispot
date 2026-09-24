@@ -13,6 +13,9 @@ esp_err_t start(UpdateHandler on_update);
 /** True once authenticated and subscribed. */
 bool connected();
 
+/** Stops and starts the client, for when its own retries have got nowhere. */
+esp_err_t restart();
+
 esp_err_t call_service(const char *domain, const char *service, const char *entity_id);
 
 esp_err_t call_service_with(const char *domain, const char *service, const char *entity_id,
