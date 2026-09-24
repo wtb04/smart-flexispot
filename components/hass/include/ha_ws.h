@@ -13,6 +13,10 @@ esp_err_t start(UpdateHandler on_update);
 /** True once authenticated and subscribed. */
 bool connected();
 
+/** Where Home Assistant serves plain HTTP, such as pictures: the websocket's
+ *  scheme and host without the path. Empty when none is configured. */
+const char *http_origin();
+
 /** Stops and starts the client, for when its own retries have got nowhere.
  *  Creates it if it never was. */
 esp_err_t restart();

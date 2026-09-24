@@ -6,6 +6,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 
+#include <cstdio>
 #include <cstring>
 #include "freertos/task.h"
 
@@ -368,6 +369,26 @@ esp_err_t restart()
     }
     begin_again_in(1, "restart asked for");
     return ESP_OK;
+}
+
+const char *http_origin()
+{
+    static char origin[96];
+    if (origin[0] != '\0') {
+        return origin;
+    }
+    const char *uri  = HASS_WS_URI;
+    const char *host = std::strstr(uri, "://");
+    host             = host != nullptr ? host + 3 : uri;
+    const char       *end = std::strchr(host, '/');
+    const std::size_t len = end != nullptr ? static_cast<std::size_t>(end - host) : std::strlen(host);
+
+    const bool secure = std::strncmp(uri, "wss", 3) == 0;
+    if (len > 0) {
+        std::snprintf(origin, sizeof(origin), "%s%.*s", secure ? "https://" : "http://",
+                      static_cast<int>(len), host);
+    }
+    return origin;
 }
 
 void on_refusal(RefusalHandler handler)

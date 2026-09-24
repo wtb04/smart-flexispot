@@ -406,7 +406,7 @@ constexpr const char *PRESENCE_TAGS[]  = {"presence"};
 constexpr const char *POWER_TAGS[]     = {"power", "battery"};
 constexpr const char *DESK_TAGS[]      = {"desk", "loctek", "desklink", "deskproxy", "proxy", "leds"};
 constexpr const char *RADAR_TAGS[]     = {"radar"};
-constexpr const char *MEDIA_TAGS[]     = {"media", "sound"};
+constexpr const char *MEDIA_TAGS[]     = {"media", "jpeg", "sound"};
 constexpr const char *CALENDAR_TAGS[]  = {"ical", "travel"};
 constexpr const char *SYSTEM_TAGS[]    = {
     "tab5",  "ui",     "shot",   "diag",      "clock",     "settings", "logbuf",   "board",

@@ -4,6 +4,7 @@
 #include "desk.h"
 #include "esp_check.h"
 #include "ble.h"
+#include "jpeg.h"
 #include "media.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
@@ -175,7 +176,8 @@ void nudge_links()
     hass::ws::on_refusal(on_refusal);
     ESP_ERROR_CHECK_WITHOUT_ABORT(hass::ws::start(on_entities));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ble::start());
-    ESP_ERROR_CHECK_WITHOUT_ABORT(media::start(on_album_art));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(jpeg::start());
+    ESP_ERROR_CHECK_WITHOUT_ABORT(media::start(hass::ws::http_origin(), on_album_art));
     ESP_ERROR_CHECK_WITHOUT_ABORT(radar::start(on_radar, on_radar_details, on_radar_photo));
 
     for (;;) {

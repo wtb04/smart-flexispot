@@ -6,7 +6,7 @@
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_timer.h"
-#include "media.h"
+#include "jpeg.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -287,8 +287,7 @@ void fetch_photo(const char *hex, const Details &details)
     s_photo_at_us    = esp_timer_get_time();
     s_photo_open     = true;
     if (status == 200 &&
-        media::decode_image(s_body, s_body_len, s_photo, PHOTO_MAX_W, PHOTO_MAX_H, width,
-                            height)) {
+        jpeg::decode_into(s_body, s_body_len, s_photo, PHOTO_MAX_W, PHOTO_MAX_H, width, height)) {
         s_photo_w = width;
         s_photo_h = height;
         std::snprintf(s_photo_hex, sizeof(s_photo_hex), "%s", hex);

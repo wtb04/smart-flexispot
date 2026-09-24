@@ -1,6 +1,5 @@
 #include "media.h"
 
-#include "driver/jpeg_decode.h"
 #include "esp_check.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
@@ -8,13 +7,11 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
-#include "hass_secrets.h"
+#include "jpeg.h"
 
 #include "esp_heap_caps.h"
-#include "jpeglib.h"
 
 #include <algorithm>
-#include <csetjmp>
 #include <cstdio>
 #include <cstring>
 
@@ -39,10 +36,6 @@ void record(bool playing, bool have_art, bool art_ok, bool hardware, int decode_
     portEXIT_CRITICAL(&s_status_lock);
 }
 
-constexpr std::size_t MAX_JPEG = 512 * 1024;
-
-constexpr int MAX_DECODE_SIDE = 800;
-
 constexpr std::uint32_t TASK_STACK    = 4096;  // measured: uses 2.8 KB
 constexpr UBaseType_t   TASK_PRIORITY = 2;
 constexpr BaseType_t    TASK_CORE     = 0;
@@ -52,9 +45,7 @@ StackType_t  s_task_stack[TASK_STACK];
 
 ArtHandler s_on_art = nullptr;
 
-jpeg_decoder_handle_t s_decoder = nullptr;
-std::uint8_t         *s_jpeg    = nullptr;
-std::uint8_t         *s_full    = nullptr;
+std::uint8_t *s_body = nullptr;  // the cover as downloaded
 std::uint16_t *s_art[2] = {nullptr, nullptr};
 int            s_next   = 0;
 
@@ -63,32 +54,14 @@ char              s_loaded[320] = {};
 SemaphoreHandle_t s_lock        = nullptr;
 StaticSemaphore_t s_lock_ctrl;
 
-SemaphoreHandle_t s_decoder_lock = nullptr;
-StaticSemaphore_t s_decoder_lock_ctrl;
 TaskHandle_t      s_task = nullptr;
 
-const char *http_origin()
-{
-    static char origin[96];
-    if (origin[0] != '\0') {
-        return origin;
-    }
-    const char *uri = HASS_WS_URI;
-    const char *host = std::strstr(uri, "://");
-    host             = host != nullptr ? host + 3 : uri;
-    const char *end  = std::strchr(host, '/');
-    const std::size_t len = end != nullptr ? static_cast<std::size_t>(end - host) : std::strlen(host);
-
-    const bool secure = std::strncmp(uri, "wss", 3) == 0;
-    std::snprintf(origin, sizeof(origin), "%s%.*s", secure ? "https://" : "http://",
-                  static_cast<int>(len), host);
-    return origin;
-}
+char s_origin[96] = {};
 
 std::size_t download(const char *path)
 {
     char url[512];
-    std::snprintf(url, sizeof(url), "%s%s", http_origin(), path);
+    std::snprintf(url, sizeof(url), "%s%s", s_origin, path);
 
     esp_http_client_config_t cfg{};
     cfg.url             = url;
@@ -105,10 +78,10 @@ std::size_t download(const char *path)
     if (esp_http_client_open(client, 0) == ESP_OK) {
         const int64_t length = esp_http_client_fetch_headers(client);
         const int     status = esp_http_client_get_status_code(client);
-        if (status == 200 && length <= static_cast<int64_t>(MAX_JPEG)) {
-            while (total < MAX_JPEG) {
-                const int read = esp_http_client_read(client, reinterpret_cast<char *>(s_jpeg + total),
-                                                      static_cast<int>(MAX_JPEG - total));
+        if (status == 200 && length <= static_cast<int64_t>(jpeg::kMaxInput)) {
+            while (total < jpeg::kMaxInput) {
+                const int read = esp_http_client_read(client, reinterpret_cast<char *>(s_body + total),
+                                                      static_cast<int>(jpeg::kMaxInput - total));
                 if (read <= 0) {
                     break;
                 }
@@ -121,26 +94,6 @@ std::size_t download(const char *path)
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
     return total;
-}
-
-// The engine writes whole MCUs, so a picture whose width is not a multiple of
-// the MCU width comes back padded on the end of every row. Reading it at the
-// picture width shears the image into diagonal streaks.
-int decoded_stride(const jpeg_decode_picture_info_t &info)
-{
-    const int mcu_w = info.sample_method == JPEG_DOWN_SAMPLING_YUV422 ||
-                              info.sample_method == JPEG_DOWN_SAMPLING_YUV420
-                          ? 16
-                          : 8;
-    return (static_cast<int>(info.width) + mcu_w - 1) / mcu_w * mcu_w;
-}
-
-// A single-component jpeg is the one thing the engine will not give back as
-// RGB565: asked for colour it answers ESP_ERR_NOT_SUPPORTED. Built
-// arithmetically, so unlike the engine's own output it needs no byte swap.
-inline std::uint16_t grey_to_rgb565(std::uint8_t level)
-{
-    return static_cast<std::uint16_t>(((level >> 3) << 11) | ((level >> 2) << 5) | (level >> 3));
 }
 
 /** The card's frame is square; a wide episode still shows its middle. */
@@ -176,84 +129,37 @@ void shrink_grey(const std::uint8_t *src, Square from, int stride, std::uint16_t
             src + static_cast<std::size_t>(from.top + y * from.side / kArtSize) * stride + from.left;
         std::uint16_t *out = dst + static_cast<std::size_t>(y) * kArtSize;
         for (int x = 0; x < kArtSize; ++x) {
-            out[x] = grey_to_rgb565(row[x * from.side / kArtSize]);
+            out[x] = jpeg::grey_to_rgb565(row[x * from.side / kArtSize]);
         }
     }
 }
 
-bool baseline(const std::uint8_t *jpeg, std::size_t length);
-bool decode_soft(const void *jpeg, std::size_t length, std::uint16_t *out, int max_w, int max_h,
-                 int &out_w, int &out_h);
+bool s_last_hardware = false;
 
-bool decode_locked(std::size_t bytes)
+void take_cover(const jpeg::Picture &picture, void *)
 {
-    jpeg_decode_picture_info_t info{};
-    if (jpeg_decoder_get_info(s_jpeg, bytes, &info) != ESP_OK) {
-        ESP_LOGW(TAG, "not a readable jpeg");
-        return false;
-    }
-    if (static_cast<int>(info.width) > MAX_DECODE_SIDE ||
-        static_cast<int>(info.height) > MAX_DECODE_SIDE) {
-        ESP_LOGW(TAG, "cover is %ux%u, skipping", info.width, info.height);
-        return false;
-    }
-    const Square from = middle(static_cast<int>(info.width), static_cast<int>(info.height));
-
-    // The engine takes baseline pictures whose pixel count divides by eight;
-    // anything else goes through software.
-    if (!baseline(s_jpeg, bytes) || (info.width * info.height) % 8 != 0) {
-        int width  = 0;
-        int height = 0;
-        auto *full = reinterpret_cast<std::uint16_t *>(s_full);
-        if (!decode_soft(s_jpeg, bytes, full, MAX_DECODE_SIDE, MAX_DECODE_SIDE, width, height)) {
-            ESP_LOGW(TAG, "cover %ux%u would not decode", info.width, info.height);
-            return false;
-        }
-        std::uint16_t *art = s_art[s_next];
-        shrink(full, middle(width, height), width, art);
-        s_next = 1 - s_next;
-        if (s_on_art != nullptr) {
-            s_on_art(Art::Ready, art);
-        }
-        ESP_LOGI(TAG, "cover %dx%d, in software -> %d", width, height, kArtSize);
-        return true;
-    }
-
-    const bool grey = info.sample_method == JPEG_DOWN_SAMPLING_GRAY;
-
-    jpeg_decode_cfg_t cfg{};
-    cfg.output_format = grey ? JPEG_DECODE_OUT_FORMAT_GRAY : JPEG_DECODE_OUT_FORMAT_RGB565;
-    cfg.rgb_order     = JPEG_DEC_RGB_ELEMENT_ORDER_BGR;
-
-    std::uint32_t out_size = 0;
-    const esp_err_t err = jpeg_decoder_process(s_decoder, &cfg, s_jpeg, bytes, s_full,
-                                               MAX_DECODE_SIDE * MAX_DECODE_SIDE * 2, &out_size);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "decode failed: %s", esp_err_to_name(err));
-        return false;
-    }
-
-    std::uint16_t *art = s_art[s_next];
-    if (grey) {
-        shrink_grey(s_full, from, decoded_stride(info), art);
+    const Square   from = middle(picture.width, picture.height);
+    std::uint16_t *art  = s_art[s_next];
+    if (picture.grey) {
+        shrink_grey(static_cast<const std::uint8_t *>(picture.pixels), from, picture.stride, art);
     } else {
-        shrink(reinterpret_cast<const std::uint16_t *>(s_full), from, decoded_stride(info), art);
+        shrink(static_cast<const std::uint16_t *>(picture.pixels), from, picture.stride, art);
     }
-    s_next = 1 - s_next;
-
+    s_next          = 1 - s_next;
+    s_last_hardware = picture.hardware;
+    ESP_LOGI(TAG, "cover %dx%d%s%s -> %d", picture.width, picture.height,
+             picture.grey ? " grey" : "", picture.hardware ? "" : " in software", kArtSize);
     if (s_on_art != nullptr) {
         s_on_art(Art::Ready, art);
     }
-    ESP_LOGI(TAG, "cover %ux%u%s stride %d -> %d", info.width, info.height,
-             grey ? " grey" : "", decoded_stride(info), kArtSize);
-    return true;
 }
 
 bool decode(std::size_t bytes)
 {
-    xSemaphoreTake(s_decoder_lock, portMAX_DELAY);
-    const bool ok = decode_locked(bytes);
-    xSemaphoreGive(s_decoder_lock);
+    const bool ok = jpeg::decode(s_body, bytes, jpeg::kMaxSide, jpeg::kMaxSide, take_cover, nullptr);
+    if (!ok) {
+        ESP_LOGW(TAG, "cover would not decode");
+    }
     return ok;
 }
 
@@ -297,7 +203,7 @@ constexpr std::int64_t RETRY_MAX_US   = 5 * 60 * 1000000LL;
         const std::int64_t began = esp_timer_get_time();
         const std::size_t  bytes = download(wanted);
         const bool         got   = bytes > 0 && decode(bytes);
-        record(true, true, got, true,
+        record(true, true, got, s_last_hardware,
                got ? static_cast<int>((esp_timer_get_time() - began) / 1000) : -1);
 
         if (got) {
@@ -322,159 +228,17 @@ constexpr std::int64_t RETRY_MAX_US   = 5 * 60 * 1000000LL;
     }
 }
 
-bool baseline(const std::uint8_t *jpeg, std::size_t length)
-{
-    std::size_t at = 2;  // past the start-of-image marker
-    while (at + 4 <= length && jpeg[at] == 0xff) {
-        const std::uint8_t marker = jpeg[at + 1];
-        if (marker == 0xc0 || marker == 0xc1) {
-            return true;
-        }
-        if (marker == 0xda || (marker >= 0xc2 && marker <= 0xcf && marker != 0xc4 &&
-                               marker != 0xc8 && marker != 0xcc)) {
-            return false;
-        }
-        at += 2 + (static_cast<std::size_t>(jpeg[at + 2]) << 8) + jpeg[at + 3];
-    }
-    return false;
-}
-
-struct JpegError {
-    jpeg_error_mgr pub;
-    jmp_buf        escape;
-};
-
-void on_jpeg_error(j_common_ptr info)
-{
-    std::longjmp(reinterpret_cast<JpegError *>(info->err)->escape, 1);
-}
-
-bool decode_soft(const void *jpeg, std::size_t length, std::uint16_t *out, int max_w, int max_h,
-                 int &out_w, int &out_h)
-{
-    jpeg_decompress_struct info{};
-    JpegError              err{};
-
-    info.err           = jpeg_std_error(&err.pub);
-    err.pub.error_exit = on_jpeg_error;
-    if (setjmp(err.escape) != 0) {
-        jpeg_destroy_decompress(&info);
-        return false;
-    }
-
-    jpeg_create_decompress(&info);
-    jpeg_mem_src(&info, static_cast<const unsigned char *>(jpeg), length);
-    jpeg_read_header(&info, TRUE);
-
-    // Despite the name this picks the byte order of the RGB565 word, not the
-    // channel order: _RGB writes it big-endian and LVGL reads a native
-    // little-endian uint16, which mangles red and blue into each other.
-    info.out_color_space = JCS_RGB565;
-    info.scale_num   = 1;
-    info.scale_denom = 1;
-    jpeg_calc_output_dimensions(&info);
-    while ((static_cast<int>(info.output_width) > max_w ||
-            static_cast<int>(info.output_height) > max_h) &&
-           info.scale_denom < 8) {
-        info.scale_denom *= 2;
-        jpeg_calc_output_dimensions(&info);
-    }
-    if (static_cast<int>(info.output_width) > max_w ||
-        static_cast<int>(info.output_height) > max_h) {
-        jpeg_destroy_decompress(&info);
-        return false;
-    }
-
-    jpeg_start_decompress(&info);
-    out_w = static_cast<int>(info.output_width);
-    out_h = static_cast<int>(info.output_height);
-    while (info.output_scanline < info.output_height) {
-        auto *row = reinterpret_cast<JSAMPROW>(
-            out + static_cast<std::size_t>(info.output_scanline) * out_w);
-        jpeg_read_scanlines(&info, &row, 1);
-    }
-    jpeg_finish_decompress(&info);
-    jpeg_destroy_decompress(&info);
-    return true;
-}
-
 }  // namespace
 
-bool decode_image(const void *jpeg, std::size_t length, std::uint16_t *out, int max_w, int max_h,
-                  int &out_w, int &out_h)
+esp_err_t start(const char *origin, ArtHandler on_art)
 {
-    if (jpeg == nullptr || out == nullptr || length == 0 || length > MAX_JPEG ||
-        s_decoder == nullptr) {
-        return false;
-    }
-
-    xSemaphoreTake(s_decoder_lock, portMAX_DELAY);
-    bool ok = false;
-
-    std::memcpy(s_jpeg, jpeg, length);
-
-    jpeg_decode_picture_info_t info{};
-    if (baseline(s_jpeg, length) && jpeg_decoder_get_info(s_jpeg, length, &info) == ESP_OK &&
-        (info.width * info.height) % 8 == 0 &&
-        static_cast<int>(info.width) <= max_w && static_cast<int>(info.height) <= max_h &&
-        static_cast<int>(info.width) <= MAX_DECODE_SIDE &&
-        static_cast<int>(info.height) <= MAX_DECODE_SIDE) {
-        const bool grey = info.sample_method == JPEG_DOWN_SAMPLING_GRAY;
-
-        jpeg_decode_cfg_t cfg{};
-        cfg.output_format = grey ? JPEG_DECODE_OUT_FORMAT_GRAY : JPEG_DECODE_OUT_FORMAT_RGB565;
-        cfg.rgb_order     = JPEG_DEC_RGB_ELEMENT_ORDER_BGR;
-
-        std::uint32_t produced = 0;
-        if (jpeg_decoder_process(s_decoder, &cfg, s_jpeg, length, s_full,
-                                 MAX_DECODE_SIDE * MAX_DECODE_SIDE * 2, &produced) == ESP_OK) {
-            const int stride = decoded_stride(info);
-            out_w            = static_cast<int>(info.width);
-            out_h            = static_cast<int>(info.height);
-            for (int y = 0; y < out_h; ++y) {
-                std::uint16_t *row = out + static_cast<std::size_t>(y) * out_w;
-                if (grey) {
-                    const std::uint8_t *src = s_full + static_cast<std::size_t>(y) * stride;
-                    for (int x = 0; x < out_w; ++x) {
-                        row[x] = grey_to_rgb565(src[x]);
-                    }
-                } else {
-                    const auto *src = reinterpret_cast<const std::uint16_t *>(s_full);
-                    std::memcpy(row, src + static_cast<std::size_t>(y) * stride,
-                                static_cast<std::size_t>(out_w) * 2);
-                }
-            }
-            ok = true;
-        }
-    }
-
-    if (!ok) {
-        ok = decode_soft(s_jpeg, length, out, max_w, max_h, out_w, out_h);
-    }
-
-    xSemaphoreGive(s_decoder_lock);
-    return ok;
-}
-
-esp_err_t start(ArtHandler on_art)
-{
+    std::snprintf(s_origin, sizeof(s_origin), "%s", origin != nullptr ? origin : "");
     s_on_art = on_art;
     s_lock   = xSemaphoreCreateMutexStatic(&s_lock_ctrl);
     ESP_RETURN_ON_FALSE(s_lock != nullptr, ESP_ERR_NO_MEM, TAG, "lock");
 
-    s_decoder_lock = xSemaphoreCreateMutexStatic(&s_decoder_lock_ctrl);
-    ESP_RETURN_ON_FALSE(s_decoder_lock != nullptr, ESP_ERR_NO_MEM, TAG, "decoder lock");
-
-    const jpeg_decode_engine_cfg_t engine{.intr_priority = 0, .timeout_ms = 2000};
-    ESP_RETURN_ON_ERROR(jpeg_new_decoder_engine(&engine, &s_decoder), TAG, "decoder");
-
-    jpeg_decode_memory_alloc_cfg_t in{.buffer_direction = JPEG_DEC_ALLOC_INPUT_BUFFER};
-    jpeg_decode_memory_alloc_cfg_t out{.buffer_direction = JPEG_DEC_ALLOC_OUTPUT_BUFFER};
-    std::size_t got = 0;
-    s_jpeg = static_cast<std::uint8_t *>(jpeg_alloc_decoder_mem(MAX_JPEG, &in, &got));
-    s_full = static_cast<std::uint8_t *>(
-        jpeg_alloc_decoder_mem(MAX_DECODE_SIDE * MAX_DECODE_SIDE * 2, &out, &got));
-    ESP_RETURN_ON_FALSE(s_jpeg != nullptr && s_full != nullptr, ESP_ERR_NO_MEM, TAG, "buffers");
+    s_body = static_cast<std::uint8_t *>(heap_caps_malloc(jpeg::kMaxInput, MALLOC_CAP_SPIRAM));
+    ESP_RETURN_ON_FALSE(s_body != nullptr, ESP_ERR_NO_MEM, TAG, "cover buffer");
 
     for (auto &buffer : s_art) {
         buffer = static_cast<std::uint16_t *>(
