@@ -38,6 +38,9 @@ namespace {
 constexpr char TAG[] = "ui";
 
 constexpr std::uint32_t LOCK_TIMEOUT_MS = 500;
+constexpr std::uint32_t APPLY_PERIOD_MS = 20;
+
+void apply_pending(lv_timer_t *timer);
 
 // Sized from the real display rather than with percentages: LV_PCT() returns an
 // encoded sentinel, so LV_PCT(100) - something lays out as nonsense.
@@ -1461,7 +1464,6 @@ constexpr NavItem NAV_ITEMS[PAGE_COUNT] = {
     {LV_SYMBOL_SETTINGS, "Setup", false},
 };
 
-bool s_presence_known = false;
 bool s_present        = false;
 int  s_page           = 0;
 
@@ -1493,7 +1495,7 @@ void show_guest_presets()
 
 bool page_available(int index)
 {
-    return !NAV_ITEMS[index].needs_presence || !s_presence_gate || !s_presence_known || s_present;
+    return !NAV_ITEMS[index].needs_presence || !s_presence_gate || s_present;
 }
 
 void select_page(int index)
@@ -3005,6 +3007,7 @@ esp_err_t init(const Handlers &handlers, int initial_brightness, std::uint32_t a
     s_handlers           = handlers;
     s_initial_brightness = initial_brightness;
     build_screen();
+    lv_timer_create(apply_pending, APPLY_PERIOD_MS, nullptr);
     lv_refr_now(nullptr);
     lvgl_port_unlock();
     return ESP_OK;
@@ -3015,17 +3018,174 @@ const char *preset_name(int index)
     return index >= 0 && index < kPresetCount ? PRESET_NAMES[index] : deskproto::kBetween;
 }
 
-esp_err_t set_preset_active(int index, bool active)
-{
-    ESP_RETURN_ON_FALSE(index >= 0 && index < kPresetCount, ESP_ERR_INVALID_ARG, TAG, "preset %d",
-                        index);
-    ESP_RETURN_ON_FALSE(s_preset_buttons[index] != nullptr, ESP_ERR_INVALID_STATE, TAG,
-                        "not initialised");
-    if (s_preset_active[index] == active) {
-        return ESP_OK;
-    }
-    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
+namespace {
+// Every set_* below runs on some other task. None of them touches LVGL: each
+// copies its arguments into a slot holding only the latest value and returns,
+// and apply_pending() on the LVGL task draws whatever changed. So no caller
+// ever waits on the screen, and no update is ever lost, only superseded.
+// Notifications are events rather than state, and queue instead.
+portMUX_TYPE      s_pending_lock = portMUX_INITIALIZER_UNLOCKED;
+std::atomic<bool> s_pending{false};
 
+template <typename T>
+struct Slot {
+    bool dirty = false;
+    T    value{};
+};
+
+void copy_text(char *dest, std::size_t size, const char *source)
+{
+    std::size_t i = 0;
+    if (source != nullptr) {
+        for (; i + 1 < size && source[i] != '\0'; ++i) {
+            dest[i] = source[i];
+        }
+    }
+    dest[i] = '\0';
+}
+
+/** A string that may be null, kept as text plus whether there was any. */
+template <std::size_t N>
+struct Text {
+    char text[N];
+    bool null;
+
+    void set(const char *source)
+    {
+        null = source == nullptr;
+        copy_text(text, N, source);
+    }
+    const char *get() const { return null ? nullptr : text; }
+};
+
+template <typename T>
+void put(Slot<T> &slot, const T &value)
+{
+    portENTER_CRITICAL(&s_pending_lock);
+    slot.value = value;
+    slot.dirty = true;
+    portEXIT_CRITICAL(&s_pending_lock);
+    s_pending.store(true, std::memory_order_release);
+}
+
+template <typename T>
+bool take(Slot<T> &slot, T &out)
+{
+    portENTER_CRITICAL(&s_pending_lock);
+    const bool dirty = slot.dirty;
+    if (dirty) {
+        out        = slot.value;
+        slot.dirty = false;
+    }
+    portEXIT_CRITICAL(&s_pending_lock);
+    return dirty;
+}
+
+struct MediaArgs {
+    Text<32>  source;
+    Text<128> title;
+    Text<128> artist;
+    Text<24>  state;
+    bool      playing;
+};
+struct ProgressArgs {
+    int  position_s;
+    int  duration_s;
+    bool playing;
+};
+struct ArtArgs {
+    const void *pixels;
+    bool        placeholder;
+};
+struct PillArgs {
+    Text<40> label;
+    Text<40> value;
+    Level    level;
+};
+struct LightsArgs {
+    Text<40> label;
+    Text<32> state;
+    bool     on;
+};
+struct LightArgs {
+    Text<48> name;
+    Text<32> state;
+    bool     on;
+};
+struct ToggleArgs {
+    Text<32> label;
+    bool     on;
+};
+struct RangeArgs {
+    float min_c;
+    float max_c;
+    float step_c;
+};
+struct ThermostatArgs {
+    float    current_c;
+    float    target_c;
+    Text<24> mode;
+    Hvac     state;
+};
+struct PresenceArgs {
+    bool has_key;
+    bool present;
+    bool ever_seen;
+};
+struct InfoArgs {
+    Text<64> value;
+    Level    level;
+};
+struct DetailsArgs {
+    char            hex[radar::kHexLen];
+    radar::Details  details;
+};
+struct PhotoArgs {
+    char        hex[radar::kHexLen];
+    const void *pixels;
+    int         width;
+    int         height;
+};
+
+Slot<bool>           p_preset_active[kPresetCount];
+Slot<int>            p_height;
+Slot<bool>           p_desk_available;
+Slot<MediaArgs>      p_media;
+Slot<ProgressArgs>   p_progress;
+Slot<int>            p_media_volume;
+Slot<ArtArgs>        p_art;
+Slot<PillArgs>       p_pill[kPillCount];
+Slot<LightsArgs>     p_lights;
+Slot<LightArgs>      p_light[kLightCount];
+Slot<ToggleArgs>     p_toggle[kDialToggleCount];
+Slot<RangeArgs>      p_range;
+Slot<ThermostatArgs> p_thermostat;
+Slot<PresenceArgs>   p_presence;
+Slot<Text<16>>       p_time;
+Slot<bool>           p_wifi;
+Slot<InfoArgs>       p_info[INFO_COUNT];
+Slot<Level>          p_health[INFO_CARD_COUNT];
+Slot<int>            p_media_hold;
+Slot<int>            p_notification_volume;
+Slot<bool>           p_screen;
+Slot<bool>           p_setting[SETTING_COUNT];
+Slot<bool>           p_calendar;
+Slot<bool>           p_radar;
+Slot<DetailsArgs>    p_details;
+Slot<PhotoArgs>      p_photo;
+
+// Notifications in the order they were asked for; the oldest goes when full.
+constexpr int NOTICE_INBOX_LEN = 4;
+Notice        s_inbox[NOTICE_INBOX_LEN];
+int           s_inbox_count = 0;
+
+// ---- What each update does, on the LVGL task. ----
+
+void apply_preset_active(int index, bool active)
+{
+    if (s_preset_buttons[index] == nullptr || s_preset_active[index] == active) {
+        return;
+    }
     s_preset_active[index] = active;
     lv_obj_t *button       = s_preset_buttons[index];
     lv_obj_set_state(button, LV_STATE_CHECKED, active);
@@ -3036,24 +3196,17 @@ esp_err_t set_preset_active(int index, bool active)
             lv_obj_set_state(lv_obj_get_child(child, j), LV_STATE_CHECKED, active);
         }
     }
-    lvgl_port_unlock();
-    return ESP_OK;
 }
 
-esp_err_t set_height(int height_mm)
+void apply_height(int height_mm)
 {
-    ESP_RETURN_ON_FALSE(s_height.has_value(), ESP_ERR_INVALID_STATE, TAG, "not initialised");
-    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
-    s_height->set_tenths(height_mm);
-    lvgl_port_unlock();
-    return ESP_OK;
+    if (s_height.has_value()) {
+        s_height->set_tenths(height_mm);
+    }
 }
 
-esp_err_t set_desk_available(bool available)
+void apply_desk_available(bool available)
 {
-    ESP_RETURN_ON_FALSE(s_desk_control_count > 0, ESP_ERR_INVALID_STATE, TAG, "not initialised");
-    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
-
     s_desk_available = available;
     for (int i = 0; i < s_desk_control_count; ++i) {
         lv_obj_t *obj = s_desk_controls[i];
@@ -3064,16 +3217,14 @@ esp_err_t set_desk_available(bool available)
         }
         lv_obj_set_clickable(obj, available);
     }
-    lvgl_port_unlock();
-    return ESP_OK;
 }
 
-esp_err_t set_media(const char *source, const char *title, const char *artist, const char *state,
-                    bool playing)
+void apply_media(const char *source, const char *title, const char *artist, const char *state,
+                 bool playing)
 {
-    ESP_RETURN_ON_FALSE(s_media_card != nullptr, ESP_ERR_INVALID_STATE, TAG, "not initialised");
-    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
-
+    if (s_media_card == nullptr) {
+        return;
+    }
     const bool has_track = title != nullptr && title[0] != '\0';
     s_media_off = state == nullptr || std::strcmp(state, "OFF") == 0 || std::strcmp(state, "--") == 0;
     theme::set_text(s_media_source, source != nullptr && source[0] != '\0' ? source : "SPEAKER");
@@ -3094,16 +3245,13 @@ esp_err_t set_media(const char *source, const char *title, const char *artist, c
     } else if (s_pause_timer == nullptr) {
         s_pause_timer = lv_timer_create(pause_settled, PAUSE_SETTLE_MS, nullptr);
     }
-
-    lvgl_port_unlock();
-    return ESP_OK;
 }
 
-esp_err_t set_media_progress(int position_s, int duration_s, bool playing)
+void apply_media_progress(int position_s, int duration_s, bool playing)
 {
-    ESP_RETURN_ON_FALSE(s_panel_progress != nullptr, ESP_ERR_INVALID_STATE, TAG, "not initialised");
-    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
-
+    if (s_panel_progress == nullptr) {
+        return;
+    }
     s_position_s    = position_s;
     s_duration_s    = duration_s;
     s_media_playing = playing;
@@ -3119,28 +3267,23 @@ esp_err_t set_media_progress(int position_s, int duration_s, bool playing)
         write_clock(s_panel_elapsed, position_s);
         write_clock(s_panel_total, duration_s);
     }
-    lvgl_port_unlock();
-    return ESP_OK;
 }
 
-esp_err_t set_media_volume(int percent)
+void apply_media_volume(int percent)
 {
-    ESP_RETURN_ON_FALSE(s_panel_volume_pct != nullptr, ESP_ERR_INVALID_STATE, TAG,
-                        "not initialised");
-    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
-
+    if (s_panel_volume_pct == nullptr) {
+        return;
+    }
     char text[8];
     std::snprintf(text, sizeof(text), "%d%%", percent);
     theme::set_text(s_panel_volume_pct, text);
-    lvgl_port_unlock();
-    return ESP_OK;
 }
 
-esp_err_t set_album_art(const void *pixels, bool placeholder)
+void apply_album_art(const void *pixels, bool placeholder)
 {
-    ESP_RETURN_ON_FALSE(s_media_art != nullptr, ESP_ERR_INVALID_STATE, TAG, "not initialised");
-    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
-
+    if (s_media_art == nullptr) {
+        return;
+    }
     const bool has_art = pixels != nullptr;
     const bool framed  = has_art || placeholder;
     lv_obj_set_hidden(s_media_frame, !framed);
@@ -3163,8 +3306,7 @@ esp_err_t set_album_art(const void *pixels, bool placeholder)
     layout_media_text();
 
     if (!has_art) {
-        lvgl_port_unlock();
-        return ESP_OK;
+        return;
     }
 
     lv_image_dsc_t &dsc = s_art_dsc[s_art_slot];
@@ -3182,19 +3324,14 @@ esp_err_t set_album_art(const void *pixels, bool placeholder)
     lv_image_set_src(s_panel_art, &dsc);
     lv_obj_invalidate(s_media_art);
     lv_obj_invalidate(s_panel_art);
-    lvgl_port_unlock();
-    return ESP_OK;
 }
 
-esp_err_t set_pill(int index, const char *label, const char *value, Level level)
+void apply_pill(int index, const char *label, const char *value, Level level)
 {
-    ESP_RETURN_ON_FALSE(index >= 0 && index < kPillCount, ESP_ERR_INVALID_ARG, TAG, "pill %d",
-                        index);
-    ESP_RETURN_ON_FALSE(s_pills[index].root != nullptr, ESP_ERR_INVALID_STATE, TAG,
-                        "not initialised");
-    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
-
-    Pill      &pill  = s_pills[index];
+    Pill &pill = s_pills[index];
+    if (pill.root == nullptr) {
+        return;
+    }
     const bool empty = label == nullptr || label[0] == '\0';
     lv_obj_set_hidden(pill.root, empty);
     if (pill.shown == empty) {
@@ -3206,34 +3343,27 @@ esp_err_t set_pill(int index, const char *label, const char *value, Level level)
         theme::set_text(pill.value, value != nullptr ? value : "--");
         theme::set_bg_color(pill.dot, level_ink(level));
     }
-    lvgl_port_unlock();
-    return ESP_OK;
 }
 
-esp_err_t set_lights(const char *label, const char *state, bool on)
+void apply_lights(const char *label, const char *state, bool on)
 {
-    ESP_RETURN_ON_FALSE(s_lights_button != nullptr, ESP_ERR_INVALID_STATE, TAG, "not initialised");
-    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
-
+    if (s_lights_button == nullptr) {
+        return;
+    }
     theme::set_text(s_lights_name, label != nullptr ? label : "LIGHTS");
     theme::set_text(s_lights_state, state != nullptr ? state : "--");
     paint_light(s_lights_button, s_lights_name, s_lights_state, on);
     s_lights_on = on;
     paint_bulbs();
-    lvgl_port_unlock();
-    return ESP_OK;
 }
 
-esp_err_t set_light(int index, const char *name, const char *state, bool on)
+void apply_light(int index, const char *name, const char *state, bool on)
 {
-    ESP_RETURN_ON_FALSE(index >= 0 && index < kLightCount, ESP_ERR_INVALID_ARG, TAG, "light %d",
-                        index);
-    ESP_RETURN_ON_FALSE(s_lights[index].root != nullptr, ESP_ERR_INVALID_STATE, TAG,
-                        "not initialised");
-    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
-
     LightButton &light = s_lights[index];
-    const bool   empty = name == nullptr || name[0] == '\0';
+    if (light.root == nullptr) {
+        return;
+    }
+    const bool empty = name == nullptr || name[0] == '\0';
     lv_obj_set_hidden(light.root, empty);
     lv_obj_set_hidden(s_bulbs[index], empty);
     if (!empty) {
@@ -3243,19 +3373,14 @@ esp_err_t set_light(int index, const char *name, const char *state, bool on)
     }
     s_light_on[index] = !empty && on;
     paint_bulbs();
-    lvgl_port_unlock();
-    return ESP_OK;
 }
 
-esp_err_t set_dial_toggle(int index, const char *label, bool on)
+void apply_dial_toggle(int index, const char *label, bool on)
 {
-    ESP_RETURN_ON_FALSE(index >= 0 && index < kDialToggleCount, ESP_ERR_INVALID_ARG, TAG,
-                        "toggle %d", index);
-    ESP_RETURN_ON_FALSE(s_dial_toggles[index] != nullptr, ESP_ERR_INVALID_STATE, TAG,
-                        "not initialised");
-    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
-
-    lv_obj_t  *chip  = s_dial_toggles[index];
+    lv_obj_t *chip = s_dial_toggles[index];
+    if (chip == nullptr) {
+        return;
+    }
     const bool empty = label == nullptr || label[0] == '\0';
     lv_obj_set_hidden(chip, empty);
     if (!empty) {
@@ -3266,26 +3391,23 @@ esp_err_t set_dial_toggle(int index, const char *label, bool on)
         theme::set_text_color(text, on ? theme::text : theme::secondary);
         lv_obj_set_style_text_opa(text, on ? LV_OPA_COVER : theme::mark_opa, 0);
     }
-    lvgl_port_unlock();
-    return ESP_OK;
 }
 
-esp_err_t set_thermostat_range(float min_c, float max_c, float step_c)
+void apply_thermostat_range(float min_c, float max_c, float step_c)
 {
-    ESP_RETURN_ON_FALSE(s_dial != nullptr, ESP_ERR_INVALID_STATE, TAG, "not initialised");
-    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
+    if (s_dial == nullptr) {
+        return;
+    }
     lv_arc_set_range(s_dial, static_cast<int>(min_c * DIAL_SCALE),
                      static_cast<int>(max_c * DIAL_SCALE));
     s_dial_step = step_c > 0.0f ? step_c : DEFAULT_STEP_C;
-    lvgl_port_unlock();
-    return ESP_OK;
 }
 
-esp_err_t set_thermostat(float current_c, float target_c, const char *mode, Hvac state)
+void apply_thermostat(float current_c, float target_c, const char *mode, Hvac state)
 {
-    ESP_RETURN_ON_FALSE(s_dial != nullptr, ESP_ERR_INVALID_STATE, TAG, "not initialised");
-    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
-
+    if (s_dial == nullptr) {
+        return;
+    }
     write_temperature(s_dial_current, current_c, true);
     if (!s_dial_dragging) {
         write_temperature(s_dial_target, target_c, true);
@@ -3300,37 +3422,38 @@ esp_err_t set_thermostat(float current_c, float target_c, const char *mode, Hvac
     lv_obj_t *mode_text = lv_obj_get_child(s_dial_mode, 0);
     theme::set_text(mode_text, mode != nullptr ? mode : "--");
     theme::set_text_color(mode_text, theme::text);
-    lvgl_port_unlock();
-    return ESP_OK;
 }
 
-esp_err_t set_presence(bool has_key, bool present, bool ever_seen)
+void apply_presence(bool has_key, bool present, bool ever_seen)
 {
-    ESP_RETURN_ON_FALSE(s_phone_icon != nullptr, ESP_ERR_INVALID_STATE, TAG, "not initialised");
-    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
-
+    if (s_phone_icon == nullptr) {
+        return;
+    }
     const bool here = has_key && present;
-    lv_image_set_src(s_phone_icon, here ? &icons::phone_icon : &icons::phone_off_icon);
+    static int shown_icon = -1;
+    if (shown_icon != (here ? 1 : 0)) {
+        shown_icon = here ? 1 : 0;
+        lv_image_set_src(s_phone_icon, here ? &icons::phone_icon : &icons::phone_off_icon);
+    }
 
-    const bool known = has_key && ever_seen;
-    if (known != s_presence_known || here != s_present) {
-        s_presence_known = known;
-        s_present        = here;
+    // A phone never seen is not here: the owner's pages stay hidden and the
+    // guest presets show until it is.
+    (void)ever_seen;
+    if (here != s_present) {
+        s_present = here;
         select_page(s_page);
     }
-    lvgl_port_unlock();
-    return ESP_OK;
 }
 
-esp_err_t set_time(const char *text)
+void apply_time(const char *text)
 {
-    ESP_RETURN_ON_FALSE(s_clock_hours != nullptr, ESP_ERR_INVALID_STATE, TAG, "not initialised");
-    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
-
-    char hours[4] = "--";
-    char minutes[4] = "--";
-    const char *colon = text != nullptr ? std::strchr(text, ':') : nullptr;
-    s_clock_known = colon != nullptr;
+    if (s_clock_hours == nullptr) {
+        return;
+    }
+    char        hours[4]   = "--";
+    char        minutes[4] = "--";
+    const char *colon      = text != nullptr ? std::strchr(text, ':') : nullptr;
+    s_clock_known          = colon != nullptr;
     if (s_clock_known) {
         const std::size_t count = static_cast<std::size_t>(colon - text);
         std::snprintf(hours, sizeof(hours), "%.*s", static_cast<int>(count), text);
@@ -3340,22 +3463,350 @@ esp_err_t set_time(const char *text)
     }
     theme::set_text(s_clock_hours, hours);
     theme::set_text(s_clock_minutes, minutes);
-    lvgl_port_unlock();
+}
+
+void apply_wifi(bool wifi)
+{
+    static int shown = -1;
+    if (s_wifi_icon == nullptr || shown == (wifi ? 1 : 0)) {
+        return;
+    }
+    shown = wifi ? 1 : 0;
+    lv_image_set_src(s_wifi_icon, wifi ? &icons::wifi_icon : &icons::wifi_off_icon);
+}
+
+void apply_info(int index, const char *value, Level level)
+{
+    if (s_info[index] == nullptr) {
+        return;
+    }
+    const char *text = value != nullptr && value[0] != '\0' ? value : "--";
+    theme::set_text(s_info[index], text);
+    theme::set_text_color(s_info[index], info_ink(level));
+
+    const int card = s_summary_card[index];
+    if (card >= 0) {
+        theme::set_text(s_tile_value[card], text);
+    }
+}
+
+void apply_health(int card, Level level)
+{
+    if (s_tile_dot[card] == nullptr) {
+        return;
+    }
+    theme::set_bg_color(s_tile_dot[card], level_ink(level));
+    theme::set_text_color(s_tile_value[card], info_ink(level));
+    if (s_card_level[card] != level) {
+        s_card_level[card] = level;
+        refresh_diag_summary();
+    }
+}
+
+void apply_media_hold(int preset)
+{
+    s_media_hold = preset;
+    if (preset >= 0 && s_media_panel.has_value()) {
+        s_media_panel->close();  // what it controlled is no longer on the card
+    }
+}
+
+void apply_notification_volume(int percent)
+{
+    if (s_volume_slider == nullptr) {
+        return;
+    }
+    lv_slider_set_value(s_volume_slider, percent, LV_ANIM_OFF);
+    char text[8];
+    std::snprintf(text, sizeof(text), "%d%%", percent);
+    theme::set_text(s_volume_value, text);
+}
+
+void apply_screen(bool on)
+{
+    s_screen_on         = on;
+    s_notice_lit_screen = false;
+}
+
+void apply_notice(const Notice &notice)
+{
+    if (s_notice_card == nullptr) {
+        return;
+    }
+    if (s_notice_count == NOTIFY_QUEUE_LEN) {
+        ESP_LOGW(TAG, "notification queue full, dropping oldest");
+        for (int i = 1; i < NOTIFY_QUEUE_LEN; ++i) {
+            s_notice_queue[i - 1] = s_notice_queue[i];
+        }
+        --s_notice_count;
+    }
+    s_notice_queue[s_notice_count++] = notice;
+    if (lv_obj_is_hidden(s_notice_card)) {
+        show_next_notice();
+    }
+}
+
+void apply_pending(lv_timer_t *)
+{
+    if (!s_pending.exchange(false, std::memory_order_acquire)) {
+        return;
+    }
+
+    // Settings and presence first: they decide which pages and presets show.
+    bool on = false;
+    for (int i = 0; i < SETTING_COUNT; ++i) {
+        if (take(p_setting[i], on)) {
+            apply_setting(i, on);
+        }
+    }
+    if (PresenceArgs presence{}; take(p_presence, presence)) {
+        apply_presence(presence.has_key, presence.present, presence.ever_seen);
+    }
+    if (bool screen = false; take(p_screen, screen)) {
+        apply_screen(screen);
+    }
+
+    for (int i = 0; i < kPresetCount; ++i) {
+        if (take(p_preset_active[i], on)) {
+            apply_preset_active(i, on);
+        }
+    }
+    if (bool available = false; take(p_desk_available, available)) {
+        apply_desk_available(available);
+    }
+    if (int height = 0; take(p_height, height)) {
+        apply_height(height);
+    }
+
+    static MediaArgs media;  // large for the LVGL task's stack
+    if (take(p_media, media)) {
+        apply_media(media.source.get(), media.title.get(), media.artist.get(), media.state.get(),
+                    media.playing);
+    }
+    if (ArtArgs art{}; take(p_art, art)) {
+        apply_album_art(art.pixels, art.placeholder);
+    }
+    if (ProgressArgs progress{}; take(p_progress, progress)) {
+        apply_media_progress(progress.position_s, progress.duration_s, progress.playing);
+    }
+    if (int volume = 0; take(p_media_volume, volume)) {
+        apply_media_volume(volume);
+    }
+    if (int hold = 0; take(p_media_hold, hold)) {
+        apply_media_hold(hold);
+    }
+
+    for (int i = 0; i < kPillCount; ++i) {
+        if (PillArgs pill{}; take(p_pill[i], pill)) {
+            apply_pill(i, pill.label.get(), pill.value.get(), pill.level);
+        }
+    }
+    if (LightsArgs lights{}; take(p_lights, lights)) {
+        apply_lights(lights.label.get(), lights.state.get(), lights.on);
+    }
+    for (int i = 0; i < kLightCount; ++i) {
+        if (LightArgs light{}; take(p_light[i], light)) {
+            apply_light(i, light.name.get(), light.state.get(), light.on);
+        }
+    }
+    for (int i = 0; i < kDialToggleCount; ++i) {
+        if (ToggleArgs toggle{}; take(p_toggle[i], toggle)) {
+            apply_dial_toggle(i, toggle.label.get(), toggle.on);
+        }
+    }
+    if (RangeArgs range{}; take(p_range, range)) {
+        apply_thermostat_range(range.min_c, range.max_c, range.step_c);
+    }
+    if (ThermostatArgs thermostat{}; take(p_thermostat, thermostat)) {
+        apply_thermostat(thermostat.current_c, thermostat.target_c, thermostat.mode.get(),
+                         thermostat.state);
+    }
+
+    if (Text<16> time{}; take(p_time, time)) {
+        apply_time(time.get());
+    }
+    if (bool wifi = false; take(p_wifi, wifi)) {
+        apply_wifi(wifi);
+    }
+    if (int volume = 0; take(p_notification_volume, volume)) {
+        apply_notification_volume(volume);
+    }
+
+    for (int i = 0; i < INFO_COUNT; ++i) {
+        if (InfoArgs info{}; take(p_info[i], info)) {
+            apply_info(i, info.value.get(), info.level);
+        }
+    }
+    for (int i = 0; i < INFO_CARD_COUNT; ++i) {
+        if (Level level{}; take(p_health[i], level)) {
+            apply_health(i, level);
+        }
+    }
+
+    if (bool calendar = false; take(p_calendar, calendar)) {
+        show_calendar();
+    }
+    if (bool radar = false; take(p_radar, radar)) {
+        refresh_radar();
+    }
+    static DetailsArgs details;
+    if (take(p_details, details)) {
+        show_radar_details(details.hex, details.details);
+    }
+    if (PhotoArgs photo{}; take(p_photo, photo)) {
+        show_radar_photo(photo.hex, photo.pixels, photo.width, photo.height);
+    }
+
+    static Notice notices[NOTICE_INBOX_LEN];
+    portENTER_CRITICAL(&s_pending_lock);
+    const int count = s_inbox_count;
+    for (int i = 0; i < count; ++i) {
+        notices[i] = s_inbox[i];
+    }
+    s_inbox_count = 0;
+    portEXIT_CRITICAL(&s_pending_lock);
+    for (int i = 0; i < count; ++i) {
+        apply_notice(notices[i]);
+    }
+}
+
+}  // namespace
+
+esp_err_t set_preset_active(int index, bool active)
+{
+    ESP_RETURN_ON_FALSE(index >= 0 && index < kPresetCount, ESP_ERR_INVALID_ARG, TAG, "preset %d",
+                        index);
+    put(p_preset_active[index], active);
+    return ESP_OK;
+}
+
+esp_err_t set_height(int height_mm)
+{
+    put(p_height, height_mm);
+    return ESP_OK;
+}
+
+esp_err_t set_desk_available(bool available)
+{
+    put(p_desk_available, available);
+    return ESP_OK;
+}
+
+esp_err_t set_media(const char *source, const char *title, const char *artist, const char *state,
+                    bool playing)
+{
+    static MediaArgs args;  // too large to build on a caller's stack
+    portENTER_CRITICAL(&s_pending_lock);
+    args.source.set(source);
+    args.title.set(title);
+    args.artist.set(artist);
+    args.state.set(state);
+    args.playing  = playing;
+    p_media.value = args;
+    p_media.dirty = true;
+    portEXIT_CRITICAL(&s_pending_lock);
+    s_pending.store(true, std::memory_order_release);
+    return ESP_OK;
+}
+
+esp_err_t set_media_progress(int position_s, int duration_s, bool playing)
+{
+    put(p_progress, ProgressArgs{position_s, duration_s, playing});
+    return ESP_OK;
+}
+
+esp_err_t set_media_volume(int percent)
+{
+    put(p_media_volume, percent);
+    return ESP_OK;
+}
+
+esp_err_t set_album_art(const void *pixels, bool placeholder)
+{
+    put(p_art, ArtArgs{pixels, placeholder});
+    return ESP_OK;
+}
+
+esp_err_t set_pill(int index, const char *label, const char *value, Level level)
+{
+    ESP_RETURN_ON_FALSE(index >= 0 && index < kPillCount, ESP_ERR_INVALID_ARG, TAG, "pill %d",
+                        index);
+    PillArgs args{};
+    args.label.set(label);
+    args.value.set(value);
+    args.level = level;
+    put(p_pill[index], args);
+    return ESP_OK;
+}
+
+esp_err_t set_lights(const char *label, const char *state, bool on)
+{
+    LightsArgs args{};
+    args.label.set(label);
+    args.state.set(state);
+    args.on = on;
+    put(p_lights, args);
+    return ESP_OK;
+}
+
+esp_err_t set_light(int index, const char *name, const char *state, bool on)
+{
+    ESP_RETURN_ON_FALSE(index >= 0 && index < kLightCount, ESP_ERR_INVALID_ARG, TAG, "light %d",
+                        index);
+    LightArgs args{};
+    args.name.set(name);
+    args.state.set(state);
+    args.on = on;
+    put(p_light[index], args);
+    return ESP_OK;
+}
+
+esp_err_t set_dial_toggle(int index, const char *label, bool on)
+{
+    ESP_RETURN_ON_FALSE(index >= 0 && index < kDialToggleCount, ESP_ERR_INVALID_ARG, TAG,
+                        "toggle %d", index);
+    ToggleArgs args{};
+    args.label.set(label);
+    args.on = on;
+    put(p_toggle[index], args);
+    return ESP_OK;
+}
+
+esp_err_t set_thermostat_range(float min_c, float max_c, float step_c)
+{
+    put(p_range, RangeArgs{min_c, max_c, step_c});
+    return ESP_OK;
+}
+
+esp_err_t set_thermostat(float current_c, float target_c, const char *mode, Hvac state)
+{
+    ThermostatArgs args{};
+    args.current_c = current_c;
+    args.target_c  = target_c;
+    args.mode.set(mode);
+    args.state = state;
+    put(p_thermostat, args);
+    return ESP_OK;
+}
+
+esp_err_t set_presence(bool has_key, bool present, bool ever_seen)
+{
+    put(p_presence, PresenceArgs{has_key, present, ever_seen});
+    return ESP_OK;
+}
+
+esp_err_t set_time(const char *text)
+{
+    Text<16> args{};
+    args.set(text);
+    put(p_time, args);
     return ESP_OK;
 }
 
 esp_err_t set_links(bool wifi, bool mqtt)
 {
     (void)mqtt;  // the broker has its own indicator in Home Assistant
-    ESP_RETURN_ON_FALSE(s_wifi_icon != nullptr, ESP_ERR_INVALID_STATE, TAG, "not initialised");
-    static int last = -1;
-    if (last == (wifi ? 1 : 0)) {
-        return ESP_OK;
-    }
-    last = wifi ? 1 : 0;
-    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
-    lv_image_set_src(s_wifi_icon, wifi ? &icons::wifi_icon : &icons::wifi_off_icon);
-    lvgl_port_unlock();
+    put(p_wifi, wifi);
     return ESP_OK;
 }
 
@@ -3372,51 +3823,47 @@ esp_err_t set_info(Info field, const char *value, Level level)
     const int index = static_cast<int>(field);
     ESP_RETURN_ON_FALSE(index >= 0 && index < INFO_COUNT, ESP_ERR_INVALID_ARG, TAG, "info %d",
                         index);
-    ESP_RETURN_ON_FALSE(s_info[index] != nullptr, ESP_ERR_INVALID_STATE, TAG, "not initialised");
-    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
-
-    const char *text = value != nullptr && value[0] != '\0' ? value : "--";
-    theme::set_text(s_info[index], text);
-    theme::set_text_color(s_info[index], info_ink(level));
-
-    const int card = s_summary_card[index];
-    if (card >= 0) {
-        theme::set_text(s_tile_value[card], text);
-    }
-
-    lvgl_port_unlock();
+    InfoArgs args{};
+    args.value.set(value);
+    args.level = level;
+    put(p_info[index], args);
     return ESP_OK;
 }
 
 esp_err_t set_calendar()
 {
-    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
-    show_calendar();
-    lvgl_port_unlock();
+    put(p_calendar, true);
     return ESP_OK;
 }
 
 esp_err_t set_radar(const radar::Snapshot &snapshot)
 {
-    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
-    show_radar(snapshot);
-    lvgl_port_unlock();
+    (void)snapshot;  // too big to copy here; the page takes radar's own copy
+    put(p_radar, true);
     return ESP_OK;
 }
 
 esp_err_t set_radar_details(const char *hex, const radar::Details &details)
 {
-    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
-    show_radar_details(hex, details);
-    lvgl_port_unlock();
+    static DetailsArgs args;
+    portENTER_CRITICAL(&s_pending_lock);
+    copy_text(args.hex, sizeof(args.hex), hex);
+    args.details    = details;
+    p_details.value = args;
+    p_details.dirty = true;
+    portEXIT_CRITICAL(&s_pending_lock);
+    s_pending.store(true, std::memory_order_release);
     return ESP_OK;
 }
 
 esp_err_t set_radar_photo(const char *hex, const void *pixels, int width, int height)
 {
-    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
-    show_radar_photo(hex, pixels, width, height);
-    lvgl_port_unlock();
+    PhotoArgs args{};
+    copy_text(args.hex, sizeof(args.hex), hex);
+    args.pixels = pixels;
+    args.width  = width;
+    args.height = height;
+    put(p_photo, args);
     return ESP_OK;
 }
 
@@ -3425,52 +3872,25 @@ esp_err_t set_health(Subsystem which, Level level)
     const int card = static_cast<int>(which);
     ESP_RETURN_ON_FALSE(card >= 0 && card < INFO_CARD_COUNT, ESP_ERR_INVALID_ARG, TAG,
                         "subsystem %d", card);
-    ESP_RETURN_ON_FALSE(s_tile_dot[card] != nullptr, ESP_ERR_INVALID_STATE, TAG,
-                        "not initialised");
-    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
-
-    theme::set_bg_color(s_tile_dot[card], level_ink(level));
-    theme::set_text_color(s_tile_value[card], info_ink(level));
-    if (s_card_level[card] != level) {
-        s_card_level[card] = level;
-        refresh_diag_summary();
-    }
-
-    lvgl_port_unlock();
+    put(p_health[card], level);
     return ESP_OK;
 }
 
 esp_err_t set_media_hold_preset(int preset)
 {
-    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
-    s_media_hold = preset;
-    if (preset >= 0 && s_media_panel.has_value()) {
-        s_media_panel->close();  // what it controlled is no longer on the card
-    }
-    lvgl_port_unlock();
+    put(p_media_hold, preset);
     return ESP_OK;
 }
 
 esp_err_t set_notification_volume(int percent)
 {
-    ESP_RETURN_ON_FALSE(s_volume_slider != nullptr, ESP_ERR_INVALID_STATE, TAG, "not initialised");
-    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
-
-    lv_slider_set_value(s_volume_slider, percent, LV_ANIM_OFF);
-    char text[8];
-    std::snprintf(text, sizeof(text), "%d%%", percent);
-    theme::set_text(s_volume_value, text);
-
-    lvgl_port_unlock();
+    put(p_notification_volume, percent);
     return ESP_OK;
 }
 
 esp_err_t set_screen(bool on)
 {
-    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
-    s_screen_on         = on;
-    s_notice_lit_screen = false;
-    lvgl_port_unlock();
+    put(p_screen, on);
     return ESP_OK;
 }
 
@@ -3479,12 +3899,7 @@ esp_err_t set_setting(Setting setting, bool on)
     const int index = static_cast<int>(setting);
     ESP_RETURN_ON_FALSE(index >= 0 && index < SETTING_COUNT, ESP_ERR_INVALID_ARG, TAG, "setting %d",
                         index);
-    ESP_RETURN_ON_FALSE(s_setting_value[index] != nullptr || s_setting_choice[index][0] != nullptr,
-                        ESP_ERR_INVALID_STATE, TAG,
-                        "not initialised");
-    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
-    apply_setting(index, on);
-    lvgl_port_unlock();
+    put(p_setting[index], on);
     return ESP_OK;
 }
 
@@ -3495,27 +3910,20 @@ bool diagnostics_open()
 
 esp_err_t notify(const char *title, const char *message, const char *level, int timeout_ms)
 {
-    ESP_RETURN_ON_FALSE(s_notice_card != nullptr, ESP_ERR_INVALID_STATE, TAG, "not initialised");
-    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
-
-    if (s_notice_count == NOTIFY_QUEUE_LEN) {
-        ESP_LOGW(TAG, "notification queue full, dropping oldest");
-        for (int i = 1; i < NOTIFY_QUEUE_LEN; ++i) {
-            s_notice_queue[i - 1] = s_notice_queue[i];
+    portENTER_CRITICAL(&s_pending_lock);
+    if (s_inbox_count == NOTICE_INBOX_LEN) {
+        for (int i = 1; i < NOTICE_INBOX_LEN; ++i) {
+            s_inbox[i - 1] = s_inbox[i];
         }
-        --s_notice_count;
+        --s_inbox_count;
     }
-
-    Notice &slot = s_notice_queue[s_notice_count++];
-    std::snprintf(slot.title, sizeof(slot.title), "%s", title != nullptr ? title : "");
-    std::snprintf(slot.message, sizeof(slot.message), "%s", message != nullptr ? message : "");
-    std::snprintf(slot.level, sizeof(slot.level), "%s", level != nullptr ? level : "info");
+    Notice &slot = s_inbox[s_inbox_count++];
+    copy_text(slot.title, sizeof(slot.title), title);
+    copy_text(slot.message, sizeof(slot.message), message);
+    copy_text(slot.level, sizeof(slot.level), level != nullptr ? level : "info");
     slot.timeout_ms = timeout_ms;
-
-    if (lv_obj_is_hidden(s_notice_card)) {
-        show_next_notice();
-    }
-    lvgl_port_unlock();
+    portEXIT_CRITICAL(&s_pending_lock);
+    s_pending.store(true, std::memory_order_release);
     return ESP_OK;
 }
 

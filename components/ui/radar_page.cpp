@@ -1465,6 +1465,15 @@ void show_radar(const radar::Snapshot &snapshot)
     }
 }
 
+void refresh_radar()
+{
+    if (s_last == nullptr) {
+        return;
+    }
+    radar::snapshot(*s_last);
+    show_radar(*s_last);
+}
+
 void show_radar_photo(const char *hex, const void *pixels, int width, int height)
 {
 
