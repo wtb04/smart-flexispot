@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ble.h"
+#include "ble_desk.h"
 #include "deskproto.h"
 #include "esp_err.h"
 #include "host/ble_gap.h"

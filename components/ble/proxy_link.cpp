@@ -1,6 +1,7 @@
 #include "proxy_link.h"
 
 #include "ble.h"
+#include "ble_desk.h"
 #include "deskproto.h"
 #include "esp_log.h"
 #include "esp_timer.h"

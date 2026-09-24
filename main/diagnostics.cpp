@@ -1,6 +1,7 @@
 #include "diagnostics.h"
 
 #include "ble.h"
+#include "ble_desk.h"
 #include "desk.h"
 #include "esp_app_desc.h"
 #include "esp_check.h"
