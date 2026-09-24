@@ -379,6 +379,10 @@ esp_err_t splash_step(const char *label)
 esp_err_t splash_done()
 {
     ESP_RETURN_ON_FALSE(s_splash != nullptr, ESP_ERR_INVALID_STATE, TAG, "not initialised");
+    // Told every two seconds once everything is up; only the first time needs the screen.
+    if (!s_splash_up) {
+        return ESP_OK;
+    }
     ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
 
     if (s_splash_up) {
