@@ -97,7 +97,7 @@ menu "Loctek desk control"
     config LOCTEK_MAX_HEIGHT_MM
         int "Highest height the desk can reach (mm)"
         range 600 2000
-        default 1200
+        default 1310
         help
             A travel target or a stored preset outside the desk's own range
             is garbage, not a place to drive to.

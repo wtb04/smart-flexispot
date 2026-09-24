@@ -39,8 +39,14 @@ constexpr TickType_t STALL = pdMS_TO_TICKS(2500);
 // gives up rather than wrestle with it.
 constexpr int RETREAT_MM = 15;
 
-// A travel needs the box to have said where the desk is, recently.
+// A travel steers only on a height the box has said recently. Its display goes
+// dark after about ten seconds idle and then it reports nothing, so a travel
+// asked for then wakes it first and waits this long for it to speak.
 constexpr TickType_t HEIGHT_FRESH = pdMS_TO_TICKS(2000);
+constexpr TickType_t HEIGHT_WAIT  = pdMS_TO_TICKS(5000);
+// The wake pulse does not always light the display; a real key always does, so
+// one step toward the target follows if the pulse was not enough.
+constexpr TickType_t NUDGE_AFTER  = pdMS_TO_TICKS(1500);
 
 // The desk runs on after the last key frame. How far is learned from where each
 // travel comes to rest, per direction, and kept across reboots.
@@ -124,8 +130,10 @@ TickType_t d_progress_at = 0;  // when the height last changed, or a key went do
 TickType_t d_next_frame  = 0;
 int        d_seen_height = -1;
 
-int d_target    = -1;
-int d_best_away = INT_MAX;  // the closest this travel has come
+int        d_target    = -1;
+int        d_best_away = INT_MAX;  // the closest this travel has come
+TickType_t d_asked_at  = 0;        // when the travel was asked for
+bool       d_nudged    = false;
 int d_run_on[2] = {0, 0};   // up, down
 
 int        d_landing_target = -1;
@@ -311,6 +319,8 @@ void on_height(int height_mm, TickType_t now)
     }
 }
 
+esp_err_t turn_on();
+
 void take_move(Move direction, TickType_t now)
 {
     end_travel(direction == Move::Stop ? "released" : "a hand on the keys");
@@ -330,14 +340,23 @@ void take_goto(int target_mm, TickType_t now)
     d_target         = target_mm;
     d_best_away      = INT_MAX;
     d_progress_at    = now;
+    d_asked_at       = now;
+    d_nudged         = false;
     d_landing_target = -1;
     s_travelling_to.store(target_mm, std::memory_order_relaxed);
 
-    const int here = s_last_height.load(std::memory_order_relaxed);
-    ESP_LOGI(TAG, "travelling from %d mm to %d mm", here, target_mm);
-    if (here >= 0 && now - s_last_height_at.load(std::memory_order_acquire) <= HEIGHT_FRESH) {
+    const int  here  = s_last_height.load(std::memory_order_relaxed);
+    const bool fresh = here >= 0 &&
+                       now - s_last_height_at.load(std::memory_order_acquire) <= HEIGHT_FRESH;
+    if (fresh) {
+        ESP_LOGI(TAG, "travelling from %d mm to %d mm", here, target_mm);
         steer_travel(here, now);
+        return;
     }
+    // Steering starts on the first height the woken box reports.
+    ESP_LOGI(TAG, "travelling to %d mm, waking the box to hear where it is", target_mm);
+    ESP_ERROR_CHECK_WITHOUT_ABORT(turn_on());
+    d_next_frame = xTaskGetTickCount();
 }
 
 void press_key(Key key, int duration_ms)
@@ -419,6 +438,19 @@ void take_press(const Press &press)
             on_height(s_last_height.load(std::memory_order_relaxed), now);
         }
 
+        const bool awaiting = d_target >= 0 && d_direction == Move::Stop;
+        if (awaiting && now - d_asked_at > HEIGHT_WAIT) {
+            ESP_LOGW(TAG, "the box did not say where it is, not travelling");
+            end_travel("no height");
+        } else if (awaiting && !d_nudged && now - d_asked_at > NUDGE_AFTER) {
+            d_nudged        = true;
+            const int  last = s_last_height.load(std::memory_order_relaxed);
+            const Move step = last >= 0 && d_target < last ? Move::Down : Move::Up;
+            ESP_LOGI(TAG, "box still dark, one step %s to wake it", dir_name(step));
+            ESP_ERROR_CHECK_WITHOUT_ABORT(write_frame(frame_for(step)));
+            ESP_ERROR_CHECK_WITHOUT_ABORT(write_frame(kFrameStop));
+        }
+
         if (d_direction != Move::Stop) {
             if (static_cast<std::int32_t>(now - d_deadline) >= 0) {
                 ESP_LOGW(TAG, "travel timeout, stopping");
@@ -431,11 +463,14 @@ void take_press(const Press &press)
             }
         }
 
+        // While waiting to hear the height, ask as often as while moving: the
+        // box answers every frame, and each answer is a chance to start.
         const bool moving = d_direction != Move::Stop;
-        const bool polls  = moving || IDLE_POLL_TICKS > 0;
+        const bool eager  = moving || (d_target >= 0 && d_direction == Move::Stop);
+        const bool polls  = eager || IDLE_POLL_TICKS > 0;
         if (polls && static_cast<std::int32_t>(now - d_next_frame) >= 0) {
             ESP_ERROR_CHECK_WITHOUT_ABORT(write_frame(frame_for(d_direction)));
-            d_next_frame = now + (moving ? REPEAT_TICKS : IDLE_POLL_TICKS);
+            d_next_frame = now + (eager ? REPEAT_TICKS : IDLE_POLL_TICKS);
         }
 
         TickType_t wait = portMAX_DELAY;
@@ -625,10 +660,6 @@ esp_err_t goto_height(int height_mm)
                         "%d mm is outside the desk's range", height_mm);
     ESP_RETURN_ON_FALSE(!s_hand.load(std::memory_order_relaxed), ESP_ERR_INVALID_STATE, TAG,
                         "a hand is on the keys");
-    const TickType_t at   = s_last_height_at.load(std::memory_order_acquire);
-    const bool       know = s_last_height.load(std::memory_order_relaxed) >= 0 &&
-                      xTaskGetTickCount() - at <= HEIGHT_FRESH;
-    ESP_RETURN_ON_FALSE(know, ESP_ERR_INVALID_STATE, TAG, "the box has not said where it is");
     xQueueOverwrite(s_gotos, &height_mm);
     wake_driver();
     return ESP_OK;

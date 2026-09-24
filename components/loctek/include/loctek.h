@@ -21,10 +21,11 @@ esp_err_t request_move(Move direction);
 /** Travels to a height the box has no preset for, steering on each height it
  *  reports: no clock, one decision per report. Releases early by the run-on
  *  learned from where earlier travels came to rest. Refused while a hand is on
- *  the keys, when the target is outside the desk's range, or when the box has
- *  not said where it is in the last two seconds. Bounded by the travel timeout,
- *  by the height ceasing to change, and by the desk moving away from the
- *  target. Any key sent afterwards ends it. A new target replaces the old. */
+ *  the keys or when the target is outside the desk's range. A box that has not
+ *  said where it is lately is woken first, and the travel is dropped if it
+ *  still says nothing within five seconds. Bounded by the travel timeout, by
+ *  the height ceasing to change, and by the desk moving away from the target.
+ *  Any key sent afterwards ends it. A new target replaces the old. */
 esp_err_t goto_height(int height_mm);
 
 /** The height being travelled to, or negative when not travelling. */
