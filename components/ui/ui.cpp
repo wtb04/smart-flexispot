@@ -313,8 +313,10 @@ Slot<ThermostatArgs> p_thermostat;
 Slot<PresenceArgs>   p_presence;
 Slot<Text<16>>       p_time;
 Slot<bool>           p_wifi;
-Slot<InfoArgs>       p_info[INFO_COUNT];
-Slot<Level>          p_health[INFO_CARD_COUNT];
+// Kept in PSRAM: sized for the most any card can have, it is several
+// kilobytes, and static data would take them from internal RAM.
+Slot<InfoArgs>      *p_rows = nullptr;  // [card * kMaxRows + row]
+Slot<InfoArgs>       p_card[kMaxCards];
 Slot<int>            p_media_hold;
 Slot<int>            p_notification_volume;
 Slot<bool>           p_screen;
@@ -625,26 +627,22 @@ void apply_wifi(bool wifi)
     lv_image_set_src(s_wifi_icon, wifi ? &icons::wifi_icon : &icons::wifi_off_icon);
 }
 
-void apply_info(int index, const char *value, Level level)
+void apply_row(int card, int row, const char *value, Level level)
 {
-    if (s_info[index] == nullptr) {
+    lv_obj_t *label = s_row_value[card][row];
+    if (label == nullptr) {
         return;
     }
-    const char *text = value != nullptr && value[0] != '\0' ? value : "--";
-    theme::set_text(s_info[index], text);
-    theme::set_text_color(s_info[index], info_ink(level));
-
-    const int card = s_summary_card[index];
-    if (card >= 0) {
-        theme::set_text(s_tile_value[card], text);
-    }
+    theme::set_text(label, value != nullptr && value[0] != '\0' ? value : "--");
+    theme::set_text_color(label, info_ink(level));
 }
 
-void apply_health(int card, Level level)
+void apply_card(int card, const char *summary, Level level)
 {
     if (s_tile_dot[card] == nullptr) {
         return;
     }
+    theme::set_text(s_tile_value[card], summary != nullptr && summary[0] != '\0' ? summary : "--");
     theme::set_bg_color(s_tile_dot[card], level_ink(level));
     theme::set_text_color(s_tile_value[card], info_ink(level));
     if (s_card_level[card] != level) {
@@ -782,14 +780,14 @@ void apply_pending(lv_timer_t *)
         apply_notification_volume(volume);
     }
 
-    for (int i = 0; i < INFO_COUNT; ++i) {
-        if (InfoArgs info{}; take(p_info[i], info)) {
-            apply_info(i, info.value.get(), info.level);
+    for (int c = 0; c < s_card_count; ++c) {
+        if (InfoArgs card{}; take(p_card[c], card)) {
+            apply_card(c, card.value.get(), card.level);
         }
-    }
-    for (int i = 0; i < INFO_CARD_COUNT; ++i) {
-        if (Level level{}; take(p_health[i], level)) {
-            apply_health(i, level);
+        for (int r = 0; r < s_cards[c].row_count && r < kMaxRows; ++r) {
+            if (InfoArgs row{}; p_rows != nullptr && take(p_rows[c * kMaxRows + r], row)) {
+                apply_row(c, r, row.value.get(), row.level);
+            }
         }
     }
 
@@ -967,15 +965,37 @@ esp_err_t set_battery(bool present, int percent, bool charging)
     return ESP_OK;
 }
 
-esp_err_t set_info(Info field, const char *value, Level level)
+void set_cards(const Card *cards, int count)
 {
-    const int index = static_cast<int>(field);
-    ESP_RETURN_ON_FALSE(index >= 0 && index < INFO_COUNT, ESP_ERR_INVALID_ARG, TAG, "info %d",
-                        index);
+    s_cards      = cards;
+    s_card_count = std::min(count, kMaxCards);
+    if (p_rows == nullptr) {
+        p_rows = static_cast<Slot<InfoArgs> *>(heap_caps_calloc(
+            kMaxCards * kMaxRows, sizeof(Slot<InfoArgs>), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    }
+}
+
+esp_err_t set_card(int card, const char *summary, Level level)
+{
+    ESP_RETURN_ON_FALSE(card >= 0 && card < s_card_count, ESP_ERR_INVALID_ARG, TAG, "card %d",
+                        card);
+    InfoArgs args{};
+    args.value.set(summary);
+    args.level = level;
+    put(p_card[card], args);
+    return ESP_OK;
+}
+
+esp_err_t set_row(int card, int row, const char *value, Level level)
+{
+    ESP_RETURN_ON_FALSE(card >= 0 && card < s_card_count && row >= 0 &&
+                            row < std::min(s_cards[card].row_count, kMaxRows),
+                        ESP_ERR_INVALID_ARG, TAG, "card %d row %d", card, row);
+    ESP_RETURN_ON_FALSE(p_rows != nullptr, ESP_ERR_NO_MEM, TAG, "rows");
     InfoArgs args{};
     args.value.set(value);
     args.level = level;
-    put(p_info[index], args);
+    put(p_rows[card * kMaxRows + row], args);
     return ESP_OK;
 }
 
@@ -1013,15 +1033,6 @@ esp_err_t set_radar_photo(const char *hex, const void *pixels, int width, int he
     args.width  = width;
     args.height = height;
     put(p_photo, args);
-    return ESP_OK;
-}
-
-esp_err_t set_health(Subsystem which, Level level)
-{
-    const int card = static_cast<int>(which);
-    ESP_RETURN_ON_FALSE(card >= 0 && card < INFO_CARD_COUNT, ESP_ERR_INVALID_ARG, TAG,
-                        "subsystem %d", card);
-    put(p_health[card], level);
     return ESP_OK;
 }
 

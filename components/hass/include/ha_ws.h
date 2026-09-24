@@ -31,6 +31,10 @@ using RefusalHandler = void (*)(const char *reason);
 
 void on_refusal(RefusalHandler handler);
 
+/** The last service call that did not happen, and how many seconds ago. False
+ *  if none has been refused since boot. Thread-safe. */
+bool last_refusal(char *out, std::size_t size, int &age_s);
+
 esp_err_t call_service(const char *domain, const char *service, const char *entity_id);
 
 esp_err_t call_service_with(const char *domain, const char *service, const char *entity_id,

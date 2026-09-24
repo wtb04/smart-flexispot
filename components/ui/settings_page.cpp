@@ -363,11 +363,11 @@ void build_diagnostics_view(lv_obj_t *parent, std::int32_t w, std::int32_t h)
     build_sub_header(view, "Diagnostics");
 
     const std::int32_t grid_y = DIAG_HEADER_H + BUTTON_GAP;
-    const int          rows   = (INFO_CARD_COUNT + 2) / 3;
+    const int          rows   = (s_card_count + 2) / 3;
     const std::int32_t tile_w = (w - 2 * BUTTON_GAP) / 3;
     const std::int32_t tile_h = (h - grid_y - (rows - 1) * BUTTON_GAP) / rows;
 
-    for (int i = 0; i < INFO_CARD_COUNT; ++i) {
+    for (int i = 0; i < s_card_count; ++i) {
         build_info_tile(view, i, (i % 3) * (tile_w + BUTTON_GAP),
                         grid_y + (i / 3) * (tile_h + BUTTON_GAP), tile_w, tile_h);
     }
@@ -383,10 +383,6 @@ void build_settings_page(lv_obj_t *page)
     lv_obj_set_style_pad_all(page, PANEL_PAD, 0);
     const std::int32_t inner_w = l.content_w - 2 * PANEL_PAD;
     const std::int32_t inner_h = l.content_h - 2 * PANEL_PAD;
-
-    for (int &card : s_summary_card) {
-        card = -1;
-    }
 
     build_settings_view(page, inner_w, inner_h);
     build_appearance_view(page, inner_w, inner_h);

@@ -371,6 +371,15 @@ bool connected()
     return s_up.load(std::memory_order_relaxed);
 }
 
+int quiet_ms()
+{
+    if (!s_up.load(std::memory_order_relaxed)) {
+        return -1;
+    }
+    return static_cast<int>((esp_timer_get_time() - s_heard_us.load(std::memory_order_relaxed)) /
+                            1000);
+}
+
 void collect(LinkStats &out)
 {
     int copy[SAMPLE_MAX];
@@ -492,6 +501,11 @@ void stop()
 bool last(deskproto::Status &out)
 {
     return proxy::last_status(out);
+}
+
+int quiet_ms()
+{
+    return proxy::quiet_ms();
 }
 
 }  // namespace ble::desk

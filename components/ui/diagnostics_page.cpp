@@ -1,19 +1,31 @@
 #include "ui_internal.h"
 
 namespace ui::detail {
-lv_obj_t     *s_info[INFO_COUNT] = {};
+const Card *s_cards      = nullptr;
+int         s_card_count = 0;
+lv_obj_t   *s_row_value[kMaxCards][kMaxRows] = {};
 namespace {
-static_assert(INFO_CARD_COUNT == static_cast<int>(Subsystem::Count), "a tile per subsystem");
-constexpr bool cards_in_order()
+const char *glyph_symbol(Glyph glyph)
 {
-    for (int i = 0; i < INFO_CARD_COUNT; ++i) {
-        if (static_cast<int>(INFO_CARDS[i].subsystem) != i) {
-            return false;
-        }
+    switch (glyph) {
+        case Glyph::Wifi:     return LV_SYMBOL_WIFI;
+        case Glyph::Home:     return LV_SYMBOL_HOME;
+        case Glyph::Presence: return LV_SYMBOL_EYE_OPEN;
+        case Glyph::Desk:     return LV_SYMBOL_UP;
+        case Glyph::Link:     return LV_SYMBOL_SHUFFLE;
+        case Glyph::Power:    return LV_SYMBOL_BATTERY_FULL;
+        case Glyph::System:   return LV_SYMBOL_SETTINGS;
+        default:              return "";
     }
-    return true;
 }
-static_assert(cards_in_order(), "a tile is indexed by its subsystem");
+
+const lv_image_dsc_t *glyph_image(Glyph glyph)
+{
+    return glyph == Glyph::Radar      ? &icons::plane_icon
+           : glyph == Glyph::Calendar ? &icons::calendar_icon
+                                      : nullptr;
+}
+
 constexpr std::int32_t LOG_W        = 800;
 constexpr std::int32_t LOG_H        = 520;
 constexpr std::int32_t DETAIL_W     = 660;
@@ -31,21 +43,20 @@ lv_obj_t *s_diag_summary    = nullptr;
 lv_obj_t *s_volume_value    = nullptr;
 lv_obj_t *s_volume_slider   = nullptr;
 
-lv_obj_t *s_tile_value[INFO_CARD_COUNT] = {};
-lv_obj_t *s_tile_dot[INFO_CARD_COUNT]   = {};
+lv_obj_t *s_tile_value[kMaxCards] = {};
+lv_obj_t *s_tile_dot[kMaxCards]   = {};
 namespace {
-lv_obj_t *s_detail[INFO_CARD_COUNT]     = {};
+lv_obj_t *s_detail[kMaxCards]     = {};
 }  // namespace
 
-Level     s_card_level[INFO_CARD_COUNT] = {};
+Level     s_card_level[kMaxCards] = {};
 namespace {
 lv_obj_t *s_detail_title                = nullptr;
-std::int32_t s_detail_height[INFO_CARD_COUNT] = {};
+std::int32_t s_detail_height[kMaxCards] = {};
 bool s_tile_long = false;
 
 }  // namespace
 
-int s_summary_card[INFO_COUNT] = {};
 namespace {
 std::optional<ModalOverlay> s_diagnostics;
 std::optional<ModalOverlay> s_log_modal;
@@ -70,16 +81,16 @@ std::uint32_t info_ink(Level level)
 void refresh_diag_summary()
 {
     int poor = 0;
-    for (Level level : s_card_level) {
-        if (level == Level::Warn || level == Level::Bad) {
+    for (int i = 0; i < s_card_count; ++i) {
+        if (s_card_level[i] == Level::Warn || s_card_level[i] == Level::Bad) {
             ++poor;
         }
     }
     char text[48];
     if (poor == 0) {
-        std::snprintf(text, sizeof(text), "%d subsystems, all healthy", INFO_CARD_COUNT);
+        std::snprintf(text, sizeof(text), "All %d parts healthy", s_card_count);
     } else {
-        std::snprintf(text, sizeof(text), "%d of %d need attention", poor, INFO_CARD_COUNT);
+        std::snprintf(text, sizeof(text), "%d of %d need attention", poor, s_card_count);
     }
     theme::set_text(s_diag_summary, text);
     theme::set_text_color(s_diag_summary, poor == 0 ? theme::secondary : theme::amber);
@@ -108,7 +119,7 @@ void refresh_log()
         return;
     }
 
-    const int count = s_handlers.log(INFO_CARDS[s_log_shown].subsystem, lines, LOG_LINE_MAX);
+    const int count = s_handlers.log(s_log_shown, lines, LOG_LINE_MAX);
     for (int i = 0; i < LOG_LINE_MAX; ++i) {
         lv_obj_set_hidden(s_log_line[i], i >= count);
         if (i < count) {
@@ -133,10 +144,10 @@ void detail_clicked_cb(lv_event_t *e)
     if (!s_diagnostics.has_value() || std::exchange(s_tile_long, false)) {
         return;
     }
-    for (int i = 0; i < INFO_CARD_COUNT; ++i) {
+    for (int i = 0; i < s_card_count; ++i) {
         lv_obj_set_hidden(s_detail[i], i != index);
     }
-    theme::set_text(s_detail_title, INFO_CARDS[index].title);
+    theme::set_text(s_detail_title, s_cards[index].title);
     lv_obj_scroll_to_y(s_detail[index], 0, LV_ANIM_OFF);
     s_diagnostics->resize(DETAIL_W, s_detail_height[index]);
     s_diagnostics->open();
@@ -151,7 +162,7 @@ void log_held_cb(lv_event_t *e)
     s_tile_long = true;
     s_log_shown = index;
     char title[48];
-    std::snprintf(title, sizeof(title), "%s log", INFO_CARDS[index].title);
+    std::snprintf(title, sizeof(title), "%s log", s_cards[index].title);
     theme::set_text(s_log_title, title);
     refresh_log();
     lv_obj_scroll_to_y(s_log_pane, 0, LV_ANIM_OFF);
@@ -262,11 +273,9 @@ lv_obj_t *build_info_row(lv_obj_t *parent, const char *label, const lv_font_t *f
 void build_info_tile(lv_obj_t *parent, int index, std::int32_t x, std::int32_t y, std::int32_t w,
                      std::int32_t h)
 {
-    lv_obj_t *tile =
-        build_tile(parent, x, y, w, h, INFO_CARDS[index].icon, INFO_CARDS[index].title, false,
-                   INFO_CARDS[index].subsystem == Subsystem::Radar      ? &icons::plane_icon
-                   : INFO_CARDS[index].subsystem == Subsystem::Calendar ? &icons::calendar_icon
-                                                                        : nullptr);
+    const Card &spec = s_cards[index];
+    lv_obj_t   *tile = build_tile(parent, x, y, w, h, glyph_symbol(spec.glyph), spec.title, false,
+                                  glyph_image(spec.glyph));
     lv_obj_add_event_cb(tile, detail_clicked_cb, LV_EVENT_CLICKED,
                         reinterpret_cast<void *>(static_cast<std::intptr_t>(index)));
     lv_obj_add_event_cb(tile, log_held_cb, LV_EVENT_LONG_PRESSED,
@@ -280,12 +289,11 @@ void build_info_tile(lv_obj_t *parent, int index, std::int32_t x, std::int32_t y
 
     s_tile_value[index] = tile_value(tile, w, "--");
     s_tile_dot[index]   = dot;
-    s_summary_card[static_cast<int>(INFO_CARDS[index].summary)] = index;
 }
 namespace {
-std::int32_t detail_height(const InfoCard &card)
+std::int32_t detail_height(const Card &card)
 {
-    const std::int32_t body = card.count * DETAIL_ROW_H + (card.count - 1) * DETAIL_ROW_GAP;
+    const std::int32_t body = card.row_count * DETAIL_ROW_H + (card.row_count - 1) * DETAIL_ROW_GAP;
 
     const Layout       l   = layout();
     const std::int32_t cap = std::min(l.screen_h * DETAIL_MAX_FRAC / 100, l.content_h - 2 * GAP);
@@ -295,7 +303,7 @@ std::int32_t detail_height(const InfoCard &card)
 
 void build_detail_overlay(lv_obj_t *parent)
 {
-    s_diagnostics.emplace(parent, DETAIL_W, detail_height(INFO_CARDS[0]));
+    s_diagnostics.emplace(parent, DETAIL_W, s_card_count > 0 ? detail_height(s_cards[0]) : 200);
     lv_obj_t *card = s_diagnostics->content();
     lv_obj_set_style_pad_all(card, DETAIL_PAD, 0);
 
@@ -305,8 +313,8 @@ void build_detail_overlay(lv_obj_t *parent)
     const std::int32_t width  = DETAIL_W - 2 * DETAIL_PAD;
     const std::int32_t body_y = ModalOverlay::header_height() + HEADER_GAP;
 
-    for (int i = 0; i < INFO_CARD_COUNT; ++i) {
-        s_detail_height[i] = detail_height(INFO_CARDS[i]);
+    for (int i = 0; i < s_card_count; ++i) {
+        s_detail_height[i] = detail_height(s_cards[i]);
         const std::int32_t height = s_detail_height[i] - 2 * DETAIL_PAD - body_y;
         lv_obj_t *panel = lv_obj_create(card);
         lv_obj_set_pos(panel, 0, body_y);
@@ -319,10 +327,9 @@ void build_detail_overlay(lv_obj_t *parent)
         lv_obj_set_scrollable(panel, true);
         lv_obj_set_scroll_dir(panel, LV_DIR_VER);
 
-        for (int r = 0; r < INFO_CARDS[i].count; ++r) {
-            const InfoRow &row = INFO_CARDS[i].rows[r];
-            s_info[static_cast<int>(row.field)] =
-                build_info_row(panel, row.label, fonts::size_20(), DETAIL_ROW_H);
+        for (int r = 0; r < s_cards[i].row_count && r < kMaxRows; ++r) {
+            s_row_value[i][r] =
+                build_info_row(panel, s_cards[i].rows[r], fonts::size_20(), DETAIL_ROW_H);
         }
 
         s_detail[i] = panel;

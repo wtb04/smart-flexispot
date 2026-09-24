@@ -28,6 +28,8 @@ esp_err_t start();
 
 bool connected();
 
+int quiet_ms();
+
 void collect(LinkStats &out);
 
 void set_status_handler(desk::StatusHandler handler);

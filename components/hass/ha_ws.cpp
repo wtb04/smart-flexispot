@@ -2,6 +2,7 @@
 
 #include "esp_check.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "esp_websocket_client.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -108,8 +109,20 @@ EntityStore   s_store;
 UpdateHandler  s_on_update  = nullptr;
 RefusalHandler s_on_refusal = nullptr;
 
+portMUX_TYPE s_refusal_lock = portMUX_INITIALIZER_UNLOCKED;
+char         s_refusal[64]  = {};
+std::int64_t s_refused_at   = 0;
+
 void refused(const char *reason)
 {
+    portENTER_CRITICAL(&s_refusal_lock);
+    std::size_t i = 0;
+    for (; reason != nullptr && reason[i] != '\0' && i + 1 < sizeof(s_refusal); ++i) {
+        s_refusal[i] = reason[i];
+    }
+    s_refusal[i]  = '\0';
+    s_refused_at  = esp_timer_get_time();
+    portEXIT_CRITICAL(&s_refusal_lock);
     if (s_on_refusal != nullptr) {
         s_on_refusal(reason);
     }
@@ -372,6 +385,23 @@ const char *http_origin()
                       static_cast<int>(len), host);
     }
     return origin;
+}
+
+bool last_refusal(char *out, std::size_t size, int &age_s)
+{
+    if (size == 0) {
+        return false;
+    }
+    portENTER_CRITICAL(&s_refusal_lock);
+    const std::int64_t at = s_refused_at;
+    std::size_t        i  = 0;
+    for (; s_refusal[i] != '\0' && i + 1 < size; ++i) {
+        out[i] = s_refusal[i];
+    }
+    out[i] = '\0';
+    portEXIT_CRITICAL(&s_refusal_lock);
+    age_s = static_cast<int>((esp_timer_get_time() - at) / 1000000);
+    return at != 0;
 }
 
 void on_refusal(RefusalHandler handler)

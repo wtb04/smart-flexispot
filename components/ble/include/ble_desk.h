@@ -43,6 +43,10 @@ void goto_height(int height_mm);
 /** Lets go of everything, hold or travel, whether or not this panel was holding. */
 void stop();
 
+/** Milliseconds since the proxy last said anything, or negative when there is
+ *  no link. */
+int quiet_ms();
+
 /** The last status the proxy sent. False if it has never sent one. */
 bool last(deskproto::Status &out);
 

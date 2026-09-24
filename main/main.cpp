@@ -226,6 +226,7 @@ extern "C" void app_main(void)
         .journey     = on_journey,
     };
     const int brightness = settings::get(settings::Key::Brightness);
+    ui::set_cards(diagnostics::cards(), diagnostics::card_count());
     ESP_ERROR_CHECK(ui::init(handlers, brightness,
                              static_cast<std::uint32_t>(settings::get(settings::Key::Accent)),
                              settings::enabled(settings::Key::RailSide), flipped));

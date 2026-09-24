@@ -113,19 +113,19 @@ using DetailsHandler = void (*)(const char *hex, const char *callsign);
  *  seconds; zero forgets the question. */
 using JourneyHandler = void (*)(std::int64_t arrive_by, bool to_work);
 
-enum class Subsystem : std::uint8_t {
-    Network,
-    HomeAssistant,
-    Bluetooth,
-    Presence,
-    Power,
-    Desk,
-    Radar,
-    Media,
-    Calendar,
-    System,
-    Count,
+/** A card on the diagnostics view. What it covers is the caller's business:
+ *  the screen draws a title, a glyph, a summary and named rows. */
+enum class Glyph : std::uint8_t { Wifi, Home, Presence, Desk, Link, Power, Radar, Calendar, System };
+
+struct Card {
+    const char        *title;
+    Glyph              glyph;
+    const char *const *rows;  // their names, in order
+    int                row_count;
 };
+
+inline constexpr int kMaxCards = 9;  // three rows of three
+inline constexpr int kMaxRows  = 12;
 
 inline constexpr std::size_t kLogTextMax = 192;
 
@@ -136,9 +136,9 @@ struct LogLine {
     char text[kLogTextMax];
 };
 
-/** Fills `out` with a subsystem's recent lines, oldest first, and returns how
- *  many. Runs on the LVGL task, so it must not block. */
-using LogHandler = int (*)(Subsystem subsystem, LogLine *out, int max);
+/** Fills `out` with a card's recent lines, oldest first, and returns how many.
+ *  Runs on the LVGL task, so it must not block. */
+using LogHandler = int (*)(int card, LogLine *out, int max);
 
 /** An empty title means nothing is playing; the card then shows the state. Strings are copied. */
 esp_err_t set_media(const char *source, const char *title, const char *artist, const char *state,
@@ -227,59 +227,18 @@ esp_err_t set_presence(bool has_key, bool present, bool ever_seen);
 
 esp_err_t set_battery(bool present, int percent, bool charging);
 
-enum class Info : std::uint8_t {
-    WifiState,
-    WifiSsid,
-    WifiIp,
-    WifiMac,
-    WifiSignal,
-    WifiChannel,
-    HaBroker,
-    HaSocket,
-    HaEntities,
-    PhoneRadio,
-    PhoneKey,
-    PhoneState,
-    PhoneSignal,
-    BleLink,
-    BleTrip,
-    BleLoss,
-    PowerSource,
-    PowerCharge,
-    PowerVolts,
-    PowerCurrent,
-    PowerStatus,
-    DeskTransport,
-    DeskLink,
-    DeskHeight,
-    DeskActive,
-    DeskStand,
-    DeskSit,
-    DeskOne,
-    DeskTwo,
-    DeskFive,
-    DeskSix,
-    RadarFeed,
-    RadarAircraft,
-    RadarRange,
-    RadarSeen,
-    MediaPlayer,
-    MediaArt,
-    MediaDecoder,
-    CalFeeds,
-    CalEvents,
-    CalNext,
-    SysFirmware,
-    SysBuilt,
-    SysUptime,
-    SysRam,
-    SysPsram,
-    SysRamLow,
-    Count,
-};
+/** Before init(): the diagnostics view's cards, in order, kept by pointer. */
+void set_cards(const Card *cards, int count);
 
-/** Strings are copied. The level colours the value; a null value clears the row. */
-esp_err_t set_info(Info field, const char *value, Level level = Level::Neutral);
+/** A card's summary and whether it is doing its job, which is not the same as
+ *  reporting what you hoped: a phone correctly seen to be away is healthy.
+ *  Strings are copied. */
+esp_err_t set_card(int card, const char *summary, Level level);
+
+/** One row of a card, by its place in Card::rows. The level colours the value;
+ *  null shows "--". Strings are copied. */
+esp_err_t set_row(int card, int row, const char *value, Level level = Level::Neutral);
+
 
 /** Re-reads the calendar and redraws its page. Thread-safe. */
 esp_err_t set_calendar();
@@ -305,9 +264,6 @@ esp_err_t set_radar_details(const char *hex, const radar::Details &details);
 /** RGB565. Null clears the frame. Ignored unless still selected. */
 esp_err_t set_radar_photo(const char *hex, const void *pixels, int width, int height);
 
-/** Whether the subsystem is doing its job, which is not the same as whether it
- *  is reporting what you hoped: a phone correctly seen to be away is healthy. */
-esp_err_t set_health(Subsystem which, Level level);
 
 /** Queued rather than shown at once: they arrive in bursts. A full queue drops the oldest. */
 esp_err_t notify(const char *title, const char *message, const char *level, int timeout_ms);

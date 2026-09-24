@@ -103,107 +103,6 @@ constexpr std::uint32_t PAUSE_SETTLE_MS = 1500;
 
 constexpr int CALENDAR_PAGE = 1;
 
-constexpr int INFO_COUNT = static_cast<int>(Info::Count);
-
-struct InfoRow {
-    Info        field;
-    const char *label;
-};
-
-struct InfoCard {
-    Subsystem   subsystem;
-    const char *title;
-    const char *icon;
-    const InfoRow *rows;
-    int            count;
-    Info           summary;
-    bool           has_setting;
-    Setting        setting;
-    const char    *setting_label;
-    // A setting that picks between two ways, shown as both. Off first, then on.
-    const char    *choice_off = nullptr;
-    const char    *choice_on  = nullptr;
-};
-
-constexpr InfoRow NETWORK_ROWS[] = {
-    {Info::WifiState, "Wi-Fi"},   {Info::WifiSsid, "Network"},  {Info::WifiIp, "Address"},
-    {Info::WifiMac, "MAC"},       {Info::WifiSignal, "Signal"}, {Info::WifiChannel, "Channel"},
-};
-constexpr InfoRow HASS_ROWS[] = {
-    {Info::HaBroker, "Broker"},
-    {Info::HaSocket, "Socket"},
-    {Info::HaEntities, "Entities"},
-};
-constexpr InfoRow BLUETOOTH_ROWS[] = {
-    {Info::PhoneRadio, "Radio"},
-    {Info::BleLink, "Desk proxy"},
-    {Info::BleTrip, "Round trip"},
-    {Info::BleLoss, "Dropped"},
-};
-constexpr InfoRow PRESENCE_ROWS[] = {
-    {Info::PhoneKey, "Identity key"},
-    {Info::PhoneState, "Phone"},
-    {Info::PhoneSignal, "Signal"},
-};
-constexpr InfoRow POWER_ROWS[] = {
-    {Info::PowerSource, "Source"},   {Info::PowerCharge, "Charge"},
-    {Info::PowerVolts, "Voltage"},   {Info::PowerCurrent, "Current"},
-    {Info::PowerStatus, "State"},
-};
-constexpr InfoRow DESK_ROWS[] = {
-    {Info::DeskTransport, "Driven over"},  {Info::DeskLink, "Controller"},
-    {Info::DeskHeight, "Height"},          {Info::DeskActive, "Standing at"},
-    {Info::DeskOne, PRESET_NAMES[0]},      {Info::DeskTwo, PRESET_NAMES[1]},
-    {Info::DeskStand, PRESET_NAMES[2]},    {Info::DeskSit, PRESET_NAMES[3]},
-    {Info::DeskFive, PRESET_NAMES[4]},     {Info::DeskSix, PRESET_NAMES[5]},
-};
-constexpr InfoRow RADAR_ROWS[] = {
-    {Info::RadarFeed, "Feed"},
-    {Info::RadarAircraft, "In range"},
-    {Info::RadarRange, "Reach"},
-    {Info::RadarSeen, "Last sweep"},
-};
-constexpr InfoRow MEDIA_ROWS[] = {
-    {Info::MediaPlayer, "Playing"},
-    {Info::MediaArt, "Artwork"},
-    {Info::MediaDecoder, "Decoder"},
-};
-constexpr InfoRow CALENDAR_ROWS[] = {
-    {Info::CalFeeds, "Feeds"},
-    {Info::CalEvents, "Ahead"},
-    {Info::CalNext, "Next"},
-};
-constexpr InfoRow SYSTEM_ROWS[] = {
-    {Info::SysFirmware, "Firmware"}, {Info::SysBuilt, "Built"},  {Info::SysUptime, "Uptime"},
-    {Info::SysRam, "Internal free"}, {Info::SysPsram, "PSRAM free"},
-    {Info::SysRamLow, "Low mark"},
-};
-
-constexpr InfoCard INFO_CARDS[] = {
-    {Subsystem::Network, "Network", LV_SYMBOL_WIFI, NETWORK_ROWS, static_cast<int>(std::size(NETWORK_ROWS)),
-     Info::WifiState, false, Setting::Charging, nullptr},
-    {Subsystem::HomeAssistant, "Home Assistant", LV_SYMBOL_HOME, HASS_ROWS, static_cast<int>(std::size(HASS_ROWS)),
-     Info::HaSocket, false, Setting::Charging, nullptr},
-    {Subsystem::Bluetooth, "Bluetooth", LV_SYMBOL_BLUETOOTH, BLUETOOTH_ROWS,
-     static_cast<int>(std::size(BLUETOOTH_ROWS)), Info::BleLink, false, Setting::Charging,
-     nullptr},
-    {Subsystem::Presence, "Presence", LV_SYMBOL_EYE_OPEN, PRESENCE_ROWS, static_cast<int>(std::size(PRESENCE_ROWS)),
-     Info::PhoneState, false, Setting::Charging, nullptr},
-    {Subsystem::Power, "Power", LV_SYMBOL_BATTERY_FULL, POWER_ROWS, static_cast<int>(std::size(POWER_ROWS)),
-     Info::PowerCharge, false, Setting::Charging, nullptr},
-    {Subsystem::Desk, "Desk", LV_SYMBOL_UP, DESK_ROWS, static_cast<int>(std::size(DESK_ROWS)), Info::DeskLink,
-     false, Setting::Charging, nullptr},
-    {Subsystem::Radar, "Radar", LV_SYMBOL_GPS, RADAR_ROWS, static_cast<int>(std::size(RADAR_ROWS)),
-     Info::RadarFeed, false, Setting::Charging, nullptr},
-    {Subsystem::Media, "Media", LV_SYMBOL_AUDIO, MEDIA_ROWS, static_cast<int>(std::size(MEDIA_ROWS)),
-     Info::MediaPlayer, false, Setting::Charging, nullptr},
-    {Subsystem::Calendar, "Calendar", LV_SYMBOL_LIST, CALENDAR_ROWS,
-     static_cast<int>(std::size(CALENDAR_ROWS)), Info::CalNext, false, Setting::Charging,
-     nullptr},
-    {Subsystem::System, "System", LV_SYMBOL_SETTINGS, SYSTEM_ROWS, static_cast<int>(std::size(SYSTEM_ROWS)),
-     Info::SysUptime, false, Setting::Charging, nullptr},
-};
-constexpr int INFO_CARD_COUNT = static_cast<int>(std::size(INFO_CARDS));
 
 constexpr int SETTING_COUNT = static_cast<int>(Setting::Count);
 
@@ -286,17 +185,18 @@ extern int s_page;
 extern std::atomic<bool> s_setup_visible;
 extern bool s_presence_gate;
 extern lv_obj_t *s_brightness_value;
-extern lv_obj_t *s_info[INFO_COUNT];
 extern lv_obj_t *s_settings_view;
 extern lv_obj_t *s_appearance_view;
 extern lv_obj_t *s_diag_view;
 extern lv_obj_t *s_diag_summary;
 extern lv_obj_t *s_volume_value;
 extern lv_obj_t *s_volume_slider;
-extern lv_obj_t *s_tile_value[INFO_CARD_COUNT];
-extern lv_obj_t *s_tile_dot[INFO_CARD_COUNT];
-extern Level s_card_level[INFO_CARD_COUNT];
-extern int s_summary_card[INFO_COUNT];
+extern const Card *s_cards;
+extern int s_card_count;
+extern lv_obj_t *s_tile_value[kMaxCards];
+extern lv_obj_t *s_tile_dot[kMaxCards];
+extern Level s_card_level[kMaxCards];
+extern lv_obj_t *s_row_value[kMaxCards][kMaxRows];
 
 Layout layout();
 void set_screen_state(bool on);
