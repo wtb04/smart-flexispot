@@ -67,8 +67,6 @@ constexpr esp_io_expander_pin_num_t CHARGE_ENABLE_PIN = IO_EXPANDER_PIN_NUM_7;
 
 constexpr float CURRENT_DEADBAND_A = 0.01f;
 
-// See set_charging() for why a pack below this is never charged.
-constexpr float CHARGE_SAFE_VOLTS = 6.0f;
 
 // Active low, and nothing to do with USB quick-charge despite the name: it
 // gates a resistor across the charger's NTC pin, which halves the current.
@@ -245,13 +243,6 @@ esp_err_t apply_charging(bool enable)
 
 esp_err_t set_charging(bool enable)
 {
-    State state{};
-    if (enable && last(state) && state.bus_volts < CHARGE_SAFE_VOLTS) {
-        ESP_LOGW(TAG, "pack at %.2f V, below the %.1f V floor - charger left off", state.bus_volts,
-                 CHARGE_SAFE_VOLTS);
-        return ESP_ERR_INVALID_STATE;
-    }
-
     s_charging_wanted = enable;
     ESP_RETURN_ON_ERROR(apply_charging(enable), TAG, "charge pins");
     ESP_LOGI(TAG, "charger %s", enable ? "enabled (fast)" : "disabled");
@@ -318,11 +309,9 @@ esp_err_t probe_pack(bool &present)
               settled.bus_volts <= PACK_MAX_VOLTS;
     s_pack_present.store(present, std::memory_order_relaxed);
 
-    if (present) {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(apply_charging(true));
-    } else {
-        s_charging_wanted = false;
-    }
+    // Back as it was asked to be, pack or not: whether there is one worth
+    // charging is the charger's call, and it cannot make it switched off.
+    ESP_ERROR_CHECK_WITHOUT_ABORT(apply_charging(s_charging_wanted));
     return settled_err;
 }
 

@@ -51,7 +51,7 @@ TaskHandle_t s_task = nullptr;
                              static_cast<int>(std::lround(state.current_amps * 1000.0f)),
                              state.full ? " full" : "");
                 } else {
-                    ESP_LOGI(TAG, "no pack, or one too flat to show (%.2f V)", state.bus_volts);
+                    ESP_LOGI(TAG, "no pack (%.2f V)", state.bus_volts);
                 }
                 was_present = present;
                 logged      = state.percent;
@@ -65,14 +65,13 @@ TaskHandle_t s_task = nullptr;
                 topped_off = false;
             }
 
-            // What the charger is doing, not what was last asked of it: a pack
-            // below the floor is refused, and one refitted afterwards has to be
-            // noticed and charged.
-            const bool setting = settings::enabled(settings::Key::Charging);
-            const bool wanted  = setting && present && !topped_off;
+            // Whether there is a pack is the charger's to find out: one that has
+            // run down to its protection reads as absent until the charger is on
+            // to wake it. Only a full one is left alone, so it is not held at the
+            // top for ever.
+            const bool wanted = settings::enabled(settings::Key::Charging) && !topped_off;
             if (wanted != power::charging_enabled() && power::set_charging(wanted) == ESP_OK) {
                 ESP_LOGI(TAG, "charger %s", wanted       ? "on"
-                                            : !present   ? "off, nothing to charge"
                                             : topped_off ? "off, pack full"
                                                          : "off");
             }

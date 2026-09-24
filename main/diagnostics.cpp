@@ -321,8 +321,7 @@ void update_power()
     row(POWER, POWER_SOURCE, battery.on_battery ? "battery" : "USB");
     if (!battery.present) {
         // Nothing wrong if there is none, so neutral rather than green. A pack
-        // too flat to show a voltage looks the same, and has to be taken out and
-        // put back before the charger will take it.
+        // run down to its protection looks the same until the charger wakes it.
         summary(POWER, "no battery", Level::Neutral);
         for (int r : {POWER_CHARGE, POWER_CURRENT}) {
             row(POWER, r, nullptr);
@@ -330,7 +329,7 @@ void update_power()
         char volts[16];
         std::snprintf(volts, sizeof(volts), "%.2f V", battery.bus_volts);
         row(POWER, POWER_VOLTS, volts);
-        row(POWER, POWER_STATE, "none, or flat: refit it");
+        row(POWER, POWER_STATE, "none found");
         return;
     }
 

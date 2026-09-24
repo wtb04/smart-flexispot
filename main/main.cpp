@@ -73,11 +73,6 @@ void on_setting(ui::Setting setting, bool on)
             // transaction and may be refused for a pack too flat to charge.
             settings::set(settings::Key::Charging, on);
             battery::refresh();
-            if (power::State state{}; on && power::last(state) && !state.present) {
-                ESP_ERROR_CHECK_WITHOUT_ABORT(ui::notify(
-                    "", "No battery to charge. If one is in, it is too flat: take it out and put it back",
-                    ui::Level::Warn, 6000));
-            }
             break;
         case ui::Setting::PresenceGate:
             settings::set(settings::Key::PresenceGate, on);
