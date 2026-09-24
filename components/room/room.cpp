@@ -1,5 +1,6 @@
 #include "room.h"
 
+#include "clock_math.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "ha_ws.h"
@@ -116,20 +117,6 @@ std::string s_position_stamp;
 int         s_position_duration = -1;
 bool        s_position_playing  = false;
 
-/** Days from 1970-01-01, by Howard Hinnant's civil calendar. */
-long long days_from_civil(const std::tm &date)
-{
-    long long       year  = date.tm_year + 1900;
-    const unsigned  month = static_cast<unsigned>(date.tm_mon) + 1;
-    const unsigned  day   = static_cast<unsigned>(date.tm_mday);
-    year -= month <= 2;
-    const long long era = (year >= 0 ? year : year - 399) / 400;
-    const unsigned  yoe = static_cast<unsigned>(year - era * 400);
-    const unsigned  doy = (153 * (month + (month > 2 ? -3 : 9)) + 2) / 5 + day - 1;
-    const unsigned  doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    return era * 146097 + static_cast<long long>(doe) - 719468;
-}
-
 /** Seconds since a Home Assistant timestamp, or 0 if it cannot be read. */
 int seconds_since(const std::string &iso)
 {
@@ -137,8 +124,7 @@ int seconds_since(const std::string &iso)
     if (iso.size() < 19 || strptime(iso.c_str(), "%Y-%m-%dT%H:%M:%S", &parsed) == nullptr) {
         return 0;
     }
-    const std::time_t when = days_from_civil(parsed) * 86400LL + parsed.tm_hour * 3600LL +
-                             parsed.tm_min * 60LL + parsed.tm_sec;
+    const std::time_t when = rtc::utc_seconds(parsed);
     const std::time_t now  = std::time(nullptr);
     const double age = std::difftime(now, when);
     return age > 0.0 && age < 24 * 3600 ? static_cast<int>(age) : 0;
