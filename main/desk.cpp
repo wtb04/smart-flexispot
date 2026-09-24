@@ -51,12 +51,10 @@ constexpr char NVS_PRESETS[]   = "presets2";
 
 constexpr int DEPARTED_MM = 8;
 
-constexpr TickType_t SETTLE_TIME = pdMS_TO_TICKS(1500);
 constexpr TickType_t STILL_TIME = pdMS_TO_TICKS(350);
 
 constexpr TickType_t COMMAND_GRACE = pdMS_TO_TICKS(4000);
 
-constexpr TickType_t LEARN_TIMEOUT = pdMS_TO_TICKS(45000);
 
 // Home Assistant's move buttons send one message and no release.
 constexpr TickType_t NETWORK_HOLD = pdMS_TO_TICKS(1500);
@@ -64,9 +62,6 @@ std::atomic<TickType_t> s_network_hold_until{0};  // zero when no such hold is l
 
 
 int  s_preset_mm[deskproto::kPresetCount] = {-1, -1, -1, -1, -1, -1};
-int  s_learning                    = -1;
-int  s_learn_from                  = -1;
-TickType_t s_learn_started         = 0;
 bool s_presets_dirty               = false;
 std::atomic<int> s_active_preset{-1};
 
@@ -252,9 +247,6 @@ void run_preset(const PresetCommand &cmd)
             ESP_ERROR_CHECK_WITHOUT_ABORT(
                 loctek::goto_preset(static_cast<loctek::Preset>(cmd.index)));
         }
-        s_learning      = cmd.index;
-        s_learn_from    = height;
-        s_learn_started = now;
     }
     clear_active();
     s_commanded_from = height;
@@ -371,15 +363,6 @@ const char *link_status(const loctek::Stats &stats, bool link_up, int wake_attem
         if (height != settled_at) {
             settled_at    = height;
             settled_since = now;
-        }
-        if (s_learning >= 0) {
-            if (now - s_learn_started > LEARN_TIMEOUT) {
-                s_learning = -1;
-            } else if (height >= 0 && height != s_learn_from &&
-                       now - settled_since > SETTLE_TIME) {
-                remember_preset(s_learning, height);
-                s_learning = -1;
-            }
         }
         if (s_presets_dirty) {
             s_presets_dirty = false;

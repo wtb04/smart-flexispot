@@ -261,9 +261,10 @@ void steer_travel(int height_mm, TickType_t now)
         ESP_LOGI(TAG, "releasing at %d mm for %d mm", height_mm, target);
         end_travel("arrived");
         release();
-        // Only a release inside the margin is a landing worth learning from; a
-        // crossing means the run-on was already too small to matter.
-        if (was != Move::Stop && away <= margin) {
+        // A new target releases the old travel before it starts, so a release
+        // here while moving is always this travel arriving, and worth learning
+        // from whether it stopped inside the margin or had already crossed.
+        if (was != Move::Stop) {
             d_landing_target = target;
             d_landing_dir    = was;
             d_landing_last   = -1;
@@ -294,11 +295,14 @@ void land(int height_mm, TickType_t now)
         ESP_LOGI(TAG, "landed on %d mm", target);
         return;
     }
-    // Half the miss at a time: above a metre the box reports whole centimetres,
-    // and taking all of one would overshoot the other way next time.
+    // Below a metre the box reports millimetres, so the whole miss is taken and
+    // the next trip lands on it. Above, it reports whole centimetres, and taking
+    // all of one would overshoot the other way, so half at a time.
     int      &run_on = d_run_on[dir_index(d_landing_dir)];
     const int was    = run_on;
-    run_on = std::clamp(run_on + (past + (past > 0 ? 1 : -1)) / 2, 0, RUN_ON_MAX_MM);
+    const bool fine  = target < 1000 && height_mm < 1000;
+    const int  step  = fine ? past : (past + (past > 0 ? 1 : -1)) / 2;
+    run_on           = std::clamp(run_on + step, 0, RUN_ON_MAX_MM);
     ESP_LOGI(TAG, "landed %d mm %s %d mm; run-on %s is now %d mm", std::abs(past),
              past > 0 ? "past" : "short of", target, dir_name(d_landing_dir), run_on);
     if (run_on != was) {
@@ -345,15 +349,19 @@ void take_goto(int target_mm, TickType_t now)
     d_landing_target = -1;
     s_travelling_to.store(target_mm, std::memory_order_relaxed);
 
-    const int  here  = s_last_height.load(std::memory_order_relaxed);
-    const bool fresh = here >= 0 &&
-                       now - s_last_height_at.load(std::memory_order_acquire) <= HEIGHT_FRESH;
-    if (fresh) {
-        ESP_LOGI(TAG, "travelling from %d mm to %d mm", here, target_mm);
+    // Every move goes through this driver, so the last height the box said is
+    // where the desk still is, even once its display has gone dark. Starting
+    // from it lights the display at once, and the first fresh height takes
+    // over; a wrong start is caught by the moving-away guard within 15 mm.
+    const int here = s_last_height.load(std::memory_order_relaxed);
+    if (here >= 0) {
+        const bool fresh = now - s_last_height_at.load(std::memory_order_acquire) <= HEIGHT_FRESH;
+        ESP_LOGI(TAG, "travelling from %d mm%s to %d mm", here, fresh ? "" : " (last heard)",
+                 target_mm);
         steer_travel(here, now);
         return;
     }
-    // Steering starts on the first height the woken box reports.
+    // Never heard at all: steering starts on the first height the woken box reports.
     ESP_LOGI(TAG, "travelling to %d mm, waking the box to hear where it is", target_mm);
     ESP_ERROR_CHECK_WITHOUT_ABORT(turn_on());
     d_next_frame = xTaskGetTickCount();
