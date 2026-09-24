@@ -1,5 +1,7 @@
 #include "logbuf.h"
 
+#include "clock_math.h"
+
 #include "esp_check.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -29,7 +31,6 @@ struct Line {
     char         text[LINE_BYTES];
 };
 
-constexpr std::time_t CLOCK_SET_AFTER = 1600000000;
 
 Line        *s_lines    = nullptr;
 int          s_channels = 0;
@@ -85,7 +86,7 @@ void store(const char *line)
 
     portENTER_CRITICAL(&s_lock);
     Line &slot     = s_lines[channel * LINES_PER_CHANNEL + s_next[channel]];
-    slot.wall      = now >= CLOCK_SET_AFTER ? now : 0;
+    slot.wall      = rtc::plausible(now) ? now : 0;
     slot.uptime_us = uptime;
     slot.level     = level;
     std::memcpy(slot.tag, named, tag_len + 1);

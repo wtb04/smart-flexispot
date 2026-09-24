@@ -1,5 +1,7 @@
 #include "ical.h"
 
+#include "clock_math.h"
+
 #include "esp_check.h"
 #include "ical_secrets.h"
 
@@ -64,7 +66,6 @@ constexpr std::size_t BODY_MAX = 256 * 1024;
 
 // Nothing is fetched until the clock is right, or every event is filed against
 // 1970 and the page shows the wrong things in the wrong order.
-constexpr std::time_t CLOCK_SET_AFTER = 1600000000;
 
 // A feed that did not come back is usually the network still coming up, or a
 // server hanging up early; neither is worth half an hour of silence.
@@ -203,7 +204,7 @@ bool fetch_all()
 [[noreturn]] void ical_task(void *)
 {
     for (;;) {
-        if (std::time(nullptr) < CLOCK_SET_AFTER || !wifi::connected()) {
+        if (!rtc::plausible(std::time(nullptr)) || !wifi::connected()) {
             ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(2000));
             continue;
         }

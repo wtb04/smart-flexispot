@@ -124,7 +124,7 @@ esp_err_t start()
     utc.tm_year = from_bcd(raw[6]) + 100;  // the chip counts from 2000, tm from 1900
 
     const std::time_t when = utc_seconds(utc);
-    if (when <= 0) {
+    if (!plausible(when)) {
         ESP_LOGW(TAG, "backup clock reads %04d-%02d-%02d, ignoring it", utc.tm_year + 1900,
                  utc.tm_mon + 1, utc.tm_mday);
         return ESP_OK;

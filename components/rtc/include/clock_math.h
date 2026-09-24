@@ -4,6 +4,15 @@
 #include <ctime>
 
 namespace rtc {
+/** A clock that says before 2024 has not been set: the backup chip starts at
+ *  2000 and the system clock at 1970, and neither is a time to act on. */
+inline constexpr std::time_t kSetAfter = 1704067200;  // 2024-01-01 00:00 UTC
+
+inline bool plausible(std::time_t when)
+{
+    return when >= kSetAfter;
+}
+
 inline std::uint8_t from_bcd(std::uint8_t value)
 {
     return static_cast<std::uint8_t>((value >> 4) * 10 + (value & 0x0f));

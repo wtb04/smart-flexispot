@@ -1,5 +1,7 @@
 #include "wallclock.h"
 
+#include "clock_math.h"
+
 #include "esp_check.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -16,8 +18,6 @@ namespace {
 constexpr char TAG[] = "clock";
 
 constexpr TickType_t TICK = pdMS_TO_TICKS(1000);
-
-constexpr int PLAUSIBLE_YEAR = 2024;
 
 constexpr std::uint32_t TASK_STACK    = 3072;
 constexpr UBaseType_t   TASK_PRIORITY = 2;
@@ -37,7 +37,7 @@ std::atomic<bool> s_synced{false};
         std::tm           local{};
         localtime_r(&now, &local);
 
-        if (local.tm_year + 1900 >= PLAUSIBLE_YEAR) {
+        if (rtc::plausible(now)) {
             char text[6];
             std::strftime(text, sizeof(text), "%H:%M", &local);
             if (!s_synced.exchange(true, std::memory_order_relaxed)) {
