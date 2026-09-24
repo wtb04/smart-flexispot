@@ -117,6 +117,7 @@ void manual_clicked_cb(lv_event_t *);
 }  // namespace
 
 lv_obj_t *s_drawer        = nullptr;
+lv_obj_t *s_drawer_frame  = nullptr;  // clips the drawer to beside the rail as it slides
 namespace {
 lv_obj_t *s_drawer_toggle = nullptr;
 bool      s_drawer_open   = false;
@@ -210,19 +211,30 @@ namespace {
 constexpr std::uint32_t DRAWER_MS = 200;
 }  // namespace
 
-// A card of its own beside the rail: tucked under it, it showed through the
-// rail's rounded corners.
-void place_drawer(std::int32_t width)
+// A card of its own beside the rail, slid rather than resized: resizing it laid
+// every button out again on every frame. It slides inside a frame that starts
+// at the rail's edge, so it comes out from beside the rail and never over its
+// rounded corners, which tucking it under the rail showed through.
+constexpr std::int32_t DRAWER_FRAME_W = DRAWER_W + 2 * GAP;
+
+void place_drawer(std::int32_t shown)
 {
     const Layout l = layout();
-    lv_obj_set_width(s_drawer, width);
-    lv_obj_set_x(s_drawer, l.rail_right ? l.screen_w - RAIL_W - GAP - width : RAIL_W + GAP);
-    lv_obj_set_hidden(s_drawer, width <= 0);
+    lv_obj_set_x(s_drawer_frame, l.rail_right ? l.rail_x - DRAWER_FRAME_W : GAP + RAIL_W);
+    const std::int32_t tucked = DRAWER_W + GAP - shown;
+    lv_obj_set_x(s_drawer, l.rail_right ? GAP + tucked : GAP - tucked);
+    lv_obj_set_hidden(s_drawer_frame, shown <= 0);
 }
 namespace {
 void pad_drawer() { lv_obj_set_style_pad_all(s_drawer, PANEL_PAD, 0); }
 
-void drawer_width_cb(void *, std::int32_t value) { place_drawer(value); }
+std::int32_t s_drawer_shown = 0;  // how far it has come out, 0 to DRAWER_W
+
+void drawer_shown_cb(void *, std::int32_t value)
+{
+    s_drawer_shown = value;
+    place_drawer(value);
+}
 
 void animate_drawer(bool open)
 {
@@ -234,8 +246,8 @@ void animate_drawer(bool open)
     lv_anim_t anim;
     lv_anim_init(&anim);
     lv_anim_set_var(&anim, s_drawer);
-    lv_anim_set_exec_cb(&anim, drawer_width_cb);
-    lv_anim_set_values(&anim, lv_obj_get_width(s_drawer), open ? DRAWER_W : 0);
+    lv_anim_set_exec_cb(&anim, drawer_shown_cb);
+    lv_anim_set_values(&anim, s_drawer_shown, open ? DRAWER_W : 0);
     lv_anim_set_duration(&anim, DRAWER_MS);
     lv_anim_set_path_cb(&anim, open ? lv_anim_path_ease_out : lv_anim_path_ease_in);
     lv_anim_start(&anim);
@@ -248,9 +260,16 @@ void create_drawer(lv_obj_t *parent)
 {
     const Layout l = layout();
 
-    s_drawer = lv_obj_create(parent);
+    s_drawer_frame = lv_obj_create(parent);
+    lv_obj_set_pos(s_drawer_frame, 0, 0);
+    lv_obj_set_size(s_drawer_frame, DRAWER_FRAME_W, l.screen_h);
+    theme::style_panel(s_drawer_frame, theme::panel, 0);
+    lv_obj_set_style_bg_opa(s_drawer_frame, LV_OPA_TRANSP, 0);
+    lv_obj_remove_flag(s_drawer_frame, LV_OBJ_FLAG_CLICKABLE);
+
+    s_drawer = lv_obj_create(s_drawer_frame);
     lv_obj_set_y(s_drawer, GAP);
-    lv_obj_set_height(s_drawer, l.screen_h - 2 * GAP);
+    lv_obj_set_size(s_drawer, DRAWER_W, l.screen_h - 2 * GAP);
     place_drawer(0);
     theme::style_panel(s_drawer, theme::panel, theme::radius::card);
     // It lies over the same surface, so a ring of background makes the card gap.
