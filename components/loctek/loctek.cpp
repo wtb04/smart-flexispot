@@ -83,6 +83,8 @@ StaticQueue_t s_press_ctrl;
 Press         s_press_storage[PRESS_QUEUE_LEN];
 QueueHandle_t s_presses = nullptr;
 
+std::atomic<bool> s_started{false};  // set last, once the tasks are running
+
 TaskHandle_t s_driver = nullptr;
 
 StaticTask_t s_driver_ctrl;
@@ -541,7 +543,8 @@ esp_err_t init_uart()
 
 esp_err_t post_press(Press::Kind kind, Key key)
 {
-    ESP_RETURN_ON_FALSE(s_presses != nullptr, ESP_ERR_INVALID_STATE, TAG, "not started");
+    ESP_RETURN_ON_FALSE(s_started.load(std::memory_order_acquire), ESP_ERR_INVALID_STATE, TAG,
+                        "not started");
     const Press press{kind, key};
     if (xQueueSend(s_presses, &press, 0) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
@@ -554,7 +557,8 @@ esp_err_t post_press(Press::Kind kind, Key key)
 
 esp_err_t start(HeightHandler on_height)
 {
-    ESP_RETURN_ON_FALSE(s_presses == nullptr, ESP_ERR_INVALID_STATE, TAG, "already started");
+    ESP_RETURN_ON_FALSE(!s_started.load(std::memory_order_acquire), ESP_ERR_INVALID_STATE, TAG,
+                        "already started");
 
     s_on_height = on_height;
     load_run_on();
@@ -568,10 +572,9 @@ esp_err_t start(HeightHandler on_height)
                                  &s_move_ctrl);
     s_gotos = xQueueCreateStatic(1, sizeof(int), reinterpret_cast<std::uint8_t *>(s_goto_storage),
                                  &s_goto_ctrl);
-    QueueHandle_t presses =
-        xQueueCreateStatic(PRESS_QUEUE_LEN, sizeof(Press),
-                           reinterpret_cast<std::uint8_t *>(s_press_storage), &s_press_ctrl);
-    ESP_RETURN_ON_FALSE(s_moves != nullptr && s_gotos != nullptr && presses != nullptr,
+    s_presses = xQueueCreateStatic(PRESS_QUEUE_LEN, sizeof(Press),
+                                   reinterpret_cast<std::uint8_t *>(s_press_storage), &s_press_ctrl);
+    ESP_RETURN_ON_FALSE(s_moves != nullptr && s_gotos != nullptr && s_presses != nullptr,
                         ESP_ERR_NO_MEM, TAG, "queues");
 
     s_rx_stack = static_cast<StackType_t *>(
@@ -591,8 +594,7 @@ esp_err_t start(HeightHandler on_height)
                                                     TASK_CORE);
     ESP_RETURN_ON_FALSE(rx != nullptr, ESP_ERR_NO_MEM, TAG, "rx task");
 
-    // Last, since every public call checks it.
-    s_presses = presses;
+    s_started.store(true, std::memory_order_release);
 
     ESP_LOGI(TAG, "uart%d tx=%d rx=%d wake=%d, desk %d-%d mm", CONFIG_LOCTEK_UART_NUM,
              CONFIG_LOCTEK_TX_GPIO, CONFIG_LOCTEK_RX_GPIO, CONFIG_LOCTEK_WAKE_GPIO,
@@ -602,7 +604,8 @@ esp_err_t start(HeightHandler on_height)
 
 esp_err_t request_move(Move direction)
 {
-    ESP_RETURN_ON_FALSE(s_presses != nullptr, ESP_ERR_INVALID_STATE, TAG, "not started");
+    ESP_RETURN_ON_FALSE(s_started.load(std::memory_order_acquire), ESP_ERR_INVALID_STATE, TAG,
+                        "not started");
     s_hand.store(direction != Move::Stop, std::memory_order_relaxed);
     xQueueOverwrite(s_moves, &direction);
     wake_driver();
@@ -616,7 +619,8 @@ bool in_range(int height_mm)
 
 esp_err_t goto_height(int height_mm)
 {
-    ESP_RETURN_ON_FALSE(s_presses != nullptr, ESP_ERR_INVALID_STATE, TAG, "not started");
+    ESP_RETURN_ON_FALSE(s_started.load(std::memory_order_acquire), ESP_ERR_INVALID_STATE, TAG,
+                        "not started");
     ESP_RETURN_ON_FALSE(in_range(height_mm), ESP_ERR_INVALID_ARG, TAG,
                         "%d mm is outside the desk's range", height_mm);
     ESP_RETURN_ON_FALSE(!s_hand.load(std::memory_order_relaxed), ESP_ERR_INVALID_STATE, TAG,
