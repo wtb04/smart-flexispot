@@ -67,6 +67,7 @@ constexpr esp_io_expander_pin_num_t CHARGE_ENABLE_PIN = IO_EXPANDER_PIN_NUM_7;
 
 constexpr float CURRENT_DEADBAND_A = 0.01f;
 
+// See set_charging() for why a pack below this is never charged.
 constexpr float CHARGE_SAFE_VOLTS = 6.0f;
 
 // Active low, and nothing to do with USB quick-charge despite the name: it
@@ -255,6 +256,11 @@ esp_err_t set_charging(bool enable)
     ESP_RETURN_ON_ERROR(apply_charging(enable), TAG, "charge pins");
     ESP_LOGI(TAG, "charger %s", enable ? "enabled (fast)" : "disabled");
     return ESP_OK;
+}
+
+bool charging_enabled()
+{
+    return s_charging_wanted;
 }
 
 // Re-initialising the 0x44 expander resets it to power-on defaults, clearing

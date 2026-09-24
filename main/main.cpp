@@ -68,8 +68,15 @@ void on_setting(ui::Setting setting, bool on)
 {
     switch (setting) {
         case ui::Setting::Charging:
+            // The battery task switches it, off the screen's task: it is an I2C
+            // transaction and may be refused for a pack too flat to charge.
             settings::set(settings::Key::Charging, on);
-            ESP_ERROR_CHECK_WITHOUT_ABORT(power::set_charging(on));
+            battery::refresh();
+            if (power::State state{}; on && power::last(state) && !state.present) {
+                ESP_ERROR_CHECK_WITHOUT_ABORT(ui::notify(
+                    "", "No battery to charge. If one is in, it is too flat: take it out and put it back",
+                    "warning", 6000));
+            }
             break;
         case ui::Setting::PresenceGate:
             settings::set(settings::Key::PresenceGate, on);

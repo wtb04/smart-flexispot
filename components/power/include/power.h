@@ -18,8 +18,14 @@ struct State {
 esp_err_t init();
 
 /** The Tab5 boots with charging disabled, so without this the pack never charges
- *  whatever is plugged in. */
+ *  whatever is plugged in. Refused, with ESP_ERR_INVALID_STATE, for a pack below
+ *  6 V: the charger must not be switched on into a collapsed or absent pack, as
+ *  in M5's own firmware, and the Tab5 documentation says such a pack has to be
+ *  taken out and put back before it will charge. */
 esp_err_t set_charging(bool enable);
+
+/** Whether the charger is switched on, as opposed to asked for. */
+bool charging_enabled();
 
 /** Puts CHG_EN back: re-initialising the IO expander clears it, and the BSP does
  *  that when enabling Wi-Fi. */
