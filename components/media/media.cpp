@@ -36,12 +36,15 @@ void record(bool playing, bool have_art, bool art_ok, bool hardware, int decode_
     portEXIT_CRITICAL(&s_status_lock);
 }
 
-constexpr std::uint32_t TASK_STACK    = 4096;  // measured: uses 2.8 KB
+// The software decoder runs on this stack when the engine cannot take a cover,
+// as for a video's thumbnail, and needs far more than the fetch does. In PSRAM,
+// since the task never touches flash, so it costs no internal RAM.
+constexpr std::uint32_t TASK_STACK    = 12288;
 constexpr UBaseType_t   TASK_PRIORITY = 2;
 constexpr BaseType_t    TASK_CORE     = 0;
 
 StaticTask_t s_task_ctrl;
-StackType_t  s_task_stack[TASK_STACK];
+StackType_t *s_task_stack = nullptr;
 
 ArtHandler s_on_art = nullptr;
 
@@ -147,8 +150,9 @@ void take_cover(const jpeg::Picture &picture, void *)
     }
     s_next          = 1 - s_next;
     s_last_hardware = picture.hardware;
-    ESP_LOGI(TAG, "cover %dx%d%s%s -> %d", picture.width, picture.height,
-             picture.grey ? " grey" : "", picture.hardware ? "" : " in software", kArtSize);
+    ESP_LOGI(TAG, "cover %dx%d%s%s -> %d, stack left %u", picture.width, picture.height,
+             picture.grey ? " grey" : "", picture.hardware ? "" : " in software", kArtSize,
+             static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
     if (s_on_art != nullptr) {
         s_on_art(Art::Ready, art);
     }
@@ -246,6 +250,9 @@ esp_err_t start(const char *origin, ArtHandler on_art)
         ESP_RETURN_ON_FALSE(buffer != nullptr, ESP_ERR_NO_MEM, TAG, "art buffer");
     }
 
+    s_task_stack = static_cast<StackType_t *>(
+        heap_caps_malloc(TASK_STACK * sizeof(StackType_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    ESP_RETURN_ON_FALSE(s_task_stack != nullptr, ESP_ERR_NO_MEM, TAG, "task stack");
     s_task = xTaskCreateStaticPinnedToCore(media_task, "media", TASK_STACK, nullptr, TASK_PRIORITY,
                                            s_task_stack, &s_task_ctrl, TASK_CORE);
     ESP_RETURN_ON_FALSE(s_task != nullptr, ESP_ERR_NO_MEM, TAG, "task");

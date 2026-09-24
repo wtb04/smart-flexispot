@@ -28,7 +28,10 @@ esp_err_t start();
 /** Decodes and hands the picture to `use`, holding the engine meanwhile so
  *  nothing else can overwrite it. A picture bigger than the box is decoded in
  *  software at a half, quarter or eighth of its size until it fits, and
- *  refused if even that will not. From any task; one decode at a time. */
+ *  refused if even that will not. From any task; one decode at a time.
+ *
+ *  The software path runs on the caller's stack and needs several kilobytes
+ *  of it: give a task that decodes 8 KB or more. */
 bool decode(const void *data, std::size_t length, int max_w, int max_h, Use use, void *context);
 
 /** The same, copied out as RGB565 into `out`, which holds max_w * max_h pixels
