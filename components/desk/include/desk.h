@@ -1,16 +1,37 @@
 #pragma once
 
 #include "esp_err.h"
-#include "ui.h"
+
+#include <cstdint>
 
 namespace desk {
-esp_err_t start();
+enum class Move : std::int8_t {
+    Down = -1,
+    Stop = 0,
+    Up   = 1,
+};
 
-void on_move(ui::Move direction);
+enum class Link : std::uint8_t {
+    Wire,       // the UART on this board
+    Bluetooth,  // through the companion
+};
+
+/** How the desk shows itself. Each may be null. Called from the desk's own
+ *  tasks, so each must return at once. */
+struct View {
+    void (*preset_active)(int index, bool active);
+    void (*height)(int height_mm);  // negative when not known
+    void (*available)(bool linked);
+    void (*notice)(const char *message, const char *level, int timeout_ms);
+};
+
+esp_err_t start(Link link, const View &view);
+
+void on_move(Move direction);
 
 /** A move asked for over the network is a hold with nobody's finger on it, so
  *  it is let go of after a moment unless asked for again. */
-void on_network_move(ui::Move direction);
+void on_network_move(Move direction);
 
 /** Tap travels to a preset, hold stores the current height. */
 void on_preset(int index, bool store);

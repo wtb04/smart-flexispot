@@ -37,6 +37,33 @@ void on_brightness_changed(int percent)
 
 void restart_for_desk(bool bluetooth);
 
+void on_move(ui::Move direction)
+{
+    desk::on_move(direction == ui::Move::Up     ? desk::Move::Up
+                  : direction == ui::Move::Down ? desk::Move::Down
+                                                : desk::Move::Stop);
+}
+
+void show_preset_active(int index, bool active)
+{
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_preset_active(index, active));
+}
+
+void show_height(int height_mm)
+{
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_height(height_mm));
+}
+
+void show_desk_available(bool linked)
+{
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_desk_available(linked));
+}
+
+void show_notice(const char *message, const char *level, int timeout_ms)
+{
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::notify("", message, level, timeout_ms));
+}
+
 void on_setting(ui::Setting setting, bool on)
 {
     switch (setting) {
@@ -163,13 +190,28 @@ extern "C" void app_main(void)
 
     const bool flipped = settings::enabled(settings::Key::Flipped);
     ESP_ERROR_CHECK(board::init(flipped));
-    const ui::Handlers handlers{desk::on_move,      desk::on_preset,      on_brightness_changed,
-                                room::on_media,     room::on_setpoint,    room::on_mode,
-                                room::on_lights,    room::on_light,       room::on_dial_toggle,
-                                diagnostics::refresh, on_setting,         on_volume,
-                                on_restart,           on_radar_page,      diagnostics::logs,
-                                on_primary,           on_rail_side,       on_orientation,
-                                on_screen};
+    // Named, since several share a signature and a swap would still compile.
+    const ui::Handlers handlers{
+        .move        = on_move,
+        .preset      = desk::on_preset,
+        .brightness  = on_brightness_changed,
+        .media       = room::on_media,
+        .setpoint    = room::on_setpoint,
+        .mode        = room::on_mode,
+        .lights      = room::on_lights,
+        .light       = room::on_light,
+        .dial_toggle = room::on_dial_toggle,
+        .diagnostics = diagnostics::refresh,
+        .setting     = on_setting,
+        .volume      = on_volume,
+        .restart     = on_restart,
+        .radar       = on_radar_page,
+        .log         = diagnostics::logs,
+        .primary     = on_primary,
+        .rail_side   = on_rail_side,
+        .orientation = on_orientation,
+        .screen      = on_screen,
+    };
     const int brightness = settings::get(settings::Key::Brightness);
     ESP_ERROR_CHECK(ui::init(handlers, brightness,
                              static_cast<std::uint32_t>(settings::get(settings::Key::Accent)),
@@ -187,7 +229,16 @@ extern "C" void app_main(void)
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_notification_volume(volume));
 
     room::init();
-    ESP_ERROR_CHECK_WITHOUT_ABORT(desk::start());
+    const desk::View desk_view{
+        .preset_active = show_preset_active,
+        .height        = show_height,
+        .available     = show_desk_available,
+        .notice        = show_notice,
+    };
+    ESP_ERROR_CHECK_WITHOUT_ABORT(desk::start(settings::enabled(settings::Key::DeskBluetooth)
+                                                  ? desk::Link::Bluetooth
+                                                  : desk::Link::Wire,
+                                              desk_view));
     ESP_ERROR_CHECK_WITHOUT_ABORT(rtc::start());
 
     ESP_ERROR_CHECK_WITHOUT_ABORT(battery::start());

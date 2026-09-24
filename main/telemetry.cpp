@@ -82,11 +82,11 @@ void on_entities(const hass::ws::EntityStore &store)
 
 void on_move(hass::protocol::Move direction)
 {
-    ui::Move move = ui::Move::Stop;
+    desk::Move move = desk::Move::Stop;
     switch (direction) {
-        case hass::protocol::Move::Up:   move = ui::Move::Up; break;
-        case hass::protocol::Move::Down: move = ui::Move::Down; break;
-        default:                         move = ui::Move::Stop; break;
+        case hass::protocol::Move::Up:   move = desk::Move::Up; break;
+        case hass::protocol::Move::Down: move = desk::Move::Down; break;
+        default:                         move = desk::Move::Stop; break;
     }
     ESP_LOGI(TAG, "move %d requested", static_cast<int>(move));
     desk::on_network_move(move);

@@ -1,6 +1,7 @@
 #include "desk.h"
 
 #include "ble.h"
+#include "deskproto.h"
 #include "esp_check.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -9,7 +10,6 @@
 #include "loctek.h"
 #include "nvs.h"
 #include "nvs_flash.h"
-#include "settings.h"
 
 #include <atomic>
 #include <cstdlib>
@@ -18,6 +18,36 @@
 namespace desk {
 namespace {
 constexpr char TAG[] = "desk";
+
+View s_view{};
+
+void show_preset_active(int index, bool active)
+{
+    if (s_view.preset_active != nullptr) {
+        s_view.preset_active(index, active);
+    }
+}
+
+void show_height(int height_mm)
+{
+    if (s_view.height != nullptr) {
+        s_view.height(height_mm);
+    }
+}
+
+void show_available(bool linked)
+{
+    if (s_view.available != nullptr) {
+        s_view.available(linked);
+    }
+}
+
+void show_notice(const char *message, const char *level, int timeout_ms)
+{
+    if (s_view.notice != nullptr) {
+        s_view.notice(message, level, timeout_ms);
+    }
+}
 constexpr char kConnected[] = "connected";
 constexpr char kAsleep[]    = "desk display asleep";
 constexpr char kNoReply[]   = "disconnected";
@@ -120,7 +150,7 @@ void publish_active(int height_mm, bool linked, bool moving)
         if (active) {
             standing_at = i;
         }
-        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_preset_active(i, active));
+        show_preset_active(i, active);
     }
     s_active_preset.store(standing_at, std::memory_order_relaxed);
 }
@@ -129,7 +159,7 @@ void clear_active()
 {
     s_active_preset.store(-1, std::memory_order_relaxed);
     for (int i = 0; i < deskproto::kPresetCount; ++i) {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_preset_active(i, false));
+        show_preset_active(i, false);
     }
 }
 
@@ -221,15 +251,14 @@ void run_preset(const PresetCommand &cmd)
             }
         }
         remember_preset(cmd.index, height);
-        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::notify("", "Preset saved", "success", 2500));
+        show_notice("Preset saved", "success", 2500);
         return;
     }
 
     const TickType_t now = xTaskGetTickCount();
     if (cmd.index >= deskproto::kBoxPresets) {
         if (s_preset_mm[cmd.index] < 0) {
-            ESP_ERROR_CHECK_WITHOUT_ABORT(
-                ui::notify("", "Hold it to save the height it goes to", "info", 3000));
+            show_notice("Hold it to save the height it goes to", "info", 3000);
             return;
         }
         if (travelling() && s_travel_index == cmd.index) {
@@ -289,7 +318,7 @@ void on_proxy_status(const deskproto::Status &status)
 void on_height(int height_mm)
 {
     if (s_height_mm.exchange(height_mm, std::memory_order_relaxed) != height_mm) {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_height(height_mm));
+        show_height(height_mm);
     }
 }
 
@@ -372,7 +401,7 @@ const char *link_status(const loctek::Stats &stats, bool link_up, int wake_attem
         if (network_until != 0 && static_cast<std::int32_t>(now - network_until) >= 0) {
             s_network_hold_until.store(0, std::memory_order_relaxed);
             ESP_LOGW(TAG, "a move from the network was not asked for again, letting go");
-            on_move(ui::Move::Stop);
+            on_move(Move::Stop);
         }
         const bool commanded = s_commanded_at != 0;
         if (commanded) {
@@ -392,9 +421,8 @@ const char *link_status(const loctek::Stats &stats, bool link_up, int wake_attem
             shown = status;
             const bool linked = status == kConnected;
             s_linked.store(linked, std::memory_order_relaxed);
-            ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_desk_available(linked));
-            ESP_ERROR_CHECK_WITHOUT_ABORT(
-                ui::set_height(linked ? s_height_mm.load(std::memory_order_relaxed) : -1));
+            show_available(linked);
+            show_height(linked ? s_height_mm.load(std::memory_order_relaxed) : -1);
             ESP_LOGI(TAG, "%s", status);
 #if CONFIG_LOCTEK_NUDGE_WAKE
             if (status == kAsleep) {
@@ -422,8 +450,9 @@ const char *link_status(const loctek::Stats &stats, bool link_up, int wake_attem
 
 }  // namespace
 
-esp_err_t start()
+esp_err_t start(Link link, const View &view)
 {
+    s_view = view;
     QueueHandle_t presets =
         xQueueCreateStatic(PRESET_QUEUE_LEN, sizeof(PresetCommand),
                            reinterpret_cast<std::uint8_t *>(s_preset_queue_storage),
@@ -433,7 +462,7 @@ esp_err_t start()
 
     load_presets();
 
-    s_over_ble = settings::enabled(settings::Key::DeskBluetooth);
+    s_over_ble = link == Link::Bluetooth;
     ESP_LOGI(TAG, "driving the desk over %s", s_over_ble ? "bluetooth" : "the local wire");
     // Heights arrive on the radio host task or the UART receive task; neither
     // may wait on the screen, so the pump carries them over.
@@ -497,9 +526,9 @@ const char *motion()
     }
 }
 
-void on_move(ui::Move direction)
+void on_move(Move direction)
 {
-    const int motion = direction == ui::Move::Up ? 1 : direction == ui::Move::Down ? -1 : 0;
+    const int motion = static_cast<int>(direction);
     if (motion != 0) {
         clear_active();
     }
@@ -517,14 +546,14 @@ void on_move(ui::Move direction)
     }
 }
 
-void on_network_move(ui::Move direction)
+void on_network_move(Move direction)
 {
     if (!linked()) {
         ESP_LOGW(TAG, "ignoring a move from the network: the desk is not linked");
         return;
     }
     s_network_hold_until.store(
-        direction == ui::Move::Stop ? 0 : xTaskGetTickCount() + NETWORK_HOLD,
+        direction == Move::Stop ? 0 : xTaskGetTickCount() + NETWORK_HOLD,
         std::memory_order_relaxed);
     on_move(direction);
 }
