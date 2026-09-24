@@ -36,7 +36,9 @@ constexpr std::uint16_t DIE_INA226      = 0x2260;
 constexpr std::uint16_t CONFIG_VALUE = (0b010 << 9) | (0b100 << 6) | (0b100 << 3) | 0b111;
 
 constexpr float SHUNT_OHMS       = 0.005f;
-constexpr float MAX_CURRENT_AMPS = 2.0f;
+// As M5 has it: the pack takes about 0.4 A charging and more discharging under
+// load, and at 2 A full scale the register overflows into nonsense.
+constexpr float MAX_CURRENT_AMPS = 8.192f;
 constexpr float CURRENT_LSB      = MAX_CURRENT_AMPS / 32768.0f;
 constexpr float BUS_VOLTAGE_LSB  = 0.00125f;
 

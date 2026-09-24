@@ -28,6 +28,11 @@ constexpr std::uint8_t FLAG_VOLTAGE_LOW = 1 << 1;
 
 constexpr std::uint8_t CTRL0_STOP = 1 << 6;
 
+// Alarm, timer and update: flags in FLAG, enables in CTRL0, the same bits.
+// Their interrupt line wakes the power controller, so one armed by other
+// firmware stays asserted while this one runs, which uses none of them.
+constexpr std::uint8_t IRQ_BITS = (1 << 3) | (1 << 4) | (1 << 5);
+
 constexpr std::uint8_t CTRL1_BACKUP = (1 << 4) | (1 << 5);
 
 i2c_master_dev_handle_t s_dev   = nullptr;
@@ -107,6 +112,15 @@ esp_err_t start()
 
     std::uint8_t flags = 0;
     ESP_RETURN_ON_ERROR(read_bytes(REG_FLAG, &flags, 1), TAG, "read flags");
+    std::uint8_t ctrl0 = 0;
+    if ((flags & IRQ_BITS) != 0 || (read_bytes(REG_CTRL0, &ctrl0, 1) == ESP_OK && (ctrl0 & IRQ_BITS) != 0)) {
+        ESP_LOGI(TAG, "clearing interrupts left armed (flags 0x%02x, ctrl0 0x%02x)", flags, ctrl0);
+        ESP_ERROR_CHECK_WITHOUT_ABORT(write_byte(REG_FLAG, static_cast<std::uint8_t>(flags & ~IRQ_BITS)));
+        if (read_bytes(REG_CTRL0, &ctrl0, 1) == ESP_OK) {
+            ESP_ERROR_CHECK_WITHOUT_ABORT(
+                write_byte(REG_CTRL0, static_cast<std::uint8_t>(ctrl0 & ~IRQ_BITS)));
+        }
+    }
     if ((flags & FLAG_VOLTAGE_LOW) != 0) {
         ESP_LOGI(TAG, "backup clock lost its time, waiting for the network");
         return ESP_OK;
