@@ -1,5 +1,7 @@
 #include "radar_page.h"
 
+#include "ui_internal.h"
+
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -15,6 +17,13 @@
 
 namespace ui {
 namespace {
+void ask_details(const char *hex, const char *callsign)
+{
+    if (detail::s_handlers.details != nullptr) {
+        detail::s_handlers.details(hex, callsign);
+    }
+}
+
 constexpr float DEG  = 3.14159265f / 180.0f;
 // Must hold the gap plus a whole line box: at 24 the N and S labels landed
 // outside the scope object and were clipped against the ring.
@@ -399,7 +408,7 @@ void scope_clicked(lv_event_t *event)
             s_details        = radar::Details{};
             s_details_hex[0] = '\0';
             s_picture        = Picture::Looking;
-            radar::request_details(s_chosen, s_plots[best].aircraft->flight);
+            ask_details(s_chosen, s_plots[best].aircraft->flight);
         }
     }
     show_radar(*s_last);
@@ -1393,7 +1402,7 @@ void show_radar(const radar::Snapshot &snapshot)
             }
             if (std::strcmp(s_details_hex, s_chosen) != 0) {
                 s_picture = Picture::Looking;
-                radar::request_details(s_chosen, s_plots[at].aircraft->flight);
+                ask_details(s_chosen, s_plots[at].aircraft->flight);
             }
         } else {
             s_chosen[0] = '\0';

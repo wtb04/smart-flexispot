@@ -114,7 +114,18 @@ void on_rail_side(bool right)
 
 void on_orientation(bool flipped)
 {
+    board::set_flipped(flipped);
     settings::set(settings::Key::Flipped, flipped);
+}
+
+void on_details(const char *hex, const char *callsign)
+{
+    radar::request_details(hex, callsign);
+}
+
+void on_journey(std::int64_t arrive_by, bool to_work)
+{
+    travel::want(arrive_by, to_work ? travel::Place::Work : travel::Place::Study);
 }
 
 void on_radar_page(bool showing, bool reachable)
@@ -211,6 +222,8 @@ extern "C" void app_main(void)
         .rail_side   = on_rail_side,
         .orientation = on_orientation,
         .screen      = on_screen,
+        .details     = on_details,
+        .journey     = on_journey,
     };
     const int brightness = settings::get(settings::Key::Brightness);
     ESP_ERROR_CHECK(ui::init(handlers, brightness,

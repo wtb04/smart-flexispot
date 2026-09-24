@@ -106,6 +106,13 @@ using OrientationHandler = void (*)(bool flipped);
  *  once presence gating has hidden it away entirely. */
 using RadarHandler = void (*)(bool showing, bool reachable);
 
+/** A plane picked on the radar: find out who it is. */
+using DetailsHandler = void (*)(const char *hex, const char *callsign);
+
+/** What it takes to be at the next appointment by `arrive_by`, in unix
+ *  seconds; zero forgets the question. */
+using JourneyHandler = void (*)(std::int64_t arrive_by, bool to_work);
+
 enum class Subsystem : std::uint8_t {
     Network,
     HomeAssistant,
@@ -186,6 +193,8 @@ struct Handlers {
     RailSideHandler    rail_side;
     OrientationHandler orientation;
     ScreenHandler      screen;
+    DetailsHandler     details;
+    JourneyHandler     journey;
 };
 
 /** Requires the LVGL port to be running. A zero accent keeps the built-in

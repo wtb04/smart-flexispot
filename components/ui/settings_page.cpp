@@ -58,7 +58,6 @@ void flip_clicked_cb(lv_event_t *e)
         return;
     }
     s_flipped = flipped;
-    board::set_flipped(flipped);
     paint_choice(s_flip_buttons, flipped);
     if (s_handlers.orientation != nullptr) {
         s_handlers.orientation(flipped);

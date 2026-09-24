@@ -1,5 +1,7 @@
 #include "calendar_page.h"
 
+#include "ui_internal.h"
+
 #include "fonts/units_font.h"
 #include "ical.h"
 #include "icons.h"
@@ -1199,9 +1201,10 @@ void show_calendar()
     // Asked well before it is shown. Shifts go to work, the rest to the timetable.
     constexpr std::int64_t ASK_WITHIN = 5 * 3600;
     const bool want = count > 0 && ahead[0].start > now && ahead[0].start - now < ASK_WITHIN;
-    travel::want(want ? ahead[0].start : 0,
-                 count > 0 && ahead[0].feed == FEED_WORK ? travel::Place::Work
-                                                         : travel::Place::Study);
+    if (detail::s_handlers.journey != nullptr) {
+        detail::s_handlers.journey(want ? ahead[0].start : 0,
+                                   count > 0 && ahead[0].feed == FEED_WORK);
+    }
 
     pick_journey(want, now);
     show_next(count > 0 ? &ahead[0] : nullptr, now);
