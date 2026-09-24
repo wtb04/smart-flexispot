@@ -189,6 +189,11 @@ lv_obj_t *splash_bar(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int3
     return bar;
 }
 
+// Asked for from other tasks, drawn by apply_splash() on the LVGL task.
+std::atomic<int>  s_steps_wanted{0};
+std::atomic<bool> s_done_wanted{false};
+int               s_steps_shown = 0;
+
 void splash_mark(int current)
 {
     for (int i = 0; i < SPLASH_STEP_COUNT; ++i) {
@@ -355,37 +360,12 @@ void build_splash()
     lv_timer_set_repeat_count(s_splash_guard, 1);
 }
 
-}  // namespace ui::detail
-
-namespace ui {
-using namespace detail;
-
-esp_err_t splash_step(const char *label)
+void apply_splash()
 {
-    ESP_RETURN_ON_FALSE(s_splash != nullptr, ESP_ERR_INVALID_STATE, TAG, "not initialised");
     if (!s_splash_up) {
-        return ESP_OK;
+        return;
     }
-    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
-    for (int i = 0; i < SPLASH_STEP_COUNT; ++i) {
-        if (label != nullptr && std::strcmp(label, s_splash_steps[i].key) == 0) {
-            splash_mark(i + 1);
-        }
-    }
-    lvgl_port_unlock();
-    return ESP_OK;
-}
-
-esp_err_t splash_done()
-{
-    ESP_RETURN_ON_FALSE(s_splash != nullptr, ESP_ERR_INVALID_STATE, TAG, "not initialised");
-    // Told every two seconds once everything is up; only the first time needs the screen.
-    if (!s_splash_up) {
-        return ESP_OK;
-    }
-    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
-
-    if (s_splash_up) {
+    if (s_done_wanted.load(std::memory_order_relaxed)) {
         ESP_LOGI(TAG, "splash: ready after %u ms",
                  static_cast<unsigned>(lv_tick_elaps(s_splash_start)));
         s_splash_up    = false;
@@ -395,8 +375,40 @@ esp_err_t splash_done()
             lv_timer_delete(s_splash_guard);
             s_splash_guard = nullptr;
         }
+        return;
     }
-    lvgl_port_unlock();
+    const int steps = s_steps_wanted.load(std::memory_order_relaxed);
+    if (steps > s_steps_shown) {
+        s_steps_shown = steps;
+        splash_mark(steps);
+    }
+}
+
+}  // namespace ui::detail
+
+namespace ui {
+using namespace detail;
+
+esp_err_t splash_step(const char *label)
+{
+    for (int i = 0; i < SPLASH_STEP_COUNT; ++i) {
+        if (label != nullptr && std::strcmp(label, s_splash_steps[i].key) == 0) {
+            int wanted = s_steps_wanted.load(std::memory_order_relaxed);
+            while (wanted < i + 1 &&
+                   !s_steps_wanted.compare_exchange_weak(wanted, i + 1, std::memory_order_relaxed)) {
+            }
+        }
+    }
+    request_apply();
+    return ESP_OK;
+}
+
+esp_err_t splash_done()
+{
+    // Told every two seconds for as long as everything is up; only the first counts.
+    if (!s_done_wanted.exchange(true, std::memory_order_relaxed)) {
+        request_apply();
+    }
     return ESP_OK;
 }
 }  // namespace ui

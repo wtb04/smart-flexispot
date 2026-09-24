@@ -30,7 +30,8 @@ constexpr std::int32_t LOG_W        = 860;
 constexpr std::int32_t LOG_H        = 560;
 constexpr std::int32_t CHIP_H       = 48;
 constexpr std::int32_t CHIP_GAP     = 8;
-constexpr std::int32_t WARN_W       = 170;
+constexpr std::int32_t WARN_W       = 200;
+constexpr std::int32_t LOG_GAP      = 20;  // between the chips and the lines
 constexpr std::int32_t DETAIL_W     = 660;
 constexpr std::int32_t DETAIL_ROW_GAP = 2;
 constexpr std::int32_t DETAIL_MAX_FRAC = 80;
@@ -94,9 +95,9 @@ void refresh_diag_summary()
     }
     char text[48];
     if (poor == 0) {
-        std::snprintf(text, sizeof(text), "All %d parts healthy", s_card_count);
+        std::snprintf(text, sizeof(text), "All healthy");
     } else {
-        std::snprintf(text, sizeof(text), "%d of %d need attention", poor, s_card_count);
+        std::snprintf(text, sizeof(text), "%d need%s attention", poor, poor == 1 ? "s" : "");
     }
     theme::set_text(s_diag_summary, text);
     theme::set_text_color(s_diag_summary, poor == 0 ? theme::secondary : theme::amber);
@@ -398,17 +399,18 @@ void build_log_overlay(lv_obj_t *parent)
 
     const std::int32_t width  = LOG_W - 2 * DETAIL_PAD;
     const std::int32_t chip_y = ModalOverlay::header_height() + HEADER_GAP;
-    const std::int32_t body_y = chip_y + CHIP_H + CHIP_GAP;
+    const std::int32_t body_y = chip_y + CHIP_H + LOG_GAP;
     const std::int32_t height = LOG_H - 2 * DETAIL_PAD - body_y;
 
     // Whose lines: all of them, or one card's. Scrolls sideways when they do not fit.
     lv_obj_t *chips = lv_obj_create(card);
     lv_obj_set_pos(chips, 0, chip_y);
-    lv_obj_set_size(chips, width - WARN_W - CHIP_GAP, CHIP_H);
+    lv_obj_set_size(chips, width, CHIP_H);
     theme::style_panel(chips, theme::panel, 0);
     lv_obj_set_style_bg_opa(chips, LV_OPA_TRANSP, 0);
     lv_obj_set_flex_flow(chips, LV_FLEX_FLOW_ROW);
     lv_obj_set_style_pad_column(chips, CHIP_GAP, 0);
+    lv_obj_set_scrollable(chips, true);  // the panel style turns it off
     lv_obj_set_scroll_dir(chips, LV_DIR_HOR);
     lv_obj_set_scrollbar_mode(chips, LV_SCROLLBAR_MODE_OFF);
     for (int i = 0; i <= s_card_count; ++i) {
@@ -422,9 +424,9 @@ void build_log_overlay(lv_obj_t *parent)
         s_log_chip[i] = chip;
     }
 
-    s_log_warn = theme::make_button(card, "Warnings", theme::panel_light, fonts::size_20());
-    lv_obj_set_pos(s_log_warn, width - WARN_W, chip_y);
-    lv_obj_set_size(s_log_warn, WARN_W, CHIP_H);
+    s_log_warn = theme::make_button(card, "Warnings only", theme::panel_light, fonts::size_20());
+    lv_obj_set_size(s_log_warn, WARN_W, ModalOverlay::header_height());
+    lv_obj_align(s_log_warn, LV_ALIGN_TOP_RIGHT, -(ModalOverlay::header_height() + CHIP_GAP), -8);
     theme::fill_accent(s_log_warn, LV_STATE_CHECKED);
     lv_obj_add_event_cb(s_log_warn, log_warnings_cb, LV_EVENT_CLICKED, nullptr);
 

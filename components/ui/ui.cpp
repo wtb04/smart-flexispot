@@ -699,6 +699,7 @@ void apply_pending(lv_timer_t *)
     if (!s_pending.exchange(false, std::memory_order_acquire)) {
         return;
     }
+    apply_splash();
 
     // Settings and presence first: they decide which pages and presets show.
     bool on = false;
@@ -818,6 +819,11 @@ void apply_pending(lv_timer_t *)
     }
 }
 }  // namespace
+
+void detail::request_apply()
+{
+    s_pending.store(true, std::memory_order_release);
+}
 
 esp_err_t set_preset_active(int index, bool active)
 {

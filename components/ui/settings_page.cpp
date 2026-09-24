@@ -273,37 +273,26 @@ void build_settings_view(lv_obj_t *parent, std::int32_t w, std::int32_t h)
 {
     lv_obj_t *view = build_sub_view(parent, w, h);
 
-    s_volume_slider = build_slider_card(view, 0, w, LV_SYMBOL_VOLUME_MAX, "Notification volume", 0,
-                                        0, volume_changed_cb, &s_volume_value);
-
-    const std::int32_t tiles_y = ROW_CARD_H + BUTTON_GAP;
-    const std::int32_t tile_h  = (h - tiles_y - 2 * BUTTON_GAP) / 3;
+    const std::int32_t tiles_y = 0;
+    const std::int32_t tile_h  = (h - 2 * BUTTON_GAP) / 3;
     const std::int32_t pitch   = tile_h + BUTTON_GAP;
     const std::int32_t half    = (w - BUTTON_GAP) / 2;
     const std::int32_t right   = half + BUTTON_GAP;
 
-    lv_obj_t *look = build_page_tile(view, tiles_y, half, tile_h, LV_SYMBOL_IMAGE, "Appearance",
-                                     show_appearance_cb);
-    tile_note(look, half, "Colour, layout, brightness");
+    build_page_tile(view, tiles_y, half, tile_h, LV_SYMBOL_IMAGE, "Appearance", show_appearance_cb);
 
     lv_obj_t *behave = build_page_tile(view, tiles_y, half, tile_h, LV_SYMBOL_SETTINGS,
                                        "Behaviour", show_behaviour_cb);
     lv_obj_set_x(behave, right);
-    tile_note(behave, half, "Presence, charging, desk link");
 
-    lv_obj_t *diag = build_page_tile(view, tiles_y + pitch, half, tile_h, LV_SYMBOL_LIST,
+    lv_obj_t *diag = build_page_tile(view, tiles_y + pitch, w, tile_h, LV_SYMBOL_LIST,
                                      "Diagnostics", show_diagnostics_cb);
-    s_diag_summary = tile_note(diag, half, "");
-
-    lv_obj_t *log = build_page_tile(view, tiles_y + pitch, half, tile_h, LV_SYMBOL_FILE, "Log",
-                                    show_log_cb);
-    lv_obj_set_x(log, right);
-    tile_note(log, half, "Everything, newest last");
+    s_diag_summary = tile_note(diag, w, "");
 
     lv_obj_t *screen = build_tile(view, 0, tiles_y + 2 * pitch, half, tile_h,
                                   LV_SYMBOL_EYE_CLOSE, "Screen off", true);
     lv_obj_add_event_cb(screen, screen_off_cb, LV_EVENT_CLICKED, nullptr);
-    tile_note(screen, half, "Tap anywhere to bring it back");
+    tile_note(screen, half, "Tap to wake");
 
     lv_obj_t *restart = build_tile(view, right, tiles_y + 2 * pitch, half, tile_h,
                                    LV_SYMBOL_POWER, "Restart", true);
@@ -332,6 +321,9 @@ void build_behaviour_view(lv_obj_t *parent, std::int32_t w, std::int32_t h)
     build_choice_card(view, body_y + 2 * pitch, w, LV_SYMBOL_UP, "Desk link", "WIRE",
                       "BLUETOOTH", link_clicked_cb,
                       s_setting_choice[static_cast<int>(Setting::DeskBluetooth)]);
+    s_volume_slider = build_slider_card(view, body_y + 3 * pitch, w, LV_SYMBOL_VOLUME_MAX,
+                                        "Notification volume", 0, 0, volume_changed_cb,
+                                        &s_volume_value);
     for (int i = 0; i < SETTING_COUNT; ++i) {
         apply_setting(i, s_setting_on[i]);
     }
@@ -366,6 +358,12 @@ void build_diagnostics_view(lv_obj_t *parent, std::int32_t w, std::int32_t h)
     lv_obj_t *view = build_sub_view(parent, w, h);
     lv_obj_set_hidden(view, true);
     build_sub_header(view, "Diagnostics");
+
+    lv_obj_t *log = theme::make_button(view, LV_SYMBOL_FILE "  Log", theme::panel_light,
+                                       fonts::size_22());
+    lv_obj_set_size(log, 150, DIAG_HEADER_H);
+    lv_obj_align(log, LV_ALIGN_TOP_RIGHT, 0, 0);
+    lv_obj_add_event_cb(log, show_log_cb, LV_EVENT_CLICKED, nullptr);
 
     const std::int32_t grid_y = DIAG_HEADER_H + BUTTON_GAP;
     const int          rows   = (s_card_count + 2) / 3;
