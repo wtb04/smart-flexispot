@@ -26,14 +26,17 @@ const lv_image_dsc_t *glyph_image(Glyph glyph)
                                       : nullptr;
 }
 
-constexpr std::int32_t LOG_W        = 800;
-constexpr std::int32_t LOG_H        = 520;
+constexpr std::int32_t LOG_W        = 860;
+constexpr std::int32_t LOG_H        = 560;
+constexpr std::int32_t CHIP_H       = 48;
+constexpr std::int32_t CHIP_GAP     = 8;
+constexpr std::int32_t WARN_W       = 170;
 constexpr std::int32_t DETAIL_W     = 660;
 constexpr std::int32_t DETAIL_ROW_GAP = 2;
 constexpr std::int32_t DETAIL_MAX_FRAC = 80;
 constexpr std::int32_t DETAIL_ROW_H = 30;
 constexpr std::int32_t TILE_DOT     = 14;
-constexpr int LOG_LINE_MAX = 24;
+constexpr int LOG_LINE_MAX = 48;
 }  // namespace
 
 lv_obj_t *s_settings_view   = nullptr;
@@ -64,7 +67,10 @@ lv_obj_t                   *s_log_title = nullptr;
 lv_obj_t                   *s_log_line[LOG_LINE_MAX] = {};
 lv_obj_t                   *s_log_empty = nullptr;
 lv_obj_t                   *s_log_pane  = nullptr;
-int                         s_log_shown = -1;
+int                         s_log_shown = -2;  // a card, -1 for all of them, -2 when closed
+bool                        s_log_warnings = false;
+lv_obj_t                   *s_log_chip[kMaxCards + 1] = {};  // All, then each card
+lv_obj_t                   *s_log_warn = nullptr;
 lv_timer_t                 *s_log_timer = nullptr;
 }  // namespace
 
@@ -106,11 +112,9 @@ std::uint32_t level_colour(char level)
     }
 }
 
-// Built on first sight rather than at startup: forty labels are a few kilobytes
-// of the internal pool the Wi-Fi transport needs, and the log is rarely opened.
 void refresh_log()
 {
-    if (s_log_shown < 0 || s_handlers.log == nullptr) {
+    if (s_log_shown < -1 || s_handlers.log == nullptr) {
         return;
     }
     auto *lines = static_cast<LogLine *>(heap_caps_malloc(
@@ -119,7 +123,9 @@ void refresh_log()
         return;
     }
 
-    const int count = s_handlers.log(s_log_shown, lines, LOG_LINE_MAX);
+    // Stay at the newest line unless someone has scrolled up to read.
+    const bool at_end = lv_obj_get_scroll_bottom(s_log_pane) <= 8;
+    const int  count  = s_handlers.log(s_log_shown, s_log_warnings, lines, LOG_LINE_MAX);
     for (int i = 0; i < LOG_LINE_MAX; ++i) {
         lv_obj_set_hidden(s_log_line[i], i >= count);
         if (i < count) {
@@ -129,6 +135,54 @@ void refresh_log()
     }
     lv_obj_set_hidden(s_log_empty, count > 0);
     heap_caps_free(lines);
+    if (at_end) {
+        lv_obj_update_layout(s_log_pane);
+        lv_obj_scroll_to_y(s_log_pane, LV_COORD_MAX, LV_ANIM_OFF);
+    }
+}
+
+void paint_log_filter()
+{
+    for (int i = 0; i <= s_card_count; ++i) {
+        const bool picked = i - 1 == s_log_shown;
+        lv_obj_set_state(s_log_chip[i], LV_STATE_CHECKED, picked);
+        theme::set_text_color(lv_obj_get_child(s_log_chip[i], 0),
+                              picked ? theme::text : theme::secondary);
+    }
+    lv_obj_set_state(s_log_warn, LV_STATE_CHECKED, s_log_warnings);
+    theme::set_text_color(lv_obj_get_child(s_log_warn, 0),
+                          s_log_warnings ? theme::text : theme::secondary);
+}
+
+void open_log(int card)
+{
+    if (!s_log_modal.has_value()) {
+        return;
+    }
+    s_log_shown = card;
+    paint_log_filter();
+    lv_obj_scroll_to_y(s_log_pane, LV_COORD_MAX, LV_ANIM_OFF);
+    refresh_log();
+    lv_obj_update_layout(s_log_pane);
+    lv_obj_scroll_to_y(s_log_pane, LV_COORD_MAX, LV_ANIM_OFF);
+    s_log_modal->open();
+}
+
+void log_chip_cb(lv_event_t *e)
+{
+    const int card = static_cast<int>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e)));
+    s_log_shown    = card;
+    paint_log_filter();
+    lv_obj_scroll_to_y(s_log_pane, LV_COORD_MAX, LV_ANIM_OFF);
+    refresh_log();
+}
+
+void log_warnings_cb(lv_event_t *)
+{
+    s_log_warnings = !s_log_warnings;
+    paint_log_filter();
+    lv_obj_scroll_to_y(s_log_pane, LV_COORD_MAX, LV_ANIM_OFF);
+    refresh_log();
 }
 
 void log_tick(lv_timer_t *)
@@ -155,18 +209,8 @@ void detail_clicked_cb(lv_event_t *e)
 
 void log_held_cb(lv_event_t *e)
 {
-    const int index = static_cast<int>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e)));
-    if (!s_log_modal.has_value()) {
-        return;
-    }
     s_tile_long = true;
-    s_log_shown = index;
-    char title[48];
-    std::snprintf(title, sizeof(title), "%s log", s_cards[index].title);
-    theme::set_text(s_log_title, title);
-    refresh_log();
-    lv_obj_scroll_to_y(s_log_pane, 0, LV_ANIM_OFF);
-    s_log_modal->open();
+    open_log(static_cast<int>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e))));
 }
 }  // namespace
 
@@ -338,18 +382,51 @@ void build_detail_overlay(lv_obj_t *parent)
     s_diagnostics->add_close_button();
 }
 
+void show_log_cb(lv_event_t *)
+{
+    open_log(-1);
+}
+
 void build_log_overlay(lv_obj_t *parent)
 {
     s_log_modal.emplace(parent, LOG_W, LOG_H);
     lv_obj_t *card = s_log_modal->content();
     lv_obj_set_style_pad_all(card, DETAIL_PAD, 0);
 
-    s_log_title = theme::make_accent_label(card, "", fonts::size_28());
+    s_log_title = theme::make_accent_label(card, "Log", fonts::size_28());
     lv_obj_align(s_log_title, LV_ALIGN_TOP_LEFT, 0, 6);
 
     const std::int32_t width  = LOG_W - 2 * DETAIL_PAD;
-    const std::int32_t body_y = ModalOverlay::header_height() + HEADER_GAP;
+    const std::int32_t chip_y = ModalOverlay::header_height() + HEADER_GAP;
+    const std::int32_t body_y = chip_y + CHIP_H + CHIP_GAP;
     const std::int32_t height = LOG_H - 2 * DETAIL_PAD - body_y;
+
+    // Whose lines: all of them, or one card's. Scrolls sideways when they do not fit.
+    lv_obj_t *chips = lv_obj_create(card);
+    lv_obj_set_pos(chips, 0, chip_y);
+    lv_obj_set_size(chips, width - WARN_W - CHIP_GAP, CHIP_H);
+    theme::style_panel(chips, theme::panel, 0);
+    lv_obj_set_style_bg_opa(chips, LV_OPA_TRANSP, 0);
+    lv_obj_set_flex_flow(chips, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(chips, CHIP_GAP, 0);
+    lv_obj_set_scroll_dir(chips, LV_DIR_HOR);
+    lv_obj_set_scrollbar_mode(chips, LV_SCROLLBAR_MODE_OFF);
+    for (int i = 0; i <= s_card_count; ++i) {
+        const char *name = i == 0 ? "All" : s_cards[i - 1].title;
+        lv_obj_t   *chip = theme::make_button(chips, name, theme::panel_light, fonts::size_20());
+        lv_obj_set_size(chip, LV_SIZE_CONTENT, CHIP_H);
+        lv_obj_set_style_pad_hor(chip, 18, 0);
+        theme::fill_accent(chip, LV_STATE_CHECKED);
+        lv_obj_add_event_cb(chip, log_chip_cb, LV_EVENT_CLICKED,
+                            reinterpret_cast<void *>(static_cast<std::intptr_t>(i - 1)));
+        s_log_chip[i] = chip;
+    }
+
+    s_log_warn = theme::make_button(card, "Warnings", theme::panel_light, fonts::size_20());
+    lv_obj_set_pos(s_log_warn, width - WARN_W, chip_y);
+    lv_obj_set_size(s_log_warn, WARN_W, CHIP_H);
+    theme::fill_accent(s_log_warn, LV_STATE_CHECKED);
+    lv_obj_add_event_cb(s_log_warn, log_warnings_cb, LV_EVENT_CLICKED, nullptr);
 
     lv_obj_t *pane = lv_obj_create(card);
     lv_obj_set_pos(pane, 0, body_y);

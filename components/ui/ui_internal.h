@@ -231,6 +231,7 @@ void show_diagnostics_cb(lv_event_t *);
 void show_appearance_cb(lv_event_t *);
 void show_settings_cb(lv_event_t *);
 void show_behaviour_cb(lv_event_t *);
+void show_log_cb(lv_event_t *);
 void apply_setting(int index, bool on);
 void restart_held_cb(lv_event_t *);
 void volume_changed_cb(lv_event_t *e);

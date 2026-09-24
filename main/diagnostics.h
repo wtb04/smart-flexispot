@@ -16,9 +16,9 @@ esp_err_t start();
 /** Refreshes now rather than on the next tick. Safe from the LVGL task. */
 void refresh();
 
-/** Fills `out` with a card's recent log lines, oldest first, and returns how
- *  many. */
-int logs(int card, ui::LogLine *out, int max);
+/** Fills `out` with the recent log lines of one card, or of all of them when
+ *  `card` is negative, oldest first, and returns how many. */
+int logs(int card, bool warnings, ui::LogLine *out, int max);
 
 /** Which channel the log buffer should keep a tag's lines in, and how many
  *  channels there are. Passed to logbuf::start(). */

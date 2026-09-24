@@ -291,9 +291,14 @@ void build_settings_view(lv_obj_t *parent, std::int32_t w, std::int32_t h)
     lv_obj_set_x(behave, right);
     tile_note(behave, half, "Presence, charging, desk link");
 
-    lv_obj_t *diag = build_page_tile(view, tiles_y + pitch, w, tile_h, LV_SYMBOL_LIST,
+    lv_obj_t *diag = build_page_tile(view, tiles_y + pitch, half, tile_h, LV_SYMBOL_LIST,
                                      "Diagnostics", show_diagnostics_cb);
-    s_diag_summary = tile_note(diag, w, "");
+    s_diag_summary = tile_note(diag, half, "");
+
+    lv_obj_t *log = build_page_tile(view, tiles_y + pitch, half, tile_h, LV_SYMBOL_FILE, "Log",
+                                    show_log_cb);
+    lv_obj_set_x(log, right);
+    tile_note(log, half, "Everything, newest last");
 
     lv_obj_t *screen = build_tile(view, 0, tiles_y + 2 * pitch, half, tile_h,
                                   LV_SYMBOL_EYE_CLOSE, "Screen off", true);

@@ -24,6 +24,7 @@ constexpr std::size_t LINE_BYTES        = 128;
 constexpr std::size_t TAG_BYTES         = 32;
 
 struct Line {
+    std::uint32_t seq;  // across every channel, so they can be told apart in time
     std::time_t  wall;
     std::int64_t uptime_us;
     char         level;
@@ -37,6 +38,7 @@ int          s_channels = 0;
 int         *s_next     = nullptr;
 int         *s_held     = nullptr;
 Router       s_router   = nullptr;
+std::uint32_t s_seq     = 0;
 portMUX_TYPE s_lock     = portMUX_INITIALIZER_UNLOCKED;
 
 vprintf_like_t s_next_sink = nullptr;
@@ -86,6 +88,7 @@ void store(const char *line)
 
     portENTER_CRITICAL(&s_lock);
     Line &slot     = s_lines[channel * LINES_PER_CHANNEL + s_next[channel]];
+    slot.seq       = ++s_seq;
     slot.wall      = rtc::plausible(now) ? now : 0;
     slot.uptime_us = uptime;
     slot.level     = level;
@@ -117,6 +120,24 @@ int sink(const char *format, va_list args)
         }
     }
     return s_next_sink != nullptr ? s_next_sink(format, args) : 0;
+}
+
+void format(const Line &line, int channel, Entry &out)
+{
+    char stamp[16];
+    if (line.wall != 0) {
+        std::tm local{};
+        localtime_r(&line.wall, &local);
+        std::snprintf(stamp, sizeof(stamp), "%02d:%02d:%02d", local.tm_hour, local.tm_min,
+                      local.tm_sec);
+    } else {
+        std::snprintf(stamp, sizeof(stamp), "+%5.1fs",
+                      static_cast<double>(line.uptime_us) / 1000000.0);
+    }
+
+    out.level   = line.level;
+    out.channel = channel;
+    std::snprintf(out.text, sizeof(out.text), "%s  %s: %s", stamp, line.tag, line.text);
 }
 
 }  // namespace
@@ -168,24 +189,81 @@ bool at(int channel, int index, Entry &out)
         return false;
     }
 
-    const int   age  = held - index;
-    const Line &line = s_lines[channel * LINES_PER_CHANNEL +
-                               (next - age + LINES_PER_CHANNEL * 2) % LINES_PER_CHANNEL];
-
-    char stamp[16];
-    if (line.wall != 0) {
-        std::tm local{};
-        localtime_r(&line.wall, &local);
-        std::snprintf(stamp, sizeof(stamp), "%02d:%02d:%02d", local.tm_hour, local.tm_min,
-                      local.tm_sec);
-    } else {
-        std::snprintf(stamp, sizeof(stamp), "+%5.1fs",
-                      static_cast<double>(line.uptime_us) / 1000000.0);
-    }
-
-    out.level = line.level;
-    std::snprintf(out.text, sizeof(out.text), "%s  %s: %s", stamp, line.tag, line.text);
+    const int age = held - index;
+    format(s_lines[channel * LINES_PER_CHANNEL +
+                   (next - age + LINES_PER_CHANNEL * 2) % LINES_PER_CHANNEL],
+           channel, out);
     return true;
+}
+
+int recent(std::uint32_t mask, bool warnings, Entry *out, int max)
+{
+    if (s_lines == nullptr || out == nullptr || max <= 0) {
+        return 0;
+    }
+    constexpr int CHANNELS_MAX = 32;
+    const int     channels     = s_channels < CHANNELS_MAX ? s_channels : CHANNELS_MAX;
+
+    // Chosen under the lock, newest first, by walking every channel back from
+    // its newest line and always taking the most recent of their heads. Only
+    // the choosing: formatting happens after, so logging never waits on it.
+    struct Pick {
+        int           channel;
+        int           slot;
+        std::uint32_t seq;
+    };
+    auto *picks = static_cast<Pick *>(
+        heap_caps_malloc(sizeof(Pick) * static_cast<std::size_t>(max), MALLOC_CAP_SPIRAM));
+    if (picks == nullptr) {
+        return 0;
+    }
+    int back[CHANNELS_MAX] = {};  // how far back each channel has been read
+    int picked             = 0;
+
+    portENTER_CRITICAL(&s_lock);
+    while (picked < max) {
+        int           best      = -1;
+        int           best_slot = 0;
+        std::uint32_t best_seq  = 0;
+        for (int c = 0; c < channels; ++c) {
+            if ((mask & (1u << c)) == 0) {
+                continue;
+            }
+            while (back[c] < s_held[c]) {
+                const int   slot = (s_next[c] - 1 - back[c] + LINES_PER_CHANNEL * 2) %
+                                 LINES_PER_CHANNEL;
+                const Line &line = s_lines[c * LINES_PER_CHANNEL + slot];
+                if (warnings && line.level != 'E' && line.level != 'W') {
+                    ++back[c];
+                    continue;
+                }
+                if (best < 0 || line.seq > best_seq) {
+                    best      = c;
+                    best_slot = slot;
+                    best_seq  = line.seq;
+                }
+                break;
+            }
+        }
+        if (best < 0) {
+            break;
+        }
+        picks[picked++] = {best, best_slot, best_seq};
+        ++back[best];
+    }
+    portEXIT_CRITICAL(&s_lock);
+
+    int written = 0;
+    for (int i = picked - 1; i >= 0; --i) {
+        const Line &line = s_lines[picks[i].channel * LINES_PER_CHANNEL + picks[i].slot];
+        format(line, picks[i].channel, out[written]);
+        // Overwritten while it was being read: a newer line now, so leave it out.
+        if (line.seq == picks[i].seq) {
+            ++written;
+        }
+    }
+    heap_caps_free(picks);
+    return written;
 }
 
 }  // namespace logbuf

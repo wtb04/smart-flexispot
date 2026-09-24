@@ -134,11 +134,13 @@ inline constexpr std::size_t kLogTextMax = 192;
 struct LogLine {
     char level;
     char text[kLogTextMax];
+    int  card;  // whose line it is
 };
 
-/** Fills `out` with a card's recent lines, oldest first, and returns how many.
- *  Runs on the LVGL task, so it must not block. */
-using LogHandler = int (*)(int card, LogLine *out, int max);
+/** Fills `out` with the most recent lines of one card, or of every card when
+ *  `card` is negative, oldest first, and returns how many. With `warnings`,
+ *  only warnings and errors. Runs on the LVGL task, so it must not block. */
+using LogHandler = int (*)(int card, bool warnings, LogLine *out, int max);
 
 /** An empty title means nothing is playing; the card then shows the state. Strings are copied. */
 esp_err_t set_media(const char *source, const char *title, const char *artist, const char *state,

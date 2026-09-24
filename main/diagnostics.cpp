@@ -22,6 +22,7 @@
 #include "ui.h"
 #include "wifi.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -568,22 +569,23 @@ int channels()
     return CARDS;
 }
 
-int logs(int channel, ui::LogLine *out, int max)
+int logs(int card, bool warnings, ui::LogLine *out, int max)
 {
-    const int held    = logbuf::count(channel);
-    const int first   = held > max ? held - max : 0;
-
-    int written = 0;
-    for (int i = first; i < held; ++i) {
-        logbuf::Entry line;
-        if (!logbuf::at(channel, i, line)) {
-            break;
-        }
-        out[written].level = line.level;
-        std::snprintf(out[written].text, sizeof(out[written].text), "%s", line.text);
-        ++written;
+    // One set of entries, kept rather than asked for every second.
+    constexpr int         ENTRIES = 64;
+    static logbuf::Entry *entries = static_cast<logbuf::Entry *>(
+        heap_caps_malloc(sizeof(logbuf::Entry) * ENTRIES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (entries == nullptr) {
+        return 0;
     }
-    return written;
+    const std::uint32_t mask  = card < 0 ? ~0u : 1u << card;
+    const int           count = logbuf::recent(mask, warnings, entries, std::min(max, ENTRIES));
+    for (int i = 0; i < count; ++i) {
+        out[i].level = entries[i].level;
+        out[i].card  = entries[i].channel;
+        std::snprintf(out[i].text, sizeof(out[i].text), "%s", entries[i].text);
+    }
+    return count;
 }
 
 }  // namespace diagnostics
