@@ -21,7 +21,8 @@ esp_err_t publish(const protocol::Telemetry &telemetry);
 
 bool connected();
 
-/** Stops and starts the client, for when its own retries have got nowhere. */
+/** For when the client's own retries have got nowhere: alternately nudges it
+ *  to retry now, and stops and starts it. Creates it if it never was. */
 esp_err_t restart();
 
 }  // namespace hass

@@ -251,9 +251,12 @@ void nudge_links()
         const std::size_t   internal   = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
         if (dma_free < 24 * 1024 && esp_timer_get_time() - complained > 30000000) {
             complained = esp_timer_get_time();
-            ESP_LOGW(TAG, "low memory: %u KB dma-capable, %u KB internal",
+            // The largest block is what a client restart needs for its task stack.
+            ESP_LOGW(TAG, "low memory: %u KB dma-capable, %u KB internal, largest %u KB",
                      static_cast<unsigned>(dma_free / 1024),
-                     static_cast<unsigned>(internal / 1024));
+                     static_cast<unsigned>(internal / 1024),
+                     static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) /
+                                           1024));
         }
 
         vTaskDelay(PUBLISH_INTERVAL);

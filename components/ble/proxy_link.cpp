@@ -40,6 +40,11 @@ void (*s_rescan)() = nullptr;
 
 std::atomic<bool> s_up{false};
 
+// The proxy reports at least once a second; a link that says nothing for this
+// long is up in name only, and is dropped so the scanner finds it again.
+constexpr std::int64_t    SILENT_US = 5000000;
+std::atomic<std::int64_t> s_heard_us{0};
+
 std::atomic<std::uint32_t> s_seq{0};
 std::atomic<std::int64_t>  s_sent_us{0};
 std::atomic<bool>          s_waiting{false};
@@ -140,6 +145,7 @@ int on_chr(std::uint16_t conn, const ble_gatt_error *error, const ble_gatt_chr *
     params.supervision_timeout = SUPERVISION_UNITS;
     ble_gap_update_params(conn, &params);
 
+    s_heard_us.store(esp_timer_get_time(), std::memory_order_relaxed);
     s_up.store(true, std::memory_order_relaxed);
     ESP_LOGI(TAG, "linked to the desk proxy");
     send(deskproto::Op::Wake, deskproto::Motion::Idle, 0);
@@ -177,6 +183,20 @@ std::atomic<int>  s_last_motion{static_cast<int>(deskproto::Motion::Idle)};
 std::atomic<bool> s_last_driving{false};
 std::atomic<bool> s_ever_heard{false};
 
+void drop_if_silent()
+{
+    if (!s_up.load(std::memory_order_relaxed)) {
+        return;
+    }
+    const std::int64_t now = esp_timer_get_time();
+    if (now - s_heard_us.load(std::memory_order_relaxed) < SILENT_US) {
+        return;
+    }
+    s_heard_us.store(now, std::memory_order_relaxed);  // once per silence
+    ESP_LOGW(TAG, "proxy silent for 5 s, dropping the link");
+    ble_gap_terminate(s_conn, BLE_ERR_REM_USER_CONN_TERM);
+}
+
 constexpr TickType_t HOLD_PERIOD = pdMS_TO_TICKS(100);
 
 TaskHandle_t s_hold_task = nullptr;
@@ -198,6 +218,7 @@ void expire_stale_timing();
         }
         last = wanted;
         expire_stale_timing();
+        drop_if_silent();
         ulTaskNotifyTake(pdTRUE, HOLD_PERIOD);
     }
 }
@@ -316,6 +337,7 @@ bool handle(ble_gap_event *event)
                 s_last_motion.store(static_cast<int>(status.motion), std::memory_order_relaxed);
                 s_last_driving.store(status.driving, std::memory_order_relaxed);
                 s_ever_heard.store(true, std::memory_order_relaxed);
+                s_heard_us.store(esp_timer_get_time(), std::memory_order_relaxed);
                 if (s_on_status != nullptr) {
                     s_on_status(status);
                 }

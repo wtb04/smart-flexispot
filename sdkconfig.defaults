@@ -216,3 +216,7 @@ CONFIG_LV_USE_SNAPSHOT=y
 # CONFIG_MBEDTLS_HARDWARE_AES is not set
 # Without DMA, TLS needs no internal memory; a large download took it to 1 KB.
 CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+
+# MQTT, the socket, four radar feeds, calendar, travel and cover art can all be
+# open at once, which is nine of the default ten.
+CONFIG_LWIP_MAX_SOCKETS=16

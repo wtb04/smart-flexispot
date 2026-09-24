@@ -103,10 +103,15 @@ void on_mqtt_event(void *, esp_event_base_t, std::int32_t id, void *data)
                                     QOS_AT_LEAST_ONCE, RETAIN);
             publish_discovery();
             s_force_publish.store(true, std::memory_order_relaxed);
-            esp_mqtt_client_subscribe_single(s_client, s_topics.command.c_str(),
-                                             QOS_AT_LEAST_ONCE);
-            esp_mqtt_client_subscribe_single(s_client, "homeassistant/status",
-                                             QOS_AT_LEAST_ONCE);
+            // Connected but not subscribed would hear no command until the next
+            // natural reconnect, possibly days away.
+            if (esp_mqtt_client_subscribe_single(s_client, s_topics.command.c_str(),
+                                                 QOS_AT_LEAST_ONCE) < 0 ||
+                esp_mqtt_client_subscribe_single(s_client, "homeassistant/status",
+                                                 QOS_AT_LEAST_ONCE) < 0) {
+                ESP_LOGW(TAG, "subscribing failed, starting the session over");
+                esp_mqtt_client_disconnect(s_client);
+            }
             break;
 
         case MQTT_EVENT_DISCONNECTED:
@@ -196,7 +201,14 @@ bool connected()
 esp_err_t restart()
 {
     if (s_client == nullptr) {
-        return ESP_ERR_INVALID_STATE;
+        return std::string(HASS_MQTT_URI).empty() ? ESP_ERR_INVALID_STATE : start(s_handlers);
+    }
+    // First the cheap nudge, which only helps a client waiting to retry; then
+    // the full stop and start, which can block for as long as a connect takes.
+    static bool nudged = false;
+    nudged = !nudged;
+    if (nudged && esp_mqtt_client_reconnect(s_client) == ESP_OK) {
+        return ESP_OK;
     }
     s_connected.store(false, std::memory_order_relaxed);
     esp_mqtt_client_stop(s_client);  // not running is fine, that is what is being fixed

@@ -127,13 +127,13 @@ std::vector<std::string> configured_entities()
     return out;
 }
 
-void send_text(const std::string &text)
+bool send_text(const std::string &text)
 {
     if (s_client == nullptr || text.empty()) {
-        return;
+        return false;
     }
-    esp_websocket_client_send_text(s_client, text.data(), static_cast<int>(text.size()),
-                                   pdMS_TO_TICKS(5000));
+    return esp_websocket_client_send_text(s_client, text.data(), static_cast<int>(text.size()),
+                                          pdMS_TO_TICKS(5000)) >= 0;
 }
 
 void handle_message(const std::string &text)
@@ -146,7 +146,9 @@ void handle_message(const std::string &text)
 
     switch (classify(root)) {
         case MessageType::AuthRequired:
-            send_text(auth_message(HASS_WS_TOKEN));
+            if (!send_text(auth_message(HASS_WS_TOKEN))) {
+                begin_again_in(pdMS_TO_TICKS(5000), "could not send the token");
+            }
             break;
 
         case MessageType::AuthOk: {
@@ -158,8 +160,11 @@ void handle_message(const std::string &text)
                 ESP_LOGW(TAG, "no entities configured - see hass_secrets.example.h");
             } else {
                 s_next_command_id.store(SUBSCRIBE_ID + 1, std::memory_order_relaxed);
-                send_text(subscribe);
-                s_connected.store(true, std::memory_order_relaxed);
+                if (send_text(subscribe)) {
+                    s_connected.store(true, std::memory_order_relaxed);
+                } else {
+                    begin_again_in(pdMS_TO_TICKS(5000), "could not subscribe");
+                }
             }
             break;
         }
@@ -291,7 +296,9 @@ void on_event(void *, esp_event_base_t, std::int32_t id, void *data)
             static_cast<std::int32_t>(xTaskGetTickCount() - start_at) >= 0) {
             s_start_at.store(0, std::memory_order_relaxed);
             ESP_LOGI(TAG, "connecting again");
-            esp_websocket_client_start(s_client);
+            if (esp_websocket_client_start(s_client) != ESP_OK) {
+                begin_again_in(pdMS_TO_TICKS(10000), "the client would not start");
+            }
         }
     }
 }
@@ -346,7 +353,7 @@ bool connected()
 esp_err_t restart()
 {
     if (s_client == nullptr) {
-        return ESP_ERR_INVALID_STATE;
+        return std::string(HASS_WS_URI).empty() ? ESP_ERR_INVALID_STATE : start(s_on_update);
     }
     begin_again_in(1, "restart asked for");
     return ESP_OK;

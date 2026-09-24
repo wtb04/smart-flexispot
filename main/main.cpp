@@ -4,6 +4,8 @@
 #include "desk.h"
 #include "diagnostics.h"
 #include "ical.h"
+#include "cJSON.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_system.h"
@@ -137,8 +139,20 @@ void on_restart()
 }
 }  // namespace
 
+// cJSON's nodes are 40 bytes, under the size that goes to internal RAM by
+// default, and one Home Assistant state dump makes thousands of them: internal
+// RAM is what the radio needs.
+void *json_malloc(std::size_t size)
+{
+    return heap_caps_malloc_prefer(size, 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT,
+                                   MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+}
+
 extern "C" void app_main(void)
 {
+    cJSON_Hooks hooks{json_malloc, heap_caps_free};
+    cJSON_InitHooks(&hooks);
+
     if (esp_err_t err = nvs_flash_init();
         err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(nvs_flash_erase());

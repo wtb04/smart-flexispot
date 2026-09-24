@@ -68,7 +68,8 @@ constexpr std::time_t CLOCK_SET_AFTER = 1600000000;
 
 // A feed that did not come back is usually the network still coming up, or a
 // server hanging up early; neither is worth half an hour of silence.
-constexpr TickType_t RETRY_INTERVAL = pdMS_TO_TICKS(20 * 1000);
+constexpr TickType_t RETRY_INTERVAL     = pdMS_TO_TICKS(20 * 1000);
+constexpr TickType_t MAX_RETRY_INTERVAL = pdMS_TO_TICKS(5 * 60 * 1000);
 
 constexpr std::uint32_t TASK_STACK    = 6144;
 constexpr UBaseType_t   TASK_PRIORITY = 3;
@@ -160,15 +161,11 @@ int fetch_feed(int index)
 // its last events rather than vanishing from the page until the next round.
 bool fetch_all()
 {
-    constexpr int ATTEMPTS = 3;
     int  built  = 0;
     bool all_ok = true;
     for (int i = 0; i < kFeedCount; ++i) {
         const std::int64_t began = esp_timer_get_time();
-        int                n     = -1;
-        for (int attempt = 0; attempt < ATTEMPTS && n < 0; ++attempt) {
-            n = fetch_feed(i);
-        }
+        const int          n     = fetch_feed(i);
         if (n < 0) {
             all_ok   = false;
             int kept = 0;
@@ -210,7 +207,13 @@ bool fetch_all()
             ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(2000));
             continue;
         }
-        ulTaskNotifyTake(pdTRUE, fetch_all() ? POLL_INTERVAL : RETRY_INTERVAL);
+        // Each failed round waits twice as long as the last, up to five minutes:
+        // a host that is down gets a handful of handshakes, not a stream.
+        static int failures = 0;
+        failures            = fetch_all() ? 0 : std::min(failures + 1, 4);
+        ulTaskNotifyTake(pdTRUE, failures == 0 ? POLL_INTERVAL
+                                               : std::min<TickType_t>(RETRY_INTERVAL << (failures - 1),
+                                                                      MAX_RETRY_INTERVAL));
     }
 }
 
