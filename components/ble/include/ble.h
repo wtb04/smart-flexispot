@@ -54,6 +54,9 @@ void wake();
 /** The proxy drives the desk to this height itself and reports as it goes. */
 void goto_height(int height_mm);
 
+/** Lets go of everything, hold or travel, whether or not this panel was holding. */
+void stop();
+
 /** The last status the proxy sent. False if it has never sent one. */
 bool last(deskproto::Status &out);
 

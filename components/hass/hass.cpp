@@ -115,6 +115,9 @@ void on_mqtt_event(void *, esp_event_base_t, std::int32_t id, void *data)
             break;
 
         case MQTT_EVENT_DATA:
+            if (event->retain) {
+                break;  // stored by the broker and replayed on subscribe, not asked for now
+            }
             if (event->current_data_offset == 0) {
                 s_inbound.topic.assign(event->topic, event->topic_len);
                 s_inbound.payload.clear();

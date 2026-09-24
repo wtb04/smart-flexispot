@@ -79,6 +79,15 @@ void test_rejects()
     packet[8] = 3;
     check(!decode(packet, COMMAND_LEN, out), "bad direction rejected");
     packet[8] = 0;
+    packet[3] = static_cast<std::uint8_t>(Op::Preset);
+    packet[9] = kBoxPresets;
+    check(!decode(packet, COMMAND_LEN, out), "preset the box does not have rejected");
+    packet[9] = kBoxPresets - 1;
+    check(decode(packet, COMMAND_LEN, out) && out.preset == kBoxPresets - 1, "last box preset accepted");
+    packet[3] = static_cast<std::uint8_t>(Op::GoTo);
+    packet[9] = 200;
+    check(decode(packet, COMMAND_LEN, out), "preset byte ignored for other ops");
+    packet[9] = 0;
     packet[0] = 'X';
     check(!decode(packet, COMMAND_LEN, out), "bad magic rejected");
 

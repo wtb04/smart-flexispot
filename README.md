@@ -140,15 +140,23 @@ over the USB-C port. If you would rather keep the console on UART0, GPIO6/7
 ## How it fits together
 
 `app_main` brings up the board, builds the UI, starts the desk link, and
-returns — the LVGL, transmit, receive and supervisor tasks keep running.
+returns — the LVGL, driver, receive and supervisor tasks keep running.
 
 **The desk moves one short step per frame it receives**, so holding a button
-means retransmitting: the transmit task repeats the key frame every
+means retransmitting: the driver task repeats the key frame every
 `CONFIG_LOCTEK_REPEAT_MS`. Releasing sends the "no keys pressed" frame rather
 than merely going quiet, which stops the desk promptly instead of letting it
 coast. While idle, that same frame doubles as a keep-awake poll — the control
 box only reports its height in reply to something, and its panel sleeps after
 about ten seconds.
+
+**One driver task writes every key frame.** Callers post what they want into
+mailboxes that hold only the latest wish, so a Stop can never queue behind
+anything; the receive task only decodes and hands heights on. Any key whose
+height stops changing for 2.5 s is released, whatever asked for it, and a
+travel that sees the desk move away from its target gives up. A move asked
+for over the network is let go of after 1.5 s unless it is asked for again,
+since nobody's finger is on it.
 
 **Presets**: six, of which the control box has four. A tap sends the desk to
 one of those -- the box runs the move itself and ignores a plain stop while it

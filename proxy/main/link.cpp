@@ -47,8 +47,9 @@ std::uint8_t  s_address_type = 0;
 
 constexpr std::int64_t HOLD_GOOD_FOR_US = 300000;
 
-std::int64_t        s_hold_until  = 0;
-deskproto::Motion   s_holding     = deskproto::Motion::Idle;
+// Written on the host task, read by the deadman and the status task.
+std::atomic<std::int64_t>      s_hold_until{0};
+std::atomic<deskproto::Motion> s_holding{deskproto::Motion::Idle};
 std::uint32_t       s_last_seq    = 0;
 bool                s_seq_started = false;
 
@@ -98,7 +99,7 @@ void send_status()
     deskproto::Status status{};
     status.height_mm = loctek::stats().heights_decoded > 0 ? s_height_mm : -1;
     status.linked    = s_box_up.load(std::memory_order_relaxed);
-    status.holding   = s_holding != deskproto::Motion::Idle;
+    status.holding   = s_holding.load(std::memory_order_relaxed) != deskproto::Motion::Idle;
     status.driving   = loctek::driving_to() >= 0;
     status.motion    = motion_now();
     status.seq       = s_last_seq;
@@ -158,27 +159,27 @@ void apply(const deskproto::Command &command)
 {
     switch (command.op) {
         case deskproto::Op::Hold:
-            s_hold_until = esp_timer_get_time() + HOLD_GOOD_FOR_US;
-            if (command.direction != s_holding) {
-                s_holding = command.direction;
-                drive(s_holding);
+            s_hold_until.store(esp_timer_get_time() + HOLD_GOOD_FOR_US, std::memory_order_relaxed);
+            if (command.direction != s_holding.load(std::memory_order_relaxed)) {
+                s_holding.store(command.direction, std::memory_order_relaxed);
+                drive(command.direction);
             }
             break;
 
         case deskproto::Op::Stop:
-            s_hold_until = 0;
-            if (s_holding != deskproto::Motion::Idle) {
-                s_holding = deskproto::Motion::Idle;
-                drive(s_holding);
-            } else if (loctek::driving_to() >= 0) {
+            s_hold_until.store(0, std::memory_order_relaxed);
+            if (s_holding.exchange(deskproto::Motion::Idle, std::memory_order_relaxed) !=
+                    deskproto::Motion::Idle ||
+                loctek::driving_to() >= 0) {
                 drive(deskproto::Motion::Idle);
             }
             break;
 
         case deskproto::Op::GoTo:
-            // Not held any more: a hold that keeps arriving takes over again.
-            s_hold_until = 0;
-            s_holding    = deskproto::Motion::Idle;
+            if (s_holding.load(std::memory_order_relaxed) != deskproto::Motion::Idle) {
+                ESP_LOGW(TAG, "not travelling to %u mm: a hold is live", command.height_mm);
+                break;
+            }
             if (movement_allowed()) {
                 ESP_ERROR_CHECK_WITHOUT_ABORT(loctek::goto_height(command.height_mm));
             } else {
@@ -296,10 +297,11 @@ constexpr TickType_t   STATUS_KEEPALIVE  = pdMS_TO_TICKS(1000);
 {
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(50));
-        if (s_holding != deskproto::Motion::Idle && esp_timer_get_time() > s_hold_until) {
+        if (s_holding.load(std::memory_order_relaxed) != deskproto::Motion::Idle &&
+            esp_timer_get_time() > s_hold_until.load(std::memory_order_relaxed)) {
             ESP_LOGW(TAG, "hold went quiet, stopping");
-            s_holding = deskproto::Motion::Idle;
-            drive(s_holding);
+            s_holding.store(deskproto::Motion::Idle, std::memory_order_relaxed);
+            drive(deskproto::Motion::Idle);
             send_status();
         }
     }
@@ -346,12 +348,14 @@ int on_gap(ble_gap_event *event, void *)
         case BLE_GAP_EVENT_DISCONNECT:
             ESP_LOGI(TAG, "panel gone (reason %d)", event->disconnect.reason);
             s_conn = BLE_HS_CONN_HANDLE_NONE;
-            // A travel carries on, as the box's own presets do; only a hold
-            // needs the hand that was on it.
-            if (s_holding != deskproto::Motion::Idle) {
+            // Nothing can stop the desk from here once the panel is gone.
+            if (s_holding.exchange(deskproto::Motion::Idle, std::memory_order_relaxed) !=
+                deskproto::Motion::Idle) {
                 ESP_LOGW(TAG, "link lost mid-hold, stopping");
-                s_holding = deskproto::Motion::Idle;
-                drive(s_holding);
+                drive(deskproto::Motion::Idle);
+            } else if (loctek::driving_to() >= 0) {
+                ESP_LOGW(TAG, "link lost mid-travel, stopping");
+                drive(deskproto::Motion::Idle);
             }
             advertise();
             break;

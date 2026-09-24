@@ -8,6 +8,10 @@ esp_err_t start();
 
 void on_move(ui::Move direction);
 
+/** A move asked for over the network is a hold with nobody's finger on it, so
+ *  it is let go of after a moment unless asked for again. */
+void on_network_move(ui::Move direction);
+
 /** Tap travels to a preset, hold stores the current height. */
 void on_preset(int index, bool store);
 

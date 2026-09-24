@@ -89,6 +89,19 @@ menu "Loctek desk control"
             The control box wants a moment between the two key presses that
             store a preset. Reports suggest values below ~250 ms are flaky.
 
+    config LOCTEK_MIN_HEIGHT_MM
+        int "Lowest height the desk can reach (mm)"
+        range 300 1500
+        default 660
+
+    config LOCTEK_MAX_HEIGHT_MM
+        int "Highest height the desk can reach (mm)"
+        range 600 2000
+        default 1200
+        help
+            A travel target or a stored preset outside the desk's own range
+            is garbage, not a place to drive to.
+
     config LOCTEK_MOVE_TIMEOUT_MS
         int "Maximum continuous travel (ms)"
         range 1000 120000

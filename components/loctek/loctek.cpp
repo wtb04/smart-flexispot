@@ -1,22 +1,22 @@
 #include "loctek.h"
 
 #include "driver/gpio.h"
+#include "driver/uart.h"
 #include "nvs.h"
 #include "soc/soc_caps.h"
-#include "driver/uart.h"
 
-#include <cstring>
 #include "esp_check.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
-#include "freertos/semphr.h"
 #include "freertos/task.h"
 
 #include <algorithm>
 #include <atomic>
+#include <climits>
 #include <cstdlib>
+#include <cstring>
 
 namespace loctek {
 namespace {
@@ -30,50 +30,106 @@ constexpr int  TX_BUF_SIZE = 0;
 constexpr TickType_t REPEAT_TICKS    = pdMS_TO_TICKS(CONFIG_LOCTEK_REPEAT_MS);
 constexpr TickType_t IDLE_POLL_TICKS = pdMS_TO_TICKS(CONFIG_LOCTEK_IDLE_POLL_MS);
 constexpr TickType_t MOVE_TIMEOUT    = pdMS_TO_TICKS(CONFIG_LOCTEK_MOVE_TIMEOUT_MS);
-// A travel whose height stops changing has hit the end of the range, or lost
+
+// A key whose height stops changing has reached the end of the range, or lost
 // the box, long before the travel timeout would notice.
-constexpr TickType_t GOTO_STALL = pdMS_TO_TICKS(2500);
+constexpr TickType_t STALL = pdMS_TO_TICKS(2500);
+
+// A travel whose height moves away from its target is fighting something, and
+// gives up rather than wrestle with it.
+constexpr int RETREAT_MM = 15;
+
+// A travel needs the box to have said where the desk is, recently.
+constexpr TickType_t HEIGHT_FRESH = pdMS_TO_TICKS(2000);
 
 // The desk runs on after the last key frame. How far is learned from where each
-// travel actually comes to rest, per direction, and kept across reboots.
-constexpr int        RUN_ON_MAX_MM  = 40;
-constexpr TickType_t SETTLED_GAP    = pdMS_TO_TICKS(400);
+// travel comes to rest, per direction, and kept across reboots.
+constexpr int        RUN_ON_MAX_MM   = 40;
+constexpr TickType_t SETTLED_GAP     = pdMS_TO_TICKS(400);
 constexpr char       NVS_NAMESPACE[] = "loctek";
 constexpr char       NVS_RUN_ON[]    = "runon";
 
-constexpr std::uint32_t TX_TASK_STACK    = 3072;
-constexpr std::uint32_t RX_TASK_STACK    = 3072;
-constexpr UBaseType_t   TX_TASK_PRIORITY = 6;
-constexpr UBaseType_t   RX_TASK_PRIORITY = 6;
-constexpr BaseType_t    TASK_CORE        = 0;
-constexpr UBaseType_t   MOVE_QUEUE_LEN   = 4;
-constexpr int           kStopRepeats     = 3;
+constexpr std::uint32_t DRIVER_STACK  = 3072;
+constexpr std::uint32_t RX_STACK      = 3072;
+constexpr UBaseType_t   TASK_PRIORITY = 6;
+constexpr BaseType_t    TASK_CORE     = 0;
+constexpr int           kStopRepeats  = 3;
 
 constexpr KeyFrame kFrameStop = build_key_frame(Key::None);
 constexpr KeyFrame kFrameUp   = build_key_frame(Key::Up);
 constexpr KeyFrame kFrameDown = build_key_frame(Key::Down);
 
-struct Request {
-    Move direction;
-    bool steering;  // from a travel, so dropped if that travel has since been ended
+// A key press with a duration, done in order: the box wants a stream of frames
+// and a release for each.
+struct Press {
+    enum class Kind : std::uint8_t { Key, Store, Wake, Nudge };
+    Kind kind;
+    Key  key;
 };
+constexpr UBaseType_t PRESS_QUEUE_LEN = 4;
 
-StaticQueue_t s_move_queue_ctrl;
-Request       s_move_queue_storage[MOVE_QUEUE_LEN];
-QueueHandle_t s_move_queue = nullptr;
+// Two mailboxes and a queue feed the driver. Each mailbox holds the latest
+// wish of its kind, a newer one replacing the old, so a Stop can never queue
+// behind anything and a hand's move is never lost to a travel request.
+StaticQueue_t s_move_ctrl;
+Move          s_move_storage[1];
+QueueHandle_t s_moves = nullptr;
 
+StaticQueue_t s_goto_ctrl;
+int           s_goto_storage[1];
+QueueHandle_t s_gotos = nullptr;
+
+StaticQueue_t s_press_ctrl;
+Press         s_press_storage[PRESS_QUEUE_LEN];
+QueueHandle_t s_presses = nullptr;
+
+TaskHandle_t s_driver = nullptr;
+
+StaticTask_t s_driver_ctrl;
+StaticTask_t s_rx_ctrl;
+StackType_t *s_driver_stack = nullptr;
+StackType_t *s_rx_stack     = nullptr;
+
+HeightHandler s_on_height = nullptr;
+
+std::atomic<std::uint32_t> s_bytes_received{0};
+std::atomic<std::uint32_t> s_frames_decoded{0};
+std::atomic<std::uint32_t> s_height_frames{0};
+std::atomic<std::uint32_t> s_heights_decoded{0};
+
+// Published by the receive task.
+std::atomic<int>        s_last_height{-1};
+std::atomic<TickType_t> s_last_height_at{0};
+std::atomic<bool>       s_height_posted{false};
+
+// Published by the driver task, and by request_move for the hand.
 std::atomic<std::int8_t> s_motion{0};
-std::atomic<int>         s_goto_target{-1};
-std::atomic<int>         s_last_height{-1};
-std::atomic<TickType_t>  s_progress_at{0};  // when the height last changed
+std::atomic<int>         s_travelling_to{-1};
+std::atomic<bool>        s_hand{false};
 
-int s_run_on_mm[2] = {0, 0};  // up, down
+void wake_driver()
+{
+    if (s_driver != nullptr) {
+        xTaskNotifyGive(s_driver);
+    }
+}
 
-// After a travel releases, the landing is watched until the height settles.
-std::atomic<int> s_landing_target{-1};
-Move             s_landing_dir     = Move::Stop;
-int              s_landing_last    = -1;
-TickType_t       s_landing_last_at = 0;
+// ---- Driver task state. Touched on the driver task only. ----
+
+Move       d_direction   = Move::Stop;
+TickType_t d_deadline    = 0;
+TickType_t d_progress_at = 0;  // when the height last changed, or a key went down
+TickType_t d_next_frame  = 0;
+int        d_seen_height = -1;
+
+int d_target    = -1;
+int d_best_away = INT_MAX;  // the closest this travel has come
+int d_run_on[2] = {0, 0};   // up, down
+
+int        d_landing_target = -1;
+Move       d_landing_dir    = Move::Stop;
+int        d_landing_last   = -1;
+TickType_t d_landing_at     = 0;
 
 int dir_index(Move direction)
 {
@@ -83,178 +139,6 @@ int dir_index(Move direction)
 const char *dir_name(Move direction)
 {
     return direction == Move::Down ? "down" : "up";
-}
-
-void load_run_on()
-{
-    nvs_handle_t handle;
-    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle) != ESP_OK) {
-        return;
-    }
-    int         stored[2];
-    std::size_t size = sizeof(stored);
-    if (nvs_get_blob(handle, NVS_RUN_ON, stored, &size) == ESP_OK && size == sizeof(stored)) {
-        for (int i = 0; i < 2; ++i) {
-            s_run_on_mm[i] = std::clamp(stored[i], 0, RUN_ON_MAX_MM);
-        }
-    }
-    nvs_close(handle);
-}
-
-void save_run_on()
-{
-    nvs_handle_t handle;
-    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle) != ESP_OK) {
-        return;
-    }
-    if (nvs_set_blob(handle, NVS_RUN_ON, s_run_on_mm, sizeof(s_run_on_mm)) == ESP_OK) {
-        nvs_commit(handle);
-    }
-    nvs_close(handle);
-}
-
-void land(int height_mm)
-{
-    const int target = s_landing_target.load(std::memory_order_relaxed);
-    if (target < 0) {
-        return;
-    }
-    const TickType_t now = xTaskGetTickCount();
-    if (height_mm != s_landing_last || now - s_landing_last_at < SETTLED_GAP) {
-        if (height_mm != s_landing_last) {
-            s_landing_last    = height_mm;
-            s_landing_last_at = now;
-        }
-        return;
-    }
-    s_landing_target.store(-1, std::memory_order_relaxed);
-
-    const int past = s_landing_dir == Move::Up ? height_mm - target : target - height_mm;
-    if (past == 0) {
-        ESP_LOGI(TAG, "landed on %d mm", target);
-        return;
-    }
-    // Half the miss at a time: above a metre the box reports whole centimetres,
-    // and taking all of one would overshoot the other way next time.
-    int      &run_on = s_run_on_mm[dir_index(s_landing_dir)];
-    const int was    = run_on;
-    run_on = std::clamp(run_on + (past + (past > 0 ? 1 : -1)) / 2, 0, RUN_ON_MAX_MM);
-    ESP_LOGI(TAG, "landed %d mm %s %d mm; run-on %s is now %d mm", std::abs(past),
-             past > 0 ? "past" : "short of", target, dir_name(s_landing_dir), run_on);
-    if (run_on != was) {
-        save_run_on();
-    }
-}
-
-StaticSemaphore_t s_tx_mutex_ctrl;
-SemaphoreHandle_t s_tx_mutex = nullptr;
-
-StaticTask_t s_tx_task_ctrl;
-StaticTask_t s_rx_task_ctrl;
-StackType_t *s_tx_task_stack = nullptr;
-StackType_t *s_rx_task_stack = nullptr;
-
-HeightHandler s_on_height = nullptr;
-
-std::atomic<std::uint32_t> s_bytes_received{0};
-std::atomic<std::uint32_t> s_frames_decoded{0};
-std::atomic<std::uint32_t> s_height_frames{0};
-std::atomic<std::uint32_t> s_heights_decoded{0};
-
-esp_err_t write_frame_locked(const KeyFrame &frame)
-{
-    const int written = uart_write_bytes(UART, frame.data(), frame.size());
-    if (written != static_cast<int>(frame.size())) {
-        return ESP_FAIL;
-    }
-    return uart_wait_tx_done(UART, pdMS_TO_TICKS(100));
-}
-
-esp_err_t write_frame(const KeyFrame &frame)
-{
-    if (s_tx_mutex == nullptr) {
-        return write_frame_locked(frame);
-    }
-    xSemaphoreTake(s_tx_mutex, portMAX_DELAY);
-    const esp_err_t err = write_frame_locked(frame);
-    xSemaphoreGive(s_tx_mutex);
-    return err;
-}
-
-esp_err_t press_key(Key key, int duration_ms)
-{
-    const KeyFrame frame = build_key_frame(key);
-    if (s_tx_mutex != nullptr) {
-        xSemaphoreTake(s_tx_mutex, portMAX_DELAY);
-    }
-
-    esp_err_t        err = ESP_OK;
-    const TickType_t end = xTaskGetTickCount() + pdMS_TO_TICKS(duration_ms);
-    do {
-        err = write_frame_locked(frame);
-        vTaskDelay(REPEAT_TICKS);
-    } while (err == ESP_OK && static_cast<std::int32_t>(xTaskGetTickCount() - end) < 0);
-
-    const esp_err_t release = write_frame_locked(kFrameStop);
-    if (s_tx_mutex != nullptr) {
-        xSemaphoreGive(s_tx_mutex);
-    }
-    return err != ESP_OK ? err : release;
-}
-
-esp_err_t queue_move(Move direction, bool steering)
-{
-    ESP_RETURN_ON_FALSE(s_move_queue != nullptr, ESP_ERR_INVALID_STATE, TAG, "not started");
-    const Request request{direction, steering};
-    if (xQueueSend(s_move_queue, &request, 0) != pdTRUE) {
-        return ESP_ERR_TIMEOUT;
-    }
-    s_motion.store(static_cast<std::int8_t>(direction), std::memory_order_relaxed);
-    return ESP_OK;
-}
-
-void end_travel()
-{
-    s_landing_target.store(-1, std::memory_order_relaxed);
-    if (s_goto_target.exchange(-1, std::memory_order_relaxed) >= 0) {
-        ESP_LOGI(TAG, "travel ended");
-    }
-}
-
-/** Ends a travel and releases the keys, before a key press of another kind. */
-void settle()
-{
-    end_travel();
-    if (s_motion.load(std::memory_order_relaxed) != 0) {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(queue_move(Move::Stop, false));
-    }
-}
-
-void steer_toward(int height_mm)
-{
-    const int target = s_goto_target.load(std::memory_order_relaxed);
-    if (target < 0) {
-        land(height_mm);
-        return;
-    }
-    const auto current = static_cast<Move>(s_motion.load(std::memory_order_relaxed));
-    const Move heading = current != Move::Stop ? current
-                         : target > height_mm  ? Move::Up
-                                               : Move::Down;
-    const Move next = steer(target, height_mm, current, s_run_on_mm[dir_index(heading)]);
-    if (next == Move::Stop) {
-        ESP_LOGI(TAG, "releasing at %d mm for %d mm", height_mm, target);
-        s_goto_target.store(-1, std::memory_order_relaxed);
-        if (current != Move::Stop) {
-            s_landing_dir     = current;
-            s_landing_last    = -1;
-            s_landing_last_at = 0;
-            s_landing_target.store(target, std::memory_order_relaxed);
-        }
-    }
-    if (next != current) {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(queue_move(next, true));
-    }
 }
 
 const KeyFrame &frame_for(Move direction)
@@ -267,57 +151,301 @@ const KeyFrame &frame_for(Move direction)
     return kFrameStop;
 }
 
-[[noreturn]] void tx_task(void *)
+esp_err_t write_frame(const KeyFrame &frame)
 {
-    Move       direction     = Move::Stop;
-    TickType_t move_deadline = 0;
+    const int written = uart_write_bytes(UART, frame.data(), frame.size());
+    if (written != static_cast<int>(frame.size())) {
+        return ESP_FAIL;
+    }
+    return uart_wait_tx_done(UART, pdMS_TO_TICKS(100));
+}
 
-    for (;;) {
-        if (direction != Move::Stop) {
-            const TickType_t now = xTaskGetTickCount();
-            if (static_cast<std::int32_t>(now - move_deadline) >= 0) {
-                ESP_LOGW(TAG, "travel timeout, stopping");
-                end_travel();
-                direction = Move::Stop;
-            } else if (s_goto_target.load(std::memory_order_relaxed) >= 0 &&
-                       now - s_progress_at.load(std::memory_order_relaxed) > GOTO_STALL) {
-                ESP_LOGW(TAG, "height stopped changing, stopping");
-                end_travel();
-                direction = Move::Stop;
-            }
-            if (direction == Move::Stop) {
-                s_motion.store(0, std::memory_order_relaxed);
-            }
+void load_run_on()
+{
+    nvs_handle_t handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle) != ESP_OK) {
+        return;
+    }
+    int         stored[2];
+    std::size_t size = sizeof(stored);
+    if (nvs_get_blob(handle, NVS_RUN_ON, stored, &size) == ESP_OK && size == sizeof(stored)) {
+        for (int i = 0; i < 2; ++i) {
+            d_run_on[i] = std::clamp(stored[i], 0, RUN_ON_MAX_MM);
         }
+    }
+    nvs_close(handle);
+}
 
-        if (direction != Move::Stop || IDLE_POLL_TICKS > 0) {
-            ESP_ERROR_CHECK_WITHOUT_ABORT(write_frame(frame_for(direction)));
-        }
+void save_run_on()
+{
+    nvs_handle_t handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle) != ESP_OK) {
+        return;
+    }
+    if (nvs_set_blob(handle, NVS_RUN_ON, d_run_on, sizeof(d_run_on)) == ESP_OK) {
+        nvs_commit(handle);
+    }
+    nvs_close(handle);
+}
 
-        Request          request{};
-        const TickType_t wait =
-            direction != Move::Stop ? REPEAT_TICKS
-                                    : (IDLE_POLL_TICKS > 0 ? IDLE_POLL_TICKS : portMAX_DELAY);
-        if (xQueueReceive(s_move_queue, &request, wait) != pdTRUE) {
-            continue;
+/** Lets go of the keys: the release frame, repeated, since one can be missed. */
+void release()
+{
+    if (d_direction != Move::Stop) {
+        d_direction = Move::Stop;
+        s_motion.store(0, std::memory_order_relaxed);
+    }
+    for (int i = 0; i < kStopRepeats; ++i) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(write_frame(kFrameStop));
+    }
+    d_next_frame = xTaskGetTickCount() + IDLE_POLL_TICKS;
+}
+
+void end_travel(const char *why)
+{
+    d_landing_target = -1;
+    if (d_target < 0) {
+        return;
+    }
+    ESP_LOGI(TAG, "travel to %d mm ended: %s", d_target, why);
+    d_target = -1;
+    s_travelling_to.store(-1, std::memory_order_relaxed);
+}
+
+void set_direction(Move direction, TickType_t now)
+{
+    if (direction == Move::Stop) {
+        release();
+        return;
+    }
+    if (direction == d_direction) {
+        return;
+    }
+    d_direction   = direction;
+    d_deadline    = now + MOVE_TIMEOUT;
+    d_progress_at = now;
+    d_next_frame  = now;
+    s_motion.store(static_cast<std::int8_t>(direction), std::memory_order_relaxed);
+}
+
+void steer_travel(int height_mm, TickType_t now)
+{
+    const int away = std::abs(d_target - height_mm);
+    if (away < d_best_away) {
+        d_best_away = away;
+    } else if (d_direction != Move::Stop && away - d_best_away > RETREAT_MM) {
+        ESP_LOGW(TAG, "desk moving away from %d mm, giving up", d_target);
+        end_travel("moving away");
+        release();
+        return;
+    }
+
+    const Move heading = d_direction != Move::Stop ? d_direction
+                         : d_target > height_mm    ? Move::Up
+                                                   : Move::Down;
+    const int  margin  = d_run_on[dir_index(heading)];
+    const Move next    = steer(d_target, height_mm, d_direction, margin);
+    if (next == Move::Stop) {
+        const Move was    = d_direction;
+        const int  target = d_target;
+        ESP_LOGI(TAG, "releasing at %d mm for %d mm", height_mm, target);
+        end_travel("arrived");
+        release();
+        // Only a release inside the margin is a landing worth learning from; a
+        // crossing means the run-on was already too small to matter.
+        if (was != Move::Stop && away <= margin) {
+            d_landing_target = target;
+            d_landing_dir    = was;
+            d_landing_last   = -1;
+            d_landing_at     = 0;
         }
-        // A hand may have ended the travel between the steer and now.
-        const bool stale = request.steering && request.direction != Move::Stop &&
-                           s_goto_target.load(std::memory_order_relaxed) < 0;
-        if (!stale && request.direction != direction) {
-            const bool stopping = request.direction == Move::Stop;
-            direction           = request.direction;
-            if (direction != Move::Stop) {
-                move_deadline = xTaskGetTickCount() + MOVE_TIMEOUT;
-            } else if (stopping) {
-                for (int i = 0; i < kStopRepeats; ++i) {
-                    ESP_ERROR_CHECK_WITHOUT_ABORT(write_frame(kFrameStop));
-                }
-            }
-        }
-        s_motion.store(static_cast<std::int8_t>(direction), std::memory_order_relaxed);
+        return;
+    }
+    if (next != d_direction) {
+        set_direction(next, now);
     }
 }
+
+void land(int height_mm, TickType_t now)
+{
+    if (height_mm != d_landing_last) {
+        d_landing_last = height_mm;
+        d_landing_at   = now;
+        return;
+    }
+    if (now - d_landing_at < SETTLED_GAP) {
+        return;
+    }
+    const int target = d_landing_target;
+    d_landing_target = -1;
+
+    const int past = d_landing_dir == Move::Up ? height_mm - target : target - height_mm;
+    if (past == 0) {
+        ESP_LOGI(TAG, "landed on %d mm", target);
+        return;
+    }
+    // Half the miss at a time: above a metre the box reports whole centimetres,
+    // and taking all of one would overshoot the other way next time.
+    int      &run_on = d_run_on[dir_index(d_landing_dir)];
+    const int was    = run_on;
+    run_on = std::clamp(run_on + (past + (past > 0 ? 1 : -1)) / 2, 0, RUN_ON_MAX_MM);
+    ESP_LOGI(TAG, "landed %d mm %s %d mm; run-on %s is now %d mm", std::abs(past),
+             past > 0 ? "past" : "short of", target, dir_name(d_landing_dir), run_on);
+    if (run_on != was) {
+        save_run_on();
+    }
+}
+
+void on_height(int height_mm, TickType_t now)
+{
+    if (height_mm != d_seen_height) {
+        d_seen_height = height_mm;
+        d_progress_at = now;
+    }
+    if (d_target >= 0) {
+        steer_travel(height_mm, now);
+    } else if (d_landing_target >= 0) {
+        land(height_mm, now);
+    }
+}
+
+void take_move(Move direction, TickType_t now)
+{
+    end_travel(direction == Move::Stop ? "released" : "a hand on the keys");
+    set_direction(direction, now);
+}
+
+void take_goto(int target_mm, TickType_t now)
+{
+    if (s_hand.load(std::memory_order_relaxed)) {
+        ESP_LOGW(TAG, "not travelling to %d mm: a hand is on the keys", target_mm);
+        return;
+    }
+    if (d_target >= 0 || d_direction != Move::Stop) {
+        end_travel("new target");
+        release();
+    }
+    d_target         = target_mm;
+    d_best_away      = INT_MAX;
+    d_progress_at    = now;
+    d_landing_target = -1;
+    s_travelling_to.store(target_mm, std::memory_order_relaxed);
+
+    const int here = s_last_height.load(std::memory_order_relaxed);
+    ESP_LOGI(TAG, "travelling from %d mm to %d mm", here, target_mm);
+    if (here >= 0 && now - s_last_height_at.load(std::memory_order_acquire) <= HEIGHT_FRESH) {
+        steer_travel(here, now);
+    }
+}
+
+void press_key(Key key, int duration_ms)
+{
+    const KeyFrame   frame = build_key_frame(key);
+    const TickType_t end   = xTaskGetTickCount() + pdMS_TO_TICKS(duration_ms);
+    esp_err_t        err   = ESP_OK;
+    do {
+        err = write_frame(frame);
+        vTaskDelay(REPEAT_TICKS);
+    } while (err == ESP_OK && static_cast<std::int32_t>(xTaskGetTickCount() - end) < 0);
+    ESP_ERROR_CHECK_WITHOUT_ABORT(err);
+    ESP_ERROR_CHECK_WITHOUT_ABORT(write_frame(kFrameStop));
+}
+
+constexpr TickType_t WAKE_LOW = pdMS_TO_TICKS(200);
+
+esp_err_t turn_on()
+{
+    if constexpr (CONFIG_LOCTEK_WAKE_GPIO < 0) {
+        return ESP_OK;
+    } else {
+        constexpr auto pin = static_cast<gpio_num_t>(CONFIG_LOCTEK_WAKE_GPIO);
+        ESP_RETURN_ON_ERROR(gpio_set_level(pin, 0), TAG, "wake low");
+        vTaskDelay(WAKE_LOW);
+        ESP_RETURN_ON_ERROR(gpio_set_level(pin, 1), TAG, "wake high");
+        vTaskDelay(pdMS_TO_TICKS(CONFIG_LOCTEK_WAKE_PULSE_MS));
+        return ESP_OK;
+    }
+}
+
+void take_press(const Press &press)
+{
+    if (d_target >= 0 || d_direction != Move::Stop) {
+        end_travel("key pressed");
+        release();
+    }
+    switch (press.kind) {
+        case Press::Kind::Key:
+            press_key(press.key, CONFIG_LOCTEK_PRESS_MS);
+            break;
+        case Press::Kind::Store:
+            static_assert(CONFIG_LOCTEK_PRESS_MS < 2000, "M must not be held near the factory-reset time");
+            press_key(Key::Memory, CONFIG_LOCTEK_PRESS_MS);
+            vTaskDelay(pdMS_TO_TICKS(CONFIG_LOCTEK_STORE_GAP_MS));
+            press_key(press.key, CONFIG_LOCTEK_PRESS_MS);
+            break;
+        case Press::Kind::Wake:
+            ESP_ERROR_CHECK_WITHOUT_ABORT(turn_on());
+            ESP_ERROR_CHECK_WITHOUT_ABORT(write_frame(kFrameStop));
+            break;
+        case Press::Kind::Nudge:
+            ESP_ERROR_CHECK_WITHOUT_ABORT(write_frame(kFrameUp));
+            ESP_ERROR_CHECK_WITHOUT_ABORT(write_frame(kFrameStop));
+            break;
+    }
+    d_next_frame = xTaskGetTickCount() + IDLE_POLL_TICKS;
+}
+
+[[noreturn]] void driver_task(void *)
+{
+    for (;;) {
+        TickType_t now = xTaskGetTickCount();
+
+        Move wanted = Move::Stop;
+        if (xQueueReceive(s_moves, &wanted, 0) == pdTRUE) {
+            take_move(wanted, now);
+        }
+        int target = -1;
+        if (xQueueReceive(s_gotos, &target, 0) == pdTRUE) {
+            take_goto(target, now);
+        }
+        Press press{};
+        while (xQueueReceive(s_presses, &press, 0) == pdTRUE) {
+            take_press(press);  // blocks for the press; nothing else writes meanwhile
+        }
+        now = xTaskGetTickCount();
+        if (s_height_posted.exchange(false, std::memory_order_acquire)) {
+            on_height(s_last_height.load(std::memory_order_relaxed), now);
+        }
+
+        if (d_direction != Move::Stop) {
+            if (static_cast<std::int32_t>(now - d_deadline) >= 0) {
+                ESP_LOGW(TAG, "travel timeout, stopping");
+                end_travel("timeout");
+                release();
+            } else if (now - d_progress_at > STALL) {
+                ESP_LOGW(TAG, "height stopped changing, stopping");
+                end_travel("stalled");
+                release();
+            }
+        }
+
+        const bool moving = d_direction != Move::Stop;
+        const bool polls  = moving || IDLE_POLL_TICKS > 0;
+        if (polls && static_cast<std::int32_t>(now - d_next_frame) >= 0) {
+            ESP_ERROR_CHECK_WITHOUT_ABORT(write_frame(frame_for(d_direction)));
+            d_next_frame = now + (moving ? REPEAT_TICKS : IDLE_POLL_TICKS);
+        }
+
+        TickType_t wait = portMAX_DELAY;
+        if (polls) {
+            const auto until = static_cast<std::int32_t>(d_next_frame - now);
+            wait             = until > 0 ? static_cast<TickType_t>(until) : 0;
+        }
+        ulTaskNotifyTake(pdTRUE, wait);
+    }
+}
+
+// ---- Receive task. Decodes, publishes, and decides nothing. ----
 
 constexpr int RAW_KEEP = 64;
 std::uint8_t  s_raw[RAW_KEEP];
@@ -344,8 +472,6 @@ void keep_raw(const std::uint8_t *bytes, int count)
         const int read = uart_read_bytes(UART, buf.data(), buf.size(), pdMS_TO_TICKS(10));
         if (read > 0) {
             keep_raw(buf.data(), read);
-        }
-        if (read > 0) {
             s_bytes_received.fetch_add(static_cast<std::uint32_t>(read), std::memory_order_relaxed);
         }
         for (int i = 0; i < read; ++i) {
@@ -361,10 +487,10 @@ void keep_raw(const std::uint8_t *bytes, int count)
             const std::optional<int> height_mm = decode_height_mm(*frame);
             if (height_mm) {
                 s_heights_decoded.fetch_add(1, std::memory_order_relaxed);
-                if (s_last_height.exchange(*height_mm, std::memory_order_relaxed) != *height_mm) {
-                    s_progress_at.store(xTaskGetTickCount(), std::memory_order_relaxed);
-                }
-                steer_toward(*height_mm);
+                s_last_height.store(*height_mm, std::memory_order_relaxed);
+                s_last_height_at.store(xTaskGetTickCount(), std::memory_order_release);
+                s_height_posted.store(true, std::memory_order_release);
+                wake_driver();
                 if (s_on_height != nullptr) {
                     s_on_height(*height_mm);
                 }
@@ -392,22 +518,6 @@ esp_err_t init_wake_gpio()
     }
 }
 
-constexpr TickType_t WAKE_LOW = pdMS_TO_TICKS(200);
-
-esp_err_t turn_on()
-{
-    if constexpr (CONFIG_LOCTEK_WAKE_GPIO < 0) {
-        return ESP_OK;
-    } else {
-        constexpr auto pin = static_cast<gpio_num_t>(CONFIG_LOCTEK_WAKE_GPIO);
-        ESP_RETURN_ON_ERROR(gpio_set_level(pin, 0), TAG, "wake low");
-        vTaskDelay(WAKE_LOW);
-        ESP_RETURN_ON_ERROR(gpio_set_level(pin, 1), TAG, "wake high");
-        vTaskDelay(pdMS_TO_TICKS(CONFIG_LOCTEK_WAKE_PULSE_MS));
-        return ESP_OK;
-    }
-}
-
 esp_err_t init_uart()
 {
     const uart_config_t cfg = {
@@ -429,71 +539,100 @@ esp_err_t init_uart()
     return uart_flush_input(UART);
 }
 
+esp_err_t post_press(Press::Kind kind, Key key)
+{
+    ESP_RETURN_ON_FALSE(s_presses != nullptr, ESP_ERR_INVALID_STATE, TAG, "not started");
+    const Press press{kind, key};
+    if (xQueueSend(s_presses, &press, 0) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+    wake_driver();
+    return ESP_OK;
+}
+
 }  // namespace
 
 esp_err_t start(HeightHandler on_height)
 {
-    ESP_RETURN_ON_FALSE(s_move_queue == nullptr, ESP_ERR_INVALID_STATE, TAG, "already started");
+    ESP_RETURN_ON_FALSE(s_presses == nullptr, ESP_ERR_INVALID_STATE, TAG, "already started");
 
     s_on_height = on_height;
     load_run_on();
-    ESP_LOGI(TAG, "run-on up %d mm, down %d mm", s_run_on_mm[0], s_run_on_mm[1]);
+    ESP_LOGI(TAG, "run-on up %d mm, down %d mm", d_run_on[0], d_run_on[1]);
 
     ESP_RETURN_ON_ERROR(init_wake_gpio(), TAG, "wake");
     ESP_RETURN_ON_ERROR(init_uart(), TAG, "uart");
     ESP_RETURN_ON_ERROR(turn_on(), TAG, "wake line high");
 
-    QueueHandle_t queue = xQueueCreateStatic(MOVE_QUEUE_LEN, sizeof(Request),
-                                             reinterpret_cast<std::uint8_t *>(s_move_queue_storage),
-                                             &s_move_queue_ctrl);
-    ESP_RETURN_ON_FALSE(queue != nullptr, ESP_ERR_NO_MEM, TAG, "queue");
-    s_move_queue = queue;
-    s_tx_mutex   = xSemaphoreCreateMutexStatic(&s_tx_mutex_ctrl);
-    ESP_RETURN_ON_FALSE(s_tx_mutex != nullptr, ESP_ERR_NO_MEM, TAG, "tx mutex");
+    s_moves = xQueueCreateStatic(1, sizeof(Move), reinterpret_cast<std::uint8_t *>(s_move_storage),
+                                 &s_move_ctrl);
+    s_gotos = xQueueCreateStatic(1, sizeof(int), reinterpret_cast<std::uint8_t *>(s_goto_storage),
+                                 &s_goto_ctrl);
+    QueueHandle_t presses =
+        xQueueCreateStatic(PRESS_QUEUE_LEN, sizeof(Press),
+                           reinterpret_cast<std::uint8_t *>(s_press_storage), &s_press_ctrl);
+    ESP_RETURN_ON_FALSE(s_moves != nullptr && s_gotos != nullptr && presses != nullptr,
+                        ESP_ERR_NO_MEM, TAG, "queues");
 
-    s_rx_task_stack = static_cast<StackType_t *>(
-        heap_caps_malloc(RX_TASK_STACK * sizeof(StackType_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
-    s_tx_task_stack = static_cast<StackType_t *>(
-        heap_caps_malloc(TX_TASK_STACK * sizeof(StackType_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
-    ESP_RETURN_ON_FALSE(s_rx_task_stack != nullptr && s_tx_task_stack != nullptr, ESP_ERR_NO_MEM,
-                        TAG, "task stacks");
+    s_rx_stack = static_cast<StackType_t *>(
+        heap_caps_malloc(RX_STACK * sizeof(StackType_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    s_driver_stack = static_cast<StackType_t *>(
+        heap_caps_malloc(DRIVER_STACK * sizeof(StackType_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    ESP_RETURN_ON_FALSE(s_rx_stack != nullptr && s_driver_stack != nullptr, ESP_ERR_NO_MEM, TAG,
+                        "task stacks");
 
-    TaskHandle_t rx = xTaskCreateStaticPinnedToCore(rx_task, "loctek_rx", RX_TASK_STACK, nullptr,
-                                                    RX_TASK_PRIORITY, s_rx_task_stack,
-                                                    &s_rx_task_ctrl, TASK_CORE);
+    s_driver = xTaskCreateStaticPinnedToCore(driver_task, "loctek_drv", DRIVER_STACK, nullptr,
+                                             TASK_PRIORITY, s_driver_stack, &s_driver_ctrl,
+                                             TASK_CORE);
+    ESP_RETURN_ON_FALSE(s_driver != nullptr, ESP_ERR_NO_MEM, TAG, "driver task");
+
+    TaskHandle_t rx = xTaskCreateStaticPinnedToCore(rx_task, "loctek_rx", RX_STACK, nullptr,
+                                                    TASK_PRIORITY, s_rx_stack, &s_rx_ctrl,
+                                                    TASK_CORE);
     ESP_RETURN_ON_FALSE(rx != nullptr, ESP_ERR_NO_MEM, TAG, "rx task");
 
-    TaskHandle_t tx = xTaskCreateStaticPinnedToCore(tx_task, "loctek_tx", TX_TASK_STACK, nullptr,
-                                                    TX_TASK_PRIORITY, s_tx_task_stack,
-                                                    &s_tx_task_ctrl, TASK_CORE);
-    ESP_RETURN_ON_FALSE(tx != nullptr, ESP_ERR_NO_MEM, TAG, "tx task");
+    // Last, since every public call checks it.
+    s_presses = presses;
 
-    ESP_LOGI(TAG, "uart%d tx=%d rx=%d wake=%d", CONFIG_LOCTEK_UART_NUM, CONFIG_LOCTEK_TX_GPIO,
-             CONFIG_LOCTEK_RX_GPIO, CONFIG_LOCTEK_WAKE_GPIO);
+    ESP_LOGI(TAG, "uart%d tx=%d rx=%d wake=%d, desk %d-%d mm", CONFIG_LOCTEK_UART_NUM,
+             CONFIG_LOCTEK_TX_GPIO, CONFIG_LOCTEK_RX_GPIO, CONFIG_LOCTEK_WAKE_GPIO,
+             CONFIG_LOCTEK_MIN_HEIGHT_MM, CONFIG_LOCTEK_MAX_HEIGHT_MM);
     return ESP_OK;
 }
 
 esp_err_t request_move(Move direction)
 {
-    end_travel();
-    return queue_move(direction, false);
+    ESP_RETURN_ON_FALSE(s_presses != nullptr, ESP_ERR_INVALID_STATE, TAG, "not started");
+    s_hand.store(direction != Move::Stop, std::memory_order_relaxed);
+    xQueueOverwrite(s_moves, &direction);
+    wake_driver();
+    return ESP_OK;
+}
+
+bool in_range(int height_mm)
+{
+    return height_mm >= CONFIG_LOCTEK_MIN_HEIGHT_MM && height_mm <= CONFIG_LOCTEK_MAX_HEIGHT_MM;
 }
 
 esp_err_t goto_height(int height_mm)
 {
-    ESP_RETURN_ON_FALSE(s_move_queue != nullptr, ESP_ERR_INVALID_STATE, TAG, "not started");
-    const int here = s_last_height.load(std::memory_order_relaxed);
-    ESP_RETURN_ON_FALSE(here >= 0, ESP_ERR_INVALID_STATE, TAG, "height unknown");
-    ESP_LOGI(TAG, "travelling from %d mm to %d mm", here, height_mm);
-    s_progress_at.store(xTaskGetTickCount(), std::memory_order_relaxed);
-    s_goto_target.store(height_mm, std::memory_order_relaxed);
-    steer_toward(here);
+    ESP_RETURN_ON_FALSE(s_presses != nullptr, ESP_ERR_INVALID_STATE, TAG, "not started");
+    ESP_RETURN_ON_FALSE(in_range(height_mm), ESP_ERR_INVALID_ARG, TAG,
+                        "%d mm is outside the desk's range", height_mm);
+    ESP_RETURN_ON_FALSE(!s_hand.load(std::memory_order_relaxed), ESP_ERR_INVALID_STATE, TAG,
+                        "a hand is on the keys");
+    const TickType_t at   = s_last_height_at.load(std::memory_order_acquire);
+    const bool       know = s_last_height.load(std::memory_order_relaxed) >= 0 &&
+                      xTaskGetTickCount() - at <= HEIGHT_FRESH;
+    ESP_RETURN_ON_FALSE(know, ESP_ERR_INVALID_STATE, TAG, "the box has not said where it is");
+    xQueueOverwrite(s_gotos, &height_mm);
+    wake_driver();
     return ESP_OK;
 }
 
 int driving_to()
 {
-    return s_goto_target.load(std::memory_order_relaxed);
+    return s_travelling_to.load(std::memory_order_relaxed);
 }
 
 Move motion()
@@ -501,18 +640,26 @@ Move motion()
     return static_cast<Move>(s_motion.load(std::memory_order_relaxed));
 }
 
+esp_err_t goto_preset(Preset preset)
+{
+    ESP_LOGI(TAG, "preset %d", static_cast<int>(preset) + 1);
+    return post_press(Press::Kind::Key, key_for(preset));
+}
+
+esp_err_t store_preset(Preset preset)
+{
+    ESP_LOGI(TAG, "storing preset %d", static_cast<int>(preset) + 1);
+    return post_press(Press::Kind::Store, key_for(preset));
+}
+
 esp_err_t wake()
 {
-    ESP_RETURN_ON_FALSE(s_move_queue != nullptr, ESP_ERR_INVALID_STATE, TAG, "not started");
-    ESP_RETURN_ON_ERROR(turn_on(), TAG, "turn on");
-    return write_frame(kFrameStop);
+    return post_press(Press::Kind::Wake, Key::None);
 }
 
 esp_err_t nudge()
 {
-    ESP_RETURN_ON_FALSE(s_move_queue != nullptr, ESP_ERR_INVALID_STATE, TAG, "not started");
-    ESP_RETURN_ON_ERROR(write_frame(kFrameUp), TAG, "nudge");
-    return write_frame(kFrameStop);
+    return post_press(Press::Kind::Nudge, Key::None);
 }
 
 int peek_raw(std::uint8_t *out, int capacity)
@@ -528,32 +675,6 @@ Stats stats()
             s_frames_decoded.load(std::memory_order_relaxed),
             s_height_frames.load(std::memory_order_relaxed),
             s_heights_decoded.load(std::memory_order_relaxed)};
-}
-
-esp_err_t goto_preset(Preset preset)
-{
-    ESP_RETURN_ON_FALSE(s_move_queue != nullptr, ESP_ERR_INVALID_STATE, TAG, "not started");
-    settle();
-    ESP_LOGI(TAG, "preset %d", static_cast<int>(preset) + 1);
-    return press_key(key_for(preset), CONFIG_LOCTEK_PRESS_MS);
-}
-
-esp_err_t store_preset(Preset preset)
-{
-    ESP_RETURN_ON_FALSE(s_move_queue != nullptr, ESP_ERR_INVALID_STATE, TAG, "not started");
-    settle();
-    ESP_LOGI(TAG, "storing preset %d", static_cast<int>(preset) + 1);
-
-    static_assert(CONFIG_LOCTEK_PRESS_MS < 2000, "M must not be held near the factory-reset time");
-    ESP_RETURN_ON_ERROR(press_key(Key::Memory, CONFIG_LOCTEK_PRESS_MS), TAG, "memory key");
-    vTaskDelay(pdMS_TO_TICKS(CONFIG_LOCTEK_STORE_GAP_MS));
-    return press_key(key_for(preset), CONFIG_LOCTEK_PRESS_MS);
-}
-
-esp_err_t send_key(Key key)
-{
-    ESP_RETURN_ON_FALSE(s_move_queue != nullptr, ESP_ERR_INVALID_STATE, TAG, "not started");
-    return write_frame(build_key_frame(key));
 }
 
 }  // namespace loctek

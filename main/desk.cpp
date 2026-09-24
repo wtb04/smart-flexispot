@@ -58,6 +58,12 @@ constexpr TickType_t COMMAND_GRACE = pdMS_TO_TICKS(4000);
 
 constexpr TickType_t LEARN_TIMEOUT = pdMS_TO_TICKS(45000);
 
+// Home Assistant's move buttons send one message and no release.
+constexpr TickType_t NETWORK_HOLD = pdMS_TO_TICKS(1500);
+std::atomic<TickType_t> s_network_hold_until{0};  // zero when no such hold is live
+
+static_assert(ui::kBoxPresets == deskproto::kBoxPresets, "the box has four presets everywhere");
+
 int  s_preset_mm[ui::kPresetCount] = {-1, -1, -1, -1, -1, -1};
 int  s_learning                    = -1;
 int  s_learn_from                  = -1;
@@ -77,7 +83,8 @@ void load_presets()
     const bool  read = nvs_get_blob(handle, NVS_PRESETS, stored, &size) == ESP_OK &&
                       size % sizeof(int) == 0 && size <= sizeof(stored);
     for (int i = 0; i < ui::kPresetCount; ++i) {
-        s_preset_mm[i] = read && static_cast<std::size_t>(i) < size / sizeof(int) ? stored[i] : -1;
+        const bool have = read && static_cast<std::size_t>(i) < size / sizeof(int);
+        s_preset_mm[i]  = have && loctek::in_range(stored[i]) ? stored[i] : -1;
     }
     nvs_close(handle);
 }
@@ -187,14 +194,30 @@ bool travelling()
                       : loctek::driving_to() >= 0;
 }
 
+int s_travel_index = -1;  // which of the panel's presets is being travelled to
+
 // Presets 5 and 6 are the panel's own, since the control box has four. Whichever
 // board holds the wire steers the desk there on each height the box reports.
-void travel_to(int height_mm)
+bool travel_to(int height_mm)
 {
+    if (s_hold.load(std::memory_order_relaxed) != 0) {
+        ESP_LOGW(TAG, "not travelling while a button is held");
+        return false;
+    }
     if (over_ble()) {
         ble::desk::goto_height(height_mm);
+        return true;
+    }
+    return loctek::goto_height(height_mm) == ESP_OK;
+}
+
+void let_go()
+{
+    s_hold.store(0, std::memory_order_relaxed);
+    if (over_ble()) {
+        ble::desk::stop();
     } else {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(loctek::goto_height(height_mm));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(loctek::request_move(loctek::Move::Stop));
     }
 }
 
@@ -225,7 +248,14 @@ void run_preset(const PresetCommand &cmd)
                 ui::notify("", "Hold it to save the height it goes to", "info", 3000));
             return;
         }
-        travel_to(s_preset_mm[cmd.index]);
+        if (travelling() && s_travel_index == cmd.index) {
+            let_go();  // tapping it again is how a travel is cancelled, as with the box's own
+            return;
+        }
+        if (!travel_to(s_preset_mm[cmd.index])) {
+            return;
+        }
+        s_travel_index = cmd.index;
     } else {
         if (over_ble()) {
             ble::desk::preset(cmd.index);
@@ -279,6 +309,14 @@ void on_height(int height_mm)
 {
     if (s_height_mm.exchange(height_mm, std::memory_order_relaxed) != height_mm) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_height(height_mm));
+    }
+}
+
+void on_wire_height(int height_mm)
+{
+    s_pending_height.store(height_mm, std::memory_order_relaxed);
+    if (s_height_pump != nullptr) {
+        xTaskNotifyGive(s_height_pump);
     }
 }
 
@@ -358,6 +396,12 @@ const char *link_status(const loctek::Stats &stats, bool link_up, int wake_attem
             s_presets_dirty = false;
             save_presets();
         }
+        const TickType_t network_until = s_network_hold_until.load(std::memory_order_relaxed);
+        if (network_until != 0 && static_cast<std::int32_t>(now - network_until) >= 0) {
+            s_network_hold_until.store(0, std::memory_order_relaxed);
+            ESP_LOGW(TAG, "a move from the network was not asked for again, letting go");
+            on_move(ui::Move::Stop);
+        }
         const bool commanded = s_commanded_at != 0;
         if (commanded) {
             const bool left = height >= 0 && s_commanded_from >= 0 &&
@@ -419,14 +463,15 @@ esp_err_t start()
 
     s_over_ble = settings::enabled(settings::Key::DeskBluetooth);
     ESP_LOGI(TAG, "driving the desk over %s", s_over_ble ? "bluetooth" : "the local wire");
+    // Heights arrive on the radio host task or the UART receive task; neither
+    // may wait on the screen, so the pump carries them over.
+    s_height_pump = xTaskCreateStatic(height_pump_task, "deskht", PUMP_STACK, nullptr,
+                                      TASK_PRIORITY, s_pump_stack, &s_pump_ctrl);
+    ESP_RETURN_ON_FALSE(s_height_pump != nullptr, ESP_ERR_NO_MEM, TAG, "height pump");
     if (s_over_ble) {
-        s_height_pump = xTaskCreateStatic(height_pump_task, "deskht", PUMP_STACK, nullptr,
-                                          TASK_PRIORITY, s_pump_stack, &s_pump_ctrl);
-        ESP_RETURN_ON_FALSE(s_height_pump != nullptr, ESP_ERR_NO_MEM, TAG, "height pump");
         ble::desk::on_status(on_proxy_status);
-    }
-    if (!s_over_ble) {
-        ESP_RETURN_ON_ERROR(loctek::start(on_height), TAG, "loctek");
+    } else {
+        ESP_RETURN_ON_ERROR(loctek::start(on_wire_height), TAG, "loctek");
     }
 
     TaskHandle_t task = xTaskCreateStaticPinnedToCore(supervisor_task, "desk", TASK_STACK, nullptr,
@@ -492,14 +537,28 @@ void on_move(ui::Move direction)
     }
     s_hold.store(motion, std::memory_order_relaxed);
     if (over_ble()) {
-        ble::desk::hold(motion > 0   ? deskproto::Motion::Up
-                        : motion < 0 ? deskproto::Motion::Down
-                                     : deskproto::Motion::Idle);
+        if (motion == 0) {
+            ble::desk::stop();  // even a hand that was never holding can end a travel
+            return;
+        }
+        ble::desk::hold(motion > 0 ? deskproto::Motion::Up : deskproto::Motion::Down);
     } else {
         ESP_ERROR_CHECK_WITHOUT_ABORT(loctek::request_move(motion > 0   ? loctek::Move::Up
                                                            : motion < 0 ? loctek::Move::Down
                                                                         : loctek::Move::Stop));
     }
+}
+
+void on_network_move(ui::Move direction)
+{
+    if (!linked()) {
+        ESP_LOGW(TAG, "ignoring a move from the network: the desk is not linked");
+        return;
+    }
+    s_network_hold_until.store(
+        direction == ui::Move::Stop ? 0 : xTaskGetTickCount() + NETWORK_HOLD,
+        std::memory_order_relaxed);
+    on_move(direction);
 }
 
 }  // namespace desk

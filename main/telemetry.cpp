@@ -84,7 +84,7 @@ void on_move(hass::protocol::Move direction)
         default:                         move = ui::Move::Stop; break;
     }
     ESP_LOGI(TAG, "move %d requested", static_cast<int>(move));
-    desk::on_move(move);
+    desk::on_network_move(move);
 }
 
 void on_notify(const hass::protocol::Notification &notice)

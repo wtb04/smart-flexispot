@@ -11,6 +11,9 @@ inline constexpr std::uint8_t VERSION = 1;
 inline constexpr std::size_t COMMAND_LEN = 12;
 inline constexpr std::size_t STATUS_LEN  = 16;
 
+/** The control box has this many presets of its own. */
+inline constexpr std::uint8_t kBoxPresets = 4;
+
 enum class Op : std::uint8_t {
     Hold   = 1,
     Stop   = 2,
@@ -87,10 +90,17 @@ inline bool decode(const std::uint8_t *in, std::size_t length, Command &out)
         return false;
     }
 
+    const std::uint8_t preset = in[9];
+    const bool         keyed  = op == static_cast<std::uint8_t>(Op::Preset) ||
+                       op == static_cast<std::uint8_t>(Op::Store);
+    if (keyed && preset >= kBoxPresets) {
+        return false;
+    }
+
     out.op        = static_cast<Op>(op);
     out.seq       = get32(in + 4);
     out.direction = static_cast<Motion>(direction);
-    out.preset    = in[9];
+    out.preset    = preset;
     out.height_mm = static_cast<std::uint16_t>(in[10] | (in[11] << 8));
     return true;
 }

@@ -54,8 +54,6 @@ int s_lost         = 0;
 SemaphoreHandle_t s_send_lock = nullptr;
 StaticSemaphore_t s_send_lock_ctrl;
 
-std::uint32_t s_last_sent_seq = 0;
-
 bool send(deskproto::Op op, deskproto::Motion direction, std::uint8_t preset,
           std::uint16_t height_mm = 0)
 {
@@ -67,8 +65,11 @@ bool send(deskproto::Op op, deskproto::Motion direction, std::uint8_t preset,
     command.direction = direction;
     command.preset    = preset;
     command.height_mm = height_mm;
-    command.seq       = s_seq.fetch_add(1, std::memory_order_relaxed) + 1;
-    s_last_sent_seq   = command.seq;
+
+    // The proxy drops anything numbered below what it last saw, so the number
+    // and the write have to happen in the same breath.
+    xSemaphoreTake(s_send_lock, portMAX_DELAY);
+    command.seq = s_seq.fetch_add(1, std::memory_order_relaxed) + 1;
 
     std::uint8_t packet[deskproto::COMMAND_LEN];
     deskproto::encode(command, packet);
@@ -78,8 +79,6 @@ bool send(deskproto::Op op, deskproto::Motion direction, std::uint8_t preset,
         s_sent_us.store(esp_timer_get_time(), std::memory_order_relaxed);
         s_probe_seq.store(command.seq, std::memory_order_relaxed);
     }
-
-    xSemaphoreTake(s_send_lock, portMAX_DELAY);
     const int rc = ble_gattc_write_no_rsp_flat(s_conn, s_echo, packet, sizeof(packet));
     xSemaphoreGive(s_send_lock);
 
@@ -452,6 +451,12 @@ void goto_height(int height_mm)
         return;
     }
     proxy::send_command(deskproto::Op::GoTo, 0, static_cast<std::uint16_t>(height_mm));
+}
+
+void stop()
+{
+    proxy::set_hold(deskproto::Motion::Idle);
+    proxy::send_command(deskproto::Op::Stop, 0);
 }
 
 bool last(deskproto::Status &out)

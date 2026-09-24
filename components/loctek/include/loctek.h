@@ -4,39 +4,45 @@
 #include "loctek_proto.h"
 
 namespace loctek {
-/** Called on the receive task. */
+/** Called on the receive task with each height the box reports. Store it and
+ *  notify; never take a lock or write flash here. */
 using HeightHandler = void (*)(int height_mm);
 
-/** Pins and timings come from Kconfig. */
+/** Pins, timings and the desk's range come from Kconfig. One driver task
+ *  writes every key frame; the calls below only tell it what is wanted. */
 esp_err_t start(HeightHandler on_height);
 
-/** Non-blocking, from any task. Move::Stop sends the release frame; going quiet
- *  would let the desk coast on. A hand on the keys ends any travel. */
+/** A hand on the keys. Non-blocking, from any task. Only the latest request
+ *  matters, so a Stop can never queue behind anything. Move::Stop sends the
+ *  release frame; going quiet would let the desk coast on. Ends any travel, and
+ *  no travel can start until the hand lets go. */
 esp_err_t request_move(Move direction);
 
 /** Travels to a height the box has no preset for, steering on each height it
  *  reports: no clock, one decision per report. Releases early by the run-on
- *  learned from where earlier travels came to rest. Fails if the box has not
- *  said where it is yet. Bounded by the travel timeout, and by the height
- *  ceasing to change, as at the end of the desk's range. Any key sent
- *  afterwards ends it. */
+ *  learned from where earlier travels came to rest. Refused while a hand is on
+ *  the keys, when the target is outside the desk's range, or when the box has
+ *  not said where it is in the last two seconds. Bounded by the travel timeout,
+ *  by the height ceasing to change, and by the desk moving away from the
+ *  target. Any key sent afterwards ends it. A new target replaces the old. */
 esp_err_t goto_height(int height_mm);
 
 /** The height being travelled to, or negative when not travelling. */
 int driving_to();
 
-/** The key being sent right now, as last requested. */
+/** The key being sent right now. */
 Move motion();
 
+/** True for a height the desk can actually reach. */
+bool in_range(int height_mm);
+
 /** The box runs the move itself and ignores a plain stop while it does; sending
- *  the same preset again is what cancels it. */
+ *  the same preset again is what cancels it. Ends any travel first. */
 esp_err_t goto_preset(Preset preset);
 
 /** The M key, then the preset. M is sent exactly once: five seconds of it puts
  *  the control box into factory reset. */
 esp_err_t store_preset(Preset preset);
-
-esp_err_t send_key(Key key);
 
 /** Pulses the wake line, then releases the keys. */
 esp_err_t wake();
