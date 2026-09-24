@@ -56,8 +56,15 @@ public:
 
     const std::map<std::string, Entity> &all() const { return entities_; }
 
+    /** Keeps only these attributes, besides the name and unit; empty keeps them
+     *  all. A media player alone carries dozens nobody reads. */
+    void keep_attributes(std::vector<std::string> names);
+
 private:
+    bool keeps(const char *name) const;
+
     std::map<std::string, Entity> entities_;
+    std::vector<std::string>      keep_;  // sorted
 };
 
 }  // namespace hass::ws

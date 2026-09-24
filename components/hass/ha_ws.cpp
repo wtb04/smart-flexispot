@@ -311,9 +311,11 @@ void on_event(void *, esp_event_base_t, std::int32_t id, void *data)
 
 }  // namespace
 
-esp_err_t start(UpdateHandler on_update, std::vector<std::string> entities)
+esp_err_t start(UpdateHandler on_update, std::vector<std::string> entities,
+                std::vector<std::string> attributes)
 {
     s_entities = std::move(entities);
+    s_store.keep_attributes(std::move(attributes));
     if (std::string(HASS_WS_URI).empty()) {
         ESP_LOGW(TAG, "no Home Assistant URL configured, not starting");
         return ESP_OK;

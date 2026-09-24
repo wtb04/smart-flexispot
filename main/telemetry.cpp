@@ -174,7 +174,8 @@ void nudge_links()
     const hass::Handlers handlers{on_preset, on_brightness, on_notify, on_move, on_screen};
     ESP_ERROR_CHECK_WITHOUT_ABORT(hass::start(handlers, board::kMinBrightness));
     hass::ws::on_refusal(on_refusal);
-    ESP_ERROR_CHECK_WITHOUT_ABORT(hass::ws::start(on_entities, room::entities()));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(
+        hass::ws::start(on_entities, room::entities(), room::attributes()));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ble::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(jpeg::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(media::start(hass::ws::http_origin(), on_album_art));

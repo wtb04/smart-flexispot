@@ -1,5 +1,8 @@
 #include "ha_ws_protocol.h"
 
+#include <algorithm>
+#include <utility>
+
 #include <cstdio>
 #include <cstdlib>
 
@@ -67,7 +70,8 @@ void unhoist(Entity &entity, const std::string &key)
     }
 }
 
-void merge_attributes(Entity &entity, const cJSON *attributes)
+template <typename Keeps>
+void merge_attributes(Entity &entity, const cJSON *attributes, const Keeps &keeps)
 {
     if (!cJSON_IsObject(attributes)) {
         return;
@@ -77,12 +81,25 @@ void merge_attributes(Entity &entity, const cJSON *attributes)
             continue;
         }
         const std::string value = as_text(item);
-        entity.attributes[item->string] = value;
         hoist(entity, item->string, value);
+        if (keeps(item->string)) {
+            entity.attributes[item->string] = value;
+        }
     }
 }
 
 }  // namespace
+
+void EntityStore::keep_attributes(std::vector<std::string> names)
+{
+    std::sort(names.begin(), names.end());
+    keep_ = std::move(names);
+}
+
+bool EntityStore::keeps(const char *name) const
+{
+    return keep_.empty() || std::binary_search(keep_.begin(), keep_.end(), std::string(name));
+}
 
 MessageType classify(const cJSON *root)
 {
@@ -198,7 +215,8 @@ bool EntityStore::apply_event(const cJSON *event)
             }
             Entity entity;
             entity.state = field(item, KEY_STATE);
-            merge_attributes(entity, cJSON_GetObjectItemCaseSensitive(item, KEY_ATTRIBUTES));
+            merge_attributes(entity, cJSON_GetObjectItemCaseSensitive(item, KEY_ATTRIBUTES),
+                             [this](const char *name) { return keeps(name); });
             entities_[item->string] = std::move(entity);
             changed                 = true;
         }
@@ -221,7 +239,8 @@ bool EntityStore::apply_event(const cJSON *event)
                 }
                 const cJSON *attrs = cJSON_GetObjectItemCaseSensitive(additions, KEY_ATTRIBUTES);
                 if (cJSON_IsObject(attrs)) {
-                    merge_attributes(entity, attrs);
+                    merge_attributes(entity, attrs,
+                                     [this](const char *name) { return keeps(name); });
                     changed = true;
                 }
             }

@@ -12,7 +12,8 @@ using UpdateHandler = void (*)(const EntityStore &store);
 
 /** Safe to call before Wi-Fi is up; the client retries on its own. Subscribes
  *  to `entities` and nothing else. */
-esp_err_t start(UpdateHandler on_update, std::vector<std::string> entities);
+esp_err_t start(UpdateHandler on_update, std::vector<std::string> entities,
+                std::vector<std::string> attributes = {});
 
 /** True once authenticated and subscribed. */
 bool connected();

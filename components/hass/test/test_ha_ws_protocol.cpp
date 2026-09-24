@@ -121,6 +121,22 @@ void test_entity_store_remove()
     check(store.find("light.b") != nullptr, "the other entity survives");
 }
 
+void test_entity_store_filter()
+{
+    EntityStore store;
+    store.keep_attributes({"volume_level", "media_title"});
+    feed(store, R"({"event":{"a":{"media_player.x":{"s":"playing","a":{
+        "friendly_name":"Speaker","media_title":"Song","volume_level":0.4,
+        "source_list":["a","b"],"supported_features":152461}}}}})");
+    const Entity *x = store.find("media_player.x");
+    check(x != nullptr && x->attributes.size() == 2, "only the kept attributes stay");
+    check(x != nullptr && x->name == "Speaker", "the name is kept all the same");
+    feed(store, R"({"event":{"c":{"media_player.x":{"+":{"a":{"media_title":"Next",
+        "entity_picture":"/x.jpg"}}}}}})");
+    check(x->attributes.count("entity_picture") == 0 && x->attributes.at("media_title") == "Next",
+          "a change is filtered the same way");
+}
+
 void test_malformed()
 {
     EntityStore store;
@@ -166,6 +182,7 @@ int main()
     test_entity_store_add();
     test_entity_store_change();
     test_entity_store_remove();
+    test_entity_store_filter();
     test_malformed();
     test_service_call();
     test_service_call_with_data();

@@ -562,6 +562,18 @@ std::vector<std::string> entities()
     return out;
 }
 
+std::vector<std::string> attributes()
+{
+    return {"min_temp",          "max_temp",           "target_temp_step",
+            "hvac_action",       "current_temperature", "temperature",
+            "media_title",       "media_artist",        "media_series_title",
+            "media_season",      "media_episode",       "app_name",
+            "is_volume_muted",   "media_position_updated_at",
+            "media_duration",    "media_position",      "volume_level",
+            "entity_picture_local", "entity_picture",   "latitude",
+            "longitude"};
+}
+
 int entity_count()
 {
     return s_entity_count.load(std::memory_order_relaxed);

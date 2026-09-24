@@ -15,6 +15,9 @@ void init();
  *  one list, rather than a second copy to keep in step by hand. */
 std::vector<std::string> entities();
 
+/** Every attribute the page reads, so the rest are not kept. */
+std::vector<std::string> attributes();
+
 /** Runs on the WebSocket task. */
 void render(const hass::ws::EntityStore &store);
 
