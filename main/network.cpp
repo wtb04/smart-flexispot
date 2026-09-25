@@ -1,5 +1,7 @@
 #include "network.h"
 
+#include "ota.h"
+
 #include "board.h"
 #include "desk.h"
 #include "esp_check.h"
@@ -310,6 +312,9 @@ void start_clients()
     start_clients();
 
     for (;;) {
+        if (wifi::connected()) {
+            ota::confirm();  // reachable for the next update: the firmware stays
+        }
         const ble::Stats                radio = ble::stats();
         const hass::protocol::Telemetry out   = gather_telemetry(radio);
         show_links(radio);

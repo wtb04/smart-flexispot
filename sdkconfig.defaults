@@ -234,3 +234,7 @@ CONFIG_CACHE_L2_CACHE_LINE_128B=y
 # Two frame buffers, so a frame is drawn out of sight and shown whole: see
 # board.cpp. With one, the panel shows each new page as a wipe.
 CONFIG_BSP_LCD_DPI_BUFFER_NUMS=2
+
+# A firmware booted from an update that does not reach the network in time
+# restarts, and the bootloader returns to the one before. See components/ota.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y

@@ -45,6 +45,29 @@ first build. Ctrl-] exits the monitor.
 If the port does not show up, hold BOOT while plugging in the USB-C cable to
 force download mode.
 
+### Over the air
+
+Once both boards have been flashed by cable with the two-slot partition tables,
+neither needs the cable again:
+
+```sh
+tools/ota.sh panel       # the panel, over Wi-Fi
+tools/ota.sh companion   # the companion, passed on by the panel over Bluetooth
+tools/ota.sh both        # companion first
+```
+
+The script builds, then posts the image to the panel, which the router knows as
+`smart-flexispot` (give an address as a second argument if yours does not). The
+key goes in `components/ota/include/ota_secrets.h`, copied from the example; an
+empty key refuses every update. The panel takes about twenty seconds, the
+companion a minute and a half.
+
+Updates are refused while the desk moves, and each board refuses an image that
+is not its own. A firmware booted from an update is on trial: the panel until
+it rejoins Wi-Fi, the companion until the panel links. If it gets that far it
+stays; if not within three minutes it restarts, and the bootloader returns to
+the firmware before.
+
 ## Layout
 
 | Path | Purpose |
@@ -59,6 +82,7 @@ force download mode.
 | `components/hass/` | MQTT discovery and state, and the websocket for entities and service calls |
 | `components/room/` | The home page's presenter: Home Assistant entities in, taps out |
 | `components/wifi/` | Joining and staying joined |
+| `components/ota/` | Firmware over the air: the panel's own, and the companion's through it |
 | `components/jpeg/` | The one JPEG engine and its software fallback |
 | `components/media/`, `radar/`, `ical/`, `travel/` | Cover art, planes overhead, calendars, journeys |
 | `components/power/`, `rtc/`, `sound/`, `settings/`, `logbuf/` | Battery, backup clock, chime, saved settings, the log ring |

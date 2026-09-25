@@ -35,6 +35,7 @@ constexpr ble_uuid128_t uuid128(const deskproto::Uuid128 &bytes)
 
 constexpr ble_uuid128_t SERVICE_UUID = uuid128(deskproto::kServiceUuid);
 constexpr ble_uuid128_t ECHO_UUID    = uuid128(deskproto::kEchoUuid);
+constexpr ble_uuid128_t UPDATE_UUID  = uuid128(deskproto::kUpdateUuid);
 
 // Connection intervals count 1.25 ms, supervision timeouts 10 ms.
 constexpr int           CONN_ITVL_UNIT_US = 1250;
@@ -50,6 +51,7 @@ constexpr std::int64_t PROBE_TIMEOUT_US = units::kUsPerSecond;
 
 std::uint16_t s_conn  = BLE_HS_CONN_HANDLE_NONE;
 std::uint16_t s_echo  = 0;
+std::uint16_t s_update = 0;  // absent on a companion too old to take updates
 bool          s_connecting = false;
 
 void (*s_rescan)() = nullptr;
@@ -153,7 +155,11 @@ bool advert_is_proxy(const ble_gap_disc_desc &advert)
 int on_chr(std::uint16_t conn, const ble_gatt_error *error, const ble_gatt_chr *chr, void *)
 {
     if (error->status == 0 && chr != nullptr) {
-        s_echo = chr->val_handle;
+        if (ble_uuid_cmp(&chr->uuid.u, &ECHO_UUID.u) == 0) {
+            s_echo = chr->val_handle;
+        } else if (ble_uuid_cmp(&chr->uuid.u, &UPDATE_UUID.u) == 0) {
+            s_update = chr->val_handle;
+        }
         return 0;
     }
     if (error->status != BLE_HS_EDONE) {
@@ -197,7 +203,7 @@ int on_svc(std::uint16_t conn, const ble_gatt_error *error, const ble_gatt_svc *
         ble_gap_terminate(conn, BLE_ERR_REM_USER_CONN_TERM);
         return 0;
     }
-    ble_gattc_disc_chrs_by_uuid(conn, start, end, &ECHO_UUID.u, on_chr, nullptr);
+    ble_gattc_disc_all_chrs(conn, start, end, on_chr, nullptr);
     return 0;
 }
 
@@ -376,8 +382,12 @@ bool handle(ble_gap_event *event)
                 }
                 return true;
             }
-            s_conn = event->connect.conn_handle;
-            s_echo = 0;
+            s_conn   = event->connect.conn_handle;
+            s_echo   = 0;
+            s_update = 0;
+            // Updates go in pieces as big as a write may be; the default leaves
+            // room for twenty bytes.
+            ble_gattc_exchange_mtu(s_conn, nullptr, nullptr);
             ble_gattc_disc_svc_by_uuid(s_conn, &SERVICE_UUID.u, on_svc, nullptr);
             return true;
 
@@ -385,8 +395,9 @@ bool handle(ble_gap_event *event)
             ESP_LOGW(TAG, "link lost (reason %d); looking again", event->disconnect.reason);
             s_connecting = false;
             s_up.store(false, std::memory_order_relaxed);
-            s_conn = BLE_HS_CONN_HANDLE_NONE;
-            s_echo = 0;
+            s_conn   = BLE_HS_CONN_HANDLE_NONE;
+            s_echo   = 0;
+            s_update = 0;
             s_waiting.store(false, std::memory_order_relaxed);
             if (s_rescan != nullptr) {
                 s_rescan();
@@ -492,9 +503,111 @@ esp_err_t start()
                : ESP_ERR_NO_MEM;
 }
 
+// An update's steps, each written with a response and waited for, so the next
+// is only sent once the companion has taken this one.
+namespace {
+constexpr int  STEP_TIMEOUT_MS = 5000;  // a flash erase and more, never a lost link
+constexpr int  PERCENT_ALL     = 100;
+
+SemaphoreHandle_t s_step_done = nullptr;
+StaticSemaphore_t s_step_done_ctrl;
+std::atomic<int>  s_step_status{0};
+
+int on_step_written(std::uint16_t, const ble_gatt_error *error, ble_gatt_attr *, void *)
+{
+    s_step_status.store(error->status, std::memory_order_relaxed);
+    xSemaphoreGive(s_step_done);
+    return 0;
+}
+
+esp_err_t write_step(const deskproto::UpdateMessage &message, std::uint8_t *packet,
+                     std::size_t capacity)
+{
+    const std::size_t length = deskproto::encode(message, packet, capacity);
+    if (length == 0 || !s_up.load(std::memory_order_relaxed) || s_update == 0) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    xSemaphoreTake(s_step_done, 0);
+    if (ble_gattc_write_flat(s_conn, s_update, packet, static_cast<std::uint16_t>(length),
+                             on_step_written, nullptr) != 0) {
+        return ESP_FAIL;
+    }
+    if (xSemaphoreTake(s_step_done, pdMS_TO_TICKS(STEP_TIMEOUT_MS)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+    const int status = s_step_status.load(std::memory_order_relaxed);
+    if (status == 0) {
+        return ESP_OK;
+    }
+    const int refusal = status - BLE_HS_ERR_ATT_BASE;
+    ESP_LOGW(TAG, "update step refused (%d)", refusal);
+    return refusal == deskproto::kUpdateBusy ? ESP_ERR_INVALID_STATE
+           : refusal == deskproto::kUpdateBadImage ? ESP_ERR_INVALID_CRC
+                                                   : ESP_FAIL;
+}
+}  // namespace
+
 }  // namespace ble::proxy
 
 namespace ble::desk {
+esp_err_t send_update(const std::uint8_t *image, std::size_t size, std::uint32_t crc,
+                      void (*progress)(int percent))
+{
+    using namespace ble::proxy;
+    if (!s_up.load(std::memory_order_relaxed)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (s_update == 0) {
+        ESP_LOGW(TAG, "the companion's firmware takes no updates over the link");
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    if (s_step_done == nullptr) {
+        s_step_done = xSemaphoreCreateBinaryStatic(&s_step_done_ctrl);
+    }
+
+    // As much as a write may carry: the link's MTU less the ATT header.
+    constexpr std::size_t ATT_WRITE_HEADER = 3;
+    std::uint8_t          packet[CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU];
+    const std::size_t     capacity =
+        std::min<std::size_t>(sizeof(packet), ble_att_mtu(s_conn) - ATT_WRITE_HEADER);
+    const std::size_t piece_max = capacity - deskproto::update_at::kData;
+    ESP_LOGI(TAG, "sending %u bytes in pieces of %u", static_cast<unsigned>(size),
+             static_cast<unsigned>(piece_max));
+
+    deskproto::UpdateMessage message;
+    message.step = deskproto::UpdateStep::Begin;
+    message.size = static_cast<std::uint32_t>(size);
+    message.crc  = crc;
+    esp_err_t err = write_step(message, packet, capacity);
+
+    int told = -1;
+    for (std::size_t offset = 0; err == ESP_OK && offset < size; offset += piece_max) {
+        message        = deskproto::UpdateMessage{};
+        message.step   = deskproto::UpdateStep::Piece;
+        message.offset = static_cast<std::uint32_t>(offset);
+        message.data   = image + offset;
+        message.length = std::min(piece_max, size - offset);
+        err            = write_step(message, packet, capacity);
+        const int percent = static_cast<int>(offset * PERCENT_ALL / size);
+        if (progress != nullptr && percent != told) {
+            told = percent;
+            progress(percent);
+        }
+    }
+
+    message      = deskproto::UpdateMessage{};
+    message.step = err == ESP_OK ? deskproto::UpdateStep::Finish : deskproto::UpdateStep::Abandon;
+    const esp_err_t finished = write_step(message, packet, capacity);
+    if (err == ESP_OK) {
+        err = finished;
+    }
+    if (err == ESP_OK && progress != nullptr) {
+        progress(PERCENT_ALL);
+    }
+    ESP_LOGI(TAG, "update %s", err == ESP_OK ? "taken, the companion restarts" : esp_err_to_name(err));
+    return err;
+}
+
 void on_status(StatusHandler handler)
 {
     proxy::set_status_handler(handler);

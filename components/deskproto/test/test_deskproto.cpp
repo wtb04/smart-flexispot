@@ -146,8 +146,56 @@ void test_vocabulary()
           "direction to motion");
 }
 
+void test_update_messages()
+{
+    std::uint8_t out[64] = {};
+
+    UpdateMessage begin;
+    begin.step = UpdateStep::Begin;
+    begin.size = 484160;
+    begin.crc  = 0xdeadbeef;
+    const std::size_t begin_len = encode(begin, out, sizeof(out));
+    UpdateMessage     back;
+    check(begin_len == kUpdateBeginLen && decode(out, begin_len, back) &&
+              back.step == UpdateStep::Begin && back.size == 484160 && back.crc == 0xdeadbeef,
+          "begin round trip");
+
+    const std::uint8_t bytes[5] = {1, 2, 3, 4, 5};
+    UpdateMessage      piece;
+    piece.step   = UpdateStep::Piece;
+    piece.offset = 4096;
+    piece.data   = bytes;
+    piece.length = sizeof(bytes);
+    const std::size_t piece_len = encode(piece, out, sizeof(out));
+    check(piece_len == update_at::kData + sizeof(bytes) && decode(out, piece_len, back) &&
+              back.step == UpdateStep::Piece && back.offset == 4096 && back.length == 5 &&
+              std::memcmp(back.data, bytes, 5) == 0,
+          "piece round trip");
+
+    check(encode(piece, out, update_at::kData + 4) == 0, "a piece too big for the write is refused");
+
+    UpdateMessage finish;
+    finish.step = UpdateStep::Finish;
+    check(encode(finish, out, sizeof(out)) == kUpdateStepLen &&
+              decode(out, kUpdateStepLen, back) && back.step == UpdateStep::Finish,
+          "finish round trip");
+
+    const char *check_value = "123456789";
+    const auto *digits      = reinterpret_cast<const std::uint8_t *>(check_value);
+    check(crc32(0, digits, 9) == 0xCBF43926u, "crc32 of the standard check value");
+    check(crc32(crc32(0, digits, 4), digits + 4, 5) == 0xCBF43926u, "crc32 carried on in pieces");
+
+    out[update_at::kStep] = 9;
+    check(!decode(out, kUpdateStepLen, back), "an unknown step is refused");
+    encode(begin, out, sizeof(out));
+    check(!decode(out, kUpdateBeginLen - 1, back), "a short begin is refused");
+    encode(piece, out, sizeof(out));
+    check(!decode(out, update_at::kData, back), "an empty piece is refused");
+}
+
 static_assert(kBoxPresets < kPresetCount);
 static_assert(kServiceUuid != kEchoUuid);
+static_assert(kUpdateUuid != kEchoUuid && kUpdateUuid != kServiceUuid);
 
 }  // namespace
 
@@ -158,6 +206,7 @@ int main()
     test_status_round_trip();
     test_wire_layout();
     test_rejects();
+    test_update_messages();
     std::printf("\n%s\n", g_failures == 0 ? "ALL PASS" : "FAILURES");
     return g_failures == 0 ? 0 : 1;
 }

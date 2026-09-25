@@ -4,6 +4,7 @@
 #include "freertos/task.h"
 #include "leds.h"
 #include "link.h"
+#include "update.h"
 #include "loctek.h"
 #include "units.h"
 
@@ -84,6 +85,7 @@ extern "C" void app_main(void)
 
     ESP_ERROR_CHECK(loctek::start(on_height));
     ESP_LOGI(TAG, "desk link up, listening");
+    update::watch();
     ESP_ERROR_CHECK_WITHOUT_ABORT(desklink::start());
 
     for (;;) {

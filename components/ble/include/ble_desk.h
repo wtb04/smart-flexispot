@@ -1,5 +1,10 @@
 #pragma once
 
+#include "esp_err.h"
+
+#include <cstddef>
+#include <cstdint>
+
 // The panel's side of the link to the desk companion. It shares the radio, the
 // host and the scanner with the phone presence in ble.h, which starts them.
 
@@ -49,5 +54,12 @@ int quiet_ms();
 
 /** The last status the proxy sent. False if it has never sent one. */
 bool last(deskproto::Status &out);
+
+/** Sends the companion a new firmware, piece by piece, each answered before the
+ *  next, and returns once it has been taken or refused; the companion restarts
+ *  into it afterwards, so the link drops. progress, when given, hears 0 to 100.
+ *  Not from the NimBLE host task. */
+esp_err_t send_update(const std::uint8_t *image, std::size_t size, std::uint32_t crc,
+                      void (*progress)(int percent));
 
 }  // namespace ble::desk

@@ -534,14 +534,14 @@ constexpr const char *HASS_TAGS[] = {"hass",        "ha_ws",       "websocket_cl
 constexpr const char *PRESENCE_TAGS[] = {"presence", "ble",      "NimBLE",
                                          "vhci_drv", "BTDM_INIT", "phy_init"};
 constexpr const char *DESK_TAGS[]     = {"desk", "loctek"};
-constexpr const char *LINK_TAGS[]     = {"desklink", "deskproxy", "proxy", "leds"};
+constexpr const char *LINK_TAGS[]     = {"desklink", "deskproxy", "proxy", "leds", "update"};
 constexpr const char *POWER_TAGS[]    = {"power", "battery"};
 constexpr const char *RADAR_TAGS[]    = {"radar"};
 constexpr const char *CALENDAR_TAGS[] = {"ical", "travel"};
 constexpr const char *SYSTEM_TAGS[]   = {
     "panel", "ui",     "shot",   "diag",      "clock",     "settings", "logbuf",   "board",
     "rtc",   "main_task", "cpu_start", "heap_init", "spiram", "esp_psram", "esp_image",
-    "jpeg",  "sound",  "imu",    "BMI270",    "orientation", "focus"};
+    "jpeg",  "sound",  "imu",    "BMI270",    "orientation", "focus", "ota"};
 
 struct TagSet {
     Card               card;

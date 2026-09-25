@@ -1,5 +1,6 @@
 #include "battery.h"
 #include "ble.h"
+#include "ble_desk.h"
 #include "board.h"
 #include "desk.h"
 #include "diagnostics.h"
@@ -13,6 +14,7 @@
 #include "esp_timer.h"
 #include "esp_system.h"
 #include "logbuf.h"
+#include "ota.h"
 #include "nvs_flash.h"
 #include "power.h"
 #include "backup_clock.h"
@@ -31,11 +33,13 @@
 #include "units.h"
 
 #include <cstdio>
+#include <cstring>
 
 namespace {
 constexpr char TAG[] = "panel";
 
 constexpr int         FOCUS_NOTICE_MS    = 5000;
+constexpr int         UPDATE_NOTICE_MS   = 4000;
 constexpr std::size_t FOCUS_MESSAGE_SIZE = 64;
 
 // The notice stays up until the restart takes the screen down.
@@ -280,10 +284,30 @@ void *json_malloc(std::size_t size)
                                    MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
 }
 
+namespace {
+// What the update server needs from the rest of the panel.
+bool desk_moving()
+{
+    return std::strcmp(desk::motion(), "idle") != 0;
+}
+
+void update_notice(const char *message)
+{
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::notify("", message, ui::Level::Neutral, UPDATE_NOTICE_MS));
+}
+
+void before_update_restart()
+{
+    settings::flush();
+    ESP_ERROR_CHECK_WITHOUT_ABORT(board::display_off());
+}
+}  // namespace
+
 extern "C" void app_main(void)
 {
     cJSON_Hooks hooks{json_malloc, heap_caps_free};
     cJSON_InitHooks(&hooks);
+    ota::watch();
 
     if (esp_err_t err = nvs_flash_init();
         err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -361,6 +385,12 @@ extern "C" void app_main(void)
     focus::set_plan(stored_plan());  // which shows it too
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("desk"));
     ESP_ERROR_CHECK_WITHOUT_ABORT(wifi::start());
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ota::start({
+        .busy    = desk_moving,
+        .notice  = update_notice,
+        .restart = before_update_restart,
+        .relay   = ble::desk::send_update,
+    }));
     ESP_ERROR_CHECK(wallclock::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("network"));
     ESP_ERROR_CHECK_WITHOUT_ABORT(network::start());

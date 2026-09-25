@@ -1,6 +1,7 @@
 #include "link.h"
 
 #include "deskproto.h"
+#include "update.h"
 #include "loctek.h"
 #include "units.h"
 
@@ -47,6 +48,7 @@ constexpr int          HEIGHT_NEVER_SHOWN  = -2;  // unlike any height, unknown 
 constexpr TickType_t DEADMAN_PERIOD = pdMS_TO_TICKS(50);
 
 constexpr std::size_t WRITE_BUFFER_BYTES = 32;  // room for any command
+constexpr std::size_t UPDATE_WRITE_BYTES = CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU;  // a whole piece
 
 constexpr int ADV_ITVL_MIN_MS = 30;
 constexpr int ADV_ITVL_MAX_MS = 60;
@@ -76,6 +78,7 @@ constexpr ble_uuid128_t uuid128(const deskproto::Uuid128 &bytes)
 
 constexpr ble_uuid128_t SERVICE_UUID = uuid128(deskproto::kServiceUuid);
 constexpr ble_uuid128_t ECHO_UUID    = uuid128(deskproto::kEchoUuid);
+constexpr ble_uuid128_t UPDATE_UUID  = uuid128(deskproto::kUpdateUuid);
 
 std::uint16_t s_echo_handle = 0;
 std::uint16_t s_conn        = BLE_HS_CONN_HANDLE_NONE;
@@ -186,6 +189,13 @@ QueueHandle_t s_slow = nullptr;
 
 void apply(const deskproto::Command &command)
 {
+    // A firmware being written is no time to move the desk; stopping it always is.
+    const bool moves = command.op != deskproto::Op::Stop && command.op != deskproto::Op::Ping &&
+                       command.op != deskproto::Op::Wake;
+    if (moves && update::running()) {
+        ESP_LOGW(TAG, "not moving: an update is arriving");
+        return;
+    }
     switch (command.op) {
         case deskproto::Op::Hold:
             s_hold_until.store(esp_timer_get_time() + HOLD_GOOD_FOR_US, std::memory_order_relaxed);
@@ -352,6 +362,23 @@ void report_if_due(Shown &shown, bool box_up)
     }
 }
 
+int on_update(std::uint16_t, std::uint16_t, ble_gatt_access_ctxt *ctxt, void *)
+{
+    if (ctxt->op != BLE_GATT_ACCESS_OP_WRITE_CHR) {
+        return BLE_ATT_ERR_UNLIKELY;
+    }
+    std::uint8_t  payload[UPDATE_WRITE_BYTES];
+    std::uint16_t length = 0;
+    if (ble_hs_mbuf_to_flat(ctxt->om, payload, sizeof(payload), &length) != 0) {
+        return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
+    }
+    deskproto::UpdateMessage message;
+    if (!deskproto::decode(payload, length, message)) {
+        return deskproto::kUpdateOutOfOrder;
+    }
+    return update::take(message);
+}
+
 const ble_gatt_chr_def ECHO_CHRS[] = {
     {
         .uuid       = &ECHO_UUID.u,
@@ -362,6 +389,16 @@ const ble_gatt_chr_def ECHO_CHRS[] = {
         .min_key_size = 0,
         .val_handle = &s_echo_handle,
         .cpfd       = nullptr,
+    },
+    {
+        .uuid         = &UPDATE_UUID.u,
+        .access_cb    = on_update,
+        .arg          = nullptr,
+        .descriptors  = nullptr,
+        .flags        = BLE_GATT_CHR_F_WRITE,
+        .min_key_size = 0,
+        .val_handle   = nullptr,
+        .cpfd         = nullptr,
     },
     {nullptr, nullptr, nullptr, nullptr, 0, 0, nullptr, nullptr},
 };
@@ -385,6 +422,7 @@ int on_gap(ble_gap_event *event, void *)
                 s_seq_started = false;
                 s_last_seq    = 0;
                 ESP_LOGI(TAG, "panel connected");
+                update::confirm();
             } else {
                 advertise();
             }
@@ -393,6 +431,7 @@ int on_gap(ble_gap_event *event, void *)
         case BLE_GAP_EVENT_DISCONNECT:
             ESP_LOGI(TAG, "panel gone (reason %d)", event->disconnect.reason);
             s_conn = BLE_HS_CONN_HANDLE_NONE;
+            update::abandon();
             // Nothing can stop the desk from here once the panel is gone.
             if (s_holding.exchange(deskproto::Motion::Idle, std::memory_order_relaxed) !=
                 deskproto::Motion::Idle) {

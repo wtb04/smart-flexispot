@@ -1,0 +1,9 @@
+# Name,   Type, SubType, Offset,   Size,
+# nvs and phy_init keep the single-app layout's offsets, so what the companion
+# keeps survives the move to two app slots. The panel sends updates into
+# whichever slot is not running; otadata says which to boot.
+nvs,      data, nvs,     0x9000,   0x6000,
+phy_init, data, phy,     0xf000,   0x1000,
+ota_0,    app,  ota_0,   0x10000,  0xF0000,
+ota_1,    app,  ota_1,   0x100000, 0xF0000,
+otadata,  data, ota,     0x1F0000, 0x2000,

@@ -34,6 +34,7 @@
 namespace wifi {
 namespace {
 constexpr char TAG[] = "wifi";
+constexpr char HOSTNAME[] = "smart-flexispot";  // what the router lists, and tools/ota.sh asks for
 
 std::atomic<bool> s_connected{false};
 
@@ -372,7 +373,9 @@ esp_err_t start()
     ESP_RETURN_ON_ERROR(init_nvs(), TAG, "nvs");
     ESP_RETURN_ON_ERROR(esp_netif_init(), TAG, "netif");
     ESP_RETURN_ON_ERROR(esp_event_loop_create_default(), TAG, "event loop");
-    ESP_RETURN_ON_FALSE(esp_netif_create_default_wifi_sta() != nullptr, ESP_FAIL, TAG, "sta netif");
+    esp_netif_t *netif = esp_netif_create_default_wifi_sta();
+    ESP_RETURN_ON_FALSE(netif != nullptr, ESP_FAIL, TAG, "sta netif");
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_netif_set_hostname(netif, HOSTNAME));
 
     ESP_RETURN_ON_ERROR(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
                                                             on_wifi_event, nullptr, nullptr),

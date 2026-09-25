@@ -31,6 +31,8 @@ inline constexpr Uuid128 kServiceUuid = {
     0x2d, 0x71, 0x9a, 0x4c, 0x8e, 0x3b, 0x4f, 0x6a, 0x9c, 0x1d, 0x5e, 0x77, 0x01, 0x00, 0xa5, 0xde};
 inline constexpr Uuid128 kEchoUuid = {
     0x2d, 0x71, 0x9a, 0x4c, 0x8e, 0x3b, 0x4f, 0x6a, 0x9c, 0x1d, 0x5e, 0x77, 0x02, 0x00, 0xa5, 0xde};
+inline constexpr Uuid128 kUpdateUuid = {
+    0x2d, 0x71, 0x9a, 0x4c, 0x8e, 0x3b, 0x4f, 0x6a, 0x9c, 0x1d, 0x5e, 0x77, 0x03, 0x00, 0xa5, 0xde};
 
 /** The panel repeats a hold this often; the companion lets go of a hold that has
  *  not been repeated for this long. Two repeats may go missing, not three. */
@@ -214,6 +216,111 @@ inline bool decode(const std::uint8_t *in, std::size_t length, Status &out)
     out.height_mm = static_cast<std::int32_t>(get_le<std::uint32_t>(in + status_at::kHeight));
     out.motion    = motion <= static_cast<std::uint8_t>(Motion::Down) ? static_cast<Motion>(motion)
                                                                       : Motion::Idle;
+    return true;
+}
+
+// A new firmware for the companion, carried from the panel in pieces written
+// to their own characteristic. Each write is answered before the next is sent,
+// so a piece is never lost or taken out of order; the answer's ATT error, when
+// there is one, says why the companion stopped.
+enum class UpdateStep : std::uint8_t {
+    Begin   = 1,  // the image's size and CRC-32 follow
+    Piece   = 2,  // where it goes in the image, then the bytes
+    Finish  = 3,  // check what arrived and boot it
+    Abandon = 4,
+};
+
+namespace update_at {
+inline constexpr std::size_t kStep   = 3;
+inline constexpr std::size_t kSize   = 4;  // Begin
+inline constexpr std::size_t kCrc    = 8;  // Begin
+inline constexpr std::size_t kOffset = 4;  // Piece
+inline constexpr std::size_t kData   = 8;  // Piece
+}  // namespace update_at
+
+inline constexpr std::size_t kUpdateStepLen  = update_at::kStep + 1;
+inline constexpr std::size_t kUpdateBeginLen = update_at::kCrc + sizeof(std::uint32_t);
+
+/** CRC-32 as zip and PNG compute it, carried on from `crc` so an image can be
+ *  checked piece by piece; start from zero. Bitwise rather than by table: it
+ *  runs once per update, and the companion has little room to spare. */
+inline std::uint32_t crc32(std::uint32_t crc, const std::uint8_t *data, std::size_t length)
+{
+    constexpr std::uint32_t POLYNOMIAL = 0xEDB88320u;  // reflected
+    constexpr int           BITS       = 8;
+    crc = ~crc;
+    for (std::size_t i = 0; i < length; ++i) {
+        crc ^= data[i];
+        for (int bit = 0; bit < BITS; ++bit) {
+            crc = (crc >> 1) ^ (POLYNOMIAL & (0u - (crc & 1u)));
+        }
+    }
+    return ~crc;
+}
+
+/** What the companion answers a step with, as application ATT errors. */
+inline constexpr std::uint8_t kUpdateBusy       = 0x80;  // the desk is moving
+inline constexpr std::uint8_t kUpdateOutOfOrder = 0x81;
+inline constexpr std::uint8_t kUpdateBadImage   = 0x82;
+inline constexpr std::uint8_t kUpdateFlashFault = 0x83;
+
+struct UpdateMessage {
+    UpdateStep          step   = UpdateStep::Abandon;
+    std::uint32_t       size   = 0;        // Begin
+    std::uint32_t       crc    = 0;        // Begin
+    std::uint32_t       offset = 0;        // Piece
+    const std::uint8_t *data   = nullptr;  // Piece, pointing into the message
+    std::size_t         length = 0;        // Piece
+};
+
+/** The step's bytes into out, which holds the most a write may carry; returns
+ *  how many, or zero when out is too small. */
+inline std::size_t encode(const UpdateMessage &message, std::uint8_t *out, std::size_t capacity)
+{
+    const std::size_t length = message.step == UpdateStep::Begin   ? kUpdateBeginLen
+                               : message.step == UpdateStep::Piece ? update_at::kData + message.length
+                                                                   : kUpdateStepLen;
+    if (capacity < length) {
+        return 0;
+    }
+    put_header(out);
+    out[update_at::kStep] = static_cast<std::uint8_t>(message.step);
+    if (message.step == UpdateStep::Begin) {
+        put_le<std::uint32_t>(out + update_at::kSize, message.size);
+        put_le<std::uint32_t>(out + update_at::kCrc, message.crc);
+    } else if (message.step == UpdateStep::Piece) {
+        put_le<std::uint32_t>(out + update_at::kOffset, message.offset);
+        std::memcpy(out + update_at::kData, message.data, message.length);
+    }
+    return length;
+}
+
+inline bool decode(const std::uint8_t *in, std::size_t length, UpdateMessage &out)
+{
+    if (!has_header(in, length, kUpdateStepLen)) {
+        return false;
+    }
+    const std::uint8_t step = in[update_at::kStep];
+    if (step < static_cast<std::uint8_t>(UpdateStep::Begin) ||
+        step > static_cast<std::uint8_t>(UpdateStep::Abandon)) {
+        return false;
+    }
+    out = UpdateMessage{};
+    out.step = static_cast<UpdateStep>(step);
+    if (out.step == UpdateStep::Begin) {
+        if (length < kUpdateBeginLen) {
+            return false;
+        }
+        out.size = get_le<std::uint32_t>(in + update_at::kSize);
+        out.crc  = get_le<std::uint32_t>(in + update_at::kCrc);
+    } else if (out.step == UpdateStep::Piece) {
+        if (length <= update_at::kData) {
+            return false;
+        }
+        out.offset = get_le<std::uint32_t>(in + update_at::kOffset);
+        out.data   = in + update_at::kData;
+        out.length = length - update_at::kData;
+    }
     return true;
 }
 

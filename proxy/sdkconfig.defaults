@@ -48,3 +48,11 @@ CONFIG_LOCTEK_PROXY_DRY_RUN=n
 # NimBLE narrates every notification, which at five a second buries everything
 # else on the console and costs more than the notification does.
 CONFIG_BT_NIMBLE_LOG_LEVEL_NONE=y
+
+# Two app slots, so the panel can send a new firmware over the link; see
+# partitions.csv. A firmware booted from an update that does not reach the
+# panel restarts, and the bootloader then returns to the one before.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_PARTITION_TABLE_FILENAME="partitions.csv"
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
