@@ -334,16 +334,25 @@ int minutes_rounded_up(std::int64_t seconds)
     return static_cast<int>((seconds + units::kSecondsPerMinute - 1) / units::kSecondsPerMinute);
 }
 
-void span_of(std::int64_t from_now, char *out, std::size_t size)
+int days_from(std::int64_t now, std::int64_t at);
+
+/** How long until `at`: minutes, then hours, and past a day the days to it,
+ *  counted by the calendar, since 63 hours says less than Monday does. */
+void span_of(std::int64_t now, std::int64_t at, char *out, std::size_t size)
 {
-    const int minutes = minutes_rounded_up(from_now);
+    const int minutes = minutes_rounded_up(at - now);
+    const int days    = days_from(now, at);
     if (minutes <= 0) {
         std::snprintf(out, size, "now");
     } else if (minutes < units::kMinutesPerHour) {
         std::snprintf(out, size, "in %d min", minutes);
-    } else {
+    } else if (minutes < units::kMinutesPerHour * units::kHoursPerDay || days < 1) {
         std::snprintf(out, size, "in %dh %02dm", minutes / units::kMinutesPerHour,
                       minutes % units::kMinutesPerHour);
+    } else if (days == 1) {
+        std::snprintf(out, size, "tomorrow");
+    } else {
+        std::snprintf(out, size, "in %d days", days);
     }
 }
 
@@ -1053,14 +1062,14 @@ void show_next(const ical::Event *first, std::int64_t now)
     char span[32];
     if (s_going != nullptr && !ongoing) {
         clock_of(s_going->leave, text, sizeof(text));
-        span_of(s_going->leave - now, span, sizeof(span));
+        span_of(now, s_going->leave, span, sizeof(span));
         show_big_number(s_going->cancelled ? "Leave, cancelled" : "Leave", text,
                         s_going->cancelled ? theme::red : theme::text, span);
     } else if (ongoing) {
-        span_of(first->end - now, span, sizeof(span));
+        span_of(now, first->end, span, sizeof(span));
         show_big_number("Ends", to, theme::text, span);
     } else {
-        span_of(first->start - now, span, sizeof(span));
+        span_of(now, first->start, span, sizeof(span));
         show_big_number("Starts", from, theme::text, span);
     }
 }
