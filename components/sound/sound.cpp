@@ -20,6 +20,7 @@
 namespace sound {
 namespace {
 constexpr char TAG[] = "sound";
+constexpr char I2S_TAG[] = "i2s_common";  // the I2S driver's
 
 constexpr int SAMPLE_RATE     = 16000;
 constexpr int BITS_PER_SAMPLE = sizeof(std::int16_t) * CHAR_BIT;
@@ -79,7 +80,14 @@ esp_err_t open_speaker()
 {
     ESP_RETURN_ON_ERROR(bsp_feature_enable(BSP_FEATURE_SPEAKER, true), TAG, "speaker power");
 
+    // The board package opens its I2S channel with the driver's default of 240
+    // frames a DMA buffer, which the driver rounds up to 256 to align it and
+    // warns about on every boot. The package takes no channel settings of its
+    // own, so the one expected warning is kept out of the log instead.
+    const esp_log_level_t i2s_level = esp_log_level_get(I2S_TAG);
+    esp_log_level_set(I2S_TAG, ESP_LOG_ERROR);
     s_speaker = bsp_audio_codec_speaker_init();
+    esp_log_level_set(I2S_TAG, i2s_level);
     ESP_RETURN_ON_FALSE(s_speaker != nullptr, ESP_FAIL, TAG, "codec init");
 
     esp_codec_dev_sample_info_t fs = {};
