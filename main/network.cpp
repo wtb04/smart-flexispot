@@ -1,4 +1,4 @@
-#include "telemetry.h"
+#include "network.h"
 
 #include "board.h"
 #include "desk.h"
@@ -27,9 +27,9 @@
 #include <cstdio>
 #include <ctime>
 
-namespace telemetry {
+namespace network {
 namespace {
-constexpr char TAG[] = "telemetry";
+constexpr char TAG[] = "network";
 
 constexpr TickType_t PUBLISH_INTERVAL = pdMS_TO_TICKS(2000);
 
@@ -187,7 +187,7 @@ void nudge_links()
     watch_link(hass::ws::connected(), socket_down_since, "socket", hass::ws::restart);
 }
 
-[[noreturn]] void telemetry_task(void *)
+[[noreturn]] void network_task(void *)
 {
     if (!wifi::wait_for_ip(NETWORK_WAIT_MS)) {
         ESP_LOGW(TAG, "no address after %d s, starting clients anyway", NETWORK_WAIT_MS / 1000);
@@ -294,7 +294,7 @@ void nudge_links()
 
 esp_err_t start()
 {
-    TaskHandle_t task = xTaskCreateStaticPinnedToCore(telemetry_task, "telemetry", TASK_STACK,
+    TaskHandle_t task = xTaskCreateStaticPinnedToCore(network_task, "network", TASK_STACK,
                                                       nullptr, TASK_PRIORITY, s_task_stack,
                                                       &s_task_ctrl, TASK_CORE);
     ESP_RETURN_ON_FALSE(task != nullptr, ESP_ERR_NO_MEM, TAG, "task");
@@ -308,4 +308,4 @@ void note_brightness(int percent)
     s_brightness.store(percent, std::memory_order_relaxed);
 }
 
-}  // namespace telemetry
+}  // namespace network

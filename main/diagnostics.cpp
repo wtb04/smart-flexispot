@@ -468,7 +468,7 @@ constexpr const char *WIFI_TAGS[] = {
     "wifi",       "esp_netif_handlers", "esp_netif",  "esp_wifi_remote", "wifi_init",
     "H_API",      "H_SDIO_DRV",         "transport",  "sdio_wrapper",    "esp_hosted"};
 constexpr const char *HASS_TAGS[] = {"hass",        "ha_ws",       "websocket_client", "room",
-                                     "telemetry",   "mqtt_client", "MQTT_CLIENT",
+                                     "network",     "mqtt_client", "MQTT_CLIENT",
                                      "transport_base", "media"};
 constexpr const char *PRESENCE_TAGS[] = {"presence", "ble",      "NimBLE",
                                          "vhci_drv", "BTDM_INIT", "phy_init"};

@@ -49,7 +49,7 @@ force download mode.
 
 | Path | Purpose |
 | --- | --- |
-| `main/` | `app_main` and the glue: wiring handlers, telemetry to Home Assistant, diagnostics, the clock |
+| `main/` | `app_main` and the glue: wiring handlers, the network clients and what they publish, diagnostics, the clock |
 | `components/board/` | Power rails, panel, touch, LVGL port task |
 | `components/ui/` | The screen: `ui.h` is its interface, one file per part, updates applied on the LVGL task |
 | `components/desk/` | Presets, the link supervisor and what the desk is doing, over the wire or Bluetooth |

@@ -21,7 +21,7 @@
 #include "settings.h"
 #include "sound.h"
 #include "room.h"
-#include "telemetry.h"
+#include "network.h"
 #include "travel.h"
 #include "ui.h"
 #include "wallclock.h"
@@ -33,7 +33,7 @@ constexpr char TAG[] = "tab5";
 void on_brightness_changed(int percent)
 {
     board::set_brightness_percent(percent);
-    telemetry::note_brightness(percent);
+    network::note_brightness(percent);
     settings::set(settings::Key::Brightness, percent);
 }
 
@@ -104,7 +104,7 @@ void on_primary(std::uint32_t colour)
 
 void on_screen(bool on)
 {
-    telemetry::note_screen(on);
+    network::note_screen(on);
     if (on) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(board::display_on(settings::get(settings::Key::Brightness)));
     } else {
@@ -272,7 +272,7 @@ extern "C" void app_main(void)
     ESP_ERROR_CHECK_WITHOUT_ABORT(wifi::start());
     ESP_ERROR_CHECK(wallclock::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("network"));
-    ESP_ERROR_CHECK_WITHOUT_ABORT(telemetry::start());
+    ESP_ERROR_CHECK_WITHOUT_ABORT(network::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(diagnostics::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(ical::start(on_calendar));
     ESP_ERROR_CHECK_WITHOUT_ABORT(travel::start(on_travel));

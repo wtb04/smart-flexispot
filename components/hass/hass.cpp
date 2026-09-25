@@ -29,7 +29,7 @@ esp_mqtt_client_handle_t s_client = nullptr;
 std::atomic<bool>        s_connected{false};
 Handlers                 s_handlers{};
 protocol::Topics         s_topics;
-std::string              s_last_state;   // telemetry task only
+std::string              s_last_state;   // network task only
 std::atomic<bool>        s_force_publish{false};
 int                      s_brightness_floor = 0;
 
