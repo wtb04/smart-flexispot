@@ -1,11 +1,13 @@
 #include "ha_ws.h"
 
 #include "esp_check.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_websocket_client.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "units.h"
 
@@ -61,6 +63,7 @@ constexpr std::size_t FIELD_SIZE   = 32;
 constexpr std::size_t VALUE_SIZE   = 32;
 constexpr std::size_t REFUSAL_SIZE = 64;
 constexpr std::size_t ORIGIN_SIZE  = 96;
+constexpr std::size_t REQUEST_SIZE = 384;
 
 constexpr char SCHEME_SEPARATOR[] = "://";
 constexpr char SECURE_SCHEME[]    = "wss";
@@ -91,6 +94,16 @@ void begin_again_in(TickType_t delay, const char *why)
         at = 1;
     }
     s_start_at.store(at, std::memory_order_relaxed);
+}
+
+// Sleeps between rounds of its own, and is woken for anything to send.
+TaskHandle_t s_supervisor = nullptr;
+
+void wake_supervisor()
+{
+    if (s_supervisor != nullptr) {
+        xTaskNotifyGive(s_supervisor);
+    }
 }
 
 struct Command {
@@ -129,7 +142,90 @@ esp_err_t enqueue(const char *domain, const char *service, const char *entity_id
     }
     ESP_RETURN_ON_FALSE(xQueueSend(s_commands, &cmd, 0) == pdTRUE, ESP_ERR_NO_MEM, TAG,
                         "command queue full");
+    wake_supervisor();
     return ESP_OK;
+}
+
+// Requests wait in PSRAM: each is several hundred bytes, and they are rare.
+struct Request {
+    char         body[REQUEST_SIZE];
+    ReplyHandler on_reply;
+};
+
+constexpr UBaseType_t REQUEST_QUEUE_LEN = 4;
+StaticQueue_t         s_request_queue_ctrl;
+QueueHandle_t         s_requests = nullptr;
+
+// Sent and not yet answered, by the number each went out with.
+struct Pending {
+    int          id;
+    ReplyHandler on_reply;
+};
+
+constexpr int PENDING_MAX = 4;
+Pending       s_pending[PENDING_MAX]{};
+portMUX_TYPE  s_pending_lock = portMUX_INITIALIZER_UNLOCKED;
+
+bool await_reply(int id, ReplyHandler on_reply)
+{
+    portENTER_CRITICAL(&s_pending_lock);
+    for (Pending &slot : s_pending) {
+        if (slot.on_reply == nullptr) {
+            slot = {id, on_reply};
+            portEXIT_CRITICAL(&s_pending_lock);
+            return true;
+        }
+    }
+    portEXIT_CRITICAL(&s_pending_lock);
+    return false;
+}
+
+ReplyHandler take_awaited(int id)
+{
+    portENTER_CRITICAL(&s_pending_lock);
+    for (Pending &slot : s_pending) {
+        if (slot.on_reply != nullptr && slot.id == id) {
+            const ReplyHandler on_reply = slot.on_reply;
+            slot                        = {};
+            portEXIT_CRITICAL(&s_pending_lock);
+            return on_reply;
+        }
+    }
+    portEXIT_CRITICAL(&s_pending_lock);
+    return nullptr;
+}
+
+/** Nothing sent before a reconnect will be answered after it. */
+void fail_awaited()
+{
+    Pending failed[PENDING_MAX];
+    portENTER_CRITICAL(&s_pending_lock);
+    std::memcpy(failed, s_pending, sizeof(failed));
+    std::memset(s_pending, 0, sizeof(s_pending));
+    portEXIT_CRITICAL(&s_pending_lock);
+    for (const Pending &slot : failed) {
+        if (slot.on_reply != nullptr) {
+            slot.on_reply(nullptr);
+        }
+    }
+}
+
+/** True when the reply was to a request, which is then answered. */
+bool answer_request(const cJSON *root)
+{
+    const ReplyHandler on_reply = take_awaited(message_id(root));
+    if (on_reply == nullptr) {
+        return false;
+    }
+    const cJSON *result = reply_result(root);
+    if (result == nullptr) {
+        const cJSON *error = cJSON_GetObjectItemCaseSensitive(root, "error");
+        const cJSON *msg   = cJSON_GetObjectItemCaseSensitive(error, "message");
+        ESP_LOGW(TAG, "request %d refused: %s", message_id(root),
+                 cJSON_IsString(msg) ? msg->valuestring : "unknown");
+    }
+    on_reply(result);
+    return true;
 }
 
 std::string    s_rx;
@@ -177,6 +273,7 @@ void subscribe()
         ESP_LOGW(TAG, "no entities to subscribe to");
         return;
     }
+    fail_awaited();  // numbering starts again
     s_next_command_id.store(SUBSCRIBE_ID + 1, std::memory_order_relaxed);
     if (send_text(subscribe)) {
         s_connected.store(true, std::memory_order_relaxed);
@@ -230,7 +327,11 @@ void handle_message(const std::string &text)
         case MessageType::AuthOk:      subscribe(); break;
         case MessageType::AuthInvalid: begin_again_in(RETRY_TOKEN, "token rejected"); break;
         case MessageType::Event:       apply_event(root); break;
-        case MessageType::Result:      check_result(root); break;
+        case MessageType::Result:
+            if (!answer_request(root)) {
+                check_result(root);
+            }
+            break;
         default:                       break;
     }
 
@@ -287,6 +388,7 @@ void on_event(void *, esp_event_base_t, std::int32_t id, void *data)
         case WEBSOCKET_EVENT_DISCONNECTED:
         case WEBSOCKET_EVENT_CLOSED:
             s_rx.clear();
+            fail_awaited();
             if (s_connected.exchange(false, std::memory_order_relaxed)) {
                 ESP_LOGW(TAG, "%s, client retries on its own",
                          id == WEBSOCKET_EVENT_CLOSED ? "closed by the server" : "disconnected");
@@ -313,6 +415,22 @@ void send_command(const Command &cmd)
                                                     cmd.entity));
 }
 
+void send_request(const Request &req)
+{
+    const int id = next_command_id();
+    if (!connected() || !await_reply(id, req.on_reply)) {
+        ESP_LOGW(TAG, "request not sent: %s", connected() ? "too many waiting" : "not connected");
+        req.on_reply(nullptr);
+        return;
+    }
+    const std::string text = numbered(id, req.body);
+    if (!send_text(text)) {
+        if (const ReplyHandler on_reply = take_awaited(id); on_reply != nullptr) {
+            on_reply(nullptr);
+        }
+    }
+}
+
 void stop_or_start_if_wanted()
 {
     if (s_stop_wanted.exchange(false, std::memory_order_relaxed)) {
@@ -332,8 +450,12 @@ void stop_or_start_if_wanted()
 {
     for (;;) {
         Command cmd;
-        if (xQueueReceive(s_commands, &cmd, COMMAND_WAIT) == pdTRUE) {
+        ulTaskNotifyTake(pdTRUE, COMMAND_WAIT);
+        while (xQueueReceive(s_commands, &cmd, 0) == pdTRUE) {
             send_command(cmd);
+        }
+        for (Request req; xQueueReceive(s_requests, &req, 0) == pdTRUE;) {
+            send_request(req);
         }
         if (s_client != nullptr) {
             stop_or_start_if_wanted();
@@ -378,9 +500,16 @@ esp_err_t start(UpdateHandler on_update, std::vector<std::string> entities,
                                     reinterpret_cast<std::uint8_t *>(s_command_queue_storage),
                                     &s_command_queue_ctrl);
     ESP_RETURN_ON_FALSE(s_commands != nullptr, ESP_ERR_NO_MEM, TAG, "command queue");
+    auto *request_storage = static_cast<std::uint8_t *>(heap_caps_malloc(
+        REQUEST_QUEUE_LEN * sizeof(Request), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    ESP_RETURN_ON_FALSE(request_storage != nullptr, ESP_ERR_NO_MEM, TAG, "request storage");
+    s_requests = xQueueCreateStatic(REQUEST_QUEUE_LEN, sizeof(Request), request_storage,
+                                    &s_request_queue_ctrl);
+    ESP_RETURN_ON_FALSE(s_requests != nullptr, ESP_ERR_NO_MEM, TAG, "request queue");
 
-    xTaskCreateStaticPinnedToCore(supervisor_task, "ha_ws_sup", sizeof(task_stack), nullptr,
-                                  SUPERVISOR_PRIORITY, task_stack, &task_ctrl, SUPERVISOR_CORE);
+    s_supervisor =
+        xTaskCreateStaticPinnedToCore(supervisor_task, "ha_ws_sup", sizeof(task_stack), nullptr,
+                                      SUPERVISOR_PRIORITY, task_stack, &task_ctrl, SUPERVISOR_CORE);
 
     ESP_LOGI(TAG, "connecting to %s", HASS_WS_URI);
     return esp_websocket_client_start(s_client);
@@ -460,6 +589,31 @@ esp_err_t call_service_with(const char *domain, const char *service, const char 
         refused("too many at once");
     }
     return err;
+}
+
+esp_err_t request(const std::string &body, ReplyHandler on_reply)
+{
+    ESP_RETURN_ON_FALSE(on_reply != nullptr, ESP_ERR_INVALID_ARG, TAG, "no reply handler");
+    ESP_RETURN_ON_FALSE(body.size() < REQUEST_SIZE, ESP_ERR_INVALID_SIZE, TAG, "request too long");
+    if (s_requests == nullptr || !connected()) {
+        on_reply(nullptr);
+        return ESP_ERR_INVALID_STATE;
+    }
+    // Too large for a caller's stack, so one is shared; the queue copies it.
+    static Request           req;
+    static StaticSemaphore_t lock_ctrl;
+    static SemaphoreHandle_t lock = xSemaphoreCreateMutexStatic(&lock_ctrl);
+    xSemaphoreTake(lock, portMAX_DELAY);
+    copy_into(req.body, sizeof(req.body), body.c_str());
+    req.on_reply   = on_reply;
+    const bool put = xQueueSend(s_requests, &req, 0) == pdTRUE;
+    xSemaphoreGive(lock);
+    wake_supervisor();
+    if (!put) {
+        on_reply(nullptr);
+        return ESP_ERR_NO_MEM;
+    }
+    return ESP_OK;
 }
 
 }  // namespace hass::ws

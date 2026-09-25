@@ -239,6 +239,26 @@ std::string subscribe_entities_message(int id, const std::vector<std::string> &e
     return print_and_free(root);
 }
 
+std::string numbered(int id, const std::string &body)
+{
+    cJSON *root = cJSON_ParseWithLength(body.data(), body.size());
+    if (!cJSON_IsObject(root)) {
+        cJSON_Delete(root);
+        return "";
+    }
+    cJSON_DeleteItemFromObjectCaseSensitive(root, "id");
+    cJSON_AddNumberToObject(root, "id", id);
+    return print_and_free(root);
+}
+
+const cJSON *reply_result(const cJSON *root)
+{
+    if (!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "success"))) {
+        return nullptr;
+    }
+    return cJSON_GetObjectItemCaseSensitive(root, "result");
+}
+
 std::string ping_message(int id)
 {
     cJSON *root = cJSON_CreateObject();

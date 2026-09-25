@@ -38,6 +38,14 @@ bool last_refusal(char *out, std::size_t size, int &age_s);
 
 esp_err_t call_service(const char *domain, const char *service, const char *entity_id);
 
+/** What a reply carries under `result`, or null when it failed, or the link went
+ *  before it came. On the socket task, or the caller's when it was never sent. */
+using ReplyHandler = void (*)(const cJSON *result);
+
+/** Sends `body`, a command as a JSON object without its id, and hands the reply
+ *  to `on_reply`. */
+esp_err_t request(const std::string &body, ReplyHandler on_reply);
+
 esp_err_t call_service_with(const char *domain, const char *service, const char *entity_id,
                             const char *field, const char *value);
 

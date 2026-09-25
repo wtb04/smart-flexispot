@@ -38,6 +38,13 @@ std::string call_service_message(int id, const std::string &domain, const std::s
                                  const std::string &entity_id, const std::string &field,
                                  const std::string &value);
 
+/** `body`, a JSON object, numbered `id`: a request is numbered only as it goes
+ *  out. Empty when body is not an object. */
+std::string numbered(int id, const std::string &body);
+
+/** What a reply carries under `result`, or null when it says it failed. */
+const cJSON *reply_result(const cJSON *root);
+
 struct Entity {
     std::string                        state;
     std::string                        name;  // friendly_name

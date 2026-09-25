@@ -173,6 +173,27 @@ void test_service_call_with_data()
           "partially numeric value stays a string");
 }
 
+void test_requests()
+{
+    const std::string sent = numbered(12, R"({"type":"config_entries/get","domain":"x"})");
+    check(sent.find("\"id\":12") != std::string::npos, "request numbered as it goes out");
+    check(sent.find("\"domain\":\"x\"") != std::string::npos, "request keeps its body");
+    check(numbered(13, R"({"id":4,"type":"ping"})").find("\"id\":13") != std::string::npos,
+          "a stale number is replaced");
+    check(numbered(14, "[1]").empty() && numbered(15, "not json").empty(),
+          "only an object can be sent");
+
+    cJSON *ok = cJSON_Parse(R"({"id":12,"type":"result","success":true,"result":{"response":1}})");
+    const cJSON *result = reply_result(ok);
+    check(cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(result, "response")),
+          "a reply's result is handed over");
+    cJSON_Delete(ok);
+
+    cJSON *bad = cJSON_Parse(R"({"id":12,"type":"result","success":false,"error":{}})");
+    check(reply_result(bad) == nullptr, "a failed reply has no result");
+    cJSON_Delete(bad);
+}
+
 }  // namespace
 
 int main()
@@ -186,6 +207,7 @@ int main()
     test_malformed();
     test_service_call();
     test_service_call_with_data();
+    test_requests();
     std::printf("\n%s\n", g_failures == 0 ? "ALL PASS" : "FAILURES");
     return g_failures == 0 ? 0 : 1;
 }
