@@ -14,6 +14,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "ha_ws.h"
+#include "jellyfin.h"
 #include "hass.h"
 #include "travel.h"
 #include "ical.h"
@@ -302,6 +303,7 @@ void start_clients()
     hass::ws::on_refusal(on_refusal);
     ESP_ERROR_CHECK_WITHOUT_ABORT(
         hass::ws::start(on_entities, room::entities(), room::attributes()));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(jellyfin::start(room::on_jellyfin));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ble::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(jpeg::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(media::start(hass::ws::http_origin(), on_album_art, on_pick_art));

@@ -209,8 +209,10 @@ bool fetch(const char *url, Target to)
 
 bool fetch_playing(const char *path)
 {
-    char url[URL_SIZE];
-    std::snprintf(url, sizeof(url), "%s%s", s_origin, path);
+    // A path on Home Assistant, or a whole address, as a Jellyfin cover has.
+    char       url[URL_SIZE];
+    const bool whole = std::strncmp(path, "http", std::strlen("http")) == 0;
+    std::snprintf(url, sizeof(url), "%s%s", whole ? "" : s_origin, path);
     std::uint16_t *art = s_art[s_next];
     if (!fetch(url, {art, kArtSize})) {
         return false;

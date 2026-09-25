@@ -2,6 +2,7 @@
 
 #include "esp_err.h"
 #include "ha_ws_protocol.h"
+#include "jellyfin_protocol.h"
 
 #include <string>
 #include <vector>
@@ -25,6 +26,9 @@ void render(const hass::ws::EntityStore &store);
 int entity_count();
 
 void on_media(ui::MediaAction action);
+
+/** What Jellyfin's followed session plays, from its socket's task. */
+void on_jellyfin(const jellyfin::NowPlaying &now);
 
 /** Plays one of the favourites the media card offers. */
 void on_pick(int index);

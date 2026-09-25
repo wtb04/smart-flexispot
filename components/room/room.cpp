@@ -4,6 +4,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "ha_ws.h"
+#include "jellyfin.h"
 #include "media.h"
 #include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
@@ -14,6 +15,7 @@
 #include "radar.h"
 #include "ui.h"
 #include "units.h"
+
 
 #include <cstdio>
 #include <atomic>
@@ -80,10 +82,9 @@ const char *toggle_label(const ToggleSpec &spec, bool on)
 // Two players, one card: the speaker, then Jellyfin. Anything playing outranks
 // anything paused, so a paused speaker gives way to Jellyfin starting.
 constexpr char MEDIA_SPEAKER[]  = "media_player.office_speaker";
-constexpr char MEDIA_JELLYFIN[] = "media_player.macbook_pro";
-constexpr const char *MEDIA_PLAYERS[] = {MEDIA_SPEAKER, MEDIA_JELLYFIN};
+constexpr int  JELLYFIN_COVER_H = 300;  // enough for the card's frame, square from the middle
 constexpr int  JELLYFIN_PRESET  = 1;  // holding the card for Jellyfin: Preset 2
-std::atomic<const char *> s_player{MEDIA_SPEAKER};
+std::atomic<bool> s_on_jellyfin{false};  // what the card shows, and so controls
 
 // The favourites, in the order the popup shows them. For another: open it in
 // the Spotify app, Share, Copy link; open.spotify.com/playlist/ID is
@@ -282,52 +283,13 @@ void render_thermostat(const hass::ws::EntityStore &store)
                            upper(climate->state).c_str(), state));
 }
 
-bool going(const hass::ws::Entity *player)
+std::string episode_line(const std::string &series, int season, int episode)
 {
-    return known(player) &&
-           (player->state == "playing" || player->state == "paused" || player->state == "buffering");
-}
-
-/** The player the card shows and controls; the speaker while none has
- *  anything going. */
-const char *choose_player(const hass::ws::EntityStore &store)
-{
-    const char *chosen = nullptr;
-    for (const bool want_playing : {true, false}) {
-        for (const char *entity : MEDIA_PLAYERS) {
-            const hass::ws::Entity *player = store.find(entity);
-            if (chosen == nullptr && going(player) && (player->state == "paused") != want_playing) {
-                chosen = entity;
-            }
-        }
+    std::string line = series;
+    if (!line.empty() && season > 0 && episode > 0) {
+        line += "\nSeason " + std::to_string(season) + ", episode " + std::to_string(episode);
     }
-    if (chosen == nullptr) {
-        chosen = MEDIA_SPEAKER;
-    }
-    if (s_player.exchange(chosen) != chosen) {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(
-            ui::set_media_hold_preset(chosen == MEDIA_JELLYFIN ? JELLYFIN_PRESET : -1));
-    }
-    return chosen;
-}
-
-/** A player that vanishes or loses its title for a moment is not shown as
- *  gone until it has stayed so for a while. */
-bool gone_only_briefly(const hass::ws::Entity *player)
-{
-    const bool bare = known(player) && player->state != "off" && player->state != "idle" &&
-                      attribute(*player, "media_title").empty();
-
-    static std::int64_t s_gone_us = 0;
-    if (known(player) && !bare) {
-        s_gone_us = 0;
-        return false;
-    }
-    const std::int64_t now = esp_timer_get_time();
-    if (s_gone_us == 0) {
-        s_gone_us = now;
-    }
-    return now - s_gone_us < MEDIA_GONE_US;
+    return line;
 }
 
 std::string media_artist(const hass::ws::Entity &player)
@@ -337,13 +299,127 @@ std::string media_artist(const hass::ws::Entity &player)
         return artist;
     }
     // An episode has a series where a song has an artist.
-    artist            = attribute(player, "media_series_title");
-    const int season  = static_cast<int>(attribute_number(player, "media_season"));
-    const int episode = static_cast<int>(attribute_number(player, "media_episode"));
-    if (!artist.empty() && season > 0 && episode > 0) {
-        artist += "\nSeason " + std::to_string(season) + ", episode " + std::to_string(episode);
+    return episode_line(attribute(player, "media_series_title"),
+                        static_cast<int>(attribute_number(player, "media_season")),
+                        static_cast<int>(attribute_number(player, "media_episode")));
+}
+
+// What the card shows of a player, whichever it is: the speaker as Home
+// Assistant reports it, Jellyfin as its own socket does.
+struct PlayerView {
+    bool        known    = false;
+    bool        jellyfin = false;
+    std::string state;         // playing, paused, idle, off
+    std::string source;
+    std::string title;
+    std::string artist;
+    std::string picture;       // a path on Home Assistant, or a whole address
+    std::string position_key;  // changes whenever the position is reported afresh
+    int         position_s = 0;
+    int         duration_s = 0;
+    float       volume     = NO_NUMBER;
+    bool        muted      = false;
+};
+
+bool view_going(const PlayerView &view)
+{
+    return view.known &&
+           (view.state == "playing" || view.state == "paused" || view.state == "buffering");
+}
+
+PlayerView speaker_view(const hass::ws::Entity *speaker)
+{
+    PlayerView view;
+    if (!known(speaker)) {
+        return view;
     }
-    return artist;
+    const std::string app = attribute(*speaker, "app_name");
+    view.known            = true;
+    view.state            = speaker->state;
+    view.source           = upper(app.empty() ? speaker->name : app);
+    view.title            = attribute(*speaker, "media_title");
+    view.artist           = media_artist(*speaker);
+    view.picture          = attribute(*speaker, "entity_picture_local");
+    if (view.picture.empty()) {
+        view.picture = attribute(*speaker, "entity_picture");
+    }
+    view.position_key    = attribute(*speaker, "media_position_updated_at");
+    view.duration_s      = static_cast<int>(attribute_number(*speaker, "media_duration"));
+    const int reported   = static_cast<int>(attribute_number(*speaker, "media_position"));
+    view.position_s      = reported + (speaker->state == "playing" ? seconds_since(view.position_key) : 0);
+    view.volume          = attribute_number(*speaker, "volume_level");
+    view.muted           = attribute(*speaker, "is_volume_muted") == "true";
+    return view;
+}
+
+PlayerView jellyfin_view(const jellyfin::NowPlaying &now)
+{
+    PlayerView view;
+    view.jellyfin = true;
+    if (!now.active) {
+        return view;
+    }
+    view.known        = true;
+    view.state        = now.paused ? "paused" : "playing";
+    view.source       = "JELLYFIN";
+    view.title        = now.title;
+    view.artist       = episode_line(now.series, now.season, now.episode);
+    // An episode's own picture is a still from it: the card shows its season's
+    // poster, or its series'.
+    const std::string &poster = !now.season_id.empty() ? now.season_id
+                              : !now.series_id.empty() ? now.series_id
+                                                       : now.item;
+    view.picture = jellyfin::cover_url(now.kind == "Episode" ? poster : now.item, JELLYFIN_COVER_H);
+    view.position_s   = now.position_s;
+    view.duration_s   = now.duration_s;
+    view.position_key = now.item + ':' + std::to_string(now.position_s) + (now.paused ? "p" : "");
+    return view;
+}
+
+// Both sources draw the card from tasks of their own, one at a time.
+std::mutex s_media_lock;
+PlayerView s_speaker_view;
+PlayerView s_jellyfin_view;
+
+/** The player the card shows and controls: anything playing before anything
+ *  paused, the speaker before Jellyfin; the speaker while neither has anything. */
+const PlayerView &choose_view()
+{
+    const PlayerView *order[] = {&s_speaker_view, &s_jellyfin_view};
+    const PlayerView *chosen  = &s_speaker_view;
+    bool              found   = false;
+    for (const bool want_playing : {true, false}) {
+        for (const PlayerView *view : order) {
+            if (!found && view_going(*view) && (view->state == "paused") != want_playing) {
+                chosen = view;
+                found  = true;
+            }
+        }
+    }
+    if (s_on_jellyfin.exchange(chosen->jellyfin) != chosen->jellyfin) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(
+            ui::set_media_hold_preset(chosen->jellyfin ? JELLYFIN_PRESET : -1));
+    }
+    return *chosen;
+}
+
+/** A player that vanishes or loses its title for a moment is not shown as
+ *  gone until it has stayed so for a while. */
+bool gone_only_briefly(const PlayerView &view)
+{
+    const bool bare = view.known && view.state != "off" && view.state != "idle" &&
+                      view.title.empty();
+
+    static std::int64_t s_gone_us = 0;
+    if (view.known && !bare) {
+        s_gone_us = 0;
+        return false;
+    }
+    const std::int64_t now = esp_timer_get_time();
+    if (s_gone_us == 0) {
+        s_gone_us = now;
+    }
+    return now - s_gone_us < MEDIA_GONE_US;
 }
 
 void show_media_text(const std::string &source, const std::string &title,
@@ -361,30 +437,24 @@ void show_media_text(const std::string &source, const std::string &title,
     }
 }
 
-void show_media_position(const hass::ws::Entity &player, bool playing)
+void show_media_position(const PlayerView &view, bool playing)
 {
-    const std::string stamp    = attribute(player, "media_position_updated_at");
-    const int         duration = static_cast<int>(attribute_number(player, "media_duration"));
-    if (stamp == s_position_stamp && duration == s_position_duration &&
+    if (view.position_key == s_position_stamp && view.duration_s == s_position_duration &&
         playing == s_position_playing) {
         return;
     }
-    s_position_stamp    = stamp;
-    s_position_duration = duration;
+    s_position_stamp    = view.position_key;
+    s_position_duration = view.duration_s;
     s_position_playing  = playing;
-
-    const int reported = static_cast<int>(attribute_number(player, "media_position"));
-    const int elapsed  = reported + (playing ? seconds_since(stamp) : 0);
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_progress(elapsed, duration, playing));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_progress(view.position_s, view.duration_s, playing));
 }
 
-void show_media_volume(const hass::ws::Entity &player)
+void show_media_volume(const PlayerView &view)
 {
-    const float level   = attribute_number(player, "volume_level");
-    const bool  settled = esp_timer_get_time() -
-                              s_volume_set_us.load(std::memory_order_relaxed) > VOLUME_SETTLE_US;
-    if (level >= 0.0f && settled) {
-        const int percent = percent_of(level);
+    const bool settled = esp_timer_get_time() -
+                             s_volume_set_us.load(std::memory_order_relaxed) > VOLUME_SETTLE_US;
+    if (view.volume >= 0.0f && settled) {
+        const int percent = percent_of(view.volume);
         s_volume_pct.store(percent, std::memory_order_relaxed);
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_volume(percent));
     }
@@ -392,17 +462,11 @@ void show_media_volume(const hass::ws::Entity &player)
 
 /** Asks for the track's cover once it changed; true when a different one is
  *  now on its way, which the title waits for. */
-bool ask_for_art(const hass::ws::Entity &player, const std::string &title)
+bool ask_for_art(const std::string &picture, const std::string &title)
 {
     static std::string s_art_title;
     static std::string s_art_path;
     static bool        s_art_asked = false;
-    // Jellyfin's poster is only in entity_picture.
-    std::string picture = attribute(player, "entity_picture_local");
-    if (picture.empty()) {
-        picture = attribute(player, "entity_picture");
-    }
-
     if (title != s_art_title) {
         s_art_title = title;
         s_art_asked = false;
@@ -418,37 +482,40 @@ bool ask_for_art(const hass::ws::Entity &player, const std::string &title)
     return other;
 }
 
-void render_media(const hass::ws::EntityStore &store)
+/** With s_media_lock held. */
+void show_media()
 {
-    const char             *chosen = choose_player(store);
-    const bool              laptop = chosen == MEDIA_JELLYFIN;
-    const hass::ws::Entity *player = store.find(chosen);
-
-    if (gone_only_briefly(player)) {
+    const PlayerView &view = choose_view();
+    if (gone_only_briefly(view)) {
         return;
     }
-    if (player == nullptr) {
+    if (!view.known) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media("SPEAKER", "", "", "--", false, false));
         media::set_art_path("");
         return;
     }
-
-    const bool        playing = player->state == "playing";
+    const bool        playing = view.state == "playing";
     // What an idle player still names is what it last played: nothing is on.
-    const bool        on      = going(player);
-    const std::string title   = on ? attribute(*player, "media_title") : "";
-    const std::string app     = attribute(*player, "app_name");
-    const std::string source  = laptop ? "JELLYFIN" : upper(app.empty() ? player->name : app);
+    const bool        on      = view_going(view);
+    const std::string title   = on ? view.title : "";
     // An idle speaker has nothing on: to look at, it is off.
-    const std::string state   = player->state == "idle" ? "OFF" : upper(player->state);
+    const std::string state   = view.state == "idle" ? "OFF" : upper(view.state);
+    if (!view.jellyfin) {
+        s_muted.store(view.muted, std::memory_order_relaxed);
+    }
+    const bool art_coming = ask_for_art(view.picture, title);
+    show_media_text(view.source, title, on ? view.artist : "", state, playing, art_coming);
+    show_media_position(view, playing);
+    if (!view.jellyfin) {
+        show_media_volume(view);
+    }
+}
 
-    s_muted.store(attribute(*player, "is_volume_muted") == "true", std::memory_order_relaxed);
-
-    const bool art_coming = ask_for_art(*player, title);
-    show_media_text(source, title, on ? media_artist(*player) : "", state, playing,
-                    art_coming);
-    show_media_position(*player, playing);
-    show_media_volume(*player);
+void render_media(const hass::ws::EntityStore &store)
+{
+    std::lock_guard<std::mutex> hold(s_media_lock);
+    s_speaker_view = speaker_view(store.find(MEDIA_SPEAKER));
+    show_media();
 }
 
 // The favourites, locked: the lookup task names them and a tap reads them on
@@ -557,7 +624,7 @@ void send_volume(void *)
     std::snprintf(value, sizeof(value), "%.2f",
                   static_cast<double>(percent) / static_cast<double>(PERCENT_PER_WHOLE));
     ESP_ERROR_CHECK_WITHOUT_ABORT(hass::ws::call_service_with("media_player", "volume_set",
-                                                              s_player.load(), "volume_level", value));
+                                                              MEDIA_SPEAKER, "volume_level", value));
 }
 
 }  // namespace
@@ -594,6 +661,13 @@ void nudge_volume(float delta)
     }
 }
 
+void on_jellyfin(const jellyfin::NowPlaying &now)
+{
+    std::lock_guard<std::mutex> hold(s_media_lock);
+    s_jellyfin_view = jellyfin_view(now);
+    show_media();
+}
+
 void on_pick(int index)
 {
     picks::Pick pick;
@@ -613,13 +687,17 @@ void on_media(ui::MediaAction action)
 {
     switch (action) {
         case ui::MediaAction::PlayPause:
-            hass::ws::call_service("media_player", "media_play_pause", s_player.load());
+            if (s_on_jellyfin.load(std::memory_order_relaxed)) {
+                jellyfin::play_pause();
+            } else {
+                hass::ws::call_service("media_player", "media_play_pause", MEDIA_SPEAKER);
+            }
             break;
         case ui::MediaAction::Previous:
-            hass::ws::call_service("media_player", "media_previous_track", s_player.load());
+            hass::ws::call_service("media_player", "media_previous_track", MEDIA_SPEAKER);
             break;
         case ui::MediaAction::Next:
-            hass::ws::call_service("media_player", "media_next_track", s_player.load());
+            hass::ws::call_service("media_player", "media_next_track", MEDIA_SPEAKER);
             break;
         case ui::MediaAction::VolumeDown:
             nudge_volume(-VOLUME_STEP);
@@ -630,7 +708,7 @@ void on_media(ui::MediaAction action)
         case ui::MediaAction::Mute: {
             const bool muted = s_muted.load(std::memory_order_relaxed);
             ESP_ERROR_CHECK_WITHOUT_ABORT(
-                hass::ws::call_service_with("media_player", "volume_mute", s_player.load(),
+                hass::ws::call_service_with("media_player", "volume_mute", MEDIA_SPEAKER,
                                             "is_volume_muted", muted ? "false" : "true"));
             break;
         }
@@ -777,7 +855,7 @@ void on_dial_toggle(int index)
 std::vector<std::string> entities()
 {
     std::vector<std::string> out = {CLIMATE_ENTITY, ALL_LIGHTS_ENTITY, ALL_LIGHTS_ON,
-                                    ALL_LIGHTS_OFF, MEDIA_SPEAKER,     MEDIA_JELLYFIN,
+                                    ALL_LIGHTS_OFF, MEDIA_SPEAKER,
                                     "zone.home"};  // the radar's centre
     for (const PillSpec &pill : PILLS) {
         out.emplace_back(pill.entity);

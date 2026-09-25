@@ -47,8 +47,8 @@ esp_err_t start(const char *origin, ArtHandler on_art, PickArtHandler on_pick_ar
 
 /**
  * Thread-safe. Takes the entity_picture_local proxy path, which Home Assistant
- * serves over plain HTTP with a token in the query, so no TLS is needed. An
- * empty path clears the art.
+ * serves over plain HTTP with a token in the query, or a whole address, as
+ * Jellyfin's covers have. An empty path clears the art.
  */
 void set_art_path(const char *path);
 
