@@ -2,44 +2,43 @@
 
 namespace ui::detail {
 namespace {
-lv_obj_t   *s_splash       = nullptr;
-constexpr int SPLASH_SEGMENTS = 12;
-lv_obj_t   *s_splash_seg[SPLASH_SEGMENTS] = {};
-lv_obj_t   *s_splash_about = nullptr;
+lv_obj_t     *s_splash                      = nullptr;
+constexpr int SPLASH_SEGMENTS               = 12;
+lv_obj_t     *s_splash_seg[SPLASH_SEGMENTS] = {};
+lv_obj_t     *s_splash_about                = nullptr;
 
-constexpr const char *SPLASH_ICONS[] = {LV_SYMBOL_HOME, "", LV_SYMBOL_BELL, "",
-                                        LV_SYMBOL_SETTINGS};
-const lv_image_dsc_t *const SPLASH_IMAGES[] = {nullptr, &icons::calendar_icon, nullptr,
-                                               &icons::plane_icon, nullptr};
-constexpr int          SPLASH_ICON_COUNT = static_cast<int>(std::size(SPLASH_ICONS));
-constexpr std::int32_t SPLASH_CHIP       = 56;
-constexpr float        SPLASH_REACH      = 158.0f;
-constexpr float        SPLASH_SPREAD     = 68.0f;  // degrees either side of straight up
-lv_obj_t    *s_splash_icon[SPLASH_ICON_COUNT] = {};
-lv_point_t   s_splash_origin = {};  // the middle of the desktop at its lowest
+constexpr const char *SPLASH_ICONS[] = {LV_SYMBOL_HOME, "", LV_SYMBOL_BELL, "", LV_SYMBOL_SETTINGS};
+const lv_image_dsc_t *const SPLASH_IMAGES[]   = {nullptr, &icons::calendar_icon, nullptr,
+                                                 &icons::plane_icon, nullptr};
+constexpr int               SPLASH_ICON_COUNT = static_cast<int>(std::size(SPLASH_ICONS));
+constexpr std::int32_t      SPLASH_CHIP       = 56;
+constexpr float             SPLASH_REACH      = 158.0f;
+constexpr float             SPLASH_SPREAD     = 68.0f; // degrees either side of straight up
+lv_obj_t                   *s_splash_icon[SPLASH_ICON_COUNT] = {};
+lv_point_t                  s_splash_origin = {}; // the middle of the desktop at its lowest
 
 struct SplashStep {
     const char *key;
     const char *name;
     lv_obj_t   *state;
 };
-SplashStep s_splash_steps[] = {{"desk", "Desk", nullptr},
-                               {"network", "Network", nullptr},
-                               {"", "Home Assistant", nullptr}};  // up when splash_done()
+SplashStep    s_splash_steps[]  = {{"desk", "Desk", nullptr},
+                                   {"network", "Network", nullptr},
+                                   {"", "Home Assistant", nullptr}}; // up when splash_done()
 constexpr int SPLASH_STEP_COUNT = static_cast<int>(std::size(s_splash_steps));
-lv_obj_t   *s_splash_top   = nullptr;
-lv_obj_t   *s_splash_leg[2] = {};
-lv_timer_t *s_splash_guard = nullptr;
-bool        s_splash_up    = false;
-lv_timer_t  *s_splash_tick  = nullptr;
-std::uint32_t s_splash_start = 0;
-bool         s_splash_ready  = false;
+lv_obj_t     *s_splash_top      = nullptr;
+lv_obj_t     *s_splash_leg[2]   = {};
+lv_timer_t   *s_splash_guard    = nullptr;
+bool          s_splash_up       = false;
+lv_timer_t   *s_splash_tick     = nullptr;
+std::uint32_t s_splash_start    = 0;
+bool          s_splash_ready    = false;
 
-constexpr std::int32_t DESK_W     = 300;
-constexpr std::int32_t DESK_H     = 160;
-constexpr std::int32_t DESK_BAR   = 16;
-constexpr std::int32_t DESK_LOW   = DESK_H - 58;
-constexpr std::int32_t DESK_HIGH  = 6;
+constexpr std::int32_t DESK_W    = 300;
+constexpr std::int32_t DESK_H    = 160;
+constexpr std::int32_t DESK_BAR  = 16;
+constexpr std::int32_t DESK_LOW  = DESK_H - 58;
+constexpr std::int32_t DESK_HIGH = 6;
 
 void splash_hide(lv_anim_t *)
 {
@@ -82,33 +81,32 @@ void splash_frame(std::uint32_t elapsed)
     auto phase = [&](float from_ms, float length_ms) {
         return std::clamp((static_cast<float>(elapsed) - from_ms) / length_ms, 0.0f, 1.0f);
     };
-    const float rise = 0.5f - 0.5f * std::cos(phase(300.0f, 5200.0f) * 3.14159265f);
+    const float        rise = 0.5f - 0.5f * std::cos(phase(300.0f, 5200.0f) * 3.14159265f);
     const std::int32_t top =
         DESK_LOW - static_cast<std::int32_t>(std::lround((DESK_LOW - DESK_HIGH) * rise));
     set_pos_once(s_splash_top, 0, top);
 
     for (int i = 0; i < SPLASH_ICON_COUNT; ++i) {
-        const float t    = phase(6000.0f + 1000.0f * static_cast<float>(i), 600.0f);
-        const float back = 1.0f + 2.70158f * std::pow(t - 1.0f, 3.0f) +
-                           1.70158f * std::pow(t - 1.0f, 2.0f);
+        const float t = phase(6000.0f + 1000.0f * static_cast<float>(i), 600.0f);
+        const float back =
+            1.0f + 2.70158f * std::pow(t - 1.0f, 3.0f) + 1.70158f * std::pow(t - 1.0f, 2.0f);
         const float angle = (-SPLASH_SPREAD + 2.0f * SPLASH_SPREAD * static_cast<float>(i) /
                                                   (SPLASH_ICON_COUNT - 1)) *
                             3.14159265f / 180.0f;
-        const float ox   = static_cast<float>(s_splash_origin.x);
-        const float oy   = static_cast<float>(s_splash_origin.y + top - DESK_LOW);
-        const float to_x = ox + SPLASH_REACH * std::sin(angle);
-        const float to_y = static_cast<float>(s_splash_origin.y + DESK_HIGH - DESK_LOW) -
-                           SPLASH_REACH * std::cos(angle);
+        const float ox    = static_cast<float>(s_splash_origin.x);
+        const float oy    = static_cast<float>(s_splash_origin.y + top - DESK_LOW);
+        const float to_x  = ox + SPLASH_REACH * std::sin(angle);
+        const float to_y  = static_cast<float>(s_splash_origin.y + DESK_HIGH - DESK_LOW) -
+                            SPLASH_REACH * std::cos(angle);
         static bool landed[SPLASH_ICON_COUNT] = {};
         if (t <= 0.0f || landed[i]) {
             continue;
         }
         landed[i] = t >= 1.0f;
-        set_pos_once(s_splash_icon[i],
-                     static_cast<std::int32_t>(std::lround(ox + (to_x - ox) * back)) -
-                         SPLASH_CHIP / 2,
-                     static_cast<std::int32_t>(std::lround(oy + (to_y - oy) * back)) -
-                         SPLASH_CHIP / 2);
+        set_pos_once(
+            s_splash_icon[i],
+            static_cast<std::int32_t>(std::lround(ox + (to_x - ox) * back)) - SPLASH_CHIP / 2,
+            static_cast<std::int32_t>(std::lround(oy + (to_y - oy) * back)) - SPLASH_CHIP / 2);
         const auto scale = static_cast<std::int32_t>(256 * std::min(t * 2.5f, 1.0f));
         if (lv_obj_get_style_transform_scale_x(s_splash_icon[i], LV_PART_MAIN) != scale) {
             lv_obj_set_style_transform_scale(s_splash_icon[i], scale, 0);
@@ -129,12 +127,12 @@ void splash_frame(std::uint32_t elapsed)
 
 // Boot takes nine to ten seconds; the splash always takes twelve, one even
 // movement rather than a lurch per step, and waits at the end if boot is slower.
-constexpr std::uint32_t SPLASH_GUARD_MS = 15000;
+constexpr std::uint32_t SPLASH_GUARD_MS  = 15000;
 bool                    s_splash_leaving = false;
 
 // LVGL draws the screen under the top layer even where the splash covers it, and
 // Home Assistant filling the pages in cost a fifth of a second a frame.
-constexpr int SPLASH_HIDDEN_MAX = 16;
+constexpr int SPLASH_HIDDEN_MAX               = 16;
 lv_obj_t     *s_splash_hid[SPLASH_HIDDEN_MAX] = {};
 
 void hide_under_splash()
@@ -205,7 +203,7 @@ void splash_mark(int current)
         lv_obj_set_style_text_opa(state, i > current ? LV_OPA_60 : LV_OPA_COVER, 0);
     }
 }
-}  // namespace
+} // namespace
 
 void build_splash()
 {
@@ -220,15 +218,15 @@ void build_splash()
     hide_under_splash();
 
     constexpr std::int32_t STEPS_W = 360;
-    lv_obj_t *panel = lv_obj_create(s_splash);
+    lv_obj_t              *panel   = lv_obj_create(s_splash);
     lv_obj_set_pos(panel, GAP, GAP);
     lv_obj_set_size(panel, l.screen_w - 2 * GAP, l.screen_h - 2 * GAP);
     theme::style_panel(panel, theme::panel, theme::radius::card);
     lv_obj_set_style_pad_all(panel, PANEL_PAD, 0);
     lv_obj_set_clickable(panel, false);
-    const std::int32_t inner_w = l.screen_w - 2 * GAP - 2 * PANEL_PAD;
-    const std::int32_t inner_h = l.screen_h - 2 * GAP - 2 * PANEL_PAD;
-    const std::int32_t hero_h  = inner_h;
+    const std::int32_t inner_w     = l.screen_w - 2 * GAP - 2 * PANEL_PAD;
+    const std::int32_t inner_h     = l.screen_h - 2 * GAP - 2 * PANEL_PAD;
+    const std::int32_t hero_h      = inner_h;
     const std::int32_t hero_full_w = inner_w - STEPS_W - GAP;
 
     lv_obj_t *hero = theme::make_card(panel);
@@ -237,12 +235,12 @@ void build_splash()
     lv_obj_set_clickable(hero, false);
 
     constexpr std::int32_t SEG_W = 30, SEG_H = 10, SEG_GAP = 8;
-    const std::int32_t hero_w  = hero_full_w - 2 * theme::space::l;
-    const std::int32_t arc_h   = static_cast<std::int32_t>(SPLASH_REACH) + SPLASH_CHIP / 2;
-    const std::int32_t block   = arc_h + DESK_H + theme::space::l +
-                               theme::type_display()->line_height +
-                               theme::type_body()->line_height + theme::space::xl + SEG_H;
-    const std::int32_t top     = (hero_h - 2 * theme::space::l - block) / 2 + arc_h;
+    const std::int32_t     hero_w = hero_full_w - 2 * theme::space::l;
+    const std::int32_t     arc_h  = static_cast<std::int32_t>(SPLASH_REACH) + SPLASH_CHIP / 2;
+    const std::int32_t     block  = arc_h + DESK_H + theme::space::l +
+                                    theme::type_display()->line_height +
+                                    theme::type_body()->line_height + theme::space::xl + SEG_H;
+    const std::int32_t     top    = (hero_h - 2 * theme::space::l - block) / 2 + arc_h;
 
     // Created before the desk, so they come out from behind it.
     for (int i = 0; i < SPLASH_ICON_COUNT; ++i) {
@@ -279,19 +277,20 @@ void build_splash()
     splash_bar(desk, DESK_W - 96, DESK_H - 12, 88, 12, theme::panel);
     s_splash_leg[0] = splash_bar(desk, 44, 0, DESK_BAR, 10, theme::panel);
     s_splash_leg[1] = splash_bar(desk, DESK_W - 44 - DESK_BAR, 0, DESK_BAR, 10, theme::panel);
-    s_splash_top = splash_bar(desk, 0, 0, DESK_W, DESK_BAR, theme::panel);
+    s_splash_top    = splash_bar(desk, 0, 0, DESK_W, DESK_BAR, theme::panel);
     lv_obj_set_style_radius(s_splash_top, DESK_BAR / 2, 0);
     theme::fill_accent(s_splash_top);
 
     const std::int32_t title_y = top + DESK_H + theme::space::l;
     lv_obj_align(theme::make_label(hero, "Smart Flexispot", theme::text, theme::type_display()),
                  LV_ALIGN_TOP_MID, 0, title_y);
-    lv_obj_align(theme::make_label(hero, "Wouter ten Brinke", theme::secondary, theme::type_body()),
-                 LV_ALIGN_TOP_MID, 0, title_y + theme::type_display()->line_height);
+    lv_obj_align(
+        theme::make_label(hero, "by Wouter ten Brinke", theme::secondary, theme::type_body()),
+        LV_ALIGN_TOP_MID, 0, title_y + theme::type_display()->line_height);
 
-    const std::int32_t bar_y = title_y + theme::type_display()->line_height +
-                               theme::type_body()->line_height + theme::space::xl;
-    lv_obj_t *segments = lv_obj_create(hero);
+    const std::int32_t bar_y    = title_y + theme::type_display()->line_height +
+                                  theme::type_body()->line_height + theme::space::xl;
+    lv_obj_t          *segments = lv_obj_create(hero);
     lv_obj_set_size(segments, SPLASH_SEGMENTS * (SEG_W + SEG_GAP) - SEG_GAP, SEG_H);
     lv_obj_align(segments, LV_ALIGN_TOP_MID, 0, bar_y);
     lv_obj_set_style_bg_opa(segments, LV_OPA_TRANSP, 0);
@@ -299,8 +298,8 @@ void build_splash()
     lv_obj_set_style_pad_all(segments, 0, 0);
     lv_obj_set_clickable(segments, false);
     for (int i = 0; i < SPLASH_SEGMENTS; ++i) {
-        s_splash_seg[i] = splash_bar(segments, i * (SEG_W + SEG_GAP), 0, SEG_W, SEG_H,
-                                     theme::panel);
+        s_splash_seg[i] =
+            splash_bar(segments, i * (SEG_W + SEG_GAP), 0, SEG_W, SEG_H, theme::panel);
         lv_obj_set_style_radius(s_splash_seg[i], SEG_H / 2, 0);
     }
 
@@ -384,7 +383,7 @@ void apply_splash()
     }
 }
 
-}  // namespace ui::detail
+} // namespace ui::detail
 
 namespace ui {
 using namespace detail;
@@ -394,8 +393,8 @@ esp_err_t splash_step(const char *label)
     for (int i = 0; i < SPLASH_STEP_COUNT; ++i) {
         if (label != nullptr && std::strcmp(label, s_splash_steps[i].key) == 0) {
             int wanted = s_steps_wanted.load(std::memory_order_relaxed);
-            while (wanted < i + 1 &&
-                   !s_steps_wanted.compare_exchange_weak(wanted, i + 1, std::memory_order_relaxed)) {
+            while (wanted < i + 1 && !s_steps_wanted.compare_exchange_weak(
+                                         wanted, i + 1, std::memory_order_relaxed)) {
             }
         }
     }
@@ -411,4 +410,4 @@ esp_err_t splash_done()
     }
     return ESP_OK;
 }
-}  // namespace ui
+} // namespace ui
