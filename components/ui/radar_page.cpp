@@ -136,10 +136,7 @@ constexpr int SPEED_READING    = 1;
 constexpr int DISTANCE_READING = 2;
 constexpr int READINGS         = 3;
 
-constexpr std::int32_t READING_W = 78;
-// The altitude carries a trend arrow, so it gets the wider column.
-constexpr std::int32_t READING_WIDTHS[READINGS] = {INNER_W - (READINGS - 1) * READING_W,
-                                                   READING_W, READING_W};
+constexpr std::int32_t READING_MIN_GAP = 8;
 
 constexpr const char *NO_READING = "--";
 
@@ -1129,18 +1126,14 @@ void build_readings(lv_obj_t *card, std::int32_t height)
 {
     const std::int32_t name_y  = height - 2 * INSET - theme::type_label()->line_height;
     const std::int32_t value_y = name_y - theme::type_value()->line_height;
-    std::int32_t       left    = 0;
     for (int i = 0; i < READINGS; ++i) {
         s_rows[i].value = theme::make_label(card, NO_READING, theme::text, theme::type_value());
-        lv_obj_set_pos(s_rows[i].value, left, value_y);
-        lv_obj_set_width(s_rows[i].value, READING_WIDTHS[i]);
-        lv_label_set_long_mode(s_rows[i].value, LV_LABEL_LONG_MODE_CLIP);
+        lv_obj_set_y(s_rows[i].value, value_y);
         quiet(s_rows[i].value);
 
         s_rows[i].name = theme::make_label(card, "", theme::secondary, theme::type_label());
-        lv_obj_set_pos(s_rows[i].name, left, name_y);
+        lv_obj_set_y(s_rows[i].name, name_y);
         quiet(s_rows[i].name);
-        left += READING_WIDTHS[i];
     }
 }
 
@@ -1328,11 +1321,33 @@ void draw_rim(lv_obj_t *dot, const radar::Aircraft &aircraft)
     lv_obj_set_hidden(dot, false);
 }
 
+// Each reading as wide as its value or its name, the three spread across the
+// column: the quiet sky's names are longer than an aircraft's, and fixed
+// columns ran them into each other.
+void place_readings()
+{
+    lv_obj_update_layout(lv_obj_get_parent(s_rows[0].value));
+    std::int32_t width[READINGS];
+    std::int32_t used = 0;
+    for (int i = 0; i < READINGS; ++i) {
+        width[i] = std::max(lv_obj_get_width(s_rows[i].value), lv_obj_get_width(s_rows[i].name));
+        used += width[i];
+    }
+    const std::int32_t gap = std::max(READING_MIN_GAP, (INNER_W - used) / (READINGS - 1));
+    std::int32_t       x   = 0;
+    for (int i = 0; i < READINGS; ++i) {
+        lv_obj_set_x(s_rows[i].value, x);
+        lv_obj_set_x(s_rows[i].name, x);
+        x += width[i] + gap;
+    }
+}
+
 void set_row(int index, const char *name, const char *value, std::uint32_t colour = theme::text)
 {
     theme::set_text(s_rows[index].name, name);
     theme::set_text(s_rows[index].value, value);
     theme::set_text_color(s_rows[index].value, colour);
+    place_readings();
 }
 
 void show_summary_heading()
