@@ -1,6 +1,7 @@
 #pragma once
 
 #include "esp_err.h"
+#include "units.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -8,7 +9,7 @@
 namespace jpeg {
 /** The panel has one JPEG engine; this component owns it, its buffers and the
  *  software fallback for what the engine will not take. */
-inline constexpr std::size_t kMaxInput = 512 * 1024;
+inline constexpr std::size_t kMaxInput = 512 * units::kBytesPerKiB;
 inline constexpr int         kMaxSide  = 800;
 
 /** A decoded picture. Valid only inside the callback that is handed it. */
@@ -42,7 +43,12 @@ bool decode_into(const void *data, std::size_t length, std::uint16_t *out, int m
 /** Built arithmetically, so unlike the engine's own output it needs no byte swap. */
 constexpr std::uint16_t grey_to_rgb565(std::uint8_t level)
 {
-    return static_cast<std::uint16_t>(((level >> 3) << 11) | ((level >> 2) << 5) | (level >> 3));
+    constexpr int RED_SHIFT   = 11;
+    constexpr int GREEN_SHIFT = 5;
+    const int     five_bits   = level >> 3;  // of red and of blue
+    const int     six_bits    = level >> 2;  // of green
+    return static_cast<std::uint16_t>((five_bits << RED_SHIFT) | (six_bits << GREEN_SHIFT) |
+                                      five_bits);
 }
 
 }  // namespace jpeg

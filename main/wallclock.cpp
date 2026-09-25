@@ -7,6 +7,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "ui.h"
+#include "units.h"
 
 #include <atomic>
 #include <cstdio>
@@ -17,7 +18,9 @@ namespace wallclock {
 namespace {
 constexpr char TAG[] = "clock";
 
-constexpr TickType_t TICK = pdMS_TO_TICKS(1000);
+constexpr TickType_t TICK = pdMS_TO_TICKS(units::kMsPerSecond);
+
+constexpr std::size_t TIME_TEXT_SIZE = sizeof("HH:MM");
 
 constexpr std::uint32_t TASK_STACK    = 3072;
 constexpr UBaseType_t   TASK_PRIORITY = 2;
@@ -30,7 +33,7 @@ std::atomic<bool> s_synced{false};
 
 [[noreturn]] void clock_task(void *)
 {
-    char last[6] = {};
+    char last[TIME_TEXT_SIZE] = {};
 
     for (;;) {
         const std::time_t now = std::time(nullptr);
@@ -38,7 +41,7 @@ std::atomic<bool> s_synced{false};
         localtime_r(&now, &local);
 
         if (rtc::plausible(now)) {
-            char text[6];
+            char text[TIME_TEXT_SIZE];
             std::strftime(text, sizeof(text), "%H:%M", &local);
             if (!s_synced.exchange(true, std::memory_order_relaxed)) {
                 ESP_LOGI(TAG, "time set: %s", text);

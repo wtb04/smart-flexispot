@@ -20,7 +20,7 @@ int main()
 {
     using namespace focus;
     const Plan plan{};
-    const std::int32_t min = 60 * 1000;
+    const std::int32_t min = units::kMsPerMinute;
 
     State s = toggled(State{}, plan, 1000);
     check(s.phase == Phase::Work && s.round == 1 && s.running, "the button starts round one");

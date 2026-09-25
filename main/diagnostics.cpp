@@ -20,6 +20,7 @@
 #include "power.h"
 #include "room.h"
 #include "ui.h"
+#include "units.h"
 #include "wifi.h"
 
 #include <algorithm>
@@ -32,7 +33,36 @@ namespace diagnostics {
 namespace {
 constexpr char TAG[] = "diag";
 
-constexpr TickType_t TICK = pdMS_TO_TICKS(1000);
+constexpr TickType_t TICK = pdMS_TO_TICKS(units::kMsPerSecond);
+
+constexpr int STRONG_SIGNAL_DBM = -60;
+constexpr int FAIR_SIGNAL_DBM   = -75;
+
+constexpr int REFUSAL_RECENT_S       = 10 * units::kSecondsPerMinute;
+constexpr int DESK_HEARD_RECENTLY_MS = 2 * units::kMsPerSecond;
+constexpr int MS_PER_TENTH_SECOND    = units::kMsPerSecond / 10;
+constexpr int RADAR_STALE_S          = units::kSecondsPerMinute;
+
+constexpr int CHARGE_GOOD_PERCENT         = 40;
+constexpr int CHARGE_LOW_PERCENT          = 15;
+constexpr int ON_BATTERY_LOW_PERCENT      = 25;
+constexpr int ON_BATTERY_CRITICAL_PERCENT = 10;
+
+constexpr float MILLIAMPS_PER_AMP = 1000.0f;
+
+constexpr std::size_t INTERNAL_RAM_LOW_BYTES   = 24 * units::kBytesPerKiB;
+constexpr std::size_t INTERNAL_RAM_TIGHT_BYTES = 48 * units::kBytesPerKiB;
+
+constexpr int CALENDAR_LOOKAHEAD_EVENTS = 8;
+
+constexpr std::size_t VALUE_TEXT_SIZE     = 16;
+constexpr std::size_t ROW_TEXT_SIZE       = 32;
+constexpr std::size_t REFUSAL_TEXT_SIZE   = 96;
+constexpr std::size_t REFUSAL_REASON_SIZE = 32;
+constexpr std::size_t AGO_TEXT_SIZE       = 24;
+constexpr std::size_t CALENDAR_TEXT_SIZE  = 48;
+constexpr std::size_t CLOCK_TEXT_SIZE     = 8;
+constexpr std::size_t SYSTEM_TEXT_SIZE    = 40;
 
 constexpr std::uint32_t TASK_STACK    = 3072;  // measured: uses 0.7 KB
 constexpr UBaseType_t   TASK_PRIORITY = 1;
@@ -112,10 +142,10 @@ void summary(Card card, const char *value, Level level)
 
 Level signal_level(int rssi_dbm)
 {
-    if (rssi_dbm >= -60) {
+    if (rssi_dbm >= STRONG_SIGNAL_DBM) {
         return Level::Good;
     }
-    return rssi_dbm >= -75 ? Level::Warn : Level::Bad;
+    return rssi_dbm >= FAIR_SIGNAL_DBM ? Level::Warn : Level::Bad;
 }
 
 void height_text(char *out, std::size_t size, int height_mm)
@@ -123,25 +153,36 @@ void height_text(char *out, std::size_t size, int height_mm)
     if (height_mm < 0) {
         std::snprintf(out, size, "not set");
     } else {
-        std::snprintf(out, size, "%d.%d cm", height_mm / 10, height_mm % 10);
+        std::snprintf(out, size, "%d.%d cm", height_mm / units::kMmPerCm,
+                      height_mm % units::kMmPerCm);
     }
+}
+
+unsigned kib(std::size_t bytes)
+{
+    return static_cast<unsigned>(bytes / units::kBytesPerKiB);
+}
+
+int ms_from_us(int us)
+{
+    return us / static_cast<int>(units::kUsPerMs);
 }
 
 void kilobytes(Card card, int which, std::size_t bytes, Level level = Level::Neutral)
 {
-    char text[16];
-    std::snprintf(text, sizeof(text), "%u KB", static_cast<unsigned>(bytes / 1024));
+    char text[VALUE_TEXT_SIZE];
+    std::snprintf(text, sizeof(text), "%u KB", kib(bytes));
     row(card, which, text, level);
 }
 
 void ago(char *out, std::size_t size, int seconds)
 {
-    if (seconds < 60) {
+    if (seconds < units::kSecondsPerMinute) {
         std::snprintf(out, size, "%d s ago", seconds);
-    } else if (seconds < 3600) {
-        std::snprintf(out, size, "%d min ago", seconds / 60);
+    } else if (seconds < units::kSecondsPerHour) {
+        std::snprintf(out, size, "%d min ago", seconds / units::kSecondsPerMinute);
     } else {
-        std::snprintf(out, size, "%d h ago", seconds / 3600);
+        std::snprintf(out, size, "%d h ago", seconds / units::kSecondsPerHour);
     }
 }
 
@@ -150,7 +191,7 @@ void ago(char *out, std::size_t size, int seconds)
 void update_wifi()
 {
     const wifi::Info info = wifi::info();
-    char             text[32];
+    char             text[ROW_TEXT_SIZE];
     row(WIFI, WIFI_MAC, info.mac[0] != '\0' ? info.mac : nullptr);
     if (!info.connected) {
         summary(WIFI, "offline", Level::Bad);
@@ -186,7 +227,7 @@ void update_hass()
                              : "offline",
             broker && socket ? Level::Good : broker || socket ? Level::Warn : Level::Bad);
 
-    char      text[96];
+    char      text[REFUSAL_TEXT_SIZE];
     const int entities = room::entity_count();
     std::snprintf(text, sizeof(text), "%d", entities);
     row(HASS, HASS_ENTITIES, text, entities > 0 ? Level::Good : Level::Warn);
@@ -195,13 +236,13 @@ void update_hass()
     row(HASS, HASS_ART, !art.have_art ? "none" : art.art_ok ? "shown" : "failed",
         art.have_art && !art.art_ok ? Level::Warn : Level::Neutral);
 
-    char reason[32];
+    char reason[REFUSAL_REASON_SIZE];
     int  age = 0;
     if (hass::ws::last_refusal(reason, sizeof(reason), age)) {
-        char when[24];
+        char when[AGO_TEXT_SIZE];
         ago(when, sizeof(when), age);
         std::snprintf(text, sizeof(text), "%s, %s", reason, when);
-        row(HASS, HASS_REFUSED, text, age < 600 ? Level::Warn : Level::Neutral);
+        row(HASS, HASS_REFUSED, text, age < REFUSAL_RECENT_S ? Level::Warn : Level::Neutral);
     } else {
         row(HASS, HASS_REFUSED, "none");
     }
@@ -229,14 +270,14 @@ void update_presence()
         return;
     }
     row(PRESENCE, PRESENCE_PHONE, radio.phone_present ? "home" : "away");
-    char text[16];
+    char text[VALUE_TEXT_SIZE];
     std::snprintf(text, sizeof(text), "%d dBm", radio.phone_rssi);
     row(PRESENCE, PRESENCE_SIGNAL, text);
 }
 
 void update_desk()
 {
-    char      text[16];
+    char      text[VALUE_TEXT_SIZE];
     const int height = desk::height_mm();
     height_text(text, sizeof(text), height);
     row(DESK, DESK_HEIGHT, height >= 0 ? text : nullptr);
@@ -256,21 +297,19 @@ void update_desk()
     }
 }
 
-void update_link()
+void update_wire_link()
 {
-    const bool over_ble = settings::enabled(settings::Key::DeskBluetooth);
-    row(LINK, LINK_OVER, over_ble ? "Bluetooth" : "wire");
+    const bool linked = desk::linked();
+    row(LINK, LINK_BOX, linked ? "answering" : "silent", linked ? Level::Good : Level::Bad);
+    row(LINK, LINK_COMPANION, "not used");
+    row(LINK, LINK_TRIP, nullptr);
+    row(LINK, LINK_HEARD, nullptr);
+    summary(LINK, linked ? "wire" : "box silent", linked ? Level::Good : Level::Bad);
+}
 
-    char text[32];
-    if (!over_ble) {
-        const bool linked = desk::linked();
-        row(LINK, LINK_BOX, linked ? "answering" : "silent", linked ? Level::Good : Level::Bad);
-        row(LINK, LINK_COMPANION, "not used");
-        row(LINK, LINK_TRIP, nullptr);
-        row(LINK, LINK_HEARD, nullptr);
-        summary(LINK, linked ? "wire" : "box silent", linked ? Level::Good : Level::Bad);
-        return;
-    }
+void update_bluetooth_link()
+{
+    char text[ROW_TEXT_SIZE];
 
     const ble::LinkStats link = ble::link_stats();
     deskproto::Status    proxy{};
@@ -281,16 +320,17 @@ void update_link()
     row(LINK, LINK_BOX, !link.connected ? nullptr : box ? "answering" : "silent",
         !link.connected ? Level::Neutral : box ? Level::Good : Level::Bad);
     if (link.samples > 0) {
-        std::snprintf(text, sizeof(text), "%d ms, worst %d", link.median_us / 1000,
-                      link.max_us / 1000);
+        std::snprintf(text, sizeof(text), "%d ms, worst %d", ms_from_us(link.median_us),
+                      ms_from_us(link.max_us));
         row(LINK, LINK_TRIP, text);
     } else {
         row(LINK, LINK_TRIP, nullptr);
     }
     const int quiet = ble::desk::quiet_ms();
     if (quiet >= 0) {
-        std::snprintf(text, sizeof(text), "%d.%d s ago", quiet / 1000, quiet % 1000 / 100);
-        row(LINK, LINK_HEARD, text, quiet < 2000 ? Level::Good : Level::Warn);
+        std::snprintf(text, sizeof(text), "%d.%d s ago", quiet / units::kMsPerSecond,
+                      quiet % units::kMsPerSecond / MS_PER_TENTH_SECOND);
+        row(LINK, LINK_HEARD, text, quiet < DESK_HEARD_RECENTLY_MS ? Level::Good : Level::Warn);
     } else {
         row(LINK, LINK_HEARD, nullptr);
     }
@@ -300,10 +340,21 @@ void update_link()
     } else if (!box) {
         summary(LINK, "box silent", Level::Bad);
     } else if (link.samples > 0) {
-        std::snprintf(text, sizeof(text), "%d ms", link.median_us / 1000);
+        std::snprintf(text, sizeof(text), "%d ms", ms_from_us(link.median_us));
         summary(LINK, text, Level::Good);
     } else {
         summary(LINK, "Bluetooth", Level::Good);
+    }
+}
+
+void update_link()
+{
+    const bool over_ble = settings::enabled(settings::Key::DeskBluetooth);
+    row(LINK, LINK_OVER, over_ble ? "Bluetooth" : "wire");
+    if (over_ble) {
+        update_bluetooth_link();
+    } else {
+        update_wire_link();
     }
 }
 
@@ -326,26 +377,27 @@ void update_power()
         for (int r : {POWER_CHARGE, POWER_CURRENT}) {
             row(POWER, r, nullptr);
         }
-        char volts[16];
+        char volts[VALUE_TEXT_SIZE];
         std::snprintf(volts, sizeof(volts), "%.2f V", battery.bus_volts);
         row(POWER, POWER_VOLTS, volts);
         row(POWER, POWER_STATE, "none found");
         return;
     }
 
-    char        text[16];
-    const Level charge = battery.percent >= 40   ? Level::Good
-                         : battery.percent >= 15 ? Level::Warn
-                                                 : Level::Bad;
+    char        text[VALUE_TEXT_SIZE];
+    const Level charge = battery.percent >= CHARGE_GOOD_PERCENT  ? Level::Good
+                         : battery.percent >= CHARGE_LOW_PERCENT ? Level::Warn
+                                                                 : Level::Bad;
     std::snprintf(text, sizeof(text), "%d%%", battery.percent);
     row(POWER, POWER_CHARGE, text, charge);
     summary(POWER, text,
-            battery.on_battery && battery.percent < 10   ? Level::Bad
-            : battery.on_battery && battery.percent < 25 ? Level::Warn
-                                                         : Level::Good);
+            battery.on_battery && battery.percent < ON_BATTERY_CRITICAL_PERCENT ? Level::Bad
+            : battery.on_battery && battery.percent < ON_BATTERY_LOW_PERCENT    ? Level::Warn
+                                                                                : Level::Good);
     std::snprintf(text, sizeof(text), "%.2f V", battery.bus_volts);
     row(POWER, POWER_VOLTS, text);
-    std::snprintf(text, sizeof(text), "%d mA", static_cast<int>(battery.current_amps * 1000.0f));
+    std::snprintf(text, sizeof(text), "%d mA",
+                  static_cast<int>(battery.current_amps * MILLIAMPS_PER_AMP));
     row(POWER, POWER_CURRENT, text);
     row(POWER, POWER_STATE,
         battery.charging     ? "charging"
@@ -359,7 +411,7 @@ void update_radar()
     radar::Status shot{};
     radar::status(shot);
 
-    char text[32];
+    char text[ROW_TEXT_SIZE];
     if (shot.age_s < 0) {
         row(RADAR, RADAR_FEED, nullptr);
         row(RADAR, RADAR_SWEEP, nullptr);
@@ -368,9 +420,9 @@ void update_radar()
         row(RADAR, RADAR_FEED, shot.ok ? "answering" : "refusing",
             shot.ok ? Level::Good : Level::Warn);
         std::snprintf(text, sizeof(text), "%d s ago", shot.age_s);
-        row(RADAR, RADAR_SWEEP, text, shot.age_s > 60 ? Level::Warn : Level::Neutral);
+        row(RADAR, RADAR_SWEEP, text, shot.age_s > RADAR_STALE_S ? Level::Warn : Level::Neutral);
         std::snprintf(text, sizeof(text), "%d plane%s", shot.count, shot.count == 1 ? "" : "s");
-        summary(RADAR, text, shot.ok && shot.age_s <= 60 ? Level::Good : Level::Warn);
+        summary(RADAR, text, shot.ok && shot.age_s <= RADAR_STALE_S ? Level::Good : Level::Warn);
     }
     std::snprintf(text, sizeof(text), "%d", shot.count);
     row(RADAR, RADAR_PLANES, text);
@@ -380,10 +432,10 @@ void update_radar()
 
 void update_calendar()
 {
-    static ical::Event ahead[8];
+    static ical::Event ahead[CALENDAR_LOOKAHEAD_EVENTS];
     const int          n = ical::upcoming(ahead, static_cast<int>(std::size(ahead)));
 
-    char text[48];
+    char text[CALENDAR_TEXT_SIZE];
     std::snprintf(text, sizeof(text), "%d", ical::kFeedCount);
     row(CALENDAR, CAL_FEEDS, text);
 
@@ -406,14 +458,15 @@ void update_calendar()
     row(CALENDAR, CAL_AHEAD, text);
 
     const auto now     = static_cast<std::int64_t>(std::time(nullptr));
-    const int  minutes = static_cast<int>((ahead[0].start - now) / 60);
+    const int  minutes = static_cast<int>((ahead[0].start - now) / units::kSecondsPerMinute);
     std::tm    local{};
     const auto when = static_cast<std::time_t>(ahead[0].start);
     localtime_r(&when, &local);
-    char at[8];
+    char at[CLOCK_TEXT_SIZE];
     std::snprintf(at, sizeof(at), "%02d:%02d", local.tm_hour, local.tm_min);
     if (minutes > 0) {
-        std::snprintf(text, sizeof(text), "%s, in %dh%02dm", at, minutes / 60, minutes % 60);
+        std::snprintf(text, sizeof(text), "%s, in %dh%02dm", at, minutes / units::kMinutesPerHour,
+                      minutes % units::kMinutesPerHour);
     } else {
         std::snprintf(text, sizeof(text), "%s, now", at);
     }
@@ -421,31 +474,39 @@ void update_calendar()
     summary(CALENDAR, at, Level::Good);
 }
 
+void uptime_text(char *out, std::size_t size, unsigned seconds)
+{
+    constexpr unsigned MINUTE = units::kSecondsPerMinute;
+    constexpr unsigned HOUR   = units::kSecondsPerHour;
+    constexpr unsigned DAY    = units::kSecondsPerDay;
+    if (seconds >= DAY) {
+        std::snprintf(out, size, "%ud %uh", seconds / DAY, (seconds % DAY) / HOUR);
+    } else if (seconds >= HOUR) {
+        std::snprintf(out, size, "%uh %um", seconds / HOUR, (seconds % HOUR) / MINUTE);
+    } else {
+        std::snprintf(out, size, "%um %us", seconds / MINUTE, seconds % MINUTE);
+    }
+}
+
 void update_system()
 {
     const esp_app_desc_t *app = esp_app_get_description();
     row(SYSTEM, SYS_FIRMWARE, app->version);
 
-    char text[40];
+    char text[SYSTEM_TEXT_SIZE];
     std::snprintf(text, sizeof(text), "%s %s", app->date, app->time);
     row(SYSTEM, SYS_BUILT, text);
 
-    const unsigned seconds = static_cast<unsigned>(esp_timer_get_time() / 1000000);
-    if (seconds >= 86400) {
-        std::snprintf(text, sizeof(text), "%ud %uh", seconds / 86400, (seconds % 86400) / 3600);
-    } else if (seconds >= 3600) {
-        std::snprintf(text, sizeof(text), "%uh %um", seconds / 3600, (seconds % 3600) / 60);
-    } else {
-        std::snprintf(text, sizeof(text), "%um %us", seconds / 60, seconds % 60);
-    }
+    uptime_text(text, sizeof(text),
+                static_cast<unsigned>(esp_timer_get_time() / units::kUsPerSecond));
     row(SYSTEM, SYS_UPTIME, text);
 
     const std::size_t internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-    const Level       ram      = internal < 24 * 1024   ? Level::Bad
-                                 : internal < 48 * 1024 ? Level::Warn
-                                                        : Level::Good;
+    const Level       ram      = internal < INTERNAL_RAM_LOW_BYTES     ? Level::Bad
+                                 : internal < INTERNAL_RAM_TIGHT_BYTES ? Level::Warn
+                                                                       : Level::Good;
     kilobytes(SYSTEM, SYS_INTERNAL, internal, ram);
-    std::snprintf(text, sizeof(text), "%u KB free", static_cast<unsigned>(internal / 1024));
+    std::snprintf(text, sizeof(text), "%u KB free", kib(internal));
     summary(SYSTEM, text, ram);
     // What a client restart needs in one piece for its task stack.
     kilobytes(SYSTEM, SYS_LARGEST, heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));

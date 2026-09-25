@@ -2,6 +2,7 @@
 
 #include "deskproto.h"
 #include "loctek.h"
+#include "units.h"
 
 #include "esp_check.h"
 #include "esp_log.h"
@@ -28,14 +29,42 @@ namespace {
 constexpr char TAG[]  = "desklink";
 constexpr const char *NAME = deskproto::kDeviceName;
 
+// A box that has sent no frame for this long is counted gone, and one gone is
+// woken again this often.
+constexpr std::int64_t BOX_QUIET_US      = 4 * units::kUsPerSecond;
+constexpr std::int64_t BOX_WAKE_RETRY_US = 30 * units::kUsPerSecond;
+
+constexpr std::int64_t COMPLAINT_GAP_US = 5 * units::kUsPerSecond;
+
+// A status goes out when something changes, but not more often than this, and
+// once a keepalive period anyway.
+constexpr std::int64_t STATUS_MIN_GAP_US   = 50 * units::kUsPerMs;
+constexpr int          STATUS_KEEPALIVE_MS = 1000;
+constexpr TickType_t   STATUS_KEEPALIVE    = pdMS_TO_TICKS(STATUS_KEEPALIVE_MS);
+constexpr std::int64_t STATUS_KEEPALIVE_US = STATUS_KEEPALIVE_MS * units::kUsPerMs;
+constexpr int          HEIGHT_NEVER_SHOWN  = -2;  // unlike any height, unknown included
+
+constexpr TickType_t DEADMAN_PERIOD = pdMS_TO_TICKS(50);
+
+constexpr std::size_t WRITE_BUFFER_BYTES = 32;  // room for any command
+
+constexpr int ADV_ITVL_MIN_MS = 30;
+constexpr int ADV_ITVL_MAX_MS = 60;
+
+constexpr std::uint32_t DEADMAN_STACK    = 3072;
+constexpr UBaseType_t   DEADMAN_PRIORITY = 6;
+constexpr std::uint32_t STATUS_STACK     = 3072;
+constexpr UBaseType_t   STATUS_PRIORITY  = 4;
+constexpr std::uint32_t SLOW_STACK       = 4096;
+constexpr UBaseType_t   SLOW_PRIORITY    = 4;
+constexpr UBaseType_t   SLOW_QUEUE_LEN   = 4;
+
 int          s_height_mm  = -1;
 TaskHandle_t s_status_task = nullptr;
 
-constexpr std::int64_t BOX_QUIET_US = 4000000;
-
 std::atomic<bool> s_box_up{false};
 
-constexpr ble_uuid128_t uuid128(const std::array<std::uint8_t, 16> &bytes)
+constexpr ble_uuid128_t uuid128(const deskproto::Uuid128 &bytes)
 {
     ble_uuid128_t uuid{};
     uuid.u.type = BLE_UUID_TYPE_128;
@@ -52,7 +81,7 @@ std::uint16_t s_echo_handle = 0;
 std::uint16_t s_conn        = BLE_HS_CONN_HANDLE_NONE;
 std::uint8_t  s_address_type = 0;
 
-constexpr std::int64_t HOLD_GOOD_FOR_US = deskproto::kHoldTimeoutMs * 1000LL;
+constexpr std::int64_t HOLD_GOOD_FOR_US = deskproto::kHoldTimeoutMs * units::kUsPerMs;
 
 // Written on the host task, read by the deadman and the status task.
 std::atomic<std::int64_t>      s_hold_until{0};
@@ -104,7 +133,7 @@ void send_status()
     status.motion    = motion_now();
     status.seq       = s_last_seq;
 
-    std::uint8_t packet[deskproto::STATUS_LEN];
+    std::uint8_t packet[deskproto::kStatusLen];
     deskproto::encode(status, packet);
     os_mbuf *out = ble_hs_mbuf_from_flat(packet, sizeof(packet));
     if (out == nullptr) {
@@ -113,7 +142,7 @@ void send_status()
     }
     const int rc = ble_gatts_notify_custom(s_conn, s_echo_handle, out);
     static std::int64_t complained = 0;
-    if (rc != 0 && esp_timer_get_time() - complained > 5000000) {
+    if (rc != 0 && esp_timer_get_time() - complained > COMPLAINT_GAP_US) {
         complained = esp_timer_get_time();
         ESP_LOGW(TAG, "status refused (%d), conn %u handle %u", rc,
                  static_cast<unsigned>(s_conn), static_cast<unsigned>(s_echo_handle));
@@ -205,7 +234,7 @@ int on_echo(std::uint16_t conn, std::uint16_t attr, ble_gatt_access_ctxt *ctxt, 
     if (ctxt->op != BLE_GATT_ACCESS_OP_WRITE_CHR) {
         return BLE_ATT_ERR_UNLIKELY;
     }
-    std::uint8_t  payload[32];
+    std::uint8_t  payload[WRITE_BUFFER_BYTES];
     std::uint16_t length = 0;
     if (ble_hs_mbuf_to_flat(ctxt->om, payload, sizeof(payload), &length) != 0) {
         return BLE_ATT_ERR_UNLIKELY;
@@ -231,72 +260,88 @@ int on_echo(std::uint16_t conn, std::uint16_t attr, ble_gatt_access_ctxt *ctxt, 
     return 0;
 }
 
-constexpr std::int64_t STATUS_MIN_GAP_US = 50000;
-constexpr TickType_t   STATUS_KEEPALIVE  = pdMS_TO_TICKS(1000);
+/** Whether the box has sent a frame lately, logged as it changes. */
+bool watch_box(std::uint32_t frames, std::int64_t now_us)
+{
+    static std::uint32_t seen_frames = 0;
+    static std::int64_t  seen_at     = 0;
+
+    if (frames != seen_frames) {
+        seen_frames = frames;
+        seen_at     = now_us;
+    }
+    const bool box_up = seen_at != 0 && now_us - seen_at < BOX_QUIET_US;
+    if (box_up != s_box_up.exchange(box_up, std::memory_order_relaxed)) {
+        ESP_LOGW(TAG, "control box %s", box_up ? "answering" : "gone quiet - check the cable");
+    }
+    return box_up;
+}
+
+void wake_quiet_box(bool box_up, std::int64_t now_us)
+{
+    static std::int64_t woke_at = 0;
+    if (box_up || now_us - woke_at <= BOX_WAKE_RETRY_US) {
+        return;
+    }
+    woke_at = now_us;
+    ESP_LOGI(TAG, "nudging the box awake");
+    if (s_slow != nullptr) {
+        deskproto::Command wake{};
+        wake.op = deskproto::Op::Wake;
+        xQueueSend(s_slow, &wake, 0);
+    }
+}
+
+// What the panel was last told.
+struct Shown {
+    int          height  = HEIGHT_NEVER_SHOWN;
+    int          motion  = -1;
+    bool         box_up  = false;
+    bool         driving = false;
+    std::int64_t sent_at = 0;
+};
+
+void report_if_due(Shown &shown, bool box_up)
+{
+    const int  motion  = static_cast<int>(motion_now());
+    const bool driving = loctek::driving_to() >= 0;
+    const bool changed = s_height_mm != shown.height || motion != shown.motion ||
+                         box_up != shown.box_up || driving != shown.driving;
+    const std::int64_t now = esp_timer_get_time();
+    if (changed && now - shown.sent_at < STATUS_MIN_GAP_US) {
+        return;  // the next report, or the keepalive, will carry it
+    }
+    if (!changed && now - shown.sent_at < STATUS_KEEPALIVE_US) {
+        return;
+    }
+    shown.height  = s_height_mm;
+    shown.motion  = motion;
+    shown.box_up  = box_up;
+    shown.driving = driving;
+    shown.sent_at = now;
+    send_status();
+}
 
 [[noreturn]] void status_task(void *)
 {
-    int           shown_height  = -2;
-    int           shown_motion  = -1;
-    bool          shown_up      = false;
-    bool          shown_driving = false;
-    std::int64_t  last_sent    = 0;
-    std::uint32_t seen_frames  = 0;
-    std::int64_t  seen_at      = 0;
-
+    Shown shown;
     for (;;) {
         ulTaskNotifyTake(pdTRUE, STATUS_KEEPALIVE);
 
         const std::uint32_t frames = loctek::stats().frames_decoded;
         const std::int64_t  now_us = esp_timer_get_time();
-        if (frames != seen_frames) {
-            seen_frames = frames;
-            seen_at     = now_us;
+        const bool          box_up = watch_box(frames, now_us);
+        wake_quiet_box(box_up, now_us);
+        if (s_conn != BLE_HS_CONN_HANDLE_NONE) {
+            report_if_due(shown, box_up);
         }
-        const bool box_up = seen_at != 0 && now_us - seen_at < BOX_QUIET_US;
-        if (box_up != s_box_up.exchange(box_up, std::memory_order_relaxed)) {
-            ESP_LOGW(TAG, "control box %s", box_up ? "answering" : "gone quiet - check the cable");
-        }
-
-        static std::int64_t woke_at = 0;
-        if (!box_up && now_us - woke_at > 30000000) {
-            woke_at = now_us;
-            ESP_LOGI(TAG, "nudging the box awake");
-            if (s_slow != nullptr) {
-                deskproto::Command wake{};
-                wake.op = deskproto::Op::Wake;
-                xQueueSend(s_slow, &wake, 0);
-            }
-        }
-
-        if (s_conn == BLE_HS_CONN_HANDLE_NONE) {
-            continue;
-        }
-
-        const int  motion  = static_cast<int>(motion_now());
-        const bool driving = loctek::driving_to() >= 0;
-        const bool changed = s_height_mm != shown_height || motion != shown_motion ||
-                             box_up != shown_up || driving != shown_driving;
-        const std::int64_t now = esp_timer_get_time();
-        if (changed && now - last_sent < STATUS_MIN_GAP_US) {
-            continue;  // the next report, or the keepalive, will carry it
-        }
-        if (!changed && now - last_sent < 1000000) {
-            continue;
-        }
-        shown_height  = s_height_mm;
-        shown_motion  = motion;
-        shown_up      = box_up;
-        shown_driving = driving;
-        last_sent     = now;
-        send_status();
     }
 }
 
 [[noreturn]] void deadman_task(void *)
 {
     for (;;) {
-        vTaskDelay(pdMS_TO_TICKS(50));
+        vTaskDelay(DEADMAN_PERIOD);
         if (s_holding.load(std::memory_order_relaxed) != deskproto::Motion::Idle &&
             esp_timer_get_time() > s_hold_until.load(std::memory_order_relaxed)) {
             ESP_LOGW(TAG, "hold went quiet, stopping");
@@ -402,8 +447,8 @@ void advertise()
     ble_gap_adv_params params{};
     params.conn_mode = BLE_GAP_CONN_MODE_UND;
     params.disc_mode = BLE_GAP_DISC_MODE_GEN;
-    params.itvl_min  = BLE_GAP_ADV_ITVL_MS(30);
-    params.itvl_max  = BLE_GAP_ADV_ITVL_MS(60);
+    params.itvl_min  = BLE_GAP_ADV_ITVL_MS(ADV_ITVL_MIN_MS);
+    params.itvl_max  = BLE_GAP_ADV_ITVL_MS(ADV_ITVL_MAX_MS);
 
     if (const int err = ble_gap_adv_start(s_address_type, nullptr, BLE_HS_FOREVER, &params, on_gap,
                                           nullptr);
@@ -465,7 +510,8 @@ esp_err_t start()
     ESP_RETURN_ON_FALSE(ble_svc_gap_device_name_set(NAME) == 0, ESP_FAIL, TAG, "name");
 
     nimble_port_freertos_init(host_task);
-    ESP_RETURN_ON_FALSE(xTaskCreate(deadman_task, "deadman", 3072, nullptr, 6, nullptr) == pdPASS,
+    ESP_RETURN_ON_FALSE(xTaskCreate(deadman_task, "deadman", DEADMAN_STACK, nullptr,
+                                    DEADMAN_PRIORITY, nullptr) == pdPASS,
                         ESP_ERR_NO_MEM, TAG, "deadman");
 
     if (movement_allowed()) {
@@ -474,12 +520,14 @@ esp_err_t start()
         ESP_LOGI(TAG, "dry run: commands are decoded but the desk will not move");
     }
 
-    ESP_RETURN_ON_FALSE(xTaskCreate(status_task, "deskstat", 3072, nullptr, 4, &s_status_task) == pdPASS,
+    ESP_RETURN_ON_FALSE(xTaskCreate(status_task, "deskstat", STATUS_STACK, nullptr,
+                                    STATUS_PRIORITY, &s_status_task) == pdPASS,
                         ESP_ERR_NO_MEM, TAG, "status task");
 
-    s_slow = xQueueCreate(4, sizeof(deskproto::Command));
+    s_slow = xQueueCreate(SLOW_QUEUE_LEN, sizeof(deskproto::Command));
     ESP_RETURN_ON_FALSE(s_slow != nullptr, ESP_ERR_NO_MEM, TAG, "slow queue");
-    ESP_RETURN_ON_FALSE(xTaskCreate(slow_task, "deskslow", 4096, nullptr, 4, nullptr) == pdPASS,
+    ESP_RETURN_ON_FALSE(xTaskCreate(slow_task, "deskslow", SLOW_STACK, nullptr, SLOW_PRIORITY,
+                                    nullptr) == pdPASS,
                         ESP_ERR_NO_MEM, TAG, "slow task");
     return ESP_OK;
 }

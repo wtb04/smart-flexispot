@@ -8,6 +8,7 @@
 #include "freertos/task.h"
 #include "link.h"
 #include "loctek.h"
+#include "units.h"
 
 #include <cstdint>
 
@@ -17,6 +18,21 @@ constexpr char TAG[] = "leds";
 
 constexpr int BT_PIN   = CONFIG_PROXY_LED_BT_GPIO;
 constexpr int DESK_PIN = CONFIG_PROXY_LED_DESK_GPIO;
+
+constexpr TickType_t REFRESH = pdMS_TO_TICKS(50);
+
+constexpr int HEARTBEAT_PERIOD_MS = 2000;
+constexpr int HEARTBEAT_ON_MS     = 120;
+constexpr int GARBLED_PERIOD_MS   = 250;
+constexpr int GARBLED_ON_MS       = GARBLED_PERIOD_MS / 2;
+
+constexpr int        SELFTEST_BLINKS = 2;
+constexpr TickType_t SELFTEST_ON     = pdMS_TO_TICKS(220);
+constexpr TickType_t SELFTEST_OFF    = pdMS_TO_TICKS(140);
+constexpr TickType_t SELFTEST_BOTH   = pdMS_TO_TICKS(400);
+
+constexpr std::uint32_t TASK_STACK    = 2560;
+constexpr UBaseType_t   TASK_PRIORITY = 2;
 
 void set(int pin, bool on)
 {
@@ -46,7 +62,7 @@ esp_err_t configure(int pin)
  *  accumulate. */
 bool duty(std::int64_t now_us, int period_ms, int on_ms)
 {
-    return (now_us / 1000) % period_ms < on_ms;
+    return (now_us / units::kUsPerMs) % period_ms < on_ms;
 }
 
 [[noreturn]] void led_task(void *)
@@ -57,7 +73,7 @@ bool duty(std::int64_t now_us, int period_ms, int on_ms)
         // BT: solid once a panel is connected; a short heartbeat while
         // advertising, so "powered but nobody has connected" reads differently
         // from "not running at all".
-        set(BT_PIN, desklink::panel_connected() || duty(now, 2000, 120));
+        set(BT_PIN, desklink::panel_connected() || duty(now, HEARTBEAT_PERIOD_MS, HEARTBEAT_ON_MS));
 
         // LINK: solid while the box answers. Bytes arriving but nothing
         // decoding gets a fast blink -- that is a baud or wiring fault, and it
@@ -66,32 +82,32 @@ bool duty(std::int64_t now_us, int period_ms, int on_ms)
         if (desklink::box_up()) {
             desk_on = true;
         } else if (loctek::stats().bytes_received > 0) {
-            desk_on = duty(now, 250, 125);
+            desk_on = duty(now, GARBLED_PERIOD_MS, GARBLED_ON_MS);
         }
         set(DESK_PIN, desk_on);
 
-        vTaskDelay(pdMS_TO_TICKS(50));
+        vTaskDelay(REFRESH);
+    }
+}
+
+void blink(int pin)
+{
+    for (int i = 0; i < SELFTEST_BLINKS; ++i) {
+        set(pin, true);
+        vTaskDelay(SELFTEST_ON);
+        set(pin, false);
+        vTaskDelay(SELFTEST_OFF);
     }
 }
 }  // namespace
 
 void selftest()
 {
-    for (int i = 0; i < 2; ++i) {
-        set(BT_PIN, true);
-        vTaskDelay(pdMS_TO_TICKS(220));
-        set(BT_PIN, false);
-        vTaskDelay(pdMS_TO_TICKS(140));
-    }
-    for (int i = 0; i < 2; ++i) {
-        set(DESK_PIN, true);
-        vTaskDelay(pdMS_TO_TICKS(220));
-        set(DESK_PIN, false);
-        vTaskDelay(pdMS_TO_TICKS(140));
-    }
+    blink(BT_PIN);
+    blink(DESK_PIN);
     set(BT_PIN, true);
     set(DESK_PIN, true);
-    vTaskDelay(pdMS_TO_TICKS(400));
+    vTaskDelay(SELFTEST_BOTH);
     set(BT_PIN, false);
     set(DESK_PIN, false);
 }
@@ -111,8 +127,9 @@ esp_err_t start()
     selftest();
 #endif
 
-    ESP_RETURN_ON_FALSE(xTaskCreate(led_task, "leds", 2560, nullptr, 2, nullptr) == pdPASS,
-                        ESP_ERR_NO_MEM, TAG, "led task");
+    ESP_RETURN_ON_FALSE(
+        xTaskCreate(led_task, "leds", TASK_STACK, nullptr, TASK_PRIORITY, nullptr) == pdPASS,
+        ESP_ERR_NO_MEM, TAG, "led task");
     return ESP_OK;
 }
 

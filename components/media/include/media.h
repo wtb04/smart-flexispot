@@ -37,7 +37,6 @@ Status status();
  *  `origin`, such as "http://10.0.0.2:8123", which Home Assistant serves them on. */
 esp_err_t start(const char *origin, ArtHandler on_art);
 
-
 /**
  * Thread-safe. Takes the entity_picture_local proxy path, which Home Assistant
  * serves over plain HTTP with a token in the query, so no TLS is needed. An

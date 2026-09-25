@@ -6,6 +6,9 @@
 namespace hass::protocol {
 enum class Move { Stop, Up, Down, Unknown };
 
+/** What the presence signal reads while the phone has never been heard. */
+inline constexpr int kUnheardRssiDbm = -127;
+
 struct Telemetry {
     int  height_mm      = -1;     // negative: not yet known
     bool desk_connected = false;
@@ -20,7 +23,7 @@ struct Telemetry {
     const char *preset      = "none";
     bool  presence          = false;
     bool  screen            = true;
-    int   presence_rssi     = -127;
+    int   presence_rssi     = kUnheardRssiDbm;
     std::uint32_t uptime_s   = 0;
     std::uint32_t free_heap  = 0;
     std::string   ip_address;

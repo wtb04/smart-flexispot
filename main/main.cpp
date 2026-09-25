@@ -28,10 +28,21 @@
 #include "wallclock.h"
 #include "wifi.h"
 
+#include "units.h"
+
 #include <cstdio>
 
 namespace {
 constexpr char TAG[] = "tab5";
+
+constexpr int         FOCUS_NOTICE_MS    = 5000;
+constexpr std::size_t FOCUS_MESSAGE_SIZE = 64;
+
+// The notice stays up until the restart takes the screen down.
+constexpr int DESK_RESTART_DELAY_MS = 1500;
+
+// heap_caps_malloc_prefer takes the number of capability sets that follow it.
+constexpr std::size_t JSON_HEAP_CHOICES = 2;
 
 void on_brightness_changed(int percent)
 {
@@ -158,7 +169,7 @@ void on_focus_change(const focus::State &state, bool finished)
         return;
     }
     const focus::Plan plan = focus::plan();
-    char              message[64];
+    char              message[FOCUS_MESSAGE_SIZE];
     switch (state.phase) {
         case focus::Phase::Break:
             std::snprintf(message, sizeof(message), "Break, %d min", plan.break_min);
@@ -174,7 +185,7 @@ void on_focus_change(const focus::State &state, bool finished)
             return;
     }
     sound::ding();
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::notify("Focus", message, ui::Level::Good, 5000));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::notify("Focus", message, ui::Level::Good, FOCUS_NOTICE_MS));
 }
 
 focus::Plan stored_plan()
@@ -237,7 +248,7 @@ void restart_for_desk(bool bluetooth)
 {
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::notify(
         "", bluetooth ? "Switching the desk to Bluetooth" : "Switching the desk to the wire",
-        ui::Level::Neutral, 1500));
+        ui::Level::Neutral, DESK_RESTART_DELAY_MS));
     static esp_timer_handle_t timer = nullptr;
     if (timer == nullptr) {
         const esp_timer_create_args_t args{.callback = restart_now, .name = "desk-restart"};
@@ -245,7 +256,8 @@ void restart_for_desk(bool bluetooth)
     }
     if (timer != nullptr) {
         esp_timer_stop(timer);
-        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_timer_start_once(timer, 1500 * 1000));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(
+            esp_timer_start_once(timer, DESK_RESTART_DELAY_MS * units::kUsPerMs));
     }
 }
 
@@ -262,7 +274,7 @@ void on_restart()
 // RAM is what the radio needs.
 void *json_malloc(std::size_t size)
 {
-    return heap_caps_malloc_prefer(size, 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT,
+    return heap_caps_malloc_prefer(size, JSON_HEAP_CHOICES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT,
                                    MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
 }
 

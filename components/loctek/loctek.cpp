@@ -22,14 +22,23 @@ namespace loctek {
 namespace {
 constexpr char TAG[] = "loctek";
 
-constexpr auto UART        = static_cast<uart_port_t>(CONFIG_LOCTEK_UART_NUM);
-constexpr int  BAUD_RATE   = 9600;
-constexpr int  RX_BUF_SIZE = 1024;
-constexpr int  TX_BUF_SIZE = 0;
+constexpr auto        UART            = static_cast<uart_port_t>(CONFIG_LOCTEK_UART_NUM);
+constexpr int         BAUD_RATE       = 9600;
+constexpr int         RX_BUF_SIZE     = 1024;
+constexpr int         TX_BUF_SIZE     = 0;
+constexpr std::size_t RX_CHUNK        = 64;
+constexpr TickType_t  RX_READ_TIMEOUT = pdMS_TO_TICKS(10);
+constexpr TickType_t  TX_DONE_TIMEOUT = pdMS_TO_TICKS(100);
 
 constexpr TickType_t REPEAT_TICKS    = pdMS_TO_TICKS(CONFIG_LOCTEK_REPEAT_MS);
 constexpr TickType_t IDLE_POLL_TICKS = pdMS_TO_TICKS(CONFIG_LOCTEK_IDLE_POLL_MS);
 constexpr TickType_t MOVE_TIMEOUT    = pdMS_TO_TICKS(CONFIG_LOCTEK_MOVE_TIMEOUT_MS);
+constexpr TickType_t WAKE_LOW        = pdMS_TO_TICKS(200);
+constexpr int        STOP_REPEATS    = 3;
+
+constexpr int MEMORY_HOLD_LIMIT_MS = 2000;
+static_assert(CONFIG_LOCTEK_PRESS_MS < MEMORY_HOLD_LIMIT_MS,
+              "M must not be held near the factory-reset time");
 
 // A key whose height stops changing has reached the end of the range, or lost
 // the box, long before the travel timeout would notice.
@@ -50,20 +59,24 @@ constexpr TickType_t NUDGE_AFTER  = pdMS_TO_TICKS(1500);
 
 // The desk runs on after the last key frame. How far is learned from where each
 // travel comes to rest, per direction, and kept across reboots.
+constexpr int        DIRECTIONS      = 2;
 constexpr int        RUN_ON_MAX_MM   = 40;
 constexpr TickType_t SETTLED_GAP     = pdMS_TO_TICKS(400);
 constexpr char       NVS_NAMESPACE[] = "loctek";
 constexpr char       NVS_RUN_ON[]    = "runon";
 
+// Below a metre the display shows tenths of a centimetre, which is millimetres;
+// above, whole centimetres.
+constexpr int FINE_READING_BELOW_MM = 1000;
+
 constexpr std::uint32_t DRIVER_STACK  = 3072;
 constexpr std::uint32_t RX_STACK      = 3072;
 constexpr UBaseType_t   TASK_PRIORITY = 6;
 constexpr BaseType_t    TASK_CORE     = 0;
-constexpr int           kStopRepeats  = 3;
 
-constexpr KeyFrame kFrameStop = build_key_frame(Key::None);
-constexpr KeyFrame kFrameUp   = build_key_frame(Key::Up);
-constexpr KeyFrame kFrameDown = build_key_frame(Key::Down);
+constexpr KeyFrame FRAME_STOP = build_key_frame(Key::None);
+constexpr KeyFrame FRAME_UP   = build_key_frame(Key::Up);
+constexpr KeyFrame FRAME_DOWN = build_key_frame(Key::Down);
 
 // A key press with a duration, done in order: the box wants a stream of frames
 // and a release for each.
@@ -73,16 +86,17 @@ struct Press {
     Key  key;
 };
 constexpr UBaseType_t PRESS_QUEUE_LEN = 4;
+constexpr UBaseType_t MAILBOX_DEPTH   = 1;
 
 // Two mailboxes and a queue feed the driver. Each mailbox holds the latest
 // wish of its kind, a newer one replacing the old, so a Stop can never queue
 // behind anything and a hand's move is never lost to a travel request.
 StaticQueue_t s_move_ctrl;
-Move          s_move_storage[1];
+Move          s_move_storage[MAILBOX_DEPTH];
 QueueHandle_t s_moves = nullptr;
 
 StaticQueue_t s_goto_ctrl;
-int           s_goto_storage[1];
+int           s_goto_storage[MAILBOX_DEPTH];
 QueueHandle_t s_gotos = nullptr;
 
 StaticQueue_t s_press_ctrl;
@@ -122,6 +136,11 @@ void wake_driver()
     }
 }
 
+bool reached(TickType_t now, TickType_t when)
+{
+    return static_cast<std::int32_t>(now - when) >= 0;
+}
+
 // ---- Driver task state. Touched on the driver task only. ----
 
 Move       d_direction   = Move::Stop;
@@ -134,12 +153,27 @@ int        d_target    = -1;
 int        d_best_away = INT_MAX;  // the closest this travel has come
 TickType_t d_asked_at  = 0;        // when the travel was asked for
 bool       d_nudged    = false;
-int d_run_on[2] = {0, 0};   // up, down
+int        d_run_on[DIRECTIONS] = {};
 
 int        d_landing_target = -1;
 Move       d_landing_dir    = Move::Stop;
 int        d_landing_last   = -1;
 TickType_t d_landing_at     = 0;
+
+bool moving()
+{
+    return d_direction != Move::Stop;
+}
+
+bool travelling()
+{
+    return d_target >= 0;
+}
+
+bool awaiting_height()
+{
+    return travelling() && !moving();
+}
 
 int dir_index(Move direction)
 {
@@ -154,11 +188,11 @@ const char *dir_name(Move direction)
 const KeyFrame &frame_for(Move direction)
 {
     switch (direction) {
-        case Move::Up:   return kFrameUp;
-        case Move::Down: return kFrameDown;
+        case Move::Up:   return FRAME_UP;
+        case Move::Down: return FRAME_DOWN;
         case Move::Stop: break;
     }
-    return kFrameStop;
+    return FRAME_STOP;
 }
 
 esp_err_t write_frame(const KeyFrame &frame)
@@ -167,7 +201,7 @@ esp_err_t write_frame(const KeyFrame &frame)
     if (written != static_cast<int>(frame.size())) {
         return ESP_FAIL;
     }
-    return uart_wait_tx_done(UART, pdMS_TO_TICKS(100));
+    return uart_wait_tx_done(UART, TX_DONE_TIMEOUT);
 }
 
 void load_run_on()
@@ -176,10 +210,10 @@ void load_run_on()
     if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle) != ESP_OK) {
         return;
     }
-    int         stored[2];
+    int         stored[DIRECTIONS];
     std::size_t size = sizeof(stored);
     if (nvs_get_blob(handle, NVS_RUN_ON, stored, &size) == ESP_OK && size == sizeof(stored)) {
-        for (int i = 0; i < 2; ++i) {
+        for (int i = 0; i < DIRECTIONS; ++i) {
             d_run_on[i] = std::clamp(stored[i], 0, RUN_ON_MAX_MM);
         }
     }
@@ -201,12 +235,12 @@ void save_run_on()
 /** Lets go of the keys: the release frame, repeated, since one can be missed. */
 void release()
 {
-    if (d_direction != Move::Stop) {
+    if (moving()) {
         d_direction = Move::Stop;
         s_motion.store(0, std::memory_order_relaxed);
     }
-    for (int i = 0; i < kStopRepeats; ++i) {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(write_frame(kFrameStop));
+    for (int i = 0; i < STOP_REPEATS; ++i) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(write_frame(FRAME_STOP));
     }
     d_next_frame = xTaskGetTickCount() + IDLE_POLL_TICKS;
 }
@@ -214,7 +248,7 @@ void release()
 void end_travel(const char *why)
 {
     d_landing_target = -1;
-    if (d_target < 0) {
+    if (!travelling()) {
         return;
     }
     ESP_LOGI(TAG, "travel to %d mm ended: %s", d_target, why);
@@ -238,21 +272,29 @@ void set_direction(Move direction, TickType_t now)
     s_motion.store(static_cast<std::int8_t>(direction), std::memory_order_relaxed);
 }
 
+void watch_landing(int target_mm, Move direction)
+{
+    d_landing_target = target_mm;
+    d_landing_dir    = direction;
+    d_landing_last   = -1;
+    d_landing_at     = 0;
+}
+
 void steer_travel(int height_mm, TickType_t now)
 {
     const int away = std::abs(d_target - height_mm);
     if (away < d_best_away) {
         d_best_away = away;
-    } else if (d_direction != Move::Stop && away - d_best_away > RETREAT_MM) {
+    } else if (moving() && away - d_best_away > RETREAT_MM) {
         ESP_LOGW(TAG, "desk moving away from %d mm, giving up", d_target);
         end_travel("moving away");
         release();
         return;
     }
 
-    const Move heading = d_direction != Move::Stop ? d_direction
-                         : d_target > height_mm    ? Move::Up
-                                                   : Move::Down;
+    const Move heading = moving()                ? d_direction
+                         : d_target > height_mm ? Move::Up
+                                                : Move::Down;
     const int  margin  = d_run_on[dir_index(heading)];
     const Move next    = steer(d_target, height_mm, d_direction, margin);
     if (next == Move::Stop) {
@@ -265,10 +307,7 @@ void steer_travel(int height_mm, TickType_t now)
         // here while moving is always this travel arriving, and worth learning
         // from whether it stopped inside the margin or had already crossed.
         if (was != Move::Stop) {
-            d_landing_target = target;
-            d_landing_dir    = was;
-            d_landing_last   = -1;
-            d_landing_at     = 0;
+            watch_landing(target, was);
         }
         return;
     }
@@ -295,14 +334,14 @@ void land(int height_mm, TickType_t now)
         ESP_LOGI(TAG, "landed on %d mm", target);
         return;
     }
-    // Below a metre the box reports millimetres, so the whole miss is taken and
-    // the next trip lands on it. Above, it reports whole centimetres, and taking
-    // all of one would overshoot the other way, so half at a time.
-    int      &run_on = d_run_on[dir_index(d_landing_dir)];
-    const int was    = run_on;
-    const bool fine  = target < 1000 && height_mm < 1000;
-    const int  step  = fine ? past : (past + (past > 0 ? 1 : -1)) / 2;
-    run_on           = std::clamp(run_on + step, 0, RUN_ON_MAX_MM);
+    // Where the box reports millimetres the whole miss is taken and the next
+    // trip lands on it. Where it reports whole centimetres, taking all of one
+    // would overshoot the other way, so half at a time.
+    int       &run_on = d_run_on[dir_index(d_landing_dir)];
+    const int  was    = run_on;
+    const bool fine   = target < FINE_READING_BELOW_MM && height_mm < FINE_READING_BELOW_MM;
+    const int  step   = fine ? past : (past + (past > 0 ? 1 : -1)) / 2;
+    run_on            = std::clamp(run_on + step, 0, RUN_ON_MAX_MM);
     ESP_LOGI(TAG, "landed %d mm %s %d mm; run-on %s is now %d mm", std::abs(past),
              past > 0 ? "past" : "short of", target, dir_name(d_landing_dir), run_on);
     if (run_on != was) {
@@ -316,14 +355,26 @@ void on_height(int height_mm, TickType_t now)
         d_seen_height = height_mm;
         d_progress_at = now;
     }
-    if (d_target >= 0) {
+    if (travelling()) {
         steer_travel(height_mm, now);
     } else if (d_landing_target >= 0) {
         land(height_mm, now);
     }
 }
 
-esp_err_t turn_on();
+esp_err_t turn_on()
+{
+    if constexpr (CONFIG_LOCTEK_WAKE_GPIO < 0) {
+        return ESP_OK;
+    } else {
+        constexpr auto pin = static_cast<gpio_num_t>(CONFIG_LOCTEK_WAKE_GPIO);
+        ESP_RETURN_ON_ERROR(gpio_set_level(pin, 0), TAG, "wake low");
+        vTaskDelay(WAKE_LOW);
+        ESP_RETURN_ON_ERROR(gpio_set_level(pin, 1), TAG, "wake high");
+        vTaskDelay(pdMS_TO_TICKS(CONFIG_LOCTEK_WAKE_PULSE_MS));
+        return ESP_OK;
+    }
+}
 
 void take_move(Move direction, TickType_t now)
 {
@@ -337,7 +388,7 @@ void take_goto(int target_mm, TickType_t now)
         ESP_LOGW(TAG, "not travelling to %d mm: a hand is on the keys", target_mm);
         return;
     }
-    if (d_target >= 0 || d_direction != Move::Stop) {
+    if (travelling() || moving()) {
         end_travel("new target");
         release();
     }
@@ -375,30 +426,14 @@ void press_key(Key key, int duration_ms)
     do {
         err = write_frame(frame);
         vTaskDelay(REPEAT_TICKS);
-    } while (err == ESP_OK && static_cast<std::int32_t>(xTaskGetTickCount() - end) < 0);
+    } while (err == ESP_OK && !reached(xTaskGetTickCount(), end));
     ESP_ERROR_CHECK_WITHOUT_ABORT(err);
-    ESP_ERROR_CHECK_WITHOUT_ABORT(write_frame(kFrameStop));
-}
-
-constexpr TickType_t WAKE_LOW = pdMS_TO_TICKS(200);
-
-esp_err_t turn_on()
-{
-    if constexpr (CONFIG_LOCTEK_WAKE_GPIO < 0) {
-        return ESP_OK;
-    } else {
-        constexpr auto pin = static_cast<gpio_num_t>(CONFIG_LOCTEK_WAKE_GPIO);
-        ESP_RETURN_ON_ERROR(gpio_set_level(pin, 0), TAG, "wake low");
-        vTaskDelay(WAKE_LOW);
-        ESP_RETURN_ON_ERROR(gpio_set_level(pin, 1), TAG, "wake high");
-        vTaskDelay(pdMS_TO_TICKS(CONFIG_LOCTEK_WAKE_PULSE_MS));
-        return ESP_OK;
-    }
+    ESP_ERROR_CHECK_WITHOUT_ABORT(write_frame(FRAME_STOP));
 }
 
 void take_press(const Press &press)
 {
-    if (d_target >= 0 || d_direction != Move::Stop) {
+    if (travelling() || moving()) {
         end_travel("key pressed");
         release();
     }
@@ -407,86 +442,106 @@ void take_press(const Press &press)
             press_key(press.key, CONFIG_LOCTEK_PRESS_MS);
             break;
         case Press::Kind::Store:
-            static_assert(CONFIG_LOCTEK_PRESS_MS < 2000, "M must not be held near the factory-reset time");
             press_key(Key::Memory, CONFIG_LOCTEK_PRESS_MS);
             vTaskDelay(pdMS_TO_TICKS(CONFIG_LOCTEK_STORE_GAP_MS));
             press_key(press.key, CONFIG_LOCTEK_PRESS_MS);
             break;
         case Press::Kind::Wake:
             ESP_ERROR_CHECK_WITHOUT_ABORT(turn_on());
-            ESP_ERROR_CHECK_WITHOUT_ABORT(write_frame(kFrameStop));
+            ESP_ERROR_CHECK_WITHOUT_ABORT(write_frame(FRAME_STOP));
             break;
         case Press::Kind::Nudge:
-            ESP_ERROR_CHECK_WITHOUT_ABORT(write_frame(kFrameUp));
-            ESP_ERROR_CHECK_WITHOUT_ABORT(write_frame(kFrameStop));
+            ESP_ERROR_CHECK_WITHOUT_ABORT(write_frame(FRAME_UP));
+            ESP_ERROR_CHECK_WITHOUT_ABORT(write_frame(FRAME_STOP));
             break;
     }
     d_next_frame = xTaskGetTickCount() + IDLE_POLL_TICKS;
 }
 
+void take_requests(TickType_t now)
+{
+    Move wanted = Move::Stop;
+    if (xQueueReceive(s_moves, &wanted, 0) == pdTRUE) {
+        take_move(wanted, now);
+    }
+    int target = -1;
+    if (xQueueReceive(s_gotos, &target, 0) == pdTRUE) {
+        take_goto(target, now);
+    }
+    Press press{};
+    while (xQueueReceive(s_presses, &press, 0) == pdTRUE) {
+        take_press(press);  // blocks for the press; nothing else writes meanwhile
+    }
+}
+
+void take_posted_height(TickType_t now)
+{
+    if (s_height_posted.exchange(false, std::memory_order_acquire)) {
+        on_height(s_last_height.load(std::memory_order_relaxed), now);
+    }
+}
+
+void chase_silent_box(TickType_t now)
+{
+    if (!awaiting_height()) {
+        return;
+    }
+    if (now - d_asked_at > HEIGHT_WAIT) {
+        ESP_LOGW(TAG, "the box did not say where it is, not travelling");
+        end_travel("no height");
+    } else if (!d_nudged && now - d_asked_at > NUDGE_AFTER) {
+        d_nudged        = true;
+        const int  last = s_last_height.load(std::memory_order_relaxed);
+        const Move step = last >= 0 && d_target < last ? Move::Down : Move::Up;
+        ESP_LOGI(TAG, "box still dark, one step %s to wake it", dir_name(step));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(write_frame(frame_for(step)));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(write_frame(FRAME_STOP));
+    }
+}
+
+void enforce_limits(TickType_t now)
+{
+    if (!moving()) {
+        return;
+    }
+    if (reached(now, d_deadline)) {
+        ESP_LOGW(TAG, "travel timeout, stopping");
+        end_travel("timeout");
+        release();
+    } else if (now - d_progress_at > STALL) {
+        ESP_LOGW(TAG, "height stopped changing, stopping");
+        end_travel("stalled");
+        release();
+    }
+}
+
+/** Sends the frame that is due, if one is, and says how long until the next. */
+TickType_t poll_box(TickType_t now)
+{
+    // While waiting to hear the height, ask as often as while moving: the
+    // box answers every frame, and each answer is a chance to start.
+    const bool eager = moving() || awaiting_height();
+    const bool polls = eager || IDLE_POLL_TICKS > 0;
+    if (!polls) {
+        return portMAX_DELAY;
+    }
+    if (reached(now, d_next_frame)) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(write_frame(frame_for(d_direction)));
+        d_next_frame = now + (eager ? REPEAT_TICKS : IDLE_POLL_TICKS);
+    }
+    const auto until = static_cast<std::int32_t>(d_next_frame - now);
+    return until > 0 ? static_cast<TickType_t>(until) : 0;
+}
+
 [[noreturn]] void driver_task(void *)
 {
     for (;;) {
-        TickType_t now = xTaskGetTickCount();
-
-        Move wanted = Move::Stop;
-        if (xQueueReceive(s_moves, &wanted, 0) == pdTRUE) {
-            take_move(wanted, now);
-        }
-        int target = -1;
-        if (xQueueReceive(s_gotos, &target, 0) == pdTRUE) {
-            take_goto(target, now);
-        }
-        Press press{};
-        while (xQueueReceive(s_presses, &press, 0) == pdTRUE) {
-            take_press(press);  // blocks for the press; nothing else writes meanwhile
-        }
-        now = xTaskGetTickCount();
-        if (s_height_posted.exchange(false, std::memory_order_acquire)) {
-            on_height(s_last_height.load(std::memory_order_relaxed), now);
-        }
-
-        const bool awaiting = d_target >= 0 && d_direction == Move::Stop;
-        if (awaiting && now - d_asked_at > HEIGHT_WAIT) {
-            ESP_LOGW(TAG, "the box did not say where it is, not travelling");
-            end_travel("no height");
-        } else if (awaiting && !d_nudged && now - d_asked_at > NUDGE_AFTER) {
-            d_nudged        = true;
-            const int  last = s_last_height.load(std::memory_order_relaxed);
-            const Move step = last >= 0 && d_target < last ? Move::Down : Move::Up;
-            ESP_LOGI(TAG, "box still dark, one step %s to wake it", dir_name(step));
-            ESP_ERROR_CHECK_WITHOUT_ABORT(write_frame(frame_for(step)));
-            ESP_ERROR_CHECK_WITHOUT_ABORT(write_frame(kFrameStop));
-        }
-
-        if (d_direction != Move::Stop) {
-            if (static_cast<std::int32_t>(now - d_deadline) >= 0) {
-                ESP_LOGW(TAG, "travel timeout, stopping");
-                end_travel("timeout");
-                release();
-            } else if (now - d_progress_at > STALL) {
-                ESP_LOGW(TAG, "height stopped changing, stopping");
-                end_travel("stalled");
-                release();
-            }
-        }
-
-        // While waiting to hear the height, ask as often as while moving: the
-        // box answers every frame, and each answer is a chance to start.
-        const bool moving = d_direction != Move::Stop;
-        const bool eager  = moving || (d_target >= 0 && d_direction == Move::Stop);
-        const bool polls  = eager || IDLE_POLL_TICKS > 0;
-        if (polls && static_cast<std::int32_t>(now - d_next_frame) >= 0) {
-            ESP_ERROR_CHECK_WITHOUT_ABORT(write_frame(frame_for(d_direction)));
-            d_next_frame = now + (eager ? REPEAT_TICKS : IDLE_POLL_TICKS);
-        }
-
-        TickType_t wait = portMAX_DELAY;
-        if (polls) {
-            const auto until = static_cast<std::int32_t>(d_next_frame - now);
-            wait             = until > 0 ? static_cast<TickType_t>(until) : 0;
-        }
-        ulTaskNotifyTake(pdTRUE, wait);
+        take_requests(xTaskGetTickCount());
+        const TickType_t now = xTaskGetTickCount();
+        take_posted_height(now);
+        chase_silent_box(now);
+        enforce_limits(now);
+        ulTaskNotifyTake(pdTRUE, poll_box(now));
     }
 }
 
@@ -508,37 +563,43 @@ void keep_raw(const std::uint8_t *bytes, int count)
     }
 }
 
+void publish_height(int height_mm)
+{
+    s_heights_decoded.fetch_add(1, std::memory_order_relaxed);
+    s_last_height.store(height_mm, std::memory_order_relaxed);
+    s_last_height_at.store(xTaskGetTickCount(), std::memory_order_release);
+    s_height_posted.store(true, std::memory_order_release);
+    wake_driver();
+    if (s_on_height != nullptr) {
+        s_on_height(height_mm);
+    }
+}
+
+void take_frame(const Frame &frame)
+{
+    s_frames_decoded.fetch_add(1, std::memory_order_relaxed);
+    if (frame.type() == FrameType::Height) {
+        s_height_frames.fetch_add(1, std::memory_order_relaxed);
+    }
+    if (const std::optional<int> height_mm = decode_height_mm(frame)) {
+        publish_height(*height_mm);
+    }
+}
+
 [[noreturn]] void rx_task(void *)
 {
-    Parser parser;
-    std::array<std::uint8_t, 64> buf{};
+    Parser                             parser;
+    std::array<std::uint8_t, RX_CHUNK> buf{};
 
     for (;;) {
-        const int read = uart_read_bytes(UART, buf.data(), buf.size(), pdMS_TO_TICKS(10));
+        const int read = uart_read_bytes(UART, buf.data(), buf.size(), RX_READ_TIMEOUT);
         if (read > 0) {
             keep_raw(buf.data(), read);
             s_bytes_received.fetch_add(static_cast<std::uint32_t>(read), std::memory_order_relaxed);
         }
         for (int i = 0; i < read; ++i) {
-            const std::optional<Frame> frame = parser.push(buf[i]);
-            if (!frame) {
-                continue;
-            }
-            s_frames_decoded.fetch_add(1, std::memory_order_relaxed);
-            if (frame->type() == FrameType::Height) {
-                s_height_frames.fetch_add(1, std::memory_order_relaxed);
-            }
-
-            const std::optional<int> height_mm = decode_height_mm(*frame);
-            if (height_mm) {
-                s_heights_decoded.fetch_add(1, std::memory_order_relaxed);
-                s_last_height.store(*height_mm, std::memory_order_relaxed);
-                s_last_height_at.store(xTaskGetTickCount(), std::memory_order_release);
-                s_height_posted.store(true, std::memory_order_release);
-                wake_driver();
-                if (s_on_height != nullptr) {
-                    s_on_height(*height_mm);
-                }
+            if (const std::optional<Frame> frame = parser.push(buf[i])) {
+                take_frame(*frame);
             }
         }
     }
@@ -584,6 +645,45 @@ esp_err_t init_uart()
     return uart_flush_input(UART);
 }
 
+esp_err_t create_queues()
+{
+    s_moves = xQueueCreateStatic(MAILBOX_DEPTH, sizeof(Move),
+                                 reinterpret_cast<std::uint8_t *>(s_move_storage), &s_move_ctrl);
+    s_gotos = xQueueCreateStatic(MAILBOX_DEPTH, sizeof(int),
+                                 reinterpret_cast<std::uint8_t *>(s_goto_storage), &s_goto_ctrl);
+    s_presses = xQueueCreateStatic(PRESS_QUEUE_LEN, sizeof(Press),
+                                   reinterpret_cast<std::uint8_t *>(s_press_storage),
+                                   &s_press_ctrl);
+    ESP_RETURN_ON_FALSE(s_moves != nullptr && s_gotos != nullptr && s_presses != nullptr,
+                        ESP_ERR_NO_MEM, TAG, "queues");
+    return ESP_OK;
+}
+
+StackType_t *internal_stack(std::uint32_t words)
+{
+    return static_cast<StackType_t *>(
+        heap_caps_malloc(words * sizeof(StackType_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+}
+
+esp_err_t start_tasks()
+{
+    s_rx_stack     = internal_stack(RX_STACK);
+    s_driver_stack = internal_stack(DRIVER_STACK);
+    ESP_RETURN_ON_FALSE(s_rx_stack != nullptr && s_driver_stack != nullptr, ESP_ERR_NO_MEM, TAG,
+                        "task stacks");
+
+    s_driver = xTaskCreateStaticPinnedToCore(driver_task, "loctek_drv", DRIVER_STACK, nullptr,
+                                             TASK_PRIORITY, s_driver_stack, &s_driver_ctrl,
+                                             TASK_CORE);
+    ESP_RETURN_ON_FALSE(s_driver != nullptr, ESP_ERR_NO_MEM, TAG, "driver task");
+
+    TaskHandle_t rx = xTaskCreateStaticPinnedToCore(rx_task, "loctek_rx", RX_STACK, nullptr,
+                                                    TASK_PRIORITY, s_rx_stack, &s_rx_ctrl,
+                                                    TASK_CORE);
+    ESP_RETURN_ON_FALSE(rx != nullptr, ESP_ERR_NO_MEM, TAG, "rx task");
+    return ESP_OK;
+}
+
 esp_err_t post_press(Press::Kind kind, Key key)
 {
     ESP_RETURN_ON_FALSE(s_started.load(std::memory_order_acquire), ESP_ERR_INVALID_STATE, TAG,
@@ -605,37 +705,14 @@ esp_err_t start(HeightHandler on_height)
 
     s_on_height = on_height;
     load_run_on();
-    ESP_LOGI(TAG, "run-on up %d mm, down %d mm", d_run_on[0], d_run_on[1]);
+    ESP_LOGI(TAG, "run-on up %d mm, down %d mm", d_run_on[dir_index(Move::Up)],
+             d_run_on[dir_index(Move::Down)]);
 
     ESP_RETURN_ON_ERROR(init_wake_gpio(), TAG, "wake");
     ESP_RETURN_ON_ERROR(init_uart(), TAG, "uart");
     ESP_RETURN_ON_ERROR(turn_on(), TAG, "wake line high");
-
-    s_moves = xQueueCreateStatic(1, sizeof(Move), reinterpret_cast<std::uint8_t *>(s_move_storage),
-                                 &s_move_ctrl);
-    s_gotos = xQueueCreateStatic(1, sizeof(int), reinterpret_cast<std::uint8_t *>(s_goto_storage),
-                                 &s_goto_ctrl);
-    s_presses = xQueueCreateStatic(PRESS_QUEUE_LEN, sizeof(Press),
-                                   reinterpret_cast<std::uint8_t *>(s_press_storage), &s_press_ctrl);
-    ESP_RETURN_ON_FALSE(s_moves != nullptr && s_gotos != nullptr && s_presses != nullptr,
-                        ESP_ERR_NO_MEM, TAG, "queues");
-
-    s_rx_stack = static_cast<StackType_t *>(
-        heap_caps_malloc(RX_STACK * sizeof(StackType_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
-    s_driver_stack = static_cast<StackType_t *>(
-        heap_caps_malloc(DRIVER_STACK * sizeof(StackType_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
-    ESP_RETURN_ON_FALSE(s_rx_stack != nullptr && s_driver_stack != nullptr, ESP_ERR_NO_MEM, TAG,
-                        "task stacks");
-
-    s_driver = xTaskCreateStaticPinnedToCore(driver_task, "loctek_drv", DRIVER_STACK, nullptr,
-                                             TASK_PRIORITY, s_driver_stack, &s_driver_ctrl,
-                                             TASK_CORE);
-    ESP_RETURN_ON_FALSE(s_driver != nullptr, ESP_ERR_NO_MEM, TAG, "driver task");
-
-    TaskHandle_t rx = xTaskCreateStaticPinnedToCore(rx_task, "loctek_rx", RX_STACK, nullptr,
-                                                    TASK_PRIORITY, s_rx_stack, &s_rx_ctrl,
-                                                    TASK_CORE);
-    ESP_RETURN_ON_FALSE(rx != nullptr, ESP_ERR_NO_MEM, TAG, "rx task");
+    ESP_RETURN_ON_ERROR(create_queues(), TAG, "queues");
+    ESP_RETURN_ON_ERROR(start_tasks(), TAG, "tasks");
 
     s_started.store(true, std::memory_order_release);
 

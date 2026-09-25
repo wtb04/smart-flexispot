@@ -5,6 +5,11 @@
 
 namespace radar {
 namespace {
+// A backslash and the character it escapes.
+constexpr int ESCAPE_LENGTH = 2;
+
+constexpr std::size_t SQUAWK_TEXT_SIZE = 8;
+
 struct Scanner {
     const char *p;
     const char *end;
@@ -42,7 +47,7 @@ struct Scanner {
         start = p;
         while (p < end) {
             if (*p == '\\') {
-                p += 2;
+                p += ESCAPE_LENGTH;
                 continue;
             }
             if (*p == '"') {
@@ -109,6 +114,12 @@ struct Scanner {
         }
         return true;
     }
+
+    /** Reads `"key":`, leaving the scanner at the value. */
+    bool key(const char *&start, std::size_t &length)
+    {
+        return string(start, length) && take(':');
+    }
 };
 
 bool key_is(const char *start, std::size_t length, const char *name)
@@ -128,15 +139,82 @@ void copy_trimmed(char *out, std::size_t size, const char *start, std::size_t le
     out[length] = '\0';
 }
 
+bool read_text(Scanner &in, char *out, std::size_t size)
+{
+    const char *text   = nullptr;
+    std::size_t length = 0;
+    if (!in.string(text, length)) {
+        return false;
+    }
+    copy_trimmed(out, size, text, length);
+    return true;
+}
+
+struct Field {
+    const char *name;
+    char       *dest;
+    std::size_t size;
+};
+
+/** The field named by the key, when its value is a string. */
+template <std::size_t N>
+const Field *text_field(Scanner &in, const Field (&fields)[N], const char *key,
+                        std::size_t key_len)
+{
+    for (const Field &field : fields) {
+        if (key_is(key, key_len, field.name) && in.peek('"')) {
+            return &field;
+        }
+    }
+    return nullptr;
+}
+
+bool read_number_field(Scanner &in, const char *key, std::size_t key_len, Aircraft &out,
+                       bool &has_lat, bool &has_lon)
+{
+    double value = 0.0;
+    if (key_is(key, key_len, "alt_baro") && in.number(value)) {
+        out.altitude_ft = static_cast<int>(value);
+    } else if (key_is(key, key_len, "lat") && in.number(value)) {
+        out.lat = static_cast<float>(value);
+        has_lat = true;
+    } else if (key_is(key, key_len, "lon") && in.number(value)) {
+        out.lon = static_cast<float>(value);
+        has_lon = true;
+    } else if (key_is(key, key_len, "dst") && in.number(value)) {
+        out.distance_nm = static_cast<float>(value);
+    } else if (key_is(key, key_len, "dir") && in.number(value)) {
+        out.bearing_deg = static_cast<float>(value);
+    } else if (key_is(key, key_len, "track") && in.number(value)) {
+        out.track_deg = static_cast<float>(value);
+    } else if (key_is(key, key_len, "gs") && in.number(value)) {
+        out.speed_kt = static_cast<float>(value);
+    } else if (key_is(key, key_len, "baro_rate") && in.number(value)) {
+        out.vertical_fpm = static_cast<int>(value);
+    } else {
+        return false;
+    }
+    return true;
+}
+
 bool read_aircraft(Scanner &in, Aircraft &out, bool &usable)
 {
-    usable = false;
-    out = Aircraft{};
-    out.altitude_ft  = -1;
-    out.track_deg    = -1.0f;
-    out.squawk       = -1;
-    bool has_lat     = false;
-    bool has_lon     = false;
+    usable          = false;
+    out             = Aircraft{};
+    out.altitude_ft = -1;
+    out.track_deg   = -1.0f;
+    out.squawk      = -1;
+    bool has_lat    = false;
+    bool has_lon    = false;
+
+    const Field text_fields[] = {
+        {"hex", out.hex, sizeof(out.hex)},
+        {"flight", out.flight, sizeof(out.flight)},
+        {"t", out.type, sizeof(out.type)},
+        {"r", out.reg, sizeof(out.reg)},
+        {"desc", out.desc, sizeof(out.desc)},
+        {"category", out.category, sizeof(out.category)},
+    };
 
     if (!in.take('{')) {
         return false;
@@ -146,63 +224,21 @@ bool read_aircraft(Scanner &in, Aircraft &out, bool &usable)
     }
 
     for (;;) {
-        const char *key    = nullptr;
+        const char *key     = nullptr;
         std::size_t key_len = 0;
-        if (!in.string(key, key_len) || !in.take(':')) {
+        if (!in.key(key, key_len)) {
             return false;
         }
 
-        double value = 0.0;
-        if (key_is(key, key_len, "hex") && in.peek('"')) {
-            const char *text   = nullptr;
-            std::size_t length = 0;
-            if (!in.string(text, length)) {
+        if (const Field *field = text_field(in, text_fields, key, key_len)) {
+            if (!read_text(in, field->dest, field->size)) {
                 return false;
             }
-            copy_trimmed(out.hex, sizeof(out.hex), text, length);
-        } else if (key_is(key, key_len, "flight") && in.peek('"')) {
-            const char *text   = nullptr;
-            std::size_t length = 0;
-            if (!in.string(text, length)) {
-                return false;
-            }
-            copy_trimmed(out.flight, sizeof(out.flight), text, length);
-        } else if (key_is(key, key_len, "t") && in.peek('"')) {
-            const char *text   = nullptr;
-            std::size_t length = 0;
-            if (!in.string(text, length)) {
-                return false;
-            }
-            copy_trimmed(out.type, sizeof(out.type), text, length);
-        } else if (key_is(key, key_len, "r") && in.peek('"')) {
-            const char *text   = nullptr;
-            std::size_t length = 0;
-            if (!in.string(text, length)) {
-                return false;
-            }
-            copy_trimmed(out.reg, sizeof(out.reg), text, length);
-        } else if (key_is(key, key_len, "desc") && in.peek('"')) {
-            const char *text   = nullptr;
-            std::size_t length = 0;
-            if (!in.string(text, length)) {
-                return false;
-            }
-            copy_trimmed(out.desc, sizeof(out.desc), text, length);
-        } else if (key_is(key, key_len, "category") && in.peek('"')) {
-            const char *text   = nullptr;
-            std::size_t length = 0;
-            if (!in.string(text, length)) {
-                return false;
-            }
-            copy_trimmed(out.category, sizeof(out.category), text, length);
         } else if (key_is(key, key_len, "squawk") && in.peek('"')) {
-            const char *text   = nullptr;
-            std::size_t length = 0;
-            if (!in.string(text, length)) {
+            char digits[SQUAWK_TEXT_SIZE] = {};
+            if (!read_text(in, digits, sizeof(digits))) {
                 return false;
             }
-            char digits[8] = {};
-            copy_trimmed(digits, sizeof(digits), text, length);
             out.squawk = static_cast<int>(std::strtol(digits, nullptr, 10));
         } else if (key_is(key, key_len, "alt_baro") && in.peek('"')) {
             const char *text   = nullptr;
@@ -212,25 +248,8 @@ bool read_aircraft(Scanner &in, Aircraft &out, bool &usable)
             }
             out.on_ground   = key_is(text, length, "ground");
             out.altitude_ft = 0;
-        } else if (key_is(key, key_len, "alt_baro") && in.number(value)) {
-            out.altitude_ft = static_cast<int>(value);
-        } else if (key_is(key, key_len, "lat") && in.number(value)) {
-            out.lat = static_cast<float>(value);
-            has_lat = true;
-        } else if (key_is(key, key_len, "lon") && in.number(value)) {
-            out.lon = static_cast<float>(value);
-            has_lon = true;
-        } else if (key_is(key, key_len, "dst") && in.number(value)) {
-            out.distance_nm = static_cast<float>(value);
-        } else if (key_is(key, key_len, "dir") && in.number(value)) {
-            out.bearing_deg = static_cast<float>(value);
-        } else if (key_is(key, key_len, "track") && in.number(value)) {
-            out.track_deg = static_cast<float>(value);
-        } else if (key_is(key, key_len, "gs") && in.number(value)) {
-            out.speed_kt = static_cast<float>(value);
-        } else if (key_is(key, key_len, "baro_rate") && in.number(value)) {
-            out.vertical_fpm = static_cast<int>(value);
-        } else if (!in.skip_value()) {
+        } else if (!read_number_field(in, key, key_len, out, has_lat, has_lon) &&
+                   !in.skip_value()) {
             return false;
         }
 
@@ -247,13 +266,8 @@ bool read_aircraft(Scanner &in, Aircraft &out, bool &usable)
     return true;
 }
 
-struct Field {
-    const char *name;
-    char       *dest;
-    std::size_t size;
-};
-
-bool read_fields(Scanner &in, const Field *fields, int count)
+template <std::size_t N>
+bool read_fields(Scanner &in, const Field (&fields)[N])
 {
     if (in.take('}')) {
         return true;
@@ -261,24 +275,15 @@ bool read_fields(Scanner &in, const Field *fields, int count)
     for (;;) {
         const char *key     = nullptr;
         std::size_t key_len = 0;
-        if (!in.string(key, key_len) || !in.take(':')) {
+        if (!in.key(key, key_len)) {
             return false;
         }
 
-        bool taken = false;
-        for (int i = 0; i < count && !taken; ++i) {
-            if (!key_is(key, key_len, fields[i].name) || !in.peek('"')) {
-                continue;
-            }
-            const char *text   = nullptr;
-            std::size_t length = 0;
-            if (!in.string(text, length)) {
+        if (const Field *field = text_field(in, fields, key, key_len)) {
+            if (!read_text(in, field->dest, field->size)) {
                 return false;
             }
-            copy_trimmed(fields[i].dest, fields[i].size, text, length);
-            taken = true;
-        }
-        if (!taken && !in.skip_value()) {
+        } else if (!in.skip_value()) {
             return false;
         }
 
@@ -289,24 +294,62 @@ bool read_fields(Scanner &in, const Field *fields, int count)
     }
 }
 
+/** Moves past the key `name` (or `alias`) of the object being read, leaving
+ *  the scanner at its value. */
+bool seek_key(Scanner &in, const char *name, const char *alias = nullptr)
+{
+    for (;;) {
+        const char *key     = nullptr;
+        std::size_t key_len = 0;
+        if (!in.key(key, key_len)) {
+            return false;
+        }
+        if (key_is(key, key_len, name) || (alias != nullptr && key_is(key, key_len, alias))) {
+            return true;
+        }
+        if (!in.skip_value() || !in.take(',')) {
+            return false;
+        }
+    }
+}
+
 /** Steps into the object stored under `name`, from just past the parent's '{'. */
 bool enter_object(Scanner &in, const char *name)
 {
     if (in.peek('}')) {
         return false;
     }
-    for (;;) {
-        const char *key     = nullptr;
-        std::size_t key_len = 0;
-        if (!in.string(key, key_len) || !in.take(':')) {
-            return false;
+    return seek_key(in, name) && in.take('{');
+}
+
+void unescape_in_place(char *text)
+{
+    char *write = text;
+    for (const char *read = text; *read != '\0'; ++read) {
+        if (*read == '\\' && read[1] != '\0') {
+            ++read;
         }
-        if (key_is(key, key_len, name)) {
-            return in.take('{');
+        *write++ = *read;
+    }
+    *write = '\0';
+}
+
+/** Stores the aircraft, or, once full, lets it replace the farthest if it is
+ *  nearer: the scope shows the nearest `capacity`. */
+void keep_nearest(Aircraft *out, int capacity, int &stored, const Aircraft &aircraft)
+{
+    if (stored < capacity) {
+        out[stored++] = aircraft;
+        return;
+    }
+    int farthest = 0;
+    for (int i = 1; i < capacity; ++i) {
+        if (out[i].distance_nm > out[farthest].distance_nm) {
+            farthest = i;
         }
-        if (!in.skip_value() || !in.take(',')) {
-            return false;
-        }
+    }
+    if (aircraft.distance_nm < out[farthest].distance_nm) {
+        out[farthest] = aircraft;
     }
 }
 
@@ -325,7 +368,7 @@ bool parse_route(const char *json, std::size_t length, Details &out)
     for (;;) {
         const char *key     = nullptr;
         std::size_t key_len = 0;
-        if (!in.string(key, key_len) || !in.take(':')) {
+        if (!in.key(key, key_len)) {
             return false;
         }
 
@@ -333,16 +376,16 @@ bool parse_route(const char *json, std::size_t length, Details &out)
         if (in.peek('{')) {
             if (key_is(key, key_len, "airline")) {
                 const Field fields[] = {{"name", out.airline, sizeof(out.airline)}};
-                handled              = in.take('{') && read_fields(in, fields, 1);
+                handled              = in.take('{') && read_fields(in, fields);
             } else if (key_is(key, key_len, "origin")) {
                 const Field fields[] = {
                     {"iata_code", out.origin_code, sizeof(out.origin_code)},
                     {"municipality", out.origin_city, sizeof(out.origin_city)}};
-                handled = in.take('{') && read_fields(in, fields, 2);
+                handled = in.take('{') && read_fields(in, fields);
             } else if (key_is(key, key_len, "destination")) {
                 const Field fields[] = {{"iata_code", out.dest_code, sizeof(out.dest_code)},
                                         {"municipality", out.dest_city, sizeof(out.dest_city)}};
-                handled = in.take('{') && read_fields(in, fields, 2);
+                handled = in.take('{') && read_fields(in, fields);
             }
         }
         if (!handled && !in.skip_value()) {
@@ -367,23 +410,9 @@ bool parse_photo(const char *json, std::size_t length, char *out, std::size_t si
     out[0] = '\0';
 
     Scanner in{json, json + length};
-    if (!in.take('{')) {
+    if (!in.take('{') || !seek_key(in, "photos")) {
         return false;
     }
-    for (;;) {
-        const char *key     = nullptr;
-        std::size_t key_len = 0;
-        if (!in.string(key, key_len) || !in.take(':')) {
-            return false;
-        }
-        if (key_is(key, key_len, "photos")) {
-            break;
-        }
-        if (!in.skip_value() || !in.take(',')) {
-            return false;
-        }
-    }
-
     if (!in.take('[') || !in.take('{')) {
         return false;
     }
@@ -392,18 +421,10 @@ bool parse_photo(const char *json, std::size_t length, char *out, std::size_t si
     }
 
     const Field fields[] = {{"src", out, size}};
-    if (!read_fields(in, fields, 1)) {
+    if (!read_fields(in, fields)) {
         return false;
     }
-
-    char *write = out;
-    for (const char *read = out; *read != '\0'; ++read) {
-        if (*read == '\\' && read[1] != '\0') {
-            ++read;
-        }
-        *write++ = *read;
-    }
-    *write = '\0';
+    unescape_in_place(out);
     return out[0] != '\0';
 }
 
@@ -423,7 +444,7 @@ bool parse_aircraft(const char *json, std::size_t length, Details &out)
         {"registered_owner", out.owner, sizeof(out.owner)},
         {"url_photo_thumbnail", out.photo_url, sizeof(out.photo_url)},
     };
-    if (!read_fields(in, fields, 4)) {
+    if (!read_fields(in, fields)) {
         return false;
     }
     out.has_aircraft = out.model[0] != '\0' || out.owner[0] != '\0';
@@ -437,27 +458,9 @@ int parse(const char *json, std::size_t length, Aircraft *out, int capacity)
     }
 
     Scanner in{json, json + length};
-
-    if (!in.take('{')) {
+    if (!in.take('{') || !seek_key(in, "aircraft", "ac")) {
         return 0;
     }
-    for (;;) {
-        const char *key     = nullptr;
-        std::size_t key_len = 0;
-        if (!in.string(key, key_len) || !in.take(':')) {
-            return 0;
-        }
-        if (key_is(key, key_len, "aircraft") || key_is(key, key_len, "ac")) {
-            break;
-        }
-        if (!in.skip_value()) {
-            return 0;
-        }
-        if (!in.take(',')) {
-            return 0;
-        }
-    }
-
     if (!in.take('[')) {
         return 0;
     }
@@ -473,19 +476,7 @@ int parse(const char *json, std::size_t length, Aircraft *out, int capacity)
             break;
         }
         if (usable && !aircraft.on_ground) {
-            if (stored < capacity) {
-                out[stored++] = aircraft;
-            } else {
-                int farthest = 0;
-                for (int i = 1; i < capacity; ++i) {
-                    if (out[i].distance_nm > out[farthest].distance_nm) {
-                        farthest = i;
-                    }
-                }
-                if (aircraft.distance_nm < out[farthest].distance_nm) {
-                    out[farthest] = aircraft;
-                }
-            }
+            keep_nearest(out, capacity, stored, aircraft);
         }
         if (in.take(',')) {
             continue;

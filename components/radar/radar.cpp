@@ -10,9 +10,9 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "units.h"
 
 #include <algorithm>
-#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -21,32 +21,48 @@ namespace radar {
 namespace {
 constexpr char TAG[] = "radar";
 
-constexpr char FEED_HOST[]  = "http://api.adsb.lol";
-constexpr char LOOKUP_HOST[] = "https://api.adsbdb.com";
+constexpr char FEED_HOST[]        = "http://api.adsb.lol";
+constexpr char LOOKUP_HOST[]      = "https://api.adsbdb.com";
+constexpr char PHOTO_HOST[]       = "https://api.planespotters.net";
+constexpr char PHOTO_IMAGE_HOST[] = "http://t.plnspttrs.net";
+constexpr char PHOTO_AGENT[]      = "tab5-panel (+https://woutertenbrinke.nl)";
+constexpr char AGENT[]            = "tab5-panel";
 
-constexpr char PHOTO_HOST[]  = "https://api.planespotters.net";
-constexpr char PHOTO_AGENT[] = "tab5-panel (+https://woutertenbrinke.nl)";
-constexpr char AGENT[]       = "tab5-panel";
+constexpr char        HTTPS_PREFIX[]   = "https://";
+constexpr std::size_t HTTPS_PREFIX_LEN = sizeof(HTTPS_PREFIX) - 1;
 
-constexpr int    RANGE_DEFAULT_KM = 160;
+constexpr int HTTP_TIMEOUT_MS  = 10 * units::kMsPerSecond;
+constexpr int HTTP_BUFFER_SIZE = 2 * units::kBytesPerKiB;
+
+constexpr int HTTP_OK                = 200;
+constexpr int HTTP_NOT_FOUND         = 404;
+constexpr int HTTP_TOO_MANY_REQUESTS = 429;
+
+constexpr std::size_t URL_SIZE        = 128;
+constexpr std::size_t LOOKUP_URL_SIZE = 192;
+
+constexpr int   RANGE_KM  = 160;
+constexpr float NM_PER_KM = 0.539957f;
 
 // The home position is snapped to this grid before it reaches a url or the
 // screen, so neither carries the actual address.
 constexpr float HOME_GRID_DEG = 0.01f;
-constexpr float  NM_PER_KM        = 0.539957f;
-std::atomic<int>  s_range_km{RANGE_DEFAULT_KM};
-std::atomic<bool> s_force_fetch{false};
 
 constexpr int PHOTO_MAX_W = 320;
 constexpr int PHOTO_MAX_H = 240;
 
-constexpr std::int64_t FIRST_FETCH_DELAY_US = 6 * 1000000LL;
+constexpr std::int64_t FIRST_FETCH_DELAY_US = 6 * units::kUsPerSecond;
+constexpr TickType_t   HOME_SETTLE_CHECK    = pdMS_TO_TICKS(units::kMsPerSecond);
 
 // Measured: three seconds runs into the feed's rate limit and gets 429s.
-constexpr std::int64_t POLL_ACTIVE_US = 5 * 1000000LL;
-constexpr std::int64_t POLL_IDLE_US   = 60 * 1000000LL;
+constexpr std::int64_t POLL_ACTIVE_US = 5 * units::kUsPerSecond;
+constexpr std::int64_t POLL_IDLE_US   = units::kUsPerMinute;
 
-constexpr std::size_t BODY_MAX = 192 * 1024;
+constexpr std::int64_t OVERDUE_REST_MS = units::kMsPerSecond;
+// Short enough to close idle lookup connections on time.
+constexpr std::int64_t LOOKUPS_OPEN_REST_MS = 2 * units::kMsPerSecond;
+
+constexpr std::size_t BODY_MAX = 192 * units::kBytesPerKiB;
 
 constexpr std::uint32_t TASK_STACK    = 8192;  // measured: uses 3.1 KB; the TLS handshake runs on it
 constexpr UBaseType_t   TASK_PRIORITY = 2;
@@ -58,9 +74,8 @@ StackType_t  s_task_stack[TASK_STACK];
 char        *s_body     = nullptr;
 std::size_t  s_body_len = 0;
 
-constexpr std::int64_t IDLE_CLOSE_US = 20 * 1000000LL;
-
-constexpr std::int64_t PHOTO_IDLE_US = 30 * 1000000LL;
+constexpr std::int64_t IDLE_CLOSE_US = 20 * units::kUsPerSecond;
+constexpr std::int64_t PHOTO_IDLE_US = 30 * units::kUsPerSecond;
 
 esp_http_client_handle_t s_feed_client     = nullptr;
 esp_http_client_handle_t s_lookup_client   = nullptr;
@@ -93,11 +108,10 @@ CacheEntry *s_cache = nullptr;
 SemaphoreHandle_t s_lock = nullptr;
 StaticSemaphore_t s_lock_ctrl;
 
-Aircraft    *s_list = nullptr;
+Aircraft    *s_list       = nullptr;
 int          s_count      = 0;
-
-Aircraft *s_scratch  = nullptr;
-Snapshot *s_published = nullptr;
+Aircraft    *s_scratch    = nullptr;
+Snapshot    *s_published  = nullptr;
 bool         s_ok         = false;
 std::int64_t s_fetched_us = 0;
 
@@ -105,24 +119,33 @@ UpdateHandler  s_on_update  = nullptr;
 DetailsHandler s_on_details = nullptr;
 PhotoHandler   s_on_photo   = nullptr;
 
-std::uint16_t *s_photo    = nullptr;
-int            s_photo_w  = 0;
-int            s_photo_h  = 0;
+std::uint16_t *s_photo              = nullptr;
+int            s_photo_w            = 0;
+int            s_photo_h            = 0;
 char           s_photo_hex[kHexLen] = {};
 
-char    s_want_hex[kHexLen]      = {};
-char    s_want_flight[kFlightLen] = {};
-bool    s_want_pending           = false;
-Details s_details;
-TaskHandle_t  s_task      = nullptr;
-bool          s_active    = false;
-bool          s_enabled   = true;
+char s_want_hex[kHexLen]       = {};
+char s_want_flight[kFlightLen] = {};
+bool s_want_pending            = false;
+
+TaskHandle_t s_task    = nullptr;
+bool         s_active  = false;
+bool         s_enabled = true;
 
 std::int64_t s_home_at_us = 0;
+float        s_home_lat   = 0.0f;
+float        s_home_lon   = 0.0f;
+bool         s_has_home   = false;
 
-float s_home_lat  = 0.0f;
-float s_home_lon  = 0.0f;
-bool  s_has_home  = false;
+int ms_since(std::int64_t began_us)
+{
+    return static_cast<int>((esp_timer_get_time() - began_us) / units::kUsPerMs);
+}
+
+bool is_https(const char *url)
+{
+    return std::strncmp(url, HTTPS_PREFIX, HTTPS_PREFIX_LEN) == 0;
+}
 
 esp_err_t on_event(esp_http_client_event_t *event)
 {
@@ -146,13 +169,13 @@ esp_http_client_handle_t open_client(const char *url, const char *agent = AGENT)
     esp_http_client_config_t cfg = {};
     cfg.url                      = url;
     cfg.event_handler            = on_event;
-    cfg.timeout_ms               = 10000;
+    cfg.timeout_ms               = HTTP_TIMEOUT_MS;
     cfg.user_agent               = agent;
-    cfg.buffer_size              = 2048;
+    cfg.buffer_size              = HTTP_BUFFER_SIZE;
     cfg.keep_alive_enable        = true;
     // Only where TLS can actually be negotiated: two of these hosts are plain
     // http, and a root store there is internal memory spent on nothing.
-    if (std::strncmp(url, "https://", 8) == 0) {
+    if (is_https(url)) {
         cfg.crt_bundle_attach = esp_crt_bundle_attach;
     }
     return esp_http_client_init(&cfg);
@@ -177,9 +200,9 @@ int get(esp_http_client_handle_t client, const char *url, const char *what)
         ESP_LOGW(TAG, "%s unreachable: %s", what, esp_err_to_name(err));
         return 0;
     }
-    if (status == 404) {
+    if (status == HTTP_NOT_FOUND) {
         ESP_LOGD(TAG, "%s not known", what);
-    } else if (status != 200) {
+    } else if (status != HTTP_OK) {
         ESP_LOGW(TAG, "%s: http %d", what, status);
     }
     return status;
@@ -230,17 +253,15 @@ bool s_feed_backoff = false;
 
 bool fetch(float lat, float lon)
 {
-    const int range_km = s_range_km.load(std::memory_order_relaxed);
-
-    char url[128];
+    char url[URL_SIZE];
     std::snprintf(url, sizeof(url), "%s/v2/point/%.4f/%.4f/%d", FEED_HOST,
                   static_cast<double>(lat), static_cast<double>(lon),
-                  static_cast<int>(std::lround(static_cast<float>(range_km) * NM_PER_KM)));
+                  static_cast<int>(std::lround(static_cast<float>(RANGE_KM) * NM_PER_KM)));
     const int status = get(s_feed_client, url, "feed");
     // Measured: holding this open doubled the share the feed refused.
     esp_http_client_close(s_feed_client);
-    if (status != 200) {
-        s_feed_backoff = status == 429;
+    if (status != HTTP_OK) {
+        s_feed_backoff = status == HTTP_TOO_MANY_REQUESTS;
         return false;
     }
     s_feed_backoff = false;
@@ -254,7 +275,7 @@ bool fetch(float lat, float lon)
     s_fetched_us = esp_timer_get_time();
     xSemaphoreGive(s_lock);
 
-    ESP_LOGD(TAG, "%d aircraft within %d km, %u bytes", count, range_km,
+    ESP_LOGD(TAG, "%d aircraft within %d km, %u bytes", count, RANGE_KM,
              static_cast<unsigned>(s_body_len));
 
     if (s_on_update != nullptr) {
@@ -286,13 +307,12 @@ void fetch_photo(const char *hex, const Details &details)
     const int status = get(s_photo_client, details.photo_url, "photo");
     s_photo_at_us    = esp_timer_get_time();
     s_photo_open     = true;
-    if (status == 200 &&
+    if (status == HTTP_OK &&
         jpeg::decode_into(s_body, s_body_len, s_photo, PHOTO_MAX_W, PHOTO_MAX_H, width, height)) {
         s_photo_w = width;
         s_photo_h = height;
         std::snprintf(s_photo_hex, sizeof(s_photo_hex), "%s", hex);
-        ESP_LOGI(TAG, "%s: photo %dx%d in %d ms", hex, width, height,
-                 static_cast<int>((esp_timer_get_time() - began) / 1000));
+        ESP_LOGI(TAG, "%s: photo %dx%d in %d ms", hex, width, height, ms_since(began));
         if (s_on_photo != nullptr) {
             s_on_photo(hex, s_photo, width, height);
         }
@@ -307,7 +327,7 @@ void fetch_photo(const char *hex, const Details &details)
 
 bool fetch_details(const char *hex, const char *callsign, Details &out)
 {
-    char url[192];
+    char url[LOOKUP_URL_SIZE];
     bool want_aircraft = true;
     bool want_route    = callsign[0] != '\0';
 
@@ -319,12 +339,12 @@ bool fetch_details(const char *hex, const char *callsign, Details &out)
         std::snprintf(url, sizeof(url), "%s/v0/aircraft/%s?callsign=%s", LOOKUP_HOST, hex,
                       callsign);
         const int status = get(s_lookup_client, url, "details");
-        if (status == 200) {
+        if (status == HTTP_OK) {
             parse_aircraft(s_body, s_body_len, out);
             parse_route(s_body, s_body_len, out);
             return true;
         }
-        if (status != 404) {
+        if (status != HTTP_NOT_FOUND) {
             return false;
         }
         want_route    = std::strstr(s_body, "unknown callsign") == nullptr;
@@ -333,13 +353,13 @@ bool fetch_details(const char *hex, const char *callsign, Details &out)
 
     if (want_aircraft) {
         std::snprintf(url, sizeof(url), "%s/v0/aircraft/%s", LOOKUP_HOST, hex);
-        if (get(s_lookup_client, url, "aircraft") == 200) {
+        if (get(s_lookup_client, url, "aircraft") == HTTP_OK) {
             parse_aircraft(s_body, s_body_len, out);
         }
     }
     if (want_route) {
         std::snprintf(url, sizeof(url), "%s/v0/callsign/%s", LOOKUP_HOST, callsign);
-        if (get(s_lookup_client, url, "route") == 200) {
+        if (get(s_lookup_client, url, "route") == HTTP_OK) {
             parse_route(s_body, s_body_len, out);
         }
     }
@@ -364,9 +384,9 @@ void resolve_photo(const char *hex, Details &out)
 {
     out.photo_checked = true;
 
-    char url[128];
+    char url[URL_SIZE];
     std::snprintf(url, sizeof(url), "%s/pub/photos/hex/%s", PHOTO_HOST, hex);
-    if (get(s_photoapi_client, url, "photo lookup") != 200) {
+    if (get(s_photoapi_client, url, "photo lookup") != HTTP_OK) {
         return;
     }
 
@@ -374,8 +394,9 @@ void resolve_photo(const char *hex, Details &out)
     if (!parse_photo(s_body, s_body_len, found, sizeof(found))) {
         return;
     }
-    if (std::strncmp(found, "https://", 8) == 0) {
-        std::snprintf(out.photo_url, sizeof(out.photo_url), "http://%s", found + 8);
+    if (is_https(found)) {
+        std::snprintf(out.photo_url, sizeof(out.photo_url), "http://%s",
+                      found + HTTPS_PREFIX_LEN);
     } else {
         std::snprintf(out.photo_url, sizeof(out.photo_url), "%s", found);
     }
@@ -399,12 +420,8 @@ void look_up(const char *hex, const char *callsign, bool with_photo)
         ESP_LOGI(TAG, "%s: %s%s%s in %d ms", hex,
                  details.has_aircraft ? details.model : "unknown type",
                  details.has_route ? ", " : "", details.has_route ? details.origin_code : "",
-                 static_cast<int>((esp_timer_get_time() - began) / 1000));
+                 ms_since(began));
     }
-
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    s_details = details;
-    xSemaphoreGive(s_lock);
 
     if (with_photo && !details.photo_checked) {
         resolve_photo(hex, details);
@@ -509,18 +526,50 @@ void expire_cache()
     xSemaphoreGive(s_lock);
 }
 
+// Call with the lock held.
+int age_s()
+{
+    return s_fetched_us == 0 ? -1
+                             : static_cast<int>((esp_timer_get_time() - s_fetched_us) /
+                                                units::kUsPerSecond);
+}
+
+void sweep(float lat, float lon, bool active)
+{
+    if (fetch(lat, lon)) {
+        expire_cache();
+        if (active) {
+            prefetch_visible();
+        }
+        return;
+    }
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_ok = false;
+    xSemaphoreGive(s_lock);
+}
+
+TickType_t rest_before_next(std::int64_t due_us, std::int64_t last_fetch_us)
+{
+    const std::int64_t waited = esp_timer_get_time() - last_fetch_us;
+    std::int64_t rest_ms = waited >= due_us ? OVERDUE_REST_MS : (due_us - waited) / units::kUsPerMs;
+    if ((s_photo_open || s_lookups_open) && rest_ms > LOOKUPS_OPEN_REST_MS) {
+        rest_ms = LOOKUPS_OPEN_REST_MS;
+    }
+    return pdMS_TO_TICKS(rest_ms);
+}
+
 [[noreturn]] void radar_task(void *)
 {
     std::int64_t last_fetch = 0;
 
     for (;;) {
-        char hex[kHexLen]       = {};
+        char hex[kHexLen]         = {};
         char callsign[kFlightLen] = {};
 
         xSemaphoreTake(s_lock, portMAX_DELAY);
-        const bool  ready   = s_has_home && s_enabled;
-        const bool  active  = s_active;
-        const bool  pending = s_want_pending;
+        const bool         ready   = s_has_home && s_enabled;
+        const bool         active  = s_active;
+        const bool         pending = s_want_pending;
         const float        lat     = s_home_lat;
         const float        lon     = s_home_lon;
         const std::int64_t home_at = s_home_at_us;
@@ -540,12 +589,8 @@ void expire_cache()
         }
 
         if (last_fetch == 0 && esp_timer_get_time() - home_at < FIRST_FETCH_DELAY_US) {
-            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
+            ulTaskNotifyTake(pdTRUE, HOME_SETTLE_CHECK);
             continue;
-        }
-
-        if (s_force_fetch.exchange(false, std::memory_order_relaxed)) {
-            last_fetch = 0;
         }
 
         std::int64_t due = active ? POLL_ACTIVE_US : POLL_IDLE_US;
@@ -554,27 +599,12 @@ void expire_cache()
         }
         if (last_fetch == 0 || esp_timer_get_time() - last_fetch >= due) {
             const std::int64_t began = esp_timer_get_time();
-            if (fetch(lat, lon)) {
-                expire_cache();
-                if (active) {
-                    prefetch_visible();
-                }
-            } else {
-                xSemaphoreTake(s_lock, portMAX_DELAY);
-                s_ok = false;
-                xSemaphoreGive(s_lock);
-            }
+            sweep(lat, lon, active);
             last_fetch = began;
         }
 
         close_idle_lookups();
-
-        const std::int64_t waited = esp_timer_get_time() - last_fetch;
-        std::int64_t       rest   = waited >= due ? 1000 : (due - waited) / 1000;
-        if ((s_photo_open || s_lookups_open) && rest > 2000) {
-            rest = 2000;
-        }
-        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(rest));
+        ulTaskNotifyTake(pdTRUE, rest_before_next(due, last_fetch));
     }
 }
 
@@ -593,7 +623,8 @@ esp_err_t start(UpdateHandler on_update, DetailsHandler on_details, PhotoHandler
     ESP_RETURN_ON_FALSE(s_body != nullptr, ESP_ERR_NO_MEM, TAG, "body buffer");
 
     s_photo = static_cast<std::uint16_t *>(heap_caps_malloc(
-        static_cast<std::size_t>(PHOTO_MAX_W) * PHOTO_MAX_H * 2, MALLOC_CAP_SPIRAM));
+        static_cast<std::size_t>(PHOTO_MAX_W) * PHOTO_MAX_H * sizeof(std::uint16_t),
+        MALLOC_CAP_SPIRAM));
     ESP_RETURN_ON_FALSE(s_photo != nullptr, ESP_ERR_NO_MEM, TAG, "photo buffer");
 
     s_list      = static_cast<Aircraft *>(
@@ -612,7 +643,7 @@ esp_err_t start(UpdateHandler on_update, DetailsHandler on_details, PhotoHandler
     s_feed_client     = open_client(FEED_HOST);
     s_lookup_client   = open_client(LOOKUP_HOST);
     s_photoapi_client = open_client(PHOTO_HOST, PHOTO_AGENT);
-    s_photo_client = open_client("http://t.plnspttrs.net");
+    s_photo_client    = open_client(PHOTO_IMAGE_HOST);
     ESP_RETURN_ON_FALSE(s_feed_client != nullptr && s_lookup_client != nullptr &&
                             s_photoapi_client != nullptr && s_photo_client != nullptr,
                         ESP_ERR_NO_MEM, TAG, "http clients");
@@ -704,11 +735,9 @@ void snapshot(Snapshot &out)
     out.count    = s_count;
     out.home_lat = s_home_lat;
     out.home_lon = s_home_lon;
-    out.range_km = s_range_km.load(std::memory_order_relaxed);
+    out.range_km = RANGE_KM;
     out.ok       = s_ok;
-    out.age_s    = s_fetched_us == 0
-                       ? -1
-                       : static_cast<int>((esp_timer_get_time() - s_fetched_us) / 1000000);
+    out.age_s    = age_s();
     xSemaphoreGive(s_lock);
 }
 
@@ -716,11 +745,9 @@ void status(Status &out)
 {
     xSemaphoreTake(s_lock, portMAX_DELAY);
     out.count    = s_count;
-    out.range_km = s_range_km.load(std::memory_order_relaxed);
+    out.range_km = RANGE_KM;
     out.ok       = s_ok;
-    out.age_s    = s_fetched_us == 0
-                       ? -1
-                       : static_cast<int>((esp_timer_get_time() - s_fetched_us) / 1000000);
+    out.age_s    = age_s();
     xSemaphoreGive(s_lock);
 }
 

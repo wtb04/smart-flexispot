@@ -7,6 +7,7 @@
 #include "media.h"
 #include "radar.h"
 #include "ui.h"
+#include "units.h"
 
 #include <cstdio>
 #include <atomic>
@@ -76,6 +77,17 @@ std::atomic<const char *> s_player{MEDIA_SPEAKER};
 /** Fraction of full scale, per press. */
 constexpr float VOLUME_STEP = 0.05f;
 
+constexpr float PERCENT_PER_WHOLE = 100.0f;
+
+// attribute_number()'s answer when there is no number to read.
+constexpr float NO_NUMBER = -1.0f;
+
+constexpr std::size_t ISO_SECONDS_LENGTH = sizeof("YYYY-MM-DDTHH:MM:SS") - 1;
+constexpr int         MAX_POSITION_AGE_S = units::kSecondsPerDay;
+
+constexpr std::size_t SERVICE_VALUE_SIZE = 16;
+constexpr int         TENTHS_PER_DEGREE  = 10;
+
 constexpr int PILL_COUNT   = sizeof(PILLS) / sizeof(PILLS[0]);
 constexpr int LIGHT_COUNT  = sizeof(LIGHTS) / sizeof(LIGHTS[0]);
 constexpr int TOGGLE_COUNT = sizeof(TOGGLES) / sizeof(TOGGLES[0]);
@@ -121,13 +133,14 @@ bool        s_position_playing  = false;
 int seconds_since(const std::string &iso)
 {
     std::tm parsed{};
-    if (iso.size() < 19 || strptime(iso.c_str(), "%Y-%m-%dT%H:%M:%S", &parsed) == nullptr) {
+    if (iso.size() < ISO_SECONDS_LENGTH ||
+        strptime(iso.c_str(), "%Y-%m-%dT%H:%M:%S", &parsed) == nullptr) {
         return 0;
     }
     const std::time_t when = rtc::utc_seconds(parsed);
     const std::time_t now  = std::time(nullptr);
     const double age = std::difftime(now, when);
-    return age > 0.0 && age < 24 * 3600 ? static_cast<int>(age) : 0;
+    return age > 0.0 && age < MAX_POSITION_AGE_S ? static_cast<int>(age) : 0;
 }
 
 std::atomic<bool> s_climate_on{false};
@@ -137,15 +150,20 @@ std::atomic<bool> s_toggle_on[TOGGLE_COUNT];
 std::atomic<bool> s_muted{false};
 std::atomic<int>  s_volume_pct{-1};  // negative until the speaker reports one
 
-constexpr std::int64_t     VOLUME_SETTLE_US = 1500000;
-constexpr std::int64_t     MEDIA_GONE_US    = 3000000;
+constexpr std::int64_t VOLUME_SETTLE_US  = 1500 * units::kUsPerMs;
+constexpr std::int64_t MEDIA_GONE_US     = 3 * units::kUsPerSecond;
+constexpr std::int64_t VOLUME_MIN_GAP_US = 250 * units::kUsPerMs;
 
-constexpr std::int64_t     VOLUME_MIN_GAP_US = 250000;
-std::atomic<int>           s_volume_pending{-1};
-std::atomic<std::int64_t>  s_volume_sent_us{0};
-esp_timer_handle_t         s_volume_timer = nullptr;
-std::atomic<std::int64_t>  s_volume_set_us{0};
-std::atomic<int>  s_entity_count{0};
+std::atomic<int>          s_volume_pending{-1};
+std::atomic<std::int64_t> s_volume_sent_us{0};
+esp_timer_handle_t        s_volume_timer = nullptr;
+std::atomic<std::int64_t> s_volume_set_us{0};
+std::atomic<int>          s_entity_count{0};
+
+int percent_of(float fraction)
+{
+    return static_cast<int>(fraction * PERCENT_PER_WHOLE + 0.5f);
+}
 
 std::string attribute(const hass::ws::Entity &entity, const char *key)
 {
@@ -153,16 +171,15 @@ std::string attribute(const hass::ws::Entity &entity, const char *key)
     return it == entity.attributes.end() ? std::string{} : it->second;
 }
 
-/** -1 when the attribute is absent or not a number. */
 float attribute_number(const hass::ws::Entity &entity, const char *key)
 {
     const auto it = entity.attributes.find(key);
     if (it == entity.attributes.end()) {
-        return -1.0f;
+        return NO_NUMBER;
     }
     char       *end   = nullptr;
     const float value = std::strtof(it->second.c_str(), &end);
-    return end == it->second.c_str() ? -1.0f : value;
+    return end == it->second.c_str() ? NO_NUMBER : value;
 }
 
 ui::Level pill_level(const PillSpec &spec, const hass::ws::Entity *entity)
@@ -235,56 +252,54 @@ bool going(const hass::ws::Entity *player)
            (player->state == "playing" || player->state == "paused" || player->state == "buffering");
 }
 
-void render_media(const hass::ws::EntityStore &store)
+bool choose_laptop(const hass::ws::Entity *speaker, const hass::ws::Entity *jellyfin)
 {
-    const hass::ws::Entity *speaker  = store.find(MEDIA_SPEAKER);
-    const hass::ws::Entity *jellyfin = store.find(MEDIA_JELLYFIN);
-    const bool              laptop   = !going(speaker) && going(jellyfin);
-    const hass::ws::Entity *player   = laptop ? jellyfin : speaker;
-    if (s_player.exchange(laptop ? MEDIA_JELLYFIN : MEDIA_SPEAKER) !=
-        (laptop ? MEDIA_JELLYFIN : MEDIA_SPEAKER)) {
+    const bool  laptop = !going(speaker) && going(jellyfin);
+    const char *chosen = laptop ? MEDIA_JELLYFIN : MEDIA_SPEAKER;
+    if (s_player.exchange(chosen) != chosen) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_hold_preset(laptop ? JELLYFIN_PRESET : -1));
     }
+    return laptop;
+}
 
+/** A player that vanishes or loses its title for a moment is not shown as
+ *  gone until it has stayed so for a while. */
+bool gone_only_briefly(const hass::ws::Entity *player)
+{
     const bool bare = known(player) && player->state != "off" && player->state != "idle" &&
                       attribute(*player, "media_title").empty();
 
     static std::int64_t s_gone_us = 0;
-    if (!known(player) || bare) {
-        const std::int64_t now = esp_timer_get_time();
-        if (s_gone_us == 0) {
-            s_gone_us = now;
-        }
-        if (now - s_gone_us < MEDIA_GONE_US) {
-            return;
-        }
-    } else {
+    if (known(player) && !bare) {
         s_gone_us = 0;
+        return false;
     }
-
-    if (player == nullptr) {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media("SPEAKER", "", "", "--", false, false));
-        media::set_art_path("");
-        return;
+    const std::int64_t now = esp_timer_get_time();
+    if (s_gone_us == 0) {
+        s_gone_us = now;
     }
+    return now - s_gone_us < MEDIA_GONE_US;
+}
 
-    const bool        playing = player->state == "playing";
-    const std::string title   = attribute(*player, "media_title");
-    std::string       artist  = attribute(*player, "media_artist");
+std::string media_artist(const hass::ws::Entity &player)
+{
+    std::string artist = attribute(player, "media_artist");
+    if (!artist.empty()) {
+        return artist;
+    }
     // An episode has a series where a song has an artist.
-    if (artist.empty()) {
-        artist = attribute(*player, "media_series_title");
-        const int season  = static_cast<int>(attribute_number(*player, "media_season"));
-        const int episode = static_cast<int>(attribute_number(*player, "media_episode"));
-        if (!artist.empty() && season > 0 && episode > 0) {
-            artist += "\nSeason " + std::to_string(season) + ", episode " + std::to_string(episode);
-        }
+    artist            = attribute(player, "media_series_title");
+    const int season  = static_cast<int>(attribute_number(player, "media_season"));
+    const int episode = static_cast<int>(attribute_number(player, "media_episode"));
+    if (!artist.empty() && season > 0 && episode > 0) {
+        artist += "\nSeason " + std::to_string(season) + ", episode " + std::to_string(episode);
     }
-    const std::string source = laptop ? "JELLYFIN" : upper(attribute(*player, "app_name"));
-    const std::string state   = upper(player->state);
+    return artist;
+}
 
-    s_muted.store(attribute(*player, "is_volume_muted") == "true", std::memory_order_relaxed);
-
+void show_media_text(const std::string &source, const std::string &title,
+                     const std::string &artist, const std::string &state, bool playing)
+{
     static std::string s_shown;
     const std::string  shown = source + '\n' + title + '\n' + artist + '\n' + state +
                               (playing ? "\n1" : "\n0");
@@ -294,35 +309,45 @@ void render_media(const hass::ws::EntityStore &store)
                                                     state.c_str(), playing,
                                                     state != "OFF" && state != "--"));
     }
+}
 
-    const std::string stamp    = attribute(*player, "media_position_updated_at");
-    const int         duration = static_cast<int>(attribute_number(*player, "media_duration"));
-    if (stamp != s_position_stamp || duration != s_position_duration ||
-        playing != s_position_playing) {
-        s_position_stamp    = stamp;
-        s_position_duration = duration;
-        s_position_playing  = playing;
-
-        const int reported = static_cast<int>(attribute_number(*player, "media_position"));
-        const int elapsed  = reported + (playing ? seconds_since(stamp) : 0);
-        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_progress(elapsed, duration, playing));
+void show_media_position(const hass::ws::Entity &player, bool playing)
+{
+    const std::string stamp    = attribute(player, "media_position_updated_at");
+    const int         duration = static_cast<int>(attribute_number(player, "media_duration"));
+    if (stamp == s_position_stamp && duration == s_position_duration &&
+        playing == s_position_playing) {
+        return;
     }
+    s_position_stamp    = stamp;
+    s_position_duration = duration;
+    s_position_playing  = playing;
 
-    const float level   = attribute_number(*player, "volume_level");
+    const int reported = static_cast<int>(attribute_number(player, "media_position"));
+    const int elapsed  = reported + (playing ? seconds_since(stamp) : 0);
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_progress(elapsed, duration, playing));
+}
+
+void show_media_volume(const hass::ws::Entity &player)
+{
+    const float level   = attribute_number(player, "volume_level");
     const bool  settled = esp_timer_get_time() -
                               s_volume_set_us.load(std::memory_order_relaxed) > VOLUME_SETTLE_US;
     if (level >= 0.0f && settled) {
-        const int percent = static_cast<int>(level * 100.0f + 0.5f);
+        const int percent = percent_of(level);
         s_volume_pct.store(percent, std::memory_order_relaxed);
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_volume(percent));
     }
+}
 
+void ask_for_art(const hass::ws::Entity &player, const std::string &title)
+{
     static std::string s_art_title;
     static bool        s_art_asked = false;
     // Jellyfin's poster is only in entity_picture.
-    std::string picture = attribute(*player, "entity_picture_local");
+    std::string picture = attribute(player, "entity_picture_local");
     if (picture.empty()) {
-        picture = attribute(*player, "entity_picture");
+        picture = attribute(player, "entity_picture");
     }
 
     if (title != s_art_title) {
@@ -335,6 +360,34 @@ void render_media(const hass::ws::EntityStore &store)
     }
 }
 
+void render_media(const hass::ws::EntityStore &store)
+{
+    const hass::ws::Entity *speaker  = store.find(MEDIA_SPEAKER);
+    const hass::ws::Entity *jellyfin = store.find(MEDIA_JELLYFIN);
+    const bool              laptop   = choose_laptop(speaker, jellyfin);
+    const hass::ws::Entity *player   = laptop ? jellyfin : speaker;
+
+    if (gone_only_briefly(player)) {
+        return;
+    }
+    if (player == nullptr) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media("SPEAKER", "", "", "--", false, false));
+        media::set_art_path("");
+        return;
+    }
+
+    const bool        playing = player->state == "playing";
+    const std::string title   = attribute(*player, "media_title");
+    const std::string source  = laptop ? "JELLYFIN" : upper(attribute(*player, "app_name"));
+
+    s_muted.store(attribute(*player, "is_volume_muted") == "true", std::memory_order_relaxed);
+
+    show_media_text(source, title, media_artist(*player), upper(player->state), playing);
+    show_media_position(*player, playing);
+    show_media_volume(*player);
+    ask_for_art(*player, title);
+}
+
 void send_volume(void *)
 {
     const int percent = s_volume_pending.exchange(-1, std::memory_order_relaxed);
@@ -342,8 +395,9 @@ void send_volume(void *)
         return;
     }
     s_volume_sent_us.store(esp_timer_get_time(), std::memory_order_relaxed);
-    char value[16];
-    std::snprintf(value, sizeof(value), "%.2f", static_cast<double>(percent) / 100.0);
+    char value[SERVICE_VALUE_SIZE];
+    std::snprintf(value, sizeof(value), "%.2f",
+                  static_cast<double>(percent) / static_cast<double>(PERCENT_PER_WHOLE));
     ESP_ERROR_CHECK_WITHOUT_ABORT(hass::ws::call_service_with("media_player", "volume_set",
                                                               s_player.load(), "volume_level", value));
 }
@@ -356,10 +410,10 @@ void nudge_volume(float delta)
     if (reported < 0) {
         return;  // a blind guess would jump the volume
     }
-    float wanted = static_cast<float>(reported) / 100.0f + delta;
+    float wanted = static_cast<float>(reported) / PERCENT_PER_WHOLE + delta;
     wanted       = wanted < 0.0f ? 0.0f : (wanted > 1.0f ? 1.0f : wanted);
 
-    const int percent = static_cast<int>(wanted * 100.0f + 0.5f);
+    const int percent = percent_of(wanted);
     ESP_LOGI(TAG, "volume %d%%", percent);
 
     s_volume_pct.store(percent, std::memory_order_relaxed);
@@ -443,7 +497,7 @@ void render(const hass::ws::EntityStore &store)
     if (const hass::ws::Entity *home = store.find("zone.home"); home != nullptr) {
         const float lat = attribute_number(*home, "latitude");
         const float lon = attribute_number(*home, "longitude");
-        if (lat != -1.0f && lon != -1.0f) {
+        if (lat != NO_NUMBER && lon != NO_NUMBER) {
             radar::set_home(lat, lon);
         }
     }
@@ -492,8 +546,8 @@ void render(const hass::ws::EntityStore &store)
 void on_setpoint(float celsius)
 {
     ESP_LOGI(TAG, "setpoint %d.%d C", static_cast<int>(celsius),
-             static_cast<int>(celsius * 10) % 10);
-    char value[16];
+             static_cast<int>(celsius * TENTHS_PER_DEGREE) % TENTHS_PER_DEGREE);
+    char value[SERVICE_VALUE_SIZE];
     std::snprintf(value, sizeof(value), "%.1f", celsius);
     ESP_ERROR_CHECK_WITHOUT_ABORT(hass::ws::call_service_with("climate", "set_temperature",
                                                               CLIMATE_ENTITY, "temperature",

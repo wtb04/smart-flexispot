@@ -8,10 +8,16 @@
 
 namespace hass::ws {
 namespace {
+constexpr char EVENT_ADDED[]   = "a";
+constexpr char EVENT_CHANGED[] = "c";
+constexpr char EVENT_REMOVED[] = "r";
+
 constexpr char KEY_STATE[]      = "s";
 constexpr char KEY_ATTRIBUTES[] = "a";
 constexpr char KEY_ADDITIONS[]  = "+";
 constexpr char KEY_REMOVALS[]   = "-";
+
+constexpr std::size_t NUMBER_TEXT_SIZE = 32;
 
 constexpr char ATTR_FRIENDLY_NAME[] = "friendly_name";
 constexpr char ATTR_UNIT[]          = "unit_of_measurement";
@@ -40,7 +46,7 @@ std::string as_text(const cJSON *item)
         return cJSON_IsTrue(item) ? "true" : "false";
     }
     if (cJSON_IsNumber(item)) {
-        char buf[32];
+        char buf[NUMBER_TEXT_SIZE];
         if (item->valuedouble == static_cast<double>(item->valueint)) {
             std::snprintf(buf, sizeof(buf), "%d", item->valueint);
         } else {
@@ -86,6 +92,93 @@ void merge_attributes(Entity &entity, const cJSON *attributes, const Keeps &keep
             entity.attributes[item->string] = value;
         }
     }
+}
+
+using Entities = std::map<std::string, Entity>;
+
+template <typename Keeps>
+bool add_whole_states(Entities &entities, const cJSON *added, const Keeps &keeps)
+{
+    bool changed = false;
+    for (const cJSON *item = added->child; item != nullptr; item = item->next) {
+        if (item->string == nullptr) {
+            continue;
+        }
+        Entity entity;
+        entity.state = field(item, KEY_STATE);
+        merge_attributes(entity, cJSON_GetObjectItemCaseSensitive(item, KEY_ATTRIBUTES), keeps);
+        entities[item->string] = std::move(entity);
+        changed                = true;
+    }
+    return changed;
+}
+
+template <typename Keeps>
+bool apply_additions(Entity &entity, const cJSON *additions, const Keeps &keeps)
+{
+    bool         changed = false;
+    const cJSON *state   = cJSON_GetObjectItemCaseSensitive(additions, KEY_STATE);
+    if (cJSON_IsString(state) && state->valuestring != nullptr) {
+        entity.state = state->valuestring;
+        changed      = true;
+    }
+    const cJSON *attrs = cJSON_GetObjectItemCaseSensitive(additions, KEY_ATTRIBUTES);
+    if (cJSON_IsObject(attrs)) {
+        merge_attributes(entity, attrs, keeps);
+        changed = true;
+    }
+    return changed;
+}
+
+bool apply_removals(Entity &entity, const cJSON *removals)
+{
+    bool         changed = false;
+    const cJSON *gone    = cJSON_GetObjectItemCaseSensitive(removals, KEY_ATTRIBUTES);
+    if (!cJSON_IsArray(gone)) {
+        return false;
+    }
+    for (const cJSON *name = gone->child; name != nullptr; name = name->next) {
+        if (!cJSON_IsString(name) || name->valuestring == nullptr) {
+            continue;
+        }
+        entity.attributes.erase(name->valuestring);
+        unhoist(entity, name->valuestring);
+        changed = true;
+    }
+    return changed;
+}
+
+template <typename Keeps>
+bool apply_changes(Entities &entities, const cJSON *changes, const Keeps &keeps)
+{
+    bool changed = false;
+    for (const cJSON *item = changes->child; item != nullptr; item = item->next) {
+        if (item->string == nullptr) {
+            continue;
+        }
+        Entity &entity = entities[item->string];
+
+        const cJSON *additions = cJSON_GetObjectItemCaseSensitive(item, KEY_ADDITIONS);
+        if (cJSON_IsObject(additions)) {
+            changed |= apply_additions(entity, additions, keeps);
+        }
+        const cJSON *removals = cJSON_GetObjectItemCaseSensitive(item, KEY_REMOVALS);
+        if (cJSON_IsObject(removals)) {
+            changed |= apply_removals(entity, removals);
+        }
+    }
+    return changed;
+}
+
+bool remove_entities(Entities &entities, const cJSON *removed)
+{
+    bool changed = false;
+    for (const cJSON *name = removed->child; name != nullptr; name = name->next) {
+        if (cJSON_IsString(name) && name->valuestring != nullptr) {
+            changed |= entities.erase(name->valuestring) > 0;
+        }
+    }
+    return changed;
 }
 
 }  // namespace
@@ -205,72 +298,21 @@ bool EntityStore::apply_event(const cJSON *event)
     if (!cJSON_IsObject(event)) {
         return false;
     }
-    bool changed = false;
+    const auto keeps_name = [this](const char *name) { return keeps(name); };
+    bool       changed    = false;
 
-    const cJSON *added = cJSON_GetObjectItemCaseSensitive(event, "a");
+    const cJSON *added = cJSON_GetObjectItemCaseSensitive(event, EVENT_ADDED);
     if (cJSON_IsObject(added)) {
-        for (const cJSON *item = added->child; item != nullptr; item = item->next) {
-            if (item->string == nullptr) {
-                continue;
-            }
-            Entity entity;
-            entity.state = field(item, KEY_STATE);
-            merge_attributes(entity, cJSON_GetObjectItemCaseSensitive(item, KEY_ATTRIBUTES),
-                             [this](const char *name) { return keeps(name); });
-            entities_[item->string] = std::move(entity);
-            changed                 = true;
-        }
+        changed |= add_whole_states(entities_, added, keeps_name);
     }
-
-    const cJSON *changes = cJSON_GetObjectItemCaseSensitive(event, "c");
+    const cJSON *changes = cJSON_GetObjectItemCaseSensitive(event, EVENT_CHANGED);
     if (cJSON_IsObject(changes)) {
-        for (const cJSON *item = changes->child; item != nullptr; item = item->next) {
-            if (item->string == nullptr) {
-                continue;
-            }
-            Entity &entity = entities_[item->string];
-
-            const cJSON *additions = cJSON_GetObjectItemCaseSensitive(item, KEY_ADDITIONS);
-            if (cJSON_IsObject(additions)) {
-                const cJSON *state = cJSON_GetObjectItemCaseSensitive(additions, KEY_STATE);
-                if (cJSON_IsString(state) && state->valuestring != nullptr) {
-                    entity.state = state->valuestring;
-                    changed      = true;
-                }
-                const cJSON *attrs = cJSON_GetObjectItemCaseSensitive(additions, KEY_ATTRIBUTES);
-                if (cJSON_IsObject(attrs)) {
-                    merge_attributes(entity, attrs,
-                                     [this](const char *name) { return keeps(name); });
-                    changed = true;
-                }
-            }
-
-            const cJSON *removals = cJSON_GetObjectItemCaseSensitive(item, KEY_REMOVALS);
-            if (cJSON_IsObject(removals)) {
-                const cJSON *gone = cJSON_GetObjectItemCaseSensitive(removals, KEY_ATTRIBUTES);
-                if (cJSON_IsArray(gone)) {
-                    for (const cJSON *name = gone->child; name != nullptr; name = name->next) {
-                        if (!cJSON_IsString(name) || name->valuestring == nullptr) {
-                            continue;
-                        }
-                        entity.attributes.erase(name->valuestring);
-                        unhoist(entity, name->valuestring);
-                        changed = true;
-                    }
-                }
-            }
-        }
+        changed |= apply_changes(entities_, changes, keeps_name);
     }
-
-    const cJSON *removed = cJSON_GetObjectItemCaseSensitive(event, "r");
+    const cJSON *removed = cJSON_GetObjectItemCaseSensitive(event, EVENT_REMOVED);
     if (cJSON_IsArray(removed)) {
-        for (const cJSON *name = removed->child; name != nullptr; name = name->next) {
-            if (cJSON_IsString(name) && name->valuestring != nullptr) {
-                changed |= entities_.erase(name->valuestring) > 0;
-            }
-        }
+        changed |= remove_entities(entities_, removed);
     }
-
     return changed;
 }
 

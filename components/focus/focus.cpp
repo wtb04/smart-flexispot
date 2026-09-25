@@ -4,6 +4,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "units.h"
 
 namespace focus {
 namespace {
@@ -21,9 +22,21 @@ void arm(const State &state)
     esp_timer_stop(s_timer);
     if (state.running) {
         const std::int64_t wait_ms = state.ends_at - now_ms();
-        ESP_ERROR_CHECK_WITHOUT_ABORT(
-            esp_timer_start_once(s_timer, static_cast<std::uint64_t>(wait_ms > 0 ? wait_ms : 0) * 1000));
+        const auto wait_us =
+            static_cast<std::uint64_t>(wait_ms > 0 ? wait_ms : 0) * units::kUsPerMs;
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_timer_start_once(s_timer, wait_us));
     }
+}
+
+const char *phase_name(Phase phase)
+{
+    switch (phase) {
+        case Phase::Work:      return "focus";
+        case Phase::Break:     return "break";
+        case Phase::LongBreak: return "long break";
+        case Phase::Idle:      break;
+    }
+    return "idle";
 }
 
 void settle(const State &next, bool finished)
@@ -32,11 +45,8 @@ void settle(const State &next, bool finished)
     s_state = next;
     portEXIT_CRITICAL(&s_lock);
     arm(next);
-    ESP_LOGI(TAG, "%s round %d %s", next.phase == Phase::Work        ? "focus"
-                                    : next.phase == Phase::Break     ? "break"
-                                    : next.phase == Phase::LongBreak ? "long break"
-                                                                     : "idle",
-             next.round, next.running ? "running" : "paused");
+    ESP_LOGI(TAG, "%s round %d %s", phase_name(next.phase), next.round,
+             next.running ? "running" : "paused");
     if (s_on_change != nullptr) {
         s_on_change(next, finished);
     }
@@ -53,7 +63,9 @@ esp_err_t start(ChangeHandler on_change)
 {
     ESP_RETURN_ON_FALSE(s_timer == nullptr, ESP_ERR_INVALID_STATE, TAG, "already started");
     s_on_change = on_change;
-    const esp_timer_create_args_t args{.callback = ran_out, .name = "focus"};
+    esp_timer_create_args_t args{};
+    args.callback = ran_out;
+    args.name     = "focus";
     return esp_timer_create(&args, &s_timer);
 }
 
@@ -100,7 +112,7 @@ void set_plan(const Plan &plan)
 
 std::int64_t now_ms()
 {
-    return esp_timer_get_time() / 1000;
+    return esp_timer_get_time() / units::kUsPerMs;
 }
 
 }  // namespace focus

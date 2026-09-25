@@ -23,7 +23,7 @@ void test_command_round_trip()
     in.height_mm = 1234;
     in.seq       = 0x01020304;
 
-    std::uint8_t packet[COMMAND_LEN];
+    std::uint8_t packet[kCommandLen];
     encode(in, packet);
     Command out{};
     check(decode(packet, sizeof(packet), out), "goto decodes");
@@ -51,7 +51,7 @@ void test_status_round_trip()
     in.driving   = true;
     in.seq       = 99;
 
-    std::uint8_t packet[STATUS_LEN];
+    std::uint8_t packet[kStatusLen];
     encode(in, packet);
     Status out{};
     check(decode(packet, sizeof(packet), out), "status decodes");
@@ -63,41 +63,71 @@ void test_status_round_trip()
     check(decode(packet, sizeof(packet), out) && out.height_mm == -1, "unknown height survives");
 }
 
+// Pinned byte for byte, so a change to the layout cannot slip through on both
+// sides of the link at once.
+void test_wire_layout()
+{
+    Command command{};
+    command.op        = Op::GoTo;
+    command.height_mm = 1234;
+    command.seq       = 0x01020304;
+    std::uint8_t packet[kCommandLen];
+    encode(command, packet);
+    const std::uint8_t command_bytes[] = {'D', 'K', 1, 7, 0x04, 0x03, 0x02, 0x01, 0, 0, 0xd2, 0x04};
+    check(sizeof(command_bytes) == kCommandLen &&
+              std::memcmp(packet, command_bytes, sizeof(command_bytes)) == 0,
+          "command bytes on the wire");
+
+    Status status{};
+    status.height_mm = 1123;
+    status.motion    = Motion::Up;
+    status.linked    = true;
+    status.driving   = true;
+    status.seq       = 99;
+    std::uint8_t status_packet[kStatusLen];
+    encode(status, status_packet);
+    const std::uint8_t status_bytes[] = {'D', 'K', 1, 0x05, 99, 0, 0, 0,
+                                         0x63, 0x04, 0, 0, 1, 0, 0, 0};
+    check(sizeof(status_bytes) == kStatusLen &&
+              std::memcmp(status_packet, status_bytes, sizeof(status_bytes)) == 0,
+          "status bytes on the wire");
+}
+
 void test_rejects()
 {
     Command command{};
     command.op = Op::Ping;
-    std::uint8_t packet[COMMAND_LEN];
+    std::uint8_t packet[kCommandLen];
     encode(command, packet);
     Command out{};
 
-    check(!decode(packet, COMMAND_LEN - 1, out), "short command rejected");
-    packet[3] = 0;
-    check(!decode(packet, COMMAND_LEN, out), "op below range rejected");
-    packet[3] = static_cast<std::uint8_t>(Op::GoTo) + 1;
-    check(!decode(packet, COMMAND_LEN, out), "op above range rejected");
-    packet[3] = static_cast<std::uint8_t>(Op::Hold);
-    packet[8] = 3;
-    check(!decode(packet, COMMAND_LEN, out), "bad direction rejected");
-    packet[8] = 0;
-    packet[3] = static_cast<std::uint8_t>(Op::Preset);
-    packet[9] = kBoxPresets;
-    check(!decode(packet, COMMAND_LEN, out), "preset the box does not have rejected");
-    packet[9] = kBoxPresets - 1;
-    check(decode(packet, COMMAND_LEN, out) && out.preset == kBoxPresets - 1, "last box preset accepted");
-    packet[3] = static_cast<std::uint8_t>(Op::GoTo);
-    packet[9] = 200;
-    check(decode(packet, COMMAND_LEN, out), "preset byte ignored for other ops");
-    packet[9] = 0;
-    packet[0] = 'X';
-    check(!decode(packet, COMMAND_LEN, out), "bad magic rejected");
+    check(!decode(packet, kCommandLen - 1, out), "short command rejected");
+    packet[command_at::kOp] = 0;
+    check(!decode(packet, kCommandLen, out), "op below range rejected");
+    packet[command_at::kOp] = static_cast<std::uint8_t>(Op::GoTo) + 1;
+    check(!decode(packet, kCommandLen, out), "op above range rejected");
+    packet[command_at::kOp] = static_cast<std::uint8_t>(Op::Hold);
+    packet[command_at::kDirection] = static_cast<std::uint8_t>(Motion::Down) + 1;
+    check(!decode(packet, kCommandLen, out), "bad direction rejected");
+    packet[command_at::kDirection] = 0;
+    packet[command_at::kOp] = static_cast<std::uint8_t>(Op::Preset);
+    packet[command_at::kPreset] = kBoxPresets;
+    check(!decode(packet, kCommandLen, out), "preset the box does not have rejected");
+    packet[command_at::kPreset] = kBoxPresets - 1;
+    check(decode(packet, kCommandLen, out) && out.preset == kBoxPresets - 1, "last box preset accepted");
+    packet[command_at::kOp] = static_cast<std::uint8_t>(Op::GoTo);
+    packet[command_at::kPreset] = 200;
+    check(decode(packet, kCommandLen, out), "preset byte ignored for other ops");
+    packet[command_at::kPreset] = 0;
+    packet[kMagicAt] = 'X';
+    check(!decode(packet, kCommandLen, out), "bad magic rejected");
 
     Status status{};
-    std::uint8_t status_packet[STATUS_LEN];
+    std::uint8_t status_packet[kStatusLen];
     encode(status, status_packet);
-    status_packet[12] = 7;
+    status_packet[status_at::kMotion] = 7;
     Status decoded{};
-    check(decode(status_packet, STATUS_LEN, decoded) && decoded.motion == Motion::Idle,
+    check(decode(status_packet, kStatusLen, decoded) && decoded.motion == Motion::Idle,
           "unknown motion reads as idle");
 }
 
@@ -126,6 +156,7 @@ int main()
     test_vocabulary();
     test_command_round_trip();
     test_status_round_trip();
+    test_wire_layout();
     test_rejects();
     std::printf("\n%s\n", g_failures == 0 ? "ALL PASS" : "FAILURES");
     return g_failures == 0 ? 0 : 1;

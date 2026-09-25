@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <climits>
 #include <cstdint>
 #include <cstring>
 
@@ -25,9 +26,10 @@ constexpr const char *preset_label(int index)
 /** How the companion is found and spoken to. Bytes in the order
  *  BLE_UUID128_INIT takes them. */
 inline constexpr char kDeviceName[] = "desk-companion";
-inline constexpr std::array<std::uint8_t, 16> kServiceUuid = {
+using Uuid128 = std::array<std::uint8_t, 16>;
+inline constexpr Uuid128 kServiceUuid = {
     0x2d, 0x71, 0x9a, 0x4c, 0x8e, 0x3b, 0x4f, 0x6a, 0x9c, 0x1d, 0x5e, 0x77, 0x01, 0x00, 0xa5, 0xde};
-inline constexpr std::array<std::uint8_t, 16> kEchoUuid = {
+inline constexpr Uuid128 kEchoUuid = {
     0x2d, 0x71, 0x9a, 0x4c, 0x8e, 0x3b, 0x4f, 0x6a, 0x9c, 0x1d, 0x5e, 0x77, 0x02, 0x00, 0xa5, 0xde};
 
 /** The panel repeats a hold this often; the companion lets go of a hold that has
@@ -37,12 +39,39 @@ inline constexpr int kHoldTimeoutMs = 300;
 static_assert(kHoldTimeoutMs >= 2 * kHoldPeriodMs + kHoldPeriodMs / 2,
               "a single late repeat must not stop the desk");
 
-inline constexpr std::uint8_t MAGIC0  = 'D';
-inline constexpr std::uint8_t MAGIC1  = 'K';
-inline constexpr std::uint8_t VERSION = 1;
+inline constexpr std::uint8_t kMagic0  = 'D';
+inline constexpr std::uint8_t kMagic1  = 'K';
+inline constexpr std::uint8_t kVersion = 1;
 
-inline constexpr std::size_t COMMAND_LEN = 12;
-inline constexpr std::size_t STATUS_LEN  = 16;
+inline constexpr std::size_t kCommandLen = 12;
+inline constexpr std::size_t kStatusLen  = 16;
+
+/** Both packets open with the two magic bytes and the version. Numbers are
+ *  little-endian. */
+inline constexpr std::size_t kMagicAt   = 0;
+inline constexpr std::size_t kVersionAt = 2;
+
+namespace command_at {
+inline constexpr std::size_t kOp        = 3;
+inline constexpr std::size_t kSeq       = 4;
+inline constexpr std::size_t kDirection = 8;
+inline constexpr std::size_t kPreset    = 9;
+inline constexpr std::size_t kHeight    = 10;
+}  // namespace command_at
+
+namespace status_at {
+inline constexpr std::size_t kFlags  = 3;
+inline constexpr std::size_t kSeq    = 4;
+inline constexpr std::size_t kHeight = 8;
+inline constexpr std::size_t kMotion = 12;
+}  // namespace status_at
+
+static_assert(command_at::kHeight + sizeof(std::uint16_t) == kCommandLen);
+static_assert(status_at::kMotion < kStatusLen);
+
+inline constexpr std::uint8_t kLinkedFlag  = 1 << 0;
+inline constexpr std::uint8_t kHoldingFlag = 1 << 1;
+inline constexpr std::uint8_t kDrivingFlag = 1 << 2;
 
 enum class Op : std::uint8_t {
     Hold   = 1,
@@ -88,50 +117,63 @@ struct Status {
     std::uint32_t seq       = 0;      // the last command seen, echoed back
 };
 
-inline void put32(std::uint8_t *out, std::uint32_t value)
+template <typename Unsigned>
+void put_le(std::uint8_t *out, Unsigned value)
 {
-    out[0] = static_cast<std::uint8_t>(value);
-    out[1] = static_cast<std::uint8_t>(value >> 8);
-    out[2] = static_cast<std::uint8_t>(value >> 16);
-    out[3] = static_cast<std::uint8_t>(value >> 24);
+    for (std::size_t i = 0; i < sizeof(Unsigned); ++i) {
+        out[i] = static_cast<std::uint8_t>(value >> (i * CHAR_BIT));
+    }
 }
 
-inline std::uint32_t get32(const std::uint8_t *in)
+template <typename Unsigned>
+Unsigned get_le(const std::uint8_t *in)
 {
-    return static_cast<std::uint32_t>(in[0]) | (static_cast<std::uint32_t>(in[1]) << 8) |
-           (static_cast<std::uint32_t>(in[2]) << 16) | (static_cast<std::uint32_t>(in[3]) << 24);
+    Unsigned value = 0;
+    for (std::size_t i = 0; i < sizeof(Unsigned); ++i) {
+        value = static_cast<Unsigned>(value | (static_cast<Unsigned>(in[i]) << (i * CHAR_BIT)));
+    }
+    return value;
+}
+
+inline void put_header(std::uint8_t *out)
+{
+    out[kMagicAt]     = kMagic0;
+    out[kMagicAt + 1] = kMagic1;
+    out[kVersionAt]   = kVersion;
+}
+
+inline bool has_header(const std::uint8_t *in, std::size_t length, std::size_t expected)
+{
+    return in != nullptr && length >= expected && in[kMagicAt] == kMagic0 &&
+           in[kMagicAt + 1] == kMagic1 && in[kVersionAt] == kVersion;
 }
 
 inline void encode(const Command &command, std::uint8_t *out)
 {
-    std::memset(out, 0, COMMAND_LEN);
-    out[0] = MAGIC0;
-    out[1] = MAGIC1;
-    out[2] = VERSION;
-    out[3] = static_cast<std::uint8_t>(command.op);
-    put32(out + 4, command.seq);
-    out[8] = static_cast<std::uint8_t>(command.direction);
-    out[9] = command.preset;
-    out[10] = static_cast<std::uint8_t>(command.height_mm);
-    out[11] = static_cast<std::uint8_t>(command.height_mm >> 8);
+    std::memset(out, 0, kCommandLen);
+    put_header(out);
+    out[command_at::kOp] = static_cast<std::uint8_t>(command.op);
+    put_le<std::uint32_t>(out + command_at::kSeq, command.seq);
+    out[command_at::kDirection] = static_cast<std::uint8_t>(command.direction);
+    out[command_at::kPreset]    = command.preset;
+    put_le<std::uint16_t>(out + command_at::kHeight, command.height_mm);
 }
 
 inline bool decode(const std::uint8_t *in, std::size_t length, Command &out)
 {
-    if (in == nullptr || length < COMMAND_LEN || in[0] != MAGIC0 || in[1] != MAGIC1 ||
-        in[2] != VERSION) {
+    if (!has_header(in, length, kCommandLen)) {
         return false;
     }
-    const std::uint8_t op = in[3];
+    const std::uint8_t op = in[command_at::kOp];
     if (op < static_cast<std::uint8_t>(Op::Hold) || op > static_cast<std::uint8_t>(Op::GoTo)) {
         return false;
     }
-    const std::uint8_t direction = in[8];
+    const std::uint8_t direction = in[command_at::kDirection];
     if (direction > static_cast<std::uint8_t>(Motion::Down)) {
         return false;
     }
 
-    const std::uint8_t preset = in[9];
+    const std::uint8_t preset = in[command_at::kPreset];
     const bool         keyed  = op == static_cast<std::uint8_t>(Op::Preset) ||
                        op == static_cast<std::uint8_t>(Op::Store);
     if (keyed && preset >= kBoxPresets) {
@@ -139,40 +181,39 @@ inline bool decode(const std::uint8_t *in, std::size_t length, Command &out)
     }
 
     out.op        = static_cast<Op>(op);
-    out.seq       = get32(in + 4);
+    out.seq       = get_le<std::uint32_t>(in + command_at::kSeq);
     out.direction = static_cast<Motion>(direction);
     out.preset    = preset;
-    out.height_mm = static_cast<std::uint16_t>(in[10] | (in[11] << 8));
+    out.height_mm = get_le<std::uint16_t>(in + command_at::kHeight);
     return true;
 }
 
 inline void encode(const Status &status, std::uint8_t *out)
 {
-    std::memset(out, 0, STATUS_LEN);
-    out[0] = MAGIC0;
-    out[1] = MAGIC1;
-    out[2] = VERSION;
-    out[3] = static_cast<std::uint8_t>((status.linked ? 1 : 0) | (status.holding ? 2 : 0) |
-                                       (status.driving ? 4 : 0));
-    put32(out + 4, status.seq);
-    put32(out + 8, static_cast<std::uint32_t>(status.height_mm));
-    out[12] = static_cast<std::uint8_t>(status.motion);
+    std::memset(out, 0, kStatusLen);
+    put_header(out);
+    out[status_at::kFlags] = static_cast<std::uint8_t>((status.linked ? kLinkedFlag : 0) |
+                                                       (status.holding ? kHoldingFlag : 0) |
+                                                       (status.driving ? kDrivingFlag : 0));
+    put_le<std::uint32_t>(out + status_at::kSeq, status.seq);
+    put_le<std::uint32_t>(out + status_at::kHeight, static_cast<std::uint32_t>(status.height_mm));
+    out[status_at::kMotion] = static_cast<std::uint8_t>(status.motion);
 }
 
 inline bool decode(const std::uint8_t *in, std::size_t length, Status &out)
 {
-    if (in == nullptr || length < STATUS_LEN || in[0] != MAGIC0 || in[1] != MAGIC1 ||
-        in[2] != VERSION) {
+    if (!has_header(in, length, kStatusLen)) {
         return false;
     }
-    out.linked    = (in[3] & 1) != 0;
-    out.holding   = (in[3] & 2) != 0;
-    out.driving   = (in[3] & 4) != 0;
-    out.seq       = get32(in + 4);
-    out.height_mm = static_cast<std::int32_t>(get32(in + 8));
-    out.motion    = in[12] <= static_cast<std::uint8_t>(Motion::Down)
-                        ? static_cast<Motion>(in[12])
-                        : Motion::Idle;
+    const std::uint8_t flags  = in[status_at::kFlags];
+    const std::uint8_t motion = in[status_at::kMotion];
+    out.linked    = (flags & kLinkedFlag) != 0;
+    out.holding   = (flags & kHoldingFlag) != 0;
+    out.driving   = (flags & kDrivingFlag) != 0;
+    out.seq       = get_le<std::uint32_t>(in + status_at::kSeq);
+    out.height_mm = static_cast<std::int32_t>(get_le<std::uint32_t>(in + status_at::kHeight));
+    out.motion    = motion <= static_cast<std::uint8_t>(Motion::Down) ? static_cast<Motion>(motion)
+                                                                      : Motion::Idle;
     return true;
 }
 

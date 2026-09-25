@@ -3,6 +3,7 @@
 #include "esp_check.h"
 #include "esp_log.h"
 #include "mqtt_client.h"
+#include "units.h"
 
 #include <atomic>
 #include <string>
@@ -24,6 +25,13 @@ constexpr char SW_VERSION[] = "1.0.0";
 
 constexpr int QOS_AT_LEAST_ONCE = 1;
 constexpr int RETAIN            = 1;
+
+constexpr char HA_STATUS_TOPIC[] = "homeassistant/status";
+
+constexpr int KEEPALIVE_S     = 30;
+constexpr int RECONNECT_MS    = 5 * units::kMsPerSecond;
+constexpr int RX_BUFFER_BYTES = 2 * units::kBytesPerKiB;
+constexpr int TX_BUFFER_BYTES = 8 * units::kBytesPerKiB;
 
 esp_mqtt_client_handle_t s_client = nullptr;
 std::atomic<bool>        s_connected{false};
@@ -87,7 +95,7 @@ void dispatch(const std::string &topic, const std::string &payload)
         }
         return;
     }
-    if (topic == "homeassistant/status" && payload == "online") {
+    if (topic == HA_STATUS_TOPIC && payload == "online") {
         publish_discovery();
         s_force_publish.store(true, std::memory_order_relaxed);
     }
@@ -109,7 +117,7 @@ void on_mqtt_event(void *, esp_event_base_t, std::int32_t id, void *data)
             // natural reconnect, possibly days away.
             if (esp_mqtt_client_subscribe_single(s_client, s_topics.command.c_str(),
                                                  QOS_AT_LEAST_ONCE) < 0 ||
-                esp_mqtt_client_subscribe_single(s_client, "homeassistant/status",
+                esp_mqtt_client_subscribe_single(s_client, HA_STATUS_TOPIC,
                                                  QOS_AT_LEAST_ONCE) < 0) {
                 ESP_LOGW(TAG, "subscribing failed, starting the session over");
                 esp_mqtt_client_disconnect(s_client);
@@ -163,11 +171,11 @@ esp_err_t start(const Handlers &handlers, int brightness_floor)
     cfg.session.last_will.msg    = "offline";
     cfg.session.last_will.qos    = QOS_AT_LEAST_ONCE;
     cfg.session.last_will.retain = RETAIN;
-    cfg.session.keepalive        = 30;
+    cfg.session.keepalive        = KEEPALIVE_S;
 
-    cfg.network.reconnect_timeout_ms = 5000;
-    cfg.buffer.size     = 2048;
-    cfg.buffer.out_size = 8192;
+    cfg.network.reconnect_timeout_ms = RECONNECT_MS;
+    cfg.buffer.size                  = RX_BUFFER_BYTES;
+    cfg.buffer.out_size              = TX_BUFFER_BYTES;
 
     s_client = esp_mqtt_client_init(&cfg);
     ESP_RETURN_ON_FALSE(s_client != nullptr, ESP_FAIL, TAG, "init");

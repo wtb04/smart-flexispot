@@ -10,6 +10,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "travel_secrets.h"
+#include "units.h"
 #include "wifi.h"
 
 #ifndef TRAVEL_API_KEY
@@ -27,14 +28,24 @@ constexpr char TAG[] = "travel";
 
 // The answer is a few hundred bytes: the whole point of the service is that the
 // panel never meets a journey planner's own JSON.
-constexpr std::size_t BODY_MAX = 8 * 1024;
+constexpr std::size_t BODY_MAX = 8 * units::kBytesPerKiB;
 
 // Departures move, but only the imminent ones move in a way anybody acts on.
 // Far from the event the train is the whole answer and it hardly changes, so
 // asking every few minutes all evening would be asking for nothing.
-constexpr std::int64_t NEAR_REFRESH_US = 180 * 1000000LL;
-constexpr std::int64_t FAR_REFRESH_US  = 20 * 60 * 1000000LL;
-constexpr std::int64_t NEAR_SECONDS    = 90 * 60;
+constexpr std::int64_t NEAR_REFRESH_US = 3 * units::kUsPerMinute;
+constexpr std::int64_t FAR_REFRESH_US  = 20 * units::kUsPerMinute;
+constexpr std::int64_t NEAR_SECONDS    = 90 * units::kSecondsPerMinute;
+
+constexpr TickType_t CHECK_INTERVAL = pdMS_TO_TICKS(5 * units::kMsPerSecond);
+
+constexpr std::size_t URL_SIZE         = 176;
+constexpr int         HTTP_TIMEOUT_MS  = 15 * units::kMsPerSecond;
+constexpr int         HTTP_BUFFER_SIZE = units::kBytesPerKiB;
+constexpr int         HTTP_OK          = 200;
+
+constexpr char        HTTPS_PREFIX[]   = "https://";
+constexpr std::size_t HTTPS_PREFIX_LEN = sizeof(HTTPS_PREFIX) - 1;
 
 constexpr std::uint32_t TASK_STACK    = 5120;
 constexpr UBaseType_t   TASK_PRIORITY = 3;
@@ -77,27 +88,40 @@ esp_err_t on_event(esp_http_client_event_t *event)
     return ESP_OK;
 }
 
-bool fetch(std::int64_t arrive_by, Place place)
+esp_http_client_handle_t open_client(const char *url)
 {
-    char url[176];
-    std::snprintf(url, sizeof(url), "%s/v1/leave?arriveBy=%lld%s", TRAVEL_HOST,
-                  static_cast<long long>(arrive_by), place == Place::Work ? "&to=work" : "");
-
     esp_http_client_config_t cfg{};
     cfg.url           = url;
     cfg.event_handler = on_event;
-    cfg.timeout_ms    = 15000;
-    cfg.buffer_size   = 1024;
-    if (std::strncmp(TRAVEL_HOST, "https://", 8) == 0) {
+    cfg.timeout_ms    = HTTP_TIMEOUT_MS;
+    cfg.buffer_size   = HTTP_BUFFER_SIZE;
+    if (std::strncmp(TRAVEL_HOST, HTTPS_PREFIX, HTTPS_PREFIX_LEN) == 0) {
         cfg.crt_bundle_attach = esp_crt_bundle_attach;
     }
 
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
+    if (client != nullptr && TRAVEL_API_KEY[0] != '\0') {
+        esp_http_client_set_header(client, "X-Api-Key", TRAVEL_API_KEY);
+    }
+    return client;
+}
+
+void set_ok(bool ok)
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_ok = ok;
+    xSemaphoreGive(s_lock);
+}
+
+bool fetch(std::int64_t arrive_by, Place place)
+{
+    char url[URL_SIZE];
+    std::snprintf(url, sizeof(url), "%s/v1/leave?arriveBy=%lld%s", TRAVEL_HOST,
+                  static_cast<long long>(arrive_by), place == Place::Work ? "&to=work" : "");
+
+    esp_http_client_handle_t client = open_client(url);
     if (client == nullptr) {
         return false;
-    }
-    if (TRAVEL_API_KEY[0] != '\0') {
-        esp_http_client_set_header(client, "X-Api-Key", TRAVEL_API_KEY);
     }
 
     s_body_len = 0;
@@ -107,11 +131,9 @@ bool fetch(std::int64_t arrive_by, Place place)
     const int          status = err == ESP_OK ? esp_http_client_get_status_code(client) : 0;
     esp_http_client_cleanup(client);
 
-    if (status != 200) {
+    if (status != HTTP_OK) {
         ESP_LOGW(TAG, "%s", err == ESP_OK ? "refused" : esp_err_to_name(err));
-        xSemaphoreTake(s_lock, portMAX_DELAY);
-        s_ok = false;
-        xSemaphoreGive(s_lock);
+        set_ok(false);
         return false;
     }
 
@@ -125,7 +147,7 @@ bool fetch(std::int64_t arrive_by, Place place)
     xSemaphoreGive(s_lock);
 
     ESP_LOGI(TAG, "%d option%s in %d ms", found, found == 1 ? "" : "s",
-             static_cast<int>((esp_timer_get_time() - began) / 1000));
+             static_cast<int>((esp_timer_get_time() - began) / units::kUsPerMs));
     return true;
 }
 
@@ -150,7 +172,7 @@ bool fetch(std::int64_t arrive_by, Place place)
                 s_on_update();
             }
         }
-        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(5000));
+        ulTaskNotifyTake(pdTRUE, CHECK_INTERVAL);
     }
 }
 
@@ -184,8 +206,8 @@ void want(std::int64_t arrive_by, Place place)
         // Rounded to the minute so that asking again is the same question and
         // does not set off a fetch every time the page redraws.
         const auto soon = static_cast<std::int64_t>(std::time(nullptr)) +
-                          CONFIG_TRAVEL_FAKE_MINUTES * 60;
-        arrive_by = soon - soon % 60;
+                          CONFIG_TRAVEL_FAKE_MINUTES * units::kSecondsPerMinute;
+        arrive_by = soon - soon % units::kSecondsPerMinute;
     }
 #endif
     const bool moved = s_place.exchange(place, std::memory_order_relaxed) != place;

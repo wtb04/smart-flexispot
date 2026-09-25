@@ -16,6 +16,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "units.h"
 #include "wifi.h"
 
 #include <algorithm>
@@ -60,18 +61,23 @@ bool starts_with(const char *text, const char *prefix)
 
 // A timetable is not a live feed; it changes when somebody edits it, which is
 // rarely and never urgently.
-constexpr TickType_t POLL_INTERVAL = pdMS_TO_TICKS(30 * 60 * 1000);
+constexpr TickType_t POLL_INTERVAL = pdMS_TO_TICKS(30 * units::kMsPerMinute);
 
 // The work calendar is 158 kB, the timetable feeds 22 kB at most. In PSRAM.
-constexpr std::size_t BODY_MAX = 256 * 1024;
-
-// Nothing is fetched until the clock is right, or every event is filed against
-// 1970 and the page shows the wrong things in the wrong order.
+constexpr std::size_t BODY_MAX = 256 * units::kBytesPerKiB;
 
 // A feed that did not come back is usually the network still coming up, or a
 // server hanging up early; neither is worth half an hour of silence.
-constexpr TickType_t RETRY_INTERVAL     = pdMS_TO_TICKS(20 * 1000);
-constexpr TickType_t MAX_RETRY_INTERVAL = pdMS_TO_TICKS(5 * 60 * 1000);
+constexpr TickType_t RETRY_INTERVAL     = pdMS_TO_TICKS(20 * units::kMsPerSecond);
+constexpr TickType_t MAX_RETRY_INTERVAL = pdMS_TO_TICKS(5 * units::kMsPerMinute);
+constexpr int        MAX_BACKOFF_STEPS  = 4;
+
+constexpr TickType_t NOT_READY_WAIT = pdMS_TO_TICKS(2 * units::kMsPerSecond);
+
+constexpr std::size_t URL_SIZE         = 256;
+constexpr int         HTTP_TIMEOUT_MS  = 15 * units::kMsPerSecond;
+constexpr int         HTTP_BUFFER_SIZE = 2 * units::kBytesPerKiB;
+constexpr int         HTTP_OK          = 200;
 
 constexpr std::uint32_t TASK_STACK    = 6144;
 constexpr UBaseType_t   TASK_PRIORITY = 3;
@@ -110,13 +116,24 @@ esp_err_t on_event(esp_http_client_event_t *event)
     return ESP_OK;
 }
 
+int keep_only(Event *events, int count, const char *prefix)
+{
+    int kept = 0;
+    for (int i = 0; i < count; ++i) {
+        if (starts_with(events[i].summary, prefix)) {
+            events[kept++] = events[i];
+        }
+    }
+    return kept;
+}
+
 int fetch_feed(int index)
 {
     const Feed &feed = FEEDS[index];
     if (feed.url != nullptr && feed.url[0] == '\0') {
         return -1;  // not configured
     }
-    char url[256];
+    char url[URL_SIZE];
     if (feed.url != nullptr) {
         std::snprintf(url, sizeof(url), "%s", feed.url);
     } else {
@@ -126,8 +143,8 @@ int fetch_feed(int index)
     esp_http_client_config_t cfg{};
     cfg.url               = url;
     cfg.event_handler     = on_event;
-    cfg.timeout_ms        = 15000;
-    cfg.buffer_size       = 2048;
+    cfg.timeout_ms        = HTTP_TIMEOUT_MS;
+    cfg.buffer_size       = HTTP_BUFFER_SIZE;
     cfg.crt_bundle_attach = esp_crt_bundle_attach;
 
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
@@ -135,28 +152,34 @@ int fetch_feed(int index)
         return -1;
     }
 
-    s_body_len   = 0;
-    s_body[0]    = '\0';
-    esp_err_t err = esp_http_client_perform(client);
-    const int status = err == ESP_OK ? esp_http_client_get_status_code(client) : 0;
+    s_body_len             = 0;
+    s_body[0]              = '\0';
+    const esp_err_t err    = esp_http_client_perform(client);
+    const int       status = err == ESP_OK ? esp_http_client_get_status_code(client) : 0;
     esp_http_client_cleanup(client);
 
-    if (status != 200) {
+    if (status != HTTP_OK) {
         ESP_LOGW(TAG, "%s: %s", feed.name,
                  err == ESP_OK ? "refused" : esp_err_to_name(err));
         return -1;
     }
-    int count = parse(s_body, s_body_len, static_cast<std::uint8_t>(index), s_scratch, kMaxEvents);
-    if (feed.keep != nullptr) {
-        int kept = 0;
-        for (int i = 0; i < count; ++i) {
-            if (starts_with(s_scratch[i].summary, feed.keep)) {
-                s_scratch[kept++] = s_scratch[i];
-            }
+    const int count =
+        parse(s_body, s_body_len, static_cast<std::uint8_t>(index), s_scratch, kMaxEvents);
+    return feed.keep != nullptr ? keep_only(s_scratch, count, feed.keep) : count;
+}
+
+int keep_previous(int feed, int &built)
+{
+    int kept = 0;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    for (int e = 0; e < s_count && built < kMaxEvents; ++e) {
+        if (s_events[e].feed == feed) {
+            s_building[built++] = s_events[e];
+            ++kept;
         }
-        count = kept;
     }
-    return count;
+    xSemaphoreGive(s_lock);
+    return kept;
 }
 
 // Each round is built aside and swapped in whole, and a feed that fails keeps
@@ -169,16 +192,8 @@ bool fetch_all()
         const std::int64_t began = esp_timer_get_time();
         const int          n     = fetch_feed(i);
         if (n < 0) {
-            all_ok   = false;
-            int kept = 0;
-            xSemaphoreTake(s_lock, portMAX_DELAY);
-            for (int e = 0; e < s_count && built < kMaxEvents; ++e) {
-                if (s_events[e].feed == i) {
-                    s_building[built++] = s_events[e];
-                    ++kept;
-                }
-            }
-            xSemaphoreGive(s_lock);
+            all_ok         = false;
+            const int kept = keep_previous(i, built);
             ESP_LOGW(TAG, "%s: keeping the %d events from before", FEEDS[i].name, kept);
             continue;
         }
@@ -186,7 +201,7 @@ bool fetch_all()
         std::memcpy(s_building + built, s_scratch, sizeof(Event) * static_cast<std::size_t>(take));
         built += take;
         ESP_LOGI(TAG, "%s: %d events in %d ms", FEEDS[i].name, take,
-                 static_cast<int>((esp_timer_get_time() - began) / 1000));
+                 static_cast<int>((esp_timer_get_time() - began) / units::kUsPerMs));
     }
 
     std::sort(s_building, s_building + built,
@@ -202,20 +217,28 @@ bool fetch_all()
     return all_ok;
 }
 
+// Each failed round waits twice as long as the last, up to five minutes: a
+// host that is down gets a handful of handshakes, not a stream.
+TickType_t wait_after(int failures)
+{
+    if (failures == 0) {
+        return POLL_INTERVAL;
+    }
+    return std::min<TickType_t>(RETRY_INTERVAL << (failures - 1), MAX_RETRY_INTERVAL);
+}
+
 [[noreturn]] void ical_task(void *)
 {
     for (;;) {
+        // Nothing is fetched until the clock is right, or every event is filed
+        // against 1970 and the page shows the wrong things in the wrong order.
         if (!rtc::plausible(std::time(nullptr)) || !wifi::connected()) {
-            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(2000));
+            ulTaskNotifyTake(pdTRUE, NOT_READY_WAIT);
             continue;
         }
-        // Each failed round waits twice as long as the last, up to five minutes:
-        // a host that is down gets a handful of handshakes, not a stream.
         static int failures = 0;
-        failures            = fetch_all() ? 0 : std::min(failures + 1, 4);
-        ulTaskNotifyTake(pdTRUE, failures == 0 ? POLL_INTERVAL
-                                               : std::min<TickType_t>(RETRY_INTERVAL << (failures - 1),
-                                                                      MAX_RETRY_INTERVAL));
+        failures = fetch_all() ? 0 : std::min(failures + 1, MAX_BACKOFF_STEPS);
+        ulTaskNotifyTake(pdTRUE, wait_after(failures));
     }
 }
 

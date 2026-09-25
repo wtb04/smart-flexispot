@@ -7,9 +7,9 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
-#include "jpeg.h"
-
 #include "esp_heap_caps.h"
+#include "jpeg.h"
+#include "units.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -18,6 +18,20 @@
 namespace media {
 namespace {
 constexpr char TAG[] = "media";
+
+constexpr int HTTP_TIMEOUT_MS  = 8 * units::kMsPerSecond;
+constexpr int HTTP_BUFFER_SIZE = 2 * units::kBytesPerKiB;
+constexpr int HTTP_OK          = 200;
+
+constexpr std::size_t PATH_SIZE   = 320;
+constexpr std::size_t ORIGIN_SIZE = 96;
+constexpr std::size_t URL_SIZE    = 512;
+
+// One shown while the next is drawn into.
+constexpr int ART_BUFFERS = 2;
+
+// Also how soon a failed cover is looked at again.
+constexpr TickType_t WAKE_INTERVAL = pdMS_TO_TICKS(10 * units::kMsPerSecond);
 
 Status       s_status{};
 portMUX_TYPE s_status_lock = portMUX_INITIALIZER_UNLOCKED;
@@ -48,28 +62,34 @@ StackType_t *s_task_stack = nullptr;
 
 ArtHandler s_on_art = nullptr;
 
-std::uint8_t *s_body = nullptr;  // the cover as downloaded
-std::uint16_t *s_art[2] = {nullptr, nullptr};
-int            s_next   = 0;
+std::uint8_t  *s_body = nullptr;  // the cover as downloaded
+std::uint16_t *s_art[ART_BUFFERS] = {};
+int            s_next             = 0;
 
-char              s_wanted[320] = {};
-char              s_loaded[320] = {};
-SemaphoreHandle_t s_lock        = nullptr;
+char              s_wanted[PATH_SIZE] = {};
+char              s_loaded[PATH_SIZE] = {};
+SemaphoreHandle_t s_lock              = nullptr;
 StaticSemaphore_t s_lock_ctrl;
 
-TaskHandle_t      s_task = nullptr;
+TaskHandle_t s_task = nullptr;
 
-char s_origin[96] = {};
+char s_origin[ORIGIN_SIZE] = {};
+
+void copy_path(char *dest, const char *path)
+{
+    std::strncpy(dest, path, PATH_SIZE);
+    dest[PATH_SIZE - 1] = '\0';
+}
 
 std::size_t download(const char *path)
 {
-    char url[512];
+    char url[URL_SIZE];
     std::snprintf(url, sizeof(url), "%s%s", s_origin, path);
 
     esp_http_client_config_t cfg{};
-    cfg.url             = url;
-    cfg.timeout_ms      = 8000;
-    cfg.buffer_size     = 2048;
+    cfg.url                   = url;
+    cfg.timeout_ms            = HTTP_TIMEOUT_MS;
+    cfg.buffer_size           = HTTP_BUFFER_SIZE;
     cfg.disable_auto_redirect = false;
 
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
@@ -81,7 +101,7 @@ std::size_t download(const char *path)
     if (esp_http_client_open(client, 0) == ESP_OK) {
         const int64_t length = esp_http_client_fetch_headers(client);
         const int     status = esp_http_client_get_status_code(client);
-        if (status == 200 && length <= static_cast<int64_t>(jpeg::kMaxInput)) {
+        if (status == HTTP_OK && length <= static_cast<int64_t>(jpeg::kMaxInput)) {
             while (total < jpeg::kMaxInput) {
                 const int read = esp_http_client_read(client, reinterpret_cast<char *>(s_body + total),
                                                       static_cast<int>(jpeg::kMaxInput - total));
@@ -148,7 +168,7 @@ void take_cover(const jpeg::Picture &picture, void *)
     } else {
         shrink(static_cast<const std::uint16_t *>(picture.pixels), from, picture.stride, art);
     }
-    s_next          = 1 - s_next;
+    s_next          = (s_next + 1) % ART_BUFFERS;
     s_last_hardware = picture.hardware;
     ESP_LOGI(TAG, "cover %dx%d%s%s -> %d, stack left %u", picture.width, picture.height,
              picture.grey ? " grey" : "", picture.hardware ? "" : " in software", kArtSize,
@@ -169,22 +189,30 @@ bool decode(std::size_t bytes)
 
 // A cover that failed is tried again, the wait doubling each time, rather than
 // left blank until the track changes.
-constexpr std::int64_t RETRY_FIRST_US = 20 * 1000000LL;
-constexpr std::int64_t RETRY_MAX_US   = 5 * 60 * 1000000LL;
+constexpr std::int64_t RETRY_FIRST_US = 20 * units::kUsPerSecond;
+constexpr std::int64_t RETRY_MAX_US   = 5 * units::kUsPerMinute;
+
+void clear_art()
+{
+    std::strcpy(s_loaded, "");
+    record(false, false, false, true, -1);
+    if (s_on_art != nullptr) {
+        s_on_art(Art::None, nullptr);
+    }
+}
 
 [[noreturn]] void media_task(void *)
 {
-    char         failed[sizeof(s_wanted)] = {};
-    std::int64_t retry_at                 = 0;
-    std::int64_t retry_wait               = RETRY_FIRST_US;
+    char         failed[PATH_SIZE] = {};
+    std::int64_t retry_at          = 0;
+    std::int64_t retry_wait        = RETRY_FIRST_US;
 
     for (;;) {
-        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(10000));
+        ulTaskNotifyTake(pdTRUE, WAKE_INTERVAL);
 
-        char wanted[sizeof(s_wanted)];
+        char wanted[PATH_SIZE];
         xSemaphoreTake(s_lock, portMAX_DELAY);
-        std::strncpy(wanted, s_wanted, sizeof(wanted));
-        wanted[sizeof(wanted) - 1] = '\0';
+        copy_path(wanted, s_wanted);
         xSemaphoreGive(s_lock);
 
         if (std::strcmp(wanted, s_loaded) == 0) {
@@ -196,11 +224,7 @@ constexpr std::int64_t RETRY_MAX_US   = 5 * 60 * 1000000LL;
         }
         ESP_LOGD(TAG, "cover path changed");
         if (wanted[0] == '\0') {
-            std::strcpy(s_loaded, "");
-            record(false, false, false, true, -1);
-            if (s_on_art != nullptr) {
-                s_on_art(Art::None, nullptr);
-            }
+            clear_art();
             continue;
         }
 
@@ -208,19 +232,17 @@ constexpr std::int64_t RETRY_MAX_US   = 5 * 60 * 1000000LL;
         const std::size_t  bytes = download(wanted);
         const bool         got   = bytes > 0 && decode(bytes);
         record(true, true, got, s_last_hardware,
-               got ? static_cast<int>((esp_timer_get_time() - began) / 1000) : -1);
+               got ? static_cast<int>((esp_timer_get_time() - began) / units::kUsPerMs) : -1);
 
         if (got) {
-            std::strncpy(s_loaded, wanted, sizeof(s_loaded));
-            s_loaded[sizeof(s_loaded) - 1] = '\0';
+            copy_path(s_loaded, wanted);
             failed[0]  = '\0';
             retry_wait = RETRY_FIRST_US;
             continue;
         }
         if (!again) {
-            std::strncpy(failed, wanted, sizeof(failed));
-            failed[sizeof(failed) - 1] = '\0';
-            retry_wait                 = RETRY_FIRST_US;
+            copy_path(failed, wanted);
+            retry_wait = RETRY_FIRST_US;
             if (s_on_art != nullptr) {
                 s_on_art(Art::Failed, nullptr);
             }
@@ -228,7 +250,8 @@ constexpr std::int64_t RETRY_MAX_US   = 5 * 60 * 1000000LL;
             retry_wait = std::min(retry_wait * 2, RETRY_MAX_US);
         }
         retry_at = esp_timer_get_time() + retry_wait;
-        ESP_LOGW(TAG, "cover failed, trying again in %d s", static_cast<int>(retry_wait / 1000000));
+        ESP_LOGW(TAG, "cover failed, trying again in %d s",
+                 static_cast<int>(retry_wait / units::kUsPerSecond));
     }
 }
 
@@ -246,7 +269,7 @@ esp_err_t start(const char *origin, ArtHandler on_art)
 
     for (auto &buffer : s_art) {
         buffer = static_cast<std::uint16_t *>(
-            heap_caps_malloc(kArtSize * kArtSize * 2, MALLOC_CAP_SPIRAM));
+            heap_caps_malloc(kArtSize * kArtSize * sizeof(std::uint16_t), MALLOC_CAP_SPIRAM));
         ESP_RETURN_ON_FALSE(buffer != nullptr, ESP_ERR_NO_MEM, TAG, "art buffer");
     }
 
@@ -265,10 +288,10 @@ void set_art_path(const char *path)
         return;
     }
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    const bool changed = std::strncmp(s_wanted, path != nullptr ? path : "", sizeof(s_wanted)) != 0;
+    const char *wanted  = path != nullptr ? path : "";
+    const bool  changed = std::strncmp(s_wanted, wanted, sizeof(s_wanted)) != 0;
     if (changed) {
-        std::strncpy(s_wanted, path != nullptr ? path : "", sizeof(s_wanted));
-        s_wanted[sizeof(s_wanted) - 1] = '\0';
+        copy_path(s_wanted, wanted);
     }
     xSemaphoreGive(s_lock);
 
@@ -276,7 +299,6 @@ void set_art_path(const char *path)
         xTaskNotifyGive(s_task);
     }
 }
-
 
 Status status()
 {

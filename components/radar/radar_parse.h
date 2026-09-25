@@ -3,20 +3,29 @@
 #include <cstddef>
 
 namespace radar {
-inline constexpr int kHexLen    = 8;
-inline constexpr int kFlightLen = 10;
-inline constexpr int kTypeLen   = 8;
-inline constexpr int kRegLen    = 10;
-inline constexpr int kDescLen   = 28;
+inline constexpr int kHexLen      = 8;
+inline constexpr int kFlightLen   = 10;
+inline constexpr int kTypeLen     = 8;
+inline constexpr int kRegLen      = 10;
+inline constexpr int kDescLen     = 28;
+inline constexpr int kCategoryLen = 4;
+
+inline constexpr int kAirlineLen      = 36;
+inline constexpr int kAirportCodeLen  = 8;
+inline constexpr int kCityLen         = 28;
+inline constexpr int kOwnerLen        = 36;
+inline constexpr int kManufacturerLen = 20;
+inline constexpr int kModelLen        = 28;
+inline constexpr int kPhotoUrlLen     = 160;
 
 struct Aircraft {
     char  hex[kHexLen];
-    char  flight[kFlightLen];  // callsign, trailing padding removed
-    char  type[kTypeLen];      // ICAO type, "A320" and the like
-    char  reg[kRegLen];        // tail number
-    char  desc[kDescLen];      // "BOEING 737-800" and the like
-    char  category[4];         // ADS-B emitter class, "A3" and the like
-    int   squawk;              // -1 when not reported
+    char  flight[kFlightLen];      // callsign, trailing padding removed
+    char  type[kTypeLen];          // ICAO type, "A320" and the like
+    char  reg[kRegLen];            // tail number
+    char  desc[kDescLen];          // "BOEING 737-800" and the like
+    char  category[kCategoryLen];  // ADS-B emitter class, "A3" and the like
+    int   squawk;                  // -1 when not reported
     float lat;
     float lon;
     float distance_nm;
@@ -29,15 +38,15 @@ struct Aircraft {
 };
 
 struct Details {
-    char airline[36];
-    char origin_code[8];  // IATA
-    char origin_city[28];
-    char dest_code[8];
-    char dest_city[28];
-    char owner[36];
-    char manufacturer[20];
-    char model[28];
-    char photo_url[160];
+    char airline[kAirlineLen];
+    char origin_code[kAirportCodeLen];  // IATA
+    char origin_city[kCityLen];
+    char dest_code[kAirportCodeLen];
+    char dest_city[kCityLen];
+    char owner[kOwnerLen];
+    char manufacturer[kManufacturerLen];
+    char model[kModelLen];
+    char photo_url[kPhotoUrlLen];
     bool has_route;
     bool has_aircraft;
     bool photo_checked;  // the photo database has been asked, whatever it said

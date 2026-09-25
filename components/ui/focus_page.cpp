@@ -48,6 +48,7 @@ constexpr std::int32_t RAIL           = 4;
 constexpr std::int32_t BLANK_W        = 48;
 constexpr std::int32_t BLANK_H        = 12;
 constexpr std::int32_t RUNNER         = 12;
+constexpr std::int32_t LENGTH_DOT     = 10;
 constexpr std::uint8_t RAIL_AHEAD_INK = 70;  // parts of the ink in 255, the rest the card's
 
 // As last told; until then, the plan as it stands at boot.
@@ -80,11 +81,14 @@ struct Stop {  // a part of the set, or with the last, its end
     lv_obj_t *blank = nullptr;  // where the time goes, until there is one
     lv_obj_t *node  = nullptr;
     lv_obj_t *name  = nullptr;
-    lv_obj_t *mins  = nullptr;
     lv_obj_t *rail  = nullptr;  // on to the next stop
     lv_obj_t *run   = nullptr;  // how far down it the part has got
 };
 Stop         s_stop[STOPS_MAX];
+
+// How long each kind of part lasts, said once under the stops.
+enum Length { FOCUS_LENGTH, BREAK_LENGTH, LONG_BREAK_LENGTH, LENGTH_COUNT };
+lv_obj_t *s_length[LENGTH_COUNT] = {};
 lv_obj_t    *s_runner   = nullptr;  // the dot going down the part under way
 std::int32_t s_set_h    = 0;
 std::int32_t s_pitch    = 0;
@@ -420,8 +424,7 @@ void build_dial(lv_obj_t *parent, std::int32_t w, std::int32_t h)
     build_corners(card, inner, inner_h);
 }
 
-void build_stop(lv_obj_t *set, Stop &stop, std::int32_t rail_x, std::int32_t text_x,
-                std::int32_t inner)
+void build_stop(lv_obj_t *set, Stop &stop, std::int32_t rail_x, std::int32_t text_x)
 {
     stop.when = theme::make_label(set, "", theme::text, theme::type_body());
     lv_obj_set_width(stop.when, TIME_W);
@@ -434,10 +437,34 @@ void build_stop(lv_obj_t *set, Stop &stop, std::int32_t rail_x, std::int32_t tex
     lv_obj_set_x(stop.node, rail_x - NODE / 2);
     stop.name = theme::make_label(set, "", theme::text, theme::type_body());
     lv_obj_set_x(stop.name, text_x);
-    stop.mins = theme::make_label(set, "", theme::secondary, theme::type_label());
-    lv_obj_set_width(stop.mins, inner - text_x);
-    lv_obj_set_style_text_align(stop.mins, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_obj_set_x(stop.mins, text_x);
+}
+
+// A column each: the kind of part with its colour, and how long it lasts.
+void build_lengths(lv_obj_t *card, std::int32_t y, std::int32_t w)
+{
+    static const char *const NAMES[LENGTH_COUNT] = {"FOCUS", "BREAK", "LONG"};
+    const std::int32_t       column_w = w / LENGTH_COUNT;
+    for (int i = 0; i < LENGTH_COUNT; ++i) {
+        const std::int32_t x   = i * column_w;
+        lv_obj_t          *dot = make_dot(card, theme::green, LENGTH_DOT);
+        theme::fill_accent_or(dot, i == FOCUS_LENGTH, theme::green);
+        lv_obj_set_pos(dot, x, y + (theme::type_label()->line_height - LENGTH_DOT) / 2);
+        lv_obj_t *name = theme::make_eyebrow(card, NAMES[i]);
+        lv_obj_set_pos(name, x + LENGTH_DOT + theme::space::s, y);
+        s_length[i] = theme::make_label(card, "", theme::text, theme::type_value());
+        lv_obj_set_pos(s_length[i], x, y + theme::type_label()->line_height + theme::space::xs);
+    }
+}
+
+void show_lengths()
+{
+    const int minutes[LENGTH_COUNT] = {s_focus.work_min, s_focus.break_min,
+                                       s_focus.long_break_min};
+    char      text[16];
+    for (int i = 0; i < LENGTH_COUNT; ++i) {
+        std::snprintf(text, sizeof(text), "%d min", minutes[i]);
+        theme::set_text(s_length[i], text);
+    }
 }
 
 void build_set(lv_obj_t *parent, std::int32_t x, std::int32_t w, std::int32_t h)
@@ -450,8 +477,13 @@ void build_set(lv_obj_t *parent, std::int32_t x, std::int32_t w, std::int32_t h)
     lv_obj_align(theme::make_eyebrow(card, "THE SET"), LV_ALIGN_TOP_LEFT, 0, 0);
 
     const std::int32_t top = theme::type_label()->line_height + theme::space::l;
-    lv_obj_t          *set = clear_box(card);
-    s_set_h                = inner_h - top;
+    const std::int32_t lengths_h =
+        theme::type_label()->line_height + theme::space::xs + theme::type_value()->line_height;
+    const std::int32_t lengths_y = inner_h - lengths_h;
+    build_lengths(card, lengths_y, inner);
+
+    lv_obj_t *set = clear_box(card);
+    s_set_h       = lengths_y - theme::space::l - top;
     lv_obj_set_pos(set, 0, top);
     lv_obj_set_size(set, inner, s_set_h);
 
@@ -467,7 +499,7 @@ void build_set(lv_obj_t *parent, std::int32_t x, std::int32_t w, std::int32_t h)
         lv_obj_set_size(stop.run, RAIL, 0);
     }
     for (Stop &stop : s_stop) {
-        build_stop(set, stop, rail_x, text_x, inner);
+        build_stop(set, stop, rail_x, text_x);
     }
     s_runner = make_dot(set, theme::text, RUNNER);
     lv_obj_set_x(s_runner, rail_x - RUNNER / 2);
@@ -481,7 +513,7 @@ void lay_out_stops(int count, std::int32_t pitch)
     for (int i = 0; i < STOPS_MAX; ++i) {
         Stop      &stop = s_stop[i];
         const bool real = i <= count;
-        for (lv_obj_t *obj : {stop.when, stop.blank, stop.node, stop.name, stop.mins, stop.rail}) {
+        for (lv_obj_t *obj : {stop.when, stop.blank, stop.node, stop.name, stop.rail}) {
             lv_obj_set_hidden(obj, !real);
         }
         if (!real) {
@@ -492,7 +524,6 @@ void lay_out_stops(int count, std::int32_t pitch)
         lv_obj_set_y(stop.blank, y + (line - BLANK_H) / 2);
         lv_obj_set_y(stop.node, y + (line - NODE) / 2);
         lv_obj_set_y(stop.name, y);
-        lv_obj_set_y(stop.mins, y + (line - theme::type_label()->line_height) / 2);
         lv_obj_set_y(stop.rail, y + line / 2);
         lv_obj_set_height(stop.rail, pitch);
         lv_obj_set_hidden(stop.rail, i == count);
@@ -528,7 +559,6 @@ void show_start_times(int count, int at)
 
 void paint_stops(int count, int at)
 {
-    char text[24];
     for (int i = 0; i <= count; ++i) {
         Stop      &stop = s_stop[i];
         const bool end  = i == count;
@@ -537,12 +567,6 @@ void paint_stops(int count, int at)
         const auto ink  = ink_of(end || is_rest(i));
 
         theme::set_text(stop.name, end ? "Set done" : part_name(i));
-        if (end) {
-            theme::set_text(stop.mins, "");
-        } else {
-            std::snprintf(text, sizeof(text), "%d min", part_minutes(i));
-            theme::set_text(stop.mins, text);
-        }
         theme::set_text_color(stop.name, now ? ink : theme::text);
 
         lv_obj_set_style_bg_color(stop.node, lv_color_hex(done || now ? ink : theme::panel_light),
@@ -554,7 +578,7 @@ void paint_stops(int count, int at)
             lv_color_mix(lv_color_hex(ink), lv_color_hex(theme::panel_light), RAIL_AHEAD_INK);
         lv_obj_set_style_bg_color(stop.rail, done ? lv_color_hex(ink) : ahead, 0);
         lv_obj_set_style_bg_color(stop.run, lv_color_hex(ink), 0);
-        for (lv_obj_t *obj : {stop.when, stop.name, stop.mins}) {
+        for (lv_obj_t *obj : {stop.when, stop.name}) {
             lv_obj_set_style_opa(obj, done ? LV_OPA_40 : LV_OPA_COVER, 0);
         }
     }
@@ -572,6 +596,7 @@ void show_set()
     const int at = part_index();
     show_start_times(count, at);
     paint_stops(count, at);
+    show_lengths();
 }
 
 const char *phase_name(FocusPhase phase)

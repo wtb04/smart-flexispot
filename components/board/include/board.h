@@ -7,9 +7,7 @@ namespace board {
  *  call. flipped hangs the panel the other way up. */
 esp_err_t init(bool flipped);
 
-/** Turns the picture and the touchscreen over together. Call with the LVGL
- *  lock held. */
-/** From any task. */
+/** Turns the picture and the touchscreen over together. From any task. */
 void set_flipped(bool flipped);
 
 /** Panel backlight, 0-100. */
@@ -26,7 +24,6 @@ esp_err_t display_on(int percent);
  *  the MIPI link last left it, so anything that ends the program -- a restart,
  *  above all -- has to put it to sleep rather than only dim it. */
 esp_err_t display_off();
-
 
 /** Below this the panel does not get any dimmer, so offering the range is just a
  *  control that appears broken. */

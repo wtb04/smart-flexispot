@@ -5,6 +5,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "nvs.h"
+#include "units.h"
 
 #include <algorithm>
 #include <atomic>
@@ -14,6 +15,8 @@ namespace settings {
 namespace {
 constexpr char TAG[]       = "settings";
 constexpr char NAMESPACE[] = "panel";
+
+constexpr int MAX_RGB = 0xffffff;
 
 struct Spec {
     const char *name;  // NVS keys are limited to 15 characters
@@ -28,7 +31,7 @@ constexpr Spec SPECS[] = {
     {"volume", 60, 0, 100},
     {"presence_gate", 1, 0, 1},
     {"desk_over_ble", 1, 0, 1},
-    {"accent", 0, 0, 0xffffff},
+    {"accent", 0, 0, MAX_RGB},
     {"rail_right", 0, 0, 1},
     {"flipped", 0, 0, 1},
     {"orient_auto", 0, 0, 1},
@@ -47,7 +50,7 @@ static_assert(std::size(SPECS) == COUNT, "every key needs a spec");
 std::atomic<int>           s_value[COUNT];
 std::atomic<std::uint32_t> s_dirty{0};
 
-constexpr TickType_t SETTLE = pdMS_TO_TICKS(2000);
+constexpr TickType_t SETTLE = pdMS_TO_TICKS(2 * units::kMsPerSecond);
 
 constexpr std::uint32_t TASK_STACK    = 2048;  // measured: uses 0.3 KB
 constexpr UBaseType_t   TASK_PRIORITY = 1;

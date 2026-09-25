@@ -16,11 +16,11 @@ enum class Link : std::uint8_t {
     Bluetooth,  // through the companion
 };
 
-/** How the desk shows itself. Each may be null. Called from the desk's own
- *  tasks, so each must return at once. */
 /** What a notice is: something done, or something to know. */
 enum class Tone : std::uint8_t { Done, Hint };
 
+/** How the desk shows itself. Each may be null. Called from the desk's own
+ *  tasks, so each must return at once. */
 struct View {
     void (*preset_active)(int index, bool active);
     void (*height)(int height_mm);  // negative when not known

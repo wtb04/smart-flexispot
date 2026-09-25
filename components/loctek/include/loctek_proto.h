@@ -1,15 +1,27 @@
 #pragma once
 
 #include <array>
+#include <climits>
 #include <cstdint>
 #include <optional>
 #include <span>
 
 namespace loctek {
-inline constexpr std::uint8_t kStart    = 0x9b;
-inline constexpr std::uint8_t kEnd      = 0x9d;
-inline constexpr std::size_t  kMaxFrame = 16;
-inline constexpr std::size_t  kMinFrame = 6;
+/** A frame is the start byte, a length, a type, the payload, a CRC high byte
+ *  first, and the end byte. The length counts every byte after itself, and the
+ *  CRC covers the length, the type and the payload. */
+inline constexpr std::uint8_t kStart = 0x9b;
+inline constexpr std::uint8_t kEnd   = 0x9d;
+
+inline constexpr std::size_t kLengthAt       = 1;
+inline constexpr std::size_t kTypeAt         = 2;
+inline constexpr std::size_t kPayloadAt      = 3;
+inline constexpr std::size_t kUncountedBytes = kLengthAt + 1;
+inline constexpr std::size_t kCrcBytes       = 2;
+inline constexpr std::size_t kTrailerBytes   = kCrcBytes + 1;
+
+inline constexpr std::size_t kMaxFrame = 16;
+inline constexpr std::size_t kMinFrame = kPayloadAt + kTrailerBytes;
 
 enum class FrameType : std::uint8_t {
     Key       = 0x02,
@@ -44,7 +56,8 @@ constexpr Key key_for(Preset preset)
     return Key::None;
 }
 
-using KeyFrame = std::array<std::uint8_t, 8>;
+/** A Key frame's payload is the key bitmask, low byte first. */
+using KeyFrame = std::array<std::uint8_t, kMinFrame + sizeof(Key)>;
 
 enum class Move : std::int8_t {
     Stop = 0,
@@ -68,29 +81,58 @@ constexpr Move steer(int target_mm, int height_mm, Move current, int stop_early_
     return away > 0 ? Move::Up : Move::Down;
 }
 
+constexpr std::uint8_t low_byte(std::uint16_t value)
+{
+    return static_cast<std::uint8_t>(value);
+}
+
+constexpr std::uint8_t high_byte(std::uint16_t value)
+{
+    return static_cast<std::uint8_t>(value >> CHAR_BIT);
+}
+
+/** CRC-16/MODBUS. */
+inline constexpr std::uint16_t kCrcInitial    = 0xffff;
+inline constexpr std::uint16_t kCrcPolynomial = 0xa001;  // 0x8005, bit-reversed
+
 constexpr std::uint16_t crc16(std::span<const std::uint8_t> data)
 {
-    std::uint16_t crc = 0xffff;
+    std::uint16_t crc = kCrcInitial;
     for (std::uint8_t byte : data) {
         crc ^= byte;
-        for (int bit = 0; bit < 8; ++bit) {
-            crc = (crc & 1) ? static_cast<std::uint16_t>((crc >> 1) ^ 0xa001)
+        for (int bit = 0; bit < CHAR_BIT; ++bit) {
+            crc = (crc & 1) ? static_cast<std::uint16_t>((crc >> 1) ^ kCrcPolynomial)
                             : static_cast<std::uint16_t>(crc >> 1);
         }
     }
     return crc;
 }
 
+constexpr std::size_t crc_offset(std::size_t frame_size)
+{
+    return frame_size - kTrailerBytes;
+}
+
+constexpr std::span<const std::uint8_t> crc_covered(std::span<const std::uint8_t> frame)
+{
+    return frame.subspan(kLengthAt, crc_offset(frame.size()) - kLengthAt);
+}
+
 constexpr KeyFrame build_key_frame(Key key)
 {
     const auto mask = static_cast<std::uint16_t>(key);
-    KeyFrame   frame{kStart, 0x06, static_cast<std::uint8_t>(FrameType::Key),
-                     static_cast<std::uint8_t>(mask & 0xff),
-                     static_cast<std::uint8_t>(mask >> 8), 0, 0, kEnd};
+    KeyFrame   frame{};
+    frame.front()         = kStart;
+    frame[kLengthAt]      = static_cast<std::uint8_t>(frame.size() - kUncountedBytes);
+    frame[kTypeAt]        = static_cast<std::uint8_t>(FrameType::Key);
+    frame[kPayloadAt]     = low_byte(mask);
+    frame[kPayloadAt + 1] = high_byte(mask);
+    frame.back()          = kEnd;
 
-    const std::uint16_t crc = crc16(std::span<const std::uint8_t>(frame).subspan(1, 4));
-    frame[5] = static_cast<std::uint8_t>(crc >> 8);
-    frame[6] = static_cast<std::uint8_t>(crc & 0xff);
+    const std::uint16_t crc = crc16(crc_covered(frame));
+    const std::size_t   at  = crc_offset(frame.size());
+    frame[at]               = high_byte(crc);
+    frame[at + 1]           = low_byte(crc);
     return frame;
 }
 
@@ -104,12 +146,12 @@ public:
         len_ = static_cast<std::uint8_t>(bytes.size());
     }
 
-    FrameType type() const { return static_cast<FrameType>(bytes_[2]); }
+    FrameType type() const { return static_cast<FrameType>(bytes_[kTypeAt]); }
     std::size_t size() const { return len_; }
 
     std::span<const std::uint8_t> payload() const
     {
-        return std::span<const std::uint8_t>(bytes_).subspan(3, len_ - kMinFrame);
+        return std::span<const std::uint8_t>(bytes_).subspan(kPayloadAt, len_ - kMinFrame);
     }
 
 private:

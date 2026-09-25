@@ -10,18 +10,20 @@
 #include "freertos/task.h"
 #include "host/ble_gatt.h"
 #include "host/ble_hs.h"
+#include "units.h"
 
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstring>
+#include <limits>
 
 namespace ble::proxy {
 namespace {
 constexpr char TAG[]  = "desklink";
 constexpr const char *NAME = deskproto::kDeviceName;
 
-constexpr ble_uuid128_t uuid128(const std::array<std::uint8_t, 16> &bytes)
+constexpr ble_uuid128_t uuid128(const deskproto::Uuid128 &bytes)
 {
     ble_uuid128_t uuid{};
     uuid.u.type = BLE_UUID_TYPE_128;
@@ -34,11 +36,17 @@ constexpr ble_uuid128_t uuid128(const std::array<std::uint8_t, 16> &bytes)
 constexpr ble_uuid128_t SERVICE_UUID = uuid128(deskproto::kServiceUuid);
 constexpr ble_uuid128_t ECHO_UUID    = uuid128(deskproto::kEchoUuid);
 
-constexpr std::uint16_t ITVL_MIN_UNITS = 6;   // 7.5 ms, the floor the spec allows
-constexpr std::uint16_t ITVL_MAX_UNITS = 8;   // 10 ms
-constexpr std::uint16_t SUPERVISION_UNITS = 400;  // 4 s, in 10 ms units
+// Connection intervals count 1.25 ms, supervision timeouts 10 ms.
+constexpr int           CONN_ITVL_UNIT_US = 1250;
+constexpr std::uint16_t ITVL_MIN_UNITS    = 6;    // 7.5 ms, the floor the spec allows
+constexpr std::uint16_t ITVL_MAX_UNITS    = 8;    // 10 ms
+constexpr std::uint16_t SUPERVISION_UNITS = 400;  // 4 s
 
-constexpr std::int64_t PROBE_TIMEOUT_US = 1000000;
+// Scanning flat out while connecting: a 10 ms window every 10 ms, in 0.625 ms.
+constexpr std::uint16_t CONNECT_SCAN_UNITS = 0x0010;
+constexpr std::int32_t  CONNECT_TIMEOUT_MS = 5000;
+
+constexpr std::int64_t PROBE_TIMEOUT_US = units::kUsPerSecond;
 
 std::uint16_t s_conn  = BLE_HS_CONN_HANDLE_NONE;
 std::uint16_t s_echo  = 0;
@@ -50,8 +58,19 @@ std::atomic<bool> s_up{false};
 
 // The proxy reports at least once a second; a link that says nothing for this
 // long is up in name only, and is dropped so the scanner finds it again.
-constexpr std::int64_t    SILENT_US = 5000000;
+constexpr std::int64_t    SILENT_US = 5 * units::kUsPerSecond;
 std::atomic<std::int64_t> s_heard_us{0};
+
+constexpr std::int64_t COMPLAINT_GAP_US = 5 * units::kUsPerSecond;
+
+// Written without a response, so a lost stop would go unnoticed.
+constexpr int STOP_SENDS = 2;
+
+constexpr std::uint32_t HOLD_TASK_STACK    = 2048;
+constexpr UBaseType_t   HOLD_TASK_PRIORITY = 5;
+
+constexpr int PERCENTILE = 99;
+constexpr int PERCENT    = 100;
 
 std::atomic<std::uint32_t> s_seq{0};
 std::atomic<std::int64_t>  s_sent_us{0};
@@ -84,7 +103,7 @@ bool send(deskproto::Op op, deskproto::Motion direction, std::uint8_t preset,
     xSemaphoreTake(s_send_lock, portMAX_DELAY);
     command.seq = s_seq.fetch_add(1, std::memory_order_relaxed) + 1;
 
-    std::uint8_t packet[deskproto::COMMAND_LEN];
+    std::uint8_t packet[deskproto::kCommandLen];
     deskproto::encode(command, packet);
 
     const bool timing = !s_waiting.exchange(true, std::memory_order_relaxed);
@@ -101,7 +120,7 @@ bool send(deskproto::Op op, deskproto::Motion direction, std::uint8_t preset,
 
     if (rc != 0) {
         static std::int64_t complained = 0;
-        if (esp_timer_get_time() - complained > 5000000) {
+        if (esp_timer_get_time() - complained > COMPLAINT_GAP_US) {
             complained = esp_timer_get_time();
             ESP_LOGW(TAG, "write refused (%d)", rc);
         }
@@ -221,8 +240,9 @@ void expire_stale_timing();
         if (wanted != deskproto::Motion::Idle) {
             send(deskproto::Op::Hold, wanted, 0);
         } else if (last != deskproto::Motion::Idle) {
-            send(deskproto::Op::Stop, deskproto::Motion::Idle, 0);
-            send(deskproto::Op::Stop, deskproto::Motion::Idle, 0);
+            for (int i = 0; i < STOP_SENDS; ++i) {
+                send(deskproto::Op::Stop, deskproto::Motion::Idle, 0);
+            }
         }
         last = wanted;
         expire_stale_timing();
@@ -242,6 +262,55 @@ void expire_stale_timing()
         ++s_lost;
         portEXIT_CRITICAL(&s_stats_lock);
     }
+}
+
+void log_interval(std::uint16_t conn)
+{
+    constexpr unsigned HUNDREDTHS_PER_MS = 100;
+    constexpr auto     US_PER_HUNDREDTH  = units::kUsPerMs / HUNDREDTHS_PER_MS;
+    ble_gap_conn_desc  desc{};
+    if (ble_gap_conn_find(conn, &desc) == 0) {
+        const auto hundredths =
+            static_cast<unsigned>(desc.conn_itvl * CONN_ITVL_UNIT_US / US_PER_HUNDREDTH);
+        ESP_LOGI(TAG, "connection interval %u.%02u ms", hundredths / HUNDREDTHS_PER_MS,
+                 hundredths % HUNDREDTHS_PER_MS);
+    }
+}
+
+void take_status(const deskproto::Status &status)
+{
+    s_last_height.store(status.height_mm, std::memory_order_relaxed);
+    s_box_linked.store(status.linked, std::memory_order_relaxed);
+    s_last_motion.store(static_cast<int>(status.motion), std::memory_order_relaxed);
+    s_last_driving.store(status.driving, std::memory_order_relaxed);
+    s_ever_heard.store(true, std::memory_order_relaxed);
+    s_heard_us.store(esp_timer_get_time(), std::memory_order_relaxed);
+    if (s_on_status != nullptr) {
+        s_on_status(status);
+    }
+}
+
+void time_round_trip(std::uint32_t echoed_seq)
+{
+    if (s_waiting.load(std::memory_order_relaxed) &&
+        echoed_seq == s_probe_seq.load(std::memory_order_relaxed)) {
+        const std::int64_t round_trip =
+            esp_timer_get_time() - s_sent_us.load(std::memory_order_relaxed);
+        s_waiting.store(false, std::memory_order_relaxed);
+        record(static_cast<int>(round_trip));
+    }
+}
+
+void take_notification(os_mbuf *om)
+{
+    std::uint8_t      payload[deskproto::kStatusLen];
+    std::uint16_t     length = 0;
+    deskproto::Status status{};
+    if (ble_hs_mbuf_to_flat(om, payload, sizeof(payload), &length) == 0 &&
+        deskproto::decode(payload, length, status)) {
+        take_status(status);
+    }
+    time_round_trip(status.seq);  // zero if unreadable, which no probe is numbered
 }
 
 int on_conn_event(ble_gap_event *event, void *)
@@ -275,8 +344,8 @@ bool consider(const ble_gap_disc_desc &advert)
     ble_gap_disc_cancel();
 
     ble_gap_conn_params params{};
-    params.scan_itvl           = 0x0010;
-    params.scan_window         = 0x0010;
+    params.scan_itvl           = CONNECT_SCAN_UNITS;
+    params.scan_window         = CONNECT_SCAN_UNITS;
     params.itvl_min            = ITVL_MIN_UNITS;
     params.itvl_max            = ITVL_MAX_UNITS;
     params.latency             = 0;
@@ -285,8 +354,8 @@ bool consider(const ble_gap_disc_desc &advert)
     params.max_ce_len          = 0;
 
     ESP_LOGI(TAG, "found the proxy, connecting");
-    if (ble_gap_connect(BLE_OWN_ADDR_PUBLIC, &advert.addr, 5000, &params, on_conn_event,
-                        nullptr) != 0) {
+    if (ble_gap_connect(BLE_OWN_ADDR_PUBLIC, &advert.addr, CONNECT_TIMEOUT_MS, &params,
+                        on_conn_event, nullptr) != 0) {
         s_connecting = false;
         if (s_rescan != nullptr) {
             s_rescan();
@@ -324,42 +393,13 @@ bool handle(ble_gap_event *event)
             }
             return true;
 
-        case BLE_GAP_EVENT_CONN_UPDATE: {
-            ble_gap_conn_desc desc{};
-            if (ble_gap_conn_find(event->conn_update.conn_handle, &desc) == 0) {
-                ESP_LOGI(TAG, "connection interval %u.%02u ms",
-                         static_cast<unsigned>(desc.conn_itvl * 125 / 100),
-                         static_cast<unsigned>((desc.conn_itvl * 125) % 100));
-            }
+        case BLE_GAP_EVENT_CONN_UPDATE:
+            log_interval(event->conn_update.conn_handle);
             return true;
-        }
 
-        case BLE_GAP_EVENT_NOTIFY_RX: {
-            std::uint8_t  payload[deskproto::STATUS_LEN];
-            std::uint16_t length = 0;
-            deskproto::Status status{};
-            if (ble_hs_mbuf_to_flat(event->notify_rx.om, payload, sizeof(payload), &length) == 0 &&
-                deskproto::decode(payload, length, status)) {
-                s_last_height.store(status.height_mm, std::memory_order_relaxed);
-                s_box_linked.store(status.linked, std::memory_order_relaxed);
-                s_last_motion.store(static_cast<int>(status.motion), std::memory_order_relaxed);
-                s_last_driving.store(status.driving, std::memory_order_relaxed);
-                s_ever_heard.store(true, std::memory_order_relaxed);
-                s_heard_us.store(esp_timer_get_time(), std::memory_order_relaxed);
-                if (s_on_status != nullptr) {
-                    s_on_status(status);
-                }
-            }
-
-            if (s_waiting.load(std::memory_order_relaxed) &&
-                status.seq == s_probe_seq.load(std::memory_order_relaxed)) {
-                const std::int64_t round_trip =
-                    esp_timer_get_time() - s_sent_us.load(std::memory_order_relaxed);
-                s_waiting.store(false, std::memory_order_relaxed);
-                record(static_cast<int>(round_trip));
-            }
+        case BLE_GAP_EVENT_NOTIFY_RX:
+            take_notification(event->notify_rx.om);
             return true;
-        }
 
         default:
             return false;
@@ -377,7 +417,7 @@ int quiet_ms()
         return -1;
     }
     return static_cast<int>((esp_timer_get_time() - s_heard_us.load(std::memory_order_relaxed)) /
-                            1000);
+                            units::kUsPerMs);
 }
 
 void collect(LinkStats &out)
@@ -400,7 +440,7 @@ void collect(LinkStats &out)
     std::sort(copy, copy + count);
     out.min_us    = copy[0];
     out.median_us = copy[count / 2];
-    out.p99_us    = copy[(count * 99) / 100];
+    out.p99_us    = copy[(count * PERCENTILE) / PERCENT];
     out.max_us    = copy[count - 1];
 }
 
@@ -446,7 +486,8 @@ esp_err_t start()
     if (s_send_lock == nullptr) {
         return ESP_ERR_NO_MEM;
     }
-    return xTaskCreate(hold_task, "blehold", 2048, nullptr, 5, &s_hold_task) == pdPASS
+    return xTaskCreate(hold_task, "blehold", HOLD_TASK_STACK, nullptr, HOLD_TASK_PRIORITY,
+                       &s_hold_task) == pdPASS
                ? ESP_OK
                : ESP_ERR_NO_MEM;
 }
@@ -486,7 +527,7 @@ void wake()
 
 void goto_height(int height_mm)
 {
-    if (height_mm < 0 || height_mm > 0xffff) {
+    if (height_mm < 0 || height_mm > std::numeric_limits<std::uint16_t>::max()) {
         return;
     }
     proxy::send_command(deskproto::Op::GoTo, 0, static_cast<std::uint16_t>(height_mm));

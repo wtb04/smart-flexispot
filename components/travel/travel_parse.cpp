@@ -4,6 +4,10 @@
 
 namespace travel {
 namespace {
+constexpr std::size_t QUOTE_PAIR = 2;
+
+constexpr char        TRUE_WORD[]   = "true";
+constexpr std::size_t TRUE_WORD_LEN = sizeof(TRUE_WORD) - 1;
 
 // Small enough to read by hand, and the shape is ours: the backend exists so
 // that the panel never meets a journey planner's real JSON.
@@ -29,11 +33,11 @@ const char *skip_gap(const char *at, const char *end)
 const char *find_key(const char *at, const char *end, const char *key)
 {
     const std::size_t len = std::strlen(key);
-    for (; at + len + 2 < end; ++at) {
+    for (; at + len + QUOTE_PAIR < end; ++at) {
         if (*at != '"' || std::strncmp(at + 1, key, len) != 0 || at[len + 1] != '"') {
             continue;
         }
-        const char *after = skip_space(at + len + 2, end);
+        const char *after = skip_space(at + len + QUOTE_PAIR, end);
         if (after < end && *after == ':') {
             return skip_space(after + 1, end);
         }
@@ -79,7 +83,8 @@ void read_string(const char *at, const char *end, char *out, std::size_t size)
 bool field_flag(const char *at, const char *end, const char *key)
 {
     const char *found = find_key(at, end, key);
-    return found != nullptr && end - found >= 4 && std::strncmp(found, "true", 4) == 0;
+    return found != nullptr && end - found >= static_cast<std::ptrdiff_t>(TRUE_WORD_LEN) &&
+           std::strncmp(found, TRUE_WORD, TRUE_WORD_LEN) == 0;
 }
 
 void field_number(const char *at, const char *end, const char *key, std::int64_t &out)
@@ -132,6 +137,49 @@ const char *span_end(const char *at, const char *end)
     return end;
 }
 
+void read_leg(const char *leg, const char *leg_end, Leg &into)
+{
+    field_string(leg, leg_end, "mode", into.mode, sizeof(into.mode));
+    field_string(leg, leg_end, "line", into.line, sizeof(into.line));
+    field_string(leg, leg_end, "from", into.from, sizeof(into.from));
+    field_string(leg, leg_end, "to", into.to, sizeof(into.to));
+    field_number(leg, leg_end, "dep", into.depart);
+    field_number(leg, leg_end, "arr", into.arrive);
+    into.cancelled = field_flag(leg, leg_end, "off");
+}
+
+void read_legs(const char *legs, const char *option_end, Option &option)
+{
+    const char *legs_end = span_end(legs, option_end);
+    const char *leg      = legs + 1;
+    while (option.leg_count < kLegsMax) {
+        leg = skip_gap(leg, legs_end);
+        if (leg >= legs_end || *leg != '{') {
+            break;
+        }
+        const char *leg_end = span_end(leg, legs_end);
+        read_leg(leg, leg_end, option.legs[option.leg_count]);
+        ++option.leg_count;
+        leg = leg_end;
+    }
+}
+
+void read_option(const char *at, const char *option_end, Option &option)
+{
+    option = Option{};
+    field_number(at, option_end, "leaveAt", option.leave);
+    field_number(at, option_end, "arriveAt", option.arrive);
+    option.late = field_flag(at, option_end, "late");
+
+    const char *legs = find_key(at, option_end, "legs");
+    if (legs != nullptr && *legs == '[') {
+        read_legs(legs, option_end, option);
+    }
+    for (int i = 0; i < option.leg_count; ++i) {
+        option.cancelled = option.cancelled || option.legs[i].cancelled;
+    }
+}
+
 }  // namespace
 
 int parse(const char *body, std::size_t length, Option *out, int capacity)
@@ -154,40 +202,7 @@ int parse(const char *body, std::size_t length, Option *out, int capacity)
             break;
         }
         const char *option_end = span_end(at, options_end);
-
-        Option &option = out[stored];
-        option         = Option{};
-        field_number(at, option_end, "leaveAt", option.leave);
-        field_number(at, option_end, "arriveAt", option.arrive);
-        option.late = field_flag(at, option_end, "late");
-
-        const char *legs = find_key(at, option_end, "legs");
-        if (legs != nullptr && *legs == '[') {
-            const char *legs_end = span_end(legs, option_end);
-            const char *leg      = legs + 1;
-            while (option.leg_count < kLegsMax) {
-                leg = skip_gap(leg, legs_end);
-                if (leg >= legs_end || *leg != '{') {
-                    break;
-                }
-                const char *leg_end = span_end(leg, legs_end);
-                Leg        &into    = option.legs[option.leg_count];
-
-                field_string(leg, leg_end, "mode", into.mode, sizeof(into.mode));
-                field_string(leg, leg_end, "line", into.line, sizeof(into.line));
-                field_string(leg, leg_end, "from", into.from, sizeof(into.from));
-                field_string(leg, leg_end, "to", into.to, sizeof(into.to));
-                field_number(leg, leg_end, "dep", into.depart);
-                field_number(leg, leg_end, "arr", into.arrive);
-                into.cancelled = field_flag(leg, leg_end, "off");
-
-                ++option.leg_count;
-                leg = leg_end;
-            }
-        }
-        for (int i = 0; i < option.leg_count; ++i) {
-            option.cancelled = option.cancelled || option.legs[i].cancelled;
-        }
+        read_option(at, option_end, out[stored]);
         ++stored;
         at = option_end;
     }

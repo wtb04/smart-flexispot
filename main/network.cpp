@@ -21,6 +21,7 @@
 #include "settings.h"
 #include "sound.h"
 #include "ui.h"
+#include "units.h"
 #include "wifi.h"
 
 #include <atomic>
@@ -33,11 +34,22 @@ constexpr char TAG[] = "network";
 
 constexpr TickType_t PUBLISH_INTERVAL = pdMS_TO_TICKS(2000);
 
-constexpr int NETWORK_WAIT_MS = 30000;
+constexpr int NETWORK_WAIT_MS = 30 * units::kMsPerSecond;
 
 // Both clients retry on their own, yet once, after the server had been away for
 // minutes, neither came back until a reboot. This is the reboot, for one client.
-constexpr std::int64_t LINK_PATIENCE_US = 120 * 1000000LL;
+constexpr std::int64_t LINK_PATIENCE_US = 2 * units::kUsPerMinute;
+
+constexpr int         REFUSAL_NOTICE_MS    = 4000;
+constexpr std::size_t REFUSAL_MESSAGE_SIZE = 96;
+
+constexpr float MILLIAMPS_PER_AMP = 1000.0f;
+
+// Once boot has settled, the heaps are reported once, as a baseline.
+constexpr std::int64_t HEAP_BASELINE_AFTER_US = 40 * units::kUsPerSecond;
+
+constexpr std::size_t  LOW_DMA_BYTES        = 24 * units::kBytesPerKiB;
+constexpr std::int64_t LOW_MEMORY_REPEAT_US = 30 * units::kUsPerSecond;
 
 constexpr std::uint32_t TASK_STACK    = 6144;  // measured: uses 3.0 KB
 constexpr UBaseType_t   TASK_PRIORITY = 2;
@@ -74,9 +86,9 @@ void on_brightness(int percent)
 
 void on_refusal(const char *reason)
 {
-    char message[96];
+    char message[REFUSAL_MESSAGE_SIZE];
     std::snprintf(message, sizeof(message), "Home Assistant did not do that: %s", reason);
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::notify("", message, ui::Level::Warn, 4000));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::notify("", message, ui::Level::Warn, REFUSAL_NOTICE_MS));
 }
 
 /** The journey to the next appointment is asked for well before it starts, so
@@ -187,12 +199,97 @@ void nudge_links()
     watch_link(hass::ws::connected(), socket_down_since, "socket", hass::ws::restart);
 }
 
-[[noreturn]] void network_task(void *)
+unsigned kib(std::size_t bytes)
 {
-    if (!wifi::wait_for_ip(NETWORK_WAIT_MS)) {
-        ESP_LOGW(TAG, "no address after %d s, starting clients anyway", NETWORK_WAIT_MS / 1000);
+    return static_cast<unsigned>(bytes / units::kBytesPerKiB);
+}
+
+hass::protocol::Telemetry gather_telemetry(const ble::Stats &radio)
+{
+    hass::protocol::Telemetry out;
+    out.height_mm      = desk::height_mm();
+    out.desk_connected = desk::linked();
+    out.motion         = desk::motion();
+    out.preset         = desk::active_preset_label();
+    out.screen         = s_screen_on.load(std::memory_order_relaxed);
+    out.brightness     = s_brightness.load(std::memory_order_relaxed);
+    out.uptime_s       = static_cast<std::uint32_t>(esp_timer_get_time() / units::kUsPerSecond);
+    out.free_heap      = static_cast<std::uint32_t>(esp_get_free_heap_size());
+
+    power::State battery{};
+    if (power::read(battery) == ESP_OK && battery.present) {
+        out.battery_percent   = battery.percent;
+        out.battery_volts     = battery.bus_volts;
+        out.battery_milliamps = static_cast<int>(battery.current_amps * MILLIAMPS_PER_AMP);
+        out.charging          = battery.charging;
+        out.on_battery        = battery.on_battery;
     }
 
+    if (wifi::connected()) {
+        fill_network(out);
+    }
+
+    out.presence      = radio.phone_present;
+    out.presence_rssi = radio.ever_seen ? radio.phone_rssi : hass::protocol::kUnheardRssiDbm;
+    return out;
+}
+
+void show_links(const ble::Stats &radio)
+{
+    ESP_ERROR_CHECK_WITHOUT_ABORT(
+        ui::set_links(wifi::connected(), hass::connected() && hass::ws::connected()));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(
+        ui::set_presence(radio.has_key, radio.phone_present, radio.ever_seen));
+
+    if (wifi::connected() && hass::connected() && hass::ws::connected()) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_done());
+    }
+}
+
+void log_heap_baseline_once()
+{
+    static bool settled = false;
+    if (settled || esp_timer_get_time() <= HEAP_BASELINE_AFTER_US) {
+        return;
+    }
+    settled = true;
+    multi_heap_info_t dma{};
+    multi_heap_info_t psram{};
+    heap_caps_get_info(&dma, MALLOC_CAP_DMA);
+    heap_caps_get_info(&psram, MALLOC_CAP_SPIRAM);
+
+    ESP_LOGI(TAG, "dma-capable: %u KB free of %u KB, largest block %u KB, low %u KB",
+             kib(dma.total_free_bytes), kib(dma.total_free_bytes + dma.total_allocated_bytes),
+             kib(dma.largest_free_block), kib(dma.minimum_free_bytes));
+    ESP_LOGI(TAG, "psram: %u KB free of %u KB, largest block %u KB", kib(psram.total_free_bytes),
+             kib(psram.total_free_bytes + psram.total_allocated_bytes),
+             kib(psram.largest_free_block));
+}
+
+void log_dma_heap()
+{
+    multi_heap_info_t now{};
+    heap_caps_get_info(&now, MALLOC_CAP_DMA);
+    ESP_LOGD(TAG, "dma-capable: %u KB free, largest %u KB, low %u KB", kib(now.total_free_bytes),
+             kib(now.largest_free_block), kib(now.minimum_free_bytes));
+}
+
+void warn_if_memory_low()
+{
+    static std::int64_t complained = 0;
+    const std::size_t   dma_free   = heap_caps_get_free_size(MALLOC_CAP_DMA);
+    const std::size_t   internal   = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    if (dma_free < LOW_DMA_BYTES && esp_timer_get_time() - complained > LOW_MEMORY_REPEAT_US) {
+        complained = esp_timer_get_time();
+        // The largest block is what a client restart needs for its task stack.
+        ESP_LOGW(TAG, "low memory: %u KB dma-capable, %u KB internal, largest %u KB",
+                 kib(dma_free), kib(internal),
+                 kib(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)));
+    }
+}
+
+void start_clients()
+{
     const hass::Handlers handlers{on_preset, on_brightness, on_notify, on_move, on_screen};
     ESP_ERROR_CHECK_WITHOUT_ABORT(hass::start(handlers, board::kMinBrightness));
     hass::ws::on_refusal(on_refusal);
@@ -202,90 +299,26 @@ void nudge_links()
     ESP_ERROR_CHECK_WITHOUT_ABORT(jpeg::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(media::start(hass::ws::http_origin(), on_album_art));
     ESP_ERROR_CHECK_WITHOUT_ABORT(radar::start(on_radar, on_radar_details, on_radar_photo));
+}
+
+[[noreturn]] void network_task(void *)
+{
+    if (!wifi::wait_for_ip(NETWORK_WAIT_MS)) {
+        ESP_LOGW(TAG, "no address after %d s, starting clients anyway",
+                 NETWORK_WAIT_MS / units::kMsPerSecond);
+    }
+    start_clients();
 
     for (;;) {
-        hass::protocol::Telemetry out;
-        out.height_mm      = desk::height_mm();
-        out.desk_connected = desk::linked();
-        out.motion         = desk::motion();
-        out.preset         = desk::active_preset_label();
-        out.screen         = s_screen_on.load(std::memory_order_relaxed);
-        out.brightness     = s_brightness.load(std::memory_order_relaxed);
-        out.uptime_s       = static_cast<std::uint32_t>(esp_timer_get_time() / 1000000);
-        out.free_heap      = static_cast<std::uint32_t>(esp_get_free_heap_size());
-
-        power::State battery{};
-        if (power::read(battery) == ESP_OK && battery.present) {
-            out.battery_percent   = battery.percent;
-            out.battery_volts     = battery.bus_volts;
-            out.battery_milliamps = static_cast<int>(battery.current_amps * 1000.0f);
-            out.charging          = battery.charging;
-            out.on_battery        = battery.on_battery;
-        }
-
-        if (wifi::connected()) {
-            fill_network(out);
-        }
-
-        const ble::Stats radio = ble::stats();
-        out.presence = radio.phone_present;
-        out.presence_rssi = radio.ever_seen ? radio.phone_rssi : -127;
-
-        ESP_ERROR_CHECK_WITHOUT_ABORT(
-            ui::set_links(wifi::connected(), hass::connected() && hass::ws::connected()));
-        ESP_ERROR_CHECK_WITHOUT_ABORT(
-            ui::set_presence(radio.has_key, radio.phone_present, radio.ever_seen));
-
-        if (wifi::connected() && hass::connected() && hass::ws::connected()) {
-            ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_done());
-        }
-
+        const ble::Stats                radio = ble::stats();
+        const hass::protocol::Telemetry out   = gather_telemetry(radio);
+        show_links(radio);
         hass::publish(out);
         nudge_links();
         ask_journey();
-
-        static bool settled = false;
-        if (!settled && esp_timer_get_time() > 40000000) {
-            settled = true;
-            multi_heap_info_t dma{};
-            multi_heap_info_t psram{};
-            heap_caps_get_info(&dma, MALLOC_CAP_DMA);
-            heap_caps_get_info(&psram, MALLOC_CAP_SPIRAM);
-
-            ESP_LOGI(TAG,
-                     "dma-capable: %u KB free of %u KB, largest block %u KB, low %u KB",
-                     static_cast<unsigned>(dma.total_free_bytes / 1024),
-                     static_cast<unsigned>((dma.total_free_bytes + dma.total_allocated_bytes) /
-                                           1024),
-                     static_cast<unsigned>(dma.largest_free_block / 1024),
-                     static_cast<unsigned>(dma.minimum_free_bytes / 1024));
-            ESP_LOGI(TAG, "psram: %u KB free of %u KB, largest block %u KB",
-                     static_cast<unsigned>(psram.total_free_bytes / 1024),
-                     static_cast<unsigned>(
-                         (psram.total_free_bytes + psram.total_allocated_bytes) / 1024),
-                     static_cast<unsigned>(psram.largest_free_block / 1024));
-        }
-
-        multi_heap_info_t now{};
-        heap_caps_get_info(&now, MALLOC_CAP_DMA);
-        ESP_LOGD(TAG, "dma-capable: %u KB free, largest %u KB, low %u KB",
-                 static_cast<unsigned>(now.total_free_bytes / 1024),
-                 static_cast<unsigned>(now.largest_free_block / 1024),
-                 static_cast<unsigned>(now.minimum_free_bytes / 1024));
-
-        static std::int64_t complained = 0;
-        const std::size_t   dma_free   = heap_caps_get_free_size(MALLOC_CAP_DMA);
-        const std::size_t   internal   = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-        if (dma_free < 24 * 1024 && esp_timer_get_time() - complained > 30000000) {
-            complained = esp_timer_get_time();
-            // The largest block is what a client restart needs for its task stack.
-            ESP_LOGW(TAG, "low memory: %u KB dma-capable, %u KB internal, largest %u KB",
-                     static_cast<unsigned>(dma_free / 1024),
-                     static_cast<unsigned>(internal / 1024),
-                     static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) /
-                                           1024));
-        }
-
+        log_heap_baseline_once();
+        log_dma_heap();
+        warn_if_memory_low();
         vTaskDelay(PUBLISH_INTERVAL);
     }
 }

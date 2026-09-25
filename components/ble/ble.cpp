@@ -12,8 +12,11 @@
 #include "mbedtls/base64.h"
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
+#include "units.h"
 
+#include <algorithm>
 #include <atomic>
+#include <climits>
 #include <cstddef>
 #include <cstring>
 
@@ -27,42 +30,77 @@ constexpr TickType_t SEEN_TIMEOUT = pdMS_TO_TICKS(30000);
 constexpr int RSSI_ENTER = -70;
 constexpr int RSSI_EXIT  = -76;
 
-constexpr int RSSI_SMOOTHING = 3;  // of 10, weight given to the newest packet
+constexpr int RSSI_SMOOTHING       = 3;  // weight given to the newest packet
+constexpr int RSSI_SMOOTHING_SCALE = 10;
 
 constexpr std::uint16_t SCAN_INTERVAL_MS = 1000;
 constexpr std::uint16_t SCAN_WINDOW_MS   = 300;
+constexpr int           SCAN_UNIT_US     = 625;
+
+constexpr std::size_t IRK_BYTES           = 16;
+constexpr std::size_t HEX_DIGITS_PER_BYTE = 2;
+constexpr std::size_t IRK_HEX_DIGITS      = IRK_BYTES * HEX_DIGITS_PER_BYTE;
+constexpr std::size_t IRK_TEXT_MAX        = 64;
+constexpr int         BITS_PER_HEX_DIGIT  = 4;
+constexpr int         FIRST_HEX_LETTER    = 10;
+
+// A resolvable private address is a random prand in its top three octets, with
+// the kind in the top two bits, and a hash of the prand in the bottom three.
+constexpr std::size_t  ADDR_BYTES           = sizeof(ble_addr_t::val);
+constexpr std::size_t  HASH_BYTES           = 3;
+constexpr std::size_t  PRAND_BYTES          = ADDR_BYTES - HASH_BYTES;
+constexpr std::uint8_t ADDR_KIND_MASK       = 0xC0;
+constexpr std::uint8_t ADDR_KIND_RESOLVABLE = 0x40;
+constexpr std::size_t  AES_BLOCK_BYTES      = 16;
 
 std::atomic<bool> s_ready{false};
 
-std::uint8_t s_irk[16]{};
+std::uint8_t s_irk[IRK_BYTES]{};
 // Two copies of the key, as given and reversed: hex from Home Assistant and
 // base64 from the Apple side are not always the same way round, and a key the
 // wrong way round looks exactly like an absent phone.
-std::uint8_t s_irk_reversed[16]{};
+std::uint8_t s_irk_reversed[IRK_BYTES]{};
 bool         s_have_irk     = false;
 bool         s_use_reversed = false;
 bool         s_order_known  = false;
 
 std::atomic<TickType_t> s_seen{0};
-std::atomic<int>        s_rssi{-127};
+std::atomic<int>        s_rssi{kNoRssi};
 std::atomic<bool>       s_ever{false};
 std::atomic<bool>       s_near{false};
 
 int hex_value(char c)
 {
     if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    if (c >= 'a' && c <= 'f') return c - 'a' + FIRST_HEX_LETTER;
+    if (c >= 'A' && c <= 'F') return c - 'A' + FIRST_HEX_LETTER;
     return -1;
 }
 
+bool parse_hex_irk(const char *digits, std::uint8_t out[IRK_BYTES])
+{
+    for (std::size_t i = 0; i < IRK_HEX_DIGITS; ++i) {
+        const int value = hex_value(digits[i]);
+        if (value < 0) {
+            return false;
+        }
+        const std::size_t byte = i / HEX_DIGITS_PER_BYTE;
+        if (i % HEX_DIGITS_PER_BYTE == 0) {
+            out[byte] = static_cast<std::uint8_t>(value << BITS_PER_HEX_DIGIT);
+        } else {
+            out[byte] |= static_cast<std::uint8_t>(value);
+        }
+    }
+    return true;
+}
+
 /** 32 hex characters or 24 base64 ones; both turn up for the same key. */
-bool parse_irk(const char *text, std::uint8_t out[16])
+bool parse_irk(const char *text, std::uint8_t out[IRK_BYTES])
 {
     if (text == nullptr) {
         return false;
     }
-    char        stripped[64];
+    char        stripped[IRK_TEXT_MAX];
     std::size_t len = 0;
     for (const char *c = text; *c != '\0'; ++c) {
         if (*c == ':' || *c == ' ' || *c == '-') {
@@ -74,59 +112,56 @@ bool parse_irk(const char *text, std::uint8_t out[16])
         stripped[len++] = *c;
     }
 
-    if (len == 32) {
-        for (std::size_t i = 0; i < 32; ++i) {
-            const int value = hex_value(stripped[i]);
-            if (value < 0) {
-                return false;
-            }
-            if (i % 2 == 0) {
-                out[i / 2] = static_cast<std::uint8_t>(value << 4);
-            } else {
-                out[i / 2] |= static_cast<std::uint8_t>(value);
-            }
-        }
-        return true;
+    if (len == IRK_HEX_DIGITS) {
+        return parse_hex_irk(stripped, out);
     }
 
     std::size_t decoded = 0;
-    if (mbedtls_base64_decode(out, 16, &decoded,
+    if (mbedtls_base64_decode(out, IRK_BYTES, &decoded,
                               reinterpret_cast<const unsigned char *>(stripped), len) == 0) {
-        return decoded == 16;
+        return decoded == IRK_BYTES;
     }
     return false;
 }
 
-/** A random address carries its kind in the top two bits of the last byte; 0b01
- *  is the resolvable private address a phone rotates through. */
 bool is_resolvable_private(const ble_addr_t &addr)
 {
-    return addr.type == BLE_ADDR_RANDOM && (addr.val[5] & 0xC0) == 0x40;
+    const std::uint8_t most_significant = addr.val[ADDR_BYTES - 1];
+    return addr.type == BLE_ADDR_RANDOM &&
+           (most_significant & ADDR_KIND_MASK) == ADDR_KIND_RESOLVABLE;
 }
 
-// Plaintext is thirteen zero bytes then prand, most significant octet first;
-// NimBLE hands the address over least significant octet first. The bottom three
+// Plaintext is zero bytes then prand, most significant octet first; NimBLE
+// hands the address over least significant octet first. The bottom three
 // octets of the result are the hash.
-bool hash_matches(const std::uint8_t key[16], const std::uint8_t val[6])
+bool hash_matches(const std::uint8_t key[IRK_BYTES], const std::uint8_t val[ADDR_BYTES])
 {
-    std::uint8_t block[16]{};
-    block[13] = val[5];
-    block[14] = val[4];
-    block[15] = val[3];
+    const std::uint8_t *hash  = val;
+    const std::uint8_t *prand = val + HASH_BYTES;
+
+    std::uint8_t block[AES_BLOCK_BYTES]{};
+    for (std::size_t i = 0; i < PRAND_BYTES; ++i) {
+        block[AES_BLOCK_BYTES - 1 - i] = prand[i];
+    }
 
     mbedtls_aes_context aes;
     mbedtls_aes_init(&aes);
-    std::uint8_t out[16]{};
-    const bool   ok = mbedtls_aes_setkey_enc(&aes, key, 128) == 0 &&
+    std::uint8_t out[AES_BLOCK_BYTES]{};
+    const bool   ok = mbedtls_aes_setkey_enc(&aes, key, IRK_BYTES * CHAR_BIT) == 0 &&
                     mbedtls_aes_crypt_ecb(&aes, MBEDTLS_AES_ENCRYPT, block, out) == 0;
     mbedtls_aes_free(&aes);
     if (!ok) {
         return false;
     }
-    return out[13] == val[2] && out[14] == val[1] && out[15] == val[0];
+    for (std::size_t i = 0; i < HASH_BYTES; ++i) {
+        if (out[AES_BLOCK_BYTES - 1 - i] != hash[i]) {
+            return false;
+        }
+    }
+    return true;
 }
 
-bool matches_irk(const std::uint8_t val[6])
+bool matches_irk(const std::uint8_t val[ADDR_BYTES])
 {
     if (!s_have_irk) {
         return false;
@@ -153,8 +188,8 @@ void on_resolved(int rssi)
 {
     const bool first = !s_ever.exchange(true, std::memory_order_relaxed);
     const int  prev  = s_rssi.load(std::memory_order_relaxed);
-    const int  avg =
-        first ? rssi : (prev * (10 - RSSI_SMOOTHING) + rssi * RSSI_SMOOTHING) / 10;
+    const int  mixed = prev * (RSSI_SMOOTHING_SCALE - RSSI_SMOOTHING) + rssi * RSSI_SMOOTHING;
+    const int  avg   = first ? rssi : mixed / RSSI_SMOOTHING_SCALE;
 
     s_seen.store(xTaskGetTickCount(), std::memory_order_relaxed);
     s_rssi.store(avg, std::memory_order_relaxed);
@@ -168,8 +203,6 @@ void on_resolved(int rssi)
         ESP_LOGI(PRESENCE, "phone far (%d dBm)", avg);
     }
 }
-
-void start_scanning();
 
 int on_gap_event(ble_gap_event *event, void *)
 {
@@ -190,11 +223,16 @@ int on_gap_event(ble_gap_event *event, void *)
     return 0;
 }
 
+constexpr std::uint16_t scan_units(std::uint16_t ms)
+{
+    return static_cast<std::uint16_t>(ms * units::kUsPerMs / SCAN_UNIT_US);
+}
+
 void start_scanning()
 {
     ble_gap_disc_params params{};
-    params.itvl              = SCAN_INTERVAL_MS * 1000 / 625;  // units of 0.625 ms
-    params.window            = SCAN_WINDOW_MS * 1000 / 625;
+    params.itvl              = scan_units(SCAN_INTERVAL_MS);
+    params.window            = scan_units(SCAN_WINDOW_MS);
     params.passive           = 1;  // no scan responses; the address is enough
     params.filter_duplicates = 0;  // duplicates carry a fresh RSSI, which is the point
     params.limited           = 0;
@@ -261,9 +299,7 @@ void host_task(void *)
 esp_err_t start()
 {
     s_have_irk = parse_irk(BLE_PHONE_IRK, s_irk);
-    for (int i = 0; i < 16; ++i) {
-        s_irk_reversed[i] = s_irk[15 - i];
-    }
+    std::reverse_copy(s_irk, s_irk + IRK_BYTES, s_irk_reversed);
     if (s_have_irk) {
         ESP_LOGI(PRESENCE, "identity key loaded");
     } else {

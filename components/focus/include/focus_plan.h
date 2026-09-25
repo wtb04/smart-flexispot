@@ -1,5 +1,7 @@
 #pragma once
 
+#include "units.h"
+
 #include <cstdint>
 
 namespace focus {
@@ -26,7 +28,7 @@ struct State {
 
 inline std::int32_t minutes(int count)
 {
-    return count * 60 * 1000;
+    return count * units::kMsPerMinute;
 }
 
 inline std::int32_t left_of(const State &state, std::int64_t now)

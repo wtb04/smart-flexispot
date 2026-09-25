@@ -8,6 +8,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "units.h"
 
 #include <cstdarg>
 #include <cstdint>
@@ -22,6 +23,13 @@ constexpr char TAG[] = "logbuf";
 constexpr int         LINES_PER_CHANNEL = 128;
 constexpr std::size_t LINE_BYTES        = 128;
 constexpr std::size_t TAG_BYTES         = 32;
+constexpr std::size_t STAMP_SIZE        = 16;
+
+// A line reads "I (1234) tag: text".
+constexpr char        AFTER_TIME[]   = ") ";
+constexpr std::size_t AFTER_TIME_LEN = sizeof(AFTER_TIME) - 1;
+constexpr char        AFTER_TAG[]    = ": ";
+constexpr std::size_t AFTER_TAG_LEN  = sizeof(AFTER_TAG) - 1;
 
 struct Line {
     std::uint32_t seq;  // across every channel, so they can be told apart in time
@@ -32,14 +40,13 @@ struct Line {
     char         text[LINE_BYTES];
 };
 
-
-Line        *s_lines    = nullptr;
-int          s_channels = 0;
-int         *s_next     = nullptr;
-int         *s_held     = nullptr;
-Router       s_router   = nullptr;
-std::uint32_t s_seq     = 0;
-portMUX_TYPE s_lock     = portMUX_INITIALIZER_UNLOCKED;
+Line         *s_lines    = nullptr;
+int           s_channels = 0;
+int          *s_next     = nullptr;
+int          *s_held     = nullptr;
+Router        s_router   = nullptr;
+std::uint32_t s_seq      = 0;
+portMUX_TYPE  s_lock     = portMUX_INITIALIZER_UNLOCKED;
 
 vprintf_like_t s_next_sink = nullptr;
 
@@ -51,19 +58,19 @@ void split(const char *line, char &level, const char *&tag, std::size_t &tag_len
     tag_len = 0;
     body    = line;
 
-    const char *close = std::strstr(line, ") ");
+    const char *close = std::strstr(line, AFTER_TIME);
     if (line[0] == '\0' || line[1] != ' ' || line[2] != '(' || close == nullptr) {
         return;
     }
-    const char *start = close + 2;
-    const char *colon = std::strstr(start, ": ");
+    const char *start = close + AFTER_TIME_LEN;
+    const char *colon = std::strstr(start, AFTER_TAG);
     if (colon == nullptr || static_cast<std::size_t>(colon - start) >= TAG_BYTES) {
         return;
     }
     level   = line[0];
     tag     = start;
     tag_len = static_cast<std::size_t>(colon - start);
-    body    = colon + 2;
+    body    = colon + AFTER_TAG_LEN;
 }
 
 void store(const char *line)
@@ -122,9 +129,15 @@ int sink(const char *format, va_list args)
     return s_next_sink != nullptr ? s_next_sink(format, args) : 0;
 }
 
+/** Where a channel's line `age` places before `next` sits in its ring. */
+int slot_before(int next, int age)
+{
+    return (next - age + LINES_PER_CHANNEL * 2) % LINES_PER_CHANNEL;
+}
+
 void format(const Line &line, int channel, Entry &out)
 {
-    char stamp[16];
+    char stamp[STAMP_SIZE];
     if (line.wall != 0) {
         std::tm local{};
         localtime_r(&line.wall, &local);
@@ -132,7 +145,8 @@ void format(const Line &line, int channel, Entry &out)
                       local.tm_sec);
     } else {
         std::snprintf(stamp, sizeof(stamp), "+%5.1fs",
-                      static_cast<double>(line.uptime_us) / 1000000.0);
+                      static_cast<double>(line.uptime_us) /
+                          static_cast<double>(units::kUsPerSecond));
     }
 
     out.level   = line.level;
@@ -189,36 +203,28 @@ bool at(int channel, int index, Entry &out)
         return false;
     }
 
-    const int age = held - index;
-    format(s_lines[channel * LINES_PER_CHANNEL +
-                   (next - age + LINES_PER_CHANNEL * 2) % LINES_PER_CHANNEL],
-           channel, out);
+    format(s_lines[channel * LINES_PER_CHANNEL + slot_before(next, held - index)], channel, out);
     return true;
 }
 
-int recent(std::uint32_t mask, bool warnings, Entry *out, int max)
-{
-    if (s_lines == nullptr || out == nullptr || max <= 0) {
-        return 0;
-    }
-    constexpr int CHANNELS_MAX = 32;
-    const int     channels     = s_channels < CHANNELS_MAX ? s_channels : CHANNELS_MAX;
+namespace {
+// One bit of the mask each.
+constexpr int CHANNELS_MAX = 32;
 
-    // Chosen under the lock, newest first, by walking every channel back from
-    // its newest line and always taking the most recent of their heads. Only
-    // the choosing: formatting happens after, so logging never waits on it.
-    struct Pick {
-        int           channel;
-        int           slot;
-        std::uint32_t seq;
-    };
-    auto *picks = static_cast<Pick *>(
-        heap_caps_malloc(sizeof(Pick) * static_cast<std::size_t>(max), MALLOC_CAP_SPIRAM));
-    if (picks == nullptr) {
-        return 0;
-    }
-    int back[CHANNELS_MAX] = {};  // how far back each channel has been read
-    int picked             = 0;
+struct Pick {
+    int           channel;
+    int           slot;
+    std::uint32_t seq;
+};
+
+// Chosen under the lock, newest first, by walking every channel back from its
+// newest line and always taking the most recent of their heads. Only the
+// choosing: formatting happens after, so logging never waits on it.
+int pick_recent(std::uint32_t mask, bool warnings, Pick *picks, int max)
+{
+    const int channels           = s_channels < CHANNELS_MAX ? s_channels : CHANNELS_MAX;
+    int       back[CHANNELS_MAX] = {};  // how far back each channel has been read
+    int       picked             = 0;
 
     portENTER_CRITICAL(&s_lock);
     while (picked < max) {
@@ -230,8 +236,7 @@ int recent(std::uint32_t mask, bool warnings, Entry *out, int max)
                 continue;
             }
             while (back[c] < s_held[c]) {
-                const int   slot = (s_next[c] - 1 - back[c] + LINES_PER_CHANNEL * 2) %
-                                 LINES_PER_CHANNEL;
+                const int   slot = slot_before(s_next[c], back[c] + 1);
                 const Line &line = s_lines[c * LINES_PER_CHANNEL + slot];
                 if (warnings && line.level != 'E' && line.level != 'W') {
                     ++back[c];
@@ -252,6 +257,22 @@ int recent(std::uint32_t mask, bool warnings, Entry *out, int max)
         ++back[best];
     }
     portEXIT_CRITICAL(&s_lock);
+    return picked;
+}
+
+}  // namespace
+
+int recent(std::uint32_t mask, bool warnings, Entry *out, int max)
+{
+    if (s_lines == nullptr || out == nullptr || max <= 0) {
+        return 0;
+    }
+    auto *picks = static_cast<Pick *>(
+        heap_caps_malloc(sizeof(Pick) * static_cast<std::size_t>(max), MALLOC_CAP_SPIRAM));
+    if (picks == nullptr) {
+        return 0;
+    }
+    const int picked = pick_recent(mask, warnings, picks, max);
 
     int written = 0;
     for (int i = picked - 1; i >= 0; --i) {

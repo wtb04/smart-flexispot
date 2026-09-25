@@ -11,6 +11,8 @@ namespace imu {
 namespace {
 constexpr char TAG[] = "imu";
 
+constexpr TickType_t FIRST_SAMPLES_READY = pdMS_TO_TICKS(250);
+
 bmi270_handle_t *s_imu = nullptr;
 }  // namespace
 
@@ -35,7 +37,7 @@ esp_err_t start()
     };
     ESP_RETURN_ON_ERROR(bmi270_start(s_imu, &config), TAG, "start");
 
-    vTaskDelay(pdMS_TO_TICKS(250));  // the first samples are not ready at once
+    vTaskDelay(FIRST_SAMPLES_READY);
     float x = 0.0f;
     float y = 0.0f;
     float z = 0.0f;

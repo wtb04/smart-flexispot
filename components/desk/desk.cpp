@@ -54,9 +54,10 @@ void show_notice(const char *message, Tone tone, int timeout_ms)
 }
 
 constexpr TickType_t SUPERVISE_TICK = pdMS_TO_TICKS(200);
-constexpr TickType_t WAKE_RETRY = pdMS_TO_TICKS(5000);
+constexpr TickType_t WAKE_RETRY     = pdMS_TO_TICKS(5000);
 
 constexpr std::uint32_t TASK_STACK    = 4096;  // measured: uses 1.8 KB
+constexpr std::uint32_t PUMP_STACK    = 2048;  // measured: uses 0.7 KB
 constexpr UBaseType_t   TASK_PRIORITY = 3;
 constexpr BaseType_t    TASK_CORE     = 0;
 
@@ -76,20 +77,19 @@ QueueHandle_t s_preset_queue = nullptr;
 constexpr char NVS_NAMESPACE[] = "desk";
 constexpr char NVS_PRESETS[]   = "presets2";
 
-constexpr int DEPARTED_MM = 8;
-
-constexpr TickType_t STILL_TIME = pdMS_TO_TICKS(350);
-
+constexpr int        DEPARTED_MM   = 8;
+constexpr TickType_t STILL_TIME    = pdMS_TO_TICKS(350);
 constexpr TickType_t COMMAND_GRACE = pdMS_TO_TICKS(4000);
 
+constexpr int SAVED_NOTICE_MS = 2500;
+constexpr int HINT_NOTICE_MS  = 3000;
 
 // Home Assistant's move buttons send one message and no release.
 constexpr TickType_t NETWORK_HOLD = pdMS_TO_TICKS(1500);
 std::atomic<TickType_t> s_network_hold_until{0};  // zero when no such hold is live
 
-
 int  s_preset_mm[deskproto::kPresetCount] = {-1, -1, -1, -1, -1, -1};
-bool s_presets_dirty               = false;
+bool s_presets_dirty                      = false;
 std::atomic<int> s_active_preset{-1};
 
 void load_presets()
@@ -207,14 +207,14 @@ void run_preset(const PresetCommand &cmd)
             s_link->store(cmd.index);
         }
         remember_preset(cmd.index, height);
-        show_notice("Preset saved", Tone::Done, 2500);
+        show_notice("Preset saved", Tone::Done, SAVED_NOTICE_MS);
         return;
     }
 
     const TickType_t now = xTaskGetTickCount();
     if (cmd.index >= deskproto::kBoxPresets) {
         if (s_preset_mm[cmd.index] < 0) {
-            show_notice("Hold it to save the height it goes to", Tone::Hint, 3000);
+            show_notice("Hold it to save the height it goes to", Tone::Hint, HINT_NOTICE_MS);
             return;
         }
         if (s_link->travelling() && s_travel_index == cmd.index) {
@@ -233,14 +233,18 @@ void run_preset(const PresetCommand &cmd)
     s_commanded_at   = now;
 }
 
-void on_height(int height_mm);
+void on_height(int height_mm)
+{
+    if (s_height_mm.exchange(height_mm, std::memory_order_relaxed) != height_mm) {
+        show_height(height_mm);
+    }
+}
 
 std::atomic<int> s_pending_height{-1};
 TaskHandle_t     s_height_pump = nullptr;
 
-constexpr std::uint32_t PUMP_STACK = 2048;  // measured: uses 0.7 KB
-StaticTask_t            s_pump_ctrl;
-StackType_t             s_pump_stack[PUMP_STACK];
+StaticTask_t s_pump_ctrl;
+StackType_t  s_pump_stack[PUMP_STACK];
 
 // Heights arrive on the radio host task or the UART receive task; neither may
 // wait on the screen, so the pump carries them over.
@@ -263,20 +267,86 @@ void on_link_height(int height_mm)
     }
 }
 
-void on_height(int height_mm)
+// What the supervisor carries from one tick to the next.
+struct Watch {
+    const char *shown         = nullptr;
+    TickType_t  last_wake     = 0;
+    int         wake_attempts = 0;
+    int         settled_at    = -1;
+    TickType_t  settled_since = 0;
+};
+
+void note_settling(Watch &watch, int height, TickType_t now)
 {
-    if (s_height_mm.exchange(height_mm, std::memory_order_relaxed) != height_mm) {
-        show_height(height_mm);
+    if (height != watch.settled_at) {
+        watch.settled_at    = height;
+        watch.settled_since = now;
+    }
+}
+
+void save_presets_if_changed()
+{
+    if (s_presets_dirty) {
+        s_presets_dirty = false;
+        save_presets();
+    }
+}
+
+void let_go_of_stale_network_hold(TickType_t now)
+{
+    const TickType_t network_until = s_network_hold_until.load(std::memory_order_relaxed);
+    if (network_until != 0 && static_cast<std::int32_t>(now - network_until) >= 0) {
+        s_network_hold_until.store(0, std::memory_order_relaxed);
+        ESP_LOGW(TAG, "a move from the network was not asked for again, letting go");
+        on_move(Move::Stop);
+    }
+}
+
+/** Whether a command was still expected to move the desk as this tick began.
+ *  It stops being once the desk has left, or after the grace period. */
+bool command_in_flight(int height, TickType_t now)
+{
+    const bool commanded = s_commanded_at != 0;
+    if (commanded) {
+        const bool left = height >= 0 && s_commanded_from >= 0 &&
+                          std::abs(height - s_commanded_from) > DEPARTED_MM;
+        if (left || now - s_commanded_at > COMMAND_GRACE) {
+            s_commanded_at = 0;
+        }
+    }
+    return commanded;
+}
+
+void show_status(Watch &watch, const char *status)
+{
+    if (status == watch.shown) {
+        return;
+    }
+    watch.shown       = status;
+    const bool linked = status == kConnected;
+    s_linked.store(linked, std::memory_order_relaxed);
+    show_available(linked);
+    show_height(linked ? s_height_mm.load(std::memory_order_relaxed) : -1);
+    ESP_LOGI(TAG, "%s", status);
+    if (status == kAsleep) {
+        s_link->nudge();
+    }
+}
+
+void wake_if_never_heard(Watch &watch, const char *status, TickType_t now)
+{
+    const bool never_read = s_height_mm.load(std::memory_order_relaxed) < 0;
+    if (never_read && s_link->can_wake() && status != kConnected &&
+        (watch.last_wake == 0 || now - watch.last_wake > WAKE_RETRY)) {
+        watch.last_wake = now;
+        ++watch.wake_attempts;
+        s_link->wake();
     }
 }
 
 [[noreturn]] void supervisor_task(void *)
 {
-    const char   *shown         = nullptr;
-    TickType_t    last_wake     = 0;
-    int           wake_attempts = 0;
-    int           settled_at    = -1;
-    TickType_t    settled_since = 0;
+    Watch watch;
 
     for (;;) {
         PresetCommand cmd;
@@ -284,55 +354,20 @@ void on_height(int height_mm)
             run_preset(cmd);
         }
 
-        const TickType_t now    = xTaskGetTickCount();
-        const int        height = s_height_mm.load(std::memory_order_relaxed);
-        const char      *status = s_link->status(now, height >= 0, wake_attempts);
+        const TickType_t now     = xTaskGetTickCount();
+        const int        height  = s_height_mm.load(std::memory_order_relaxed);
+        const char      *status  = s_link->status(now, height >= 0, watch.wake_attempts);
         const bool       link_up = status == kConnected;
 
-        if (height != settled_at) {
-            settled_at    = height;
-            settled_since = now;
-        }
-        if (s_presets_dirty) {
-            s_presets_dirty = false;
-            save_presets();
-        }
-        const TickType_t network_until = s_network_hold_until.load(std::memory_order_relaxed);
-        if (network_until != 0 && static_cast<std::int32_t>(now - network_until) >= 0) {
-            s_network_hold_until.store(0, std::memory_order_relaxed);
-            ESP_LOGW(TAG, "a move from the network was not asked for again, letting go");
-            on_move(Move::Stop);
-        }
-        const bool commanded = s_commanded_at != 0;
-        if (commanded) {
-            const bool left = height >= 0 && s_commanded_from >= 0 &&
-                              std::abs(height - s_commanded_from) > DEPARTED_MM;
-            if (left || now - s_commanded_at > COMMAND_GRACE) {
-                s_commanded_at = 0;
-            }
-        }
-        const bool moving = commanded || motion_now() != 0 || s_link->travelling() ||
-                            now - settled_since < STILL_TIME;
+        note_settling(watch, height, now);
+        save_presets_if_changed();
+        let_go_of_stale_network_hold(now);
+        const bool moving = command_in_flight(height, now) || motion_now() != 0 ||
+                            s_link->travelling() || now - watch.settled_since < STILL_TIME;
         publish_active(height, link_up, moving);
 
-        if (status != shown) {
-            shown = status;
-            const bool linked = status == kConnected;
-            s_linked.store(linked, std::memory_order_relaxed);
-            show_available(linked);
-            show_height(linked ? s_height_mm.load(std::memory_order_relaxed) : -1);
-            ESP_LOGI(TAG, "%s", status);
-            if (status == kAsleep) {
-                s_link->nudge();
-            }
-        }
-        const bool never_read = s_height_mm.load(std::memory_order_relaxed) < 0;
-        if (never_read && s_link->can_wake() && status != kConnected &&
-            (last_wake == 0 || now - last_wake > WAKE_RETRY)) {
-            last_wake = now;
-            ++wake_attempts;
-            s_link->wake();
-        }
+        show_status(watch, status);
+        wake_if_never_heard(watch, status, now);
     }
 }
 
