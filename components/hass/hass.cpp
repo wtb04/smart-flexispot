@@ -163,7 +163,7 @@ esp_err_t start(const Handlers &handlers, int brightness_floor)
 
     esp_mqtt_client_config_t cfg = {};
     cfg.broker.address.uri                  = HASS_MQTT_URI;
-    cfg.credentials.client_id               = HASS_DEVICE_ID "-tab5";
+    cfg.credentials.client_id               = HASS_DEVICE_ID "-panel";
     cfg.credentials.username                = HASS_MQTT_USER;
     cfg.credentials.authentication.password = HASS_MQTT_PASSWORD;
 

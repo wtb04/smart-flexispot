@@ -33,7 +33,7 @@
 #include <cstdio>
 
 namespace {
-constexpr char TAG[] = "tab5";
+constexpr char TAG[] = "panel";
 
 constexpr int         FOCUS_NOTICE_MS    = 5000;
 constexpr std::size_t FOCUS_MESSAGE_SIZE = 64;

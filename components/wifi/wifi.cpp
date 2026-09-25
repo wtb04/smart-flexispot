@@ -26,9 +26,9 @@
 #if __has_include("wifi_secrets.h")
 #include "wifi_secrets.h"
 #endif
-#ifndef TAB5_WIFI_SSID
-#define TAB5_WIFI_SSID ""
-#define TAB5_WIFI_PASS ""
+#ifndef WIFI_SSID
+#define WIFI_SSID ""
+#define WIFI_PASS ""
 #endif
 
 namespace wifi {
@@ -172,7 +172,7 @@ void on_wifi_event(void *, esp_event_base_t base, std::int32_t id, void *data)
         if (s_events != nullptr) {
             xEventGroupClearBits(s_events, GOT_IP_BIT);
         }
-        ESP_LOGW(TAG, "disconnected from '%s' (reason %d)", TAB5_WIFI_SSID, event->reason);
+        ESP_LOGW(TAG, "disconnected from '%s' (reason %d)", WIFI_SSID, event->reason);
         // The driver finds the next access point itself while roaming.
         if (event->reason != WIFI_REASON_ROAMING) {
             s_dropped.store(true, std::memory_order_relaxed);
@@ -187,7 +187,7 @@ void on_wifi_event(void *, esp_event_base_t base, std::int32_t id, void *data)
         if (s_events != nullptr) {
             xEventGroupSetBits(s_events, GOT_IP_BIT);
         }
-        ESP_LOGI(TAG, "joined '%s', ip " IPSTR, TAB5_WIFI_SSID, IP2STR(&event->ip_info.ip));
+        ESP_LOGI(TAG, "joined '%s', ip " IPSTR, WIFI_SSID, IP2STR(&event->ip_info.ip));
         start_time_sync();
         wake_task();
     }
@@ -213,9 +213,9 @@ esp_err_t bring_up()
     ESP_RETURN_ON_ERROR(esp_wifi_init(&init_config), TAG, "wifi init");
 
     wifi_config_t config = {};
-    std::strncpy(reinterpret_cast<char *>(config.sta.ssid), TAB5_WIFI_SSID,
+    std::strncpy(reinterpret_cast<char *>(config.sta.ssid), WIFI_SSID,
                  sizeof(config.sta.ssid) - 1);
-    std::strncpy(reinterpret_cast<char *>(config.sta.password), TAB5_WIFI_PASS,
+    std::strncpy(reinterpret_cast<char *>(config.sta.password), WIFI_PASS,
                  sizeof(config.sta.password) - 1);
 
     esp_err_t err = esp_wifi_set_mode(WIFI_MODE_STA);
@@ -231,7 +231,7 @@ esp_err_t bring_up()
         return err;
     }
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_ps(WIFI_PS_NONE));
-    ESP_LOGI(TAG, "joining '%s'", TAB5_WIFI_SSID);
+    ESP_LOGI(TAG, "joining '%s'", WIFI_SSID);
     return ESP_OK;
 }
 
@@ -364,7 +364,7 @@ esp_err_t start()
 
     s_events = xEventGroupCreateStatic(&s_events_ctrl);
 
-    if (std::strlen(TAB5_WIFI_SSID) == 0) {
+    if (std::strlen(WIFI_SSID) == 0) {
         ESP_LOGW(TAG, "no SSID compiled in, not starting - see wifi_secrets.example.h");
         return ESP_OK;
     }

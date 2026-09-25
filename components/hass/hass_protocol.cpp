@@ -129,16 +129,16 @@ cJSON *device_block(const std::string &device_id, const std::string &sw_version)
     cJSON_AddItemToObject(device, "ids", ids);
     cJSON_AddStringToObject(device, "name", "Smart Flexispot");
     cJSON_AddStringToObject(device, "mf", "Wouter ten Brinke");
-    cJSON_AddStringToObject(device, "mdl", "Smart Flexispot (M5Stack Tab5)");
+    cJSON_AddStringToObject(device, "mdl", "Smart Flexispot");
     cJSON_AddStringToObject(device, "sw", sw_version.c_str());
-    cJSON_AddStringToObject(device, "hw", "Tab5 / ESP32-P4");
+    cJSON_AddStringToObject(device, "hw", "M5Stack Tab5, ESP32-P4");
     return device;
 }
 
 cJSON *origin_block(const std::string &sw_version)
 {
     cJSON *origin = cJSON_CreateObject();
-    cJSON_AddStringToObject(origin, "name", "tab5-hello");
+    cJSON_AddStringToObject(origin, "name", "smart-flexispot");
     cJSON_AddStringToObject(origin, "sw", sw_version.c_str());
     return origin;
 }

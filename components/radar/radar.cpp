@@ -25,8 +25,8 @@ constexpr char FEED_HOST[]        = "http://api.adsb.lol";
 constexpr char LOOKUP_HOST[]      = "https://api.adsbdb.com";
 constexpr char PHOTO_HOST[]       = "https://api.planespotters.net";
 constexpr char PHOTO_IMAGE_HOST[] = "http://t.plnspttrs.net";
-constexpr char PHOTO_AGENT[]      = "tab5-panel (+https://woutertenbrinke.nl)";
-constexpr char AGENT[]            = "tab5-panel";
+constexpr char PHOTO_AGENT[]      = "smart-flexispot (+https://woutertenbrinke.nl)";
+constexpr char AGENT[]            = "smart-flexispot";
 
 constexpr char        HTTPS_PREFIX[]   = "https://";
 constexpr std::size_t HTTPS_PREFIX_LEN = sizeof(HTTPS_PREFIX) - 1;

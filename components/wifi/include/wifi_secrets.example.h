@@ -6,5 +6,5 @@
 //
 // An empty SSID builds an image that never joins anything.
 
-#define TAB5_WIFI_SSID "your-network"
-#define TAB5_WIFI_PASS "your-password"
+#define WIFI_SSID "your-network"
+#define WIFI_PASS "your-password"

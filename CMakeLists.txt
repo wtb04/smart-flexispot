@@ -21,4 +21,4 @@ if(EXISTS "${jpeg_component}")
 endif()
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-project(tab5_hello)
+project(smart_flexispot)

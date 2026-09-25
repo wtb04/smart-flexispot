@@ -1,4 +1,4 @@
-# tab5-hello
+# Smart Flexispot
 
 Standing-desk controller for the M5Stack Tab5 (ESP32-P4), in ESP-IDF + LVGL 9
 (C++). Shows the live height reported by a LoctekMotion / Flexispot control box

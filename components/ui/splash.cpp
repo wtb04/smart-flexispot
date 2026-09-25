@@ -372,7 +372,7 @@ void toggle_about(lv_event_t *)
 void build_about(lv_obj_t *hero)
 {
     char about[80];
-    std::snprintf(about, sizeof(about), "M5Stack Tab5, build %s",
+    std::snprintf(about, sizeof(about), "Smart Flexispot, build %s",
                   esp_app_get_description()->version);
     s_splash_about = theme::make_label(hero, about, theme::secondary, theme::type_label());
     lv_obj_set_style_text_opa(s_splash_about, LV_OPA_60, 0);
