@@ -1,5 +1,7 @@
 #include "ui_internal.h"
 
+#include "esp_heap_caps.h"
+
 namespace ui::detail {
 namespace {
 constexpr float DEFAULT_MIN_C     = 15.0f;
@@ -685,6 +687,7 @@ struct PickView {
     lv_obj_t      *art;
     lv_obj_t      *name;
     lv_image_dsc_t dsc;
+    std::uint16_t *rounded;  // the cover with its corners already in the card's colour
     bool           named;
 };
 PickView                    s_pick_views[media::kPickCount]{};
@@ -720,14 +723,65 @@ void build_pick(lv_obj_t *grid, int index)
                         reinterpret_cast<void *>(static_cast<std::intptr_t>(index)));
     lv_obj_set_hidden(view.root, true);
 
-    lv_obj_t *frame = rounded_frame(view.root, side, PICK_ART_RADIUS);
-    lv_obj_align(frame, LV_ALIGN_TOP_LEFT, 0, 0);
-    view.art = make_cover(frame, side);
+    view.art = lv_image_create(view.root);
+    lv_obj_align(view.art, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_set_clickable(view.art, false);
     lv_obj_set_hidden(view.art, true);
 
     view.name = theme::make_label(view.root, "", theme::text, fonts::size_20());
     one_line(view.name, fonts::size_20(), side);
     lv_obj_align(view.name, LV_ALIGN_TOP_LEFT, 0, side + PICK_NAME_GAP);
+}
+
+std::uint16_t rgb565_of(std::uint32_t colour)
+{
+    return static_cast<std::uint16_t>(((colour >> 8) & 0xf800) | ((colour >> 5) & 0x07e0) |
+                                      ((colour >> 3) & 0x001f));
+}
+
+std::uint16_t blend565(std::uint16_t a, std::uint16_t b, int b_share, int whole)
+{
+    const auto channel = [&](int shift, int mask) {
+        const int ca = (a >> shift) & mask;
+        const int cb = (b >> shift) & mask;
+        return ((ca * (whole - b_share) + cb * b_share) / whole) << shift;
+    };
+    constexpr int RED = 11, GREEN = 5, FIVE_BITS = 0x1f, SIX_BITS = 0x3f;
+    return static_cast<std::uint16_t>(channel(RED, FIVE_BITS) | channel(GREEN, SIX_BITS) |
+                                      channel(0, FIVE_BITS));
+}
+
+/** A square picture copied with its corners rounded over `background`, their
+ *  edge smoothed by sampling each corner pixel several times. */
+void round_corners(const std::uint16_t *from, std::uint16_t *to, std::int32_t side,
+                   std::int32_t radius, std::uint32_t background)
+{
+    constexpr int SAMPLES = 4;  // a side, per pixel
+    constexpr int WHOLE   = SAMPLES * SAMPLES;
+    const std::uint16_t fill = rgb565_of(background);
+    std::copy(from, from + side * side, to);
+    for (std::int32_t y = 0; y < radius; ++y) {
+        for (std::int32_t x = 0; x < radius; ++x) {
+            int outside = 0;
+            for (int sy = 0; sy < SAMPLES; ++sy) {
+                for (int sx = 0; sx < SAMPLES; ++sx) {
+                    const float dx = static_cast<float>(radius) - (x + (sx + 0.5f) / SAMPLES);
+                    const float dy = static_cast<float>(radius) - (y + (sy + 0.5f) / SAMPLES);
+                    outside += dx * dx + dy * dy > static_cast<float>(radius * radius) ? 1 : 0;
+                }
+            }
+            if (outside == 0) {
+                continue;
+            }
+            // The same share at each of the four corners, mirrored.
+            for (const auto &[px, py] : {std::pair{x, y}, std::pair{side - 1 - x, y},
+                                        std::pair{x, side - 1 - y},
+                                        std::pair{side - 1 - x, side - 1 - y}}) {
+                std::uint16_t &pixel = to[py * side + px];
+                pixel                = blend565(pixel, fill, outside, WHOLE);
+            }
+        }
+    }
 }
 
 /** Sized for the favourites there are, since that changes between openings. */
@@ -1110,10 +1164,19 @@ void apply_pick_art(int index, const void *pixels)
     if (view.art == nullptr) {
         return;
     }
-    lv_obj_set_hidden(view.art, pixels == nullptr);
-    if (pixels == nullptr) {
+    if (pixels != nullptr && view.rounded == nullptr) {
+        view.rounded = static_cast<std::uint16_t *>(heap_caps_malloc(
+            media::kPickArtSize * media::kPickArtSize * sizeof(std::uint16_t),
+            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    }
+    lv_obj_set_hidden(view.art, pixels == nullptr || view.rounded == nullptr);
+    if (pixels == nullptr || view.rounded == nullptr) {
         return;
     }
+    // Rounded once here rather than clipped on every frame, which in software
+    // costs more than the rest of the popup.
+    round_corners(static_cast<const std::uint16_t *>(pixels), view.rounded, media::kPickArtSize,
+                  PICK_ART_RADIUS, theme::panel);
     const std::uint32_t bytes = lv_color_format_get_size(LV_COLOR_FORMAT_RGB565);
     view.dsc.header.magic     = LV_IMAGE_HEADER_MAGIC;
     view.dsc.header.cf        = LV_COLOR_FORMAT_RGB565;
@@ -1121,7 +1184,7 @@ void apply_pick_art(int index, const void *pixels)
     view.dsc.header.h         = media::kPickArtSize;
     view.dsc.header.stride    = media::kPickArtSize * bytes;
     view.dsc.data_size        = media::kPickArtSize * media::kPickArtSize * bytes;
-    view.dsc.data             = static_cast<const std::uint8_t *>(pixels);
+    view.dsc.data             = reinterpret_cast<const std::uint8_t *>(view.rounded);
     lv_image_set_src(view.art, &view.dsc);
     lv_obj_invalidate(view.art);
 }
