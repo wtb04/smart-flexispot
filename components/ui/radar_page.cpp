@@ -613,29 +613,10 @@ void draw_map(float home_lat, float home_lon, int range_km)
     }
 }
 
-void set_button_enabled(lv_obj_t *button, bool enabled)
-{
-    if (button == nullptr) {
-        return;
-    }
-    for (std::uint32_t i = 0; i < lv_obj_get_child_count(button); ++i) {
-        lv_obj_set_state(lv_obj_get_child(button, i), LV_STATE_DISABLED, !enabled);
-    }
-    if (enabled) {
-        lv_obj_remove_state(button, LV_STATE_DISABLED);
-        return;
-    }
-    lv_obj_remove_state(button, LV_STATE_PRESSED);
-    for (std::uint32_t i = 0; i < lv_obj_get_child_count(button); ++i) {
-        lv_obj_remove_state(lv_obj_get_child(button, i), LV_STATE_PRESSED);
-    }
-    lv_obj_add_state(button, LV_STATE_DISABLED);
-}
-
 void paint_range_buttons()
 {
-    set_button_enabled(s_zoom_in, s_range_step > 0);
-    set_button_enabled(s_zoom_out, s_range_step < RANGE_COUNT - 1);
+    theme::set_usable(s_zoom_in, s_range_step > 0);
+    theme::set_usable(s_zoom_out, s_range_step < RANGE_COUNT - 1);
 }
 
 void scale_ground(float factor)
@@ -734,8 +715,7 @@ void range_clicked(lv_event_t *event)
 lv_obj_t *zoom_chip(lv_obj_t *bezel, std::int32_t x, const lv_image_dsc_t *mark, int step)
 {
     lv_obj_t *chip = theme::make_chip(bezel, "");
-    lv_obj_t *image = theme::make_mark(chip, mark);
-    lv_obj_set_style_image_opa(image, LV_OPA_20, LV_STATE_DISABLED);
+    theme::make_mark(chip, mark);
     lv_obj_set_pos(chip, x, EDGE);
     lv_obj_set_ext_click_area(chip, (CORNER - ZOOM_D) / 2);
     lv_obj_add_event_cb(chip, range_clicked, LV_EVENT_PRESSED,

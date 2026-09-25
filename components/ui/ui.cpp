@@ -364,13 +364,7 @@ void apply_desk_available(bool available)
 {
     s_desk_available = available;
     for (int i = 0; i < s_desk_control_count; ++i) {
-        lv_obj_t *obj = s_desk_controls[i];
-        lv_obj_set_state(obj, LV_STATE_DISABLED, !available);
-        lv_obj_t *label = lv_obj_get_child(obj, 0);
-        if (label != nullptr) {
-            theme::set_text_color(label, available ? theme::text : theme::disabled_ink);
-        }
-        lv_obj_set_clickable(obj, available);
+        theme::set_usable(s_desk_controls[i], available);
     }
 }
 

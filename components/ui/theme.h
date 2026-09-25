@@ -328,6 +328,24 @@ inline lv_obj_t *make_button(lv_obj_t *parent, const char *value,
     return button;
 }
 
+/** Something that cannot be used just now: faded as it is, and deaf to taps.
+ *  Not LVGL's disabled state, which paints it a flat grey that reads lighter,
+ *  and so more pressable, than the buttons beside it. */
+inline void set_usable(lv_obj_t *obj, bool usable)
+{
+    if (obj == nullptr) {
+        return;
+    }
+    lv_obj_set_clickable(obj, usable);
+    lv_obj_set_style_opa(obj, usable ? LV_OPA_COVER : LV_OPA_40, 0);
+    if (!usable) {
+        lv_obj_remove_state(obj, LV_STATE_PRESSED);
+        for (std::uint32_t i = 0; i < lv_obj_get_child_count(obj); ++i) {
+            lv_obj_remove_state(lv_obj_get_child(obj, i), LV_STATE_PRESSED);
+        }
+    }
+}
+
 /** A card: the one surface content sits on. */
 inline lv_obj_t *make_card(lv_obj_t *parent)
 {
