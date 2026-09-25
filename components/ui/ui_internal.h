@@ -263,6 +263,8 @@ void paint_light(lv_obj_t *root, lv_obj_t *name, lv_obj_t *state, bool on);
 void layout_media_text();
 /** The speaker drawn in the card's cover frame while nothing plays. */
 void show_speaker_face(bool shown);
+/** Where the card's text starts while idle, to sit level with the speaker. */
+std::int32_t idle_media_text_top();
 /** The HK Citation One the card shows then, `side` square, painted once. */
 const lv_image_dsc_t *speaker_picture(std::int32_t side);
 void apply_pick(int index, const char *name);

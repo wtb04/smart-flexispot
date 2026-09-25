@@ -536,8 +536,11 @@ void place_media_text(bool framed)
 {
     const TextBox card  = framed ? s_card_with_art : s_card_bare;
     const TextBox panel = framed ? s_panel_with_art : s_panel_bare;
-    theme::align(s_media_source, LV_ALIGN_TOP_LEFT, card.x, 0);
-    theme::align(s_media_title, LV_ALIGN_TOP_LEFT, card.x, MEDIA_TITLE_Y);
+    // Nothing playing leaves the speaker's name and OFF, a short pair, which
+    // sits level with the speaker beside it rather than at the top.
+    const std::int32_t top = s_media_idle ? idle_media_text_top() : 0;
+    theme::align(s_media_source, LV_ALIGN_TOP_LEFT, card.x, top);
+    theme::align(s_media_title, LV_ALIGN_TOP_LEFT, card.x, top + MEDIA_TITLE_Y);
     lv_obj_set_width(s_media_title, card.w);
     lv_obj_set_width(s_media_artist, card.w);
 

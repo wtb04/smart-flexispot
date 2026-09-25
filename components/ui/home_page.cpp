@@ -1087,6 +1087,12 @@ constexpr int LIGHTS_SHARE_NUM = 5;
 constexpr int LIGHTS_SHARE_DEN = 9;
 }  // namespace
 
+std::int32_t idle_media_text_top()
+{
+    const std::int32_t block = CARD_TITLE_Y + lv_font_get_line_height(fonts::size_20());
+    return std::max<std::int32_t>(0, (s_card_inner_h - block) / 2);
+}
+
 void show_speaker_face(bool shown)
 {
     lv_obj_set_hidden(s_speaker_face, !shown);
