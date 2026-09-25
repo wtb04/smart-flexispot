@@ -168,6 +168,11 @@ void on_album_art(media::Art state, const void *pixels)
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_album_art(pixels, state == media::Art::Failed));
 }
 
+void on_pick_art(int index, const void *pixels)
+{
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_pick_art(index, pixels));
+}
+
 void watch_link(bool up, std::int64_t &down_since, const char *what, esp_err_t (*restart)())
 {
     if (up) {
@@ -299,7 +304,7 @@ void start_clients()
         hass::ws::start(on_entities, room::entities(), room::attributes()));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ble::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(jpeg::start());
-    ESP_ERROR_CHECK_WITHOUT_ABORT(media::start(hass::ws::http_origin(), on_album_art));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(media::start(hass::ws::http_origin(), on_album_art, on_pick_art));
     ESP_ERROR_CHECK_WITHOUT_ABORT(radar::start(on_radar, on_radar_details, on_radar_photo));
 }
 

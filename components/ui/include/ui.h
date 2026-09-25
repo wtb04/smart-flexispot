@@ -144,6 +144,8 @@ struct UpdateState {
 };
 /** Install what is ready now. */
 using UpdateHandler = void (*)();
+/** One of the favourites, picked from the media card's popup. */
+using PickHandler = void (*)(int index);
 
 /** Minutes of focus, break and long break, and rounds before the long one. */
 using FocusPlanHandler = void (*)(int work_min, int break_min, int long_break_min, int rounds);
@@ -200,6 +202,14 @@ esp_err_t set_media_progress(int position_s, int duration_s, bool playing);
 
 esp_err_t set_media_volume(int percent);
 
+/** A favourite offered by holding the media card while nothing plays, index
+ *  below media::kPickCount. An empty name leaves it out. */
+esp_err_t set_pick(int index, const char *name);
+
+/** Its cover, media::kPickArtSize square of RGB565, or null while there is
+ *  none. The buffer must live until it is replaced. */
+esp_err_t set_pick_art(int index, const void *pixels);
+
 /** An empty label hides the chip, and the remaining ones close up the gap. */
 esp_err_t set_pill(int index, const char *label, const char *value, Level level);
 
@@ -241,6 +251,7 @@ struct Handlers {
     FocusHandler       focus;
     FocusPlanHandler   focus_plan;
     UpdateHandler      update_now;
+    PickHandler        pick;
 };
 
 /** Requires the LVGL port to be running. A zero accent keeps the built-in

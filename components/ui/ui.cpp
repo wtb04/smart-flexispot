@@ -302,6 +302,9 @@ struct DetailsArgs {
     char            hex[radar::kHexLen];
     radar::Details  details;
 };
+struct PickArgs {
+    Text<48> name;
+};
 struct PhotoArgs {
     char        hex[radar::kHexLen];
     const void *pixels;
@@ -316,6 +319,8 @@ Slot<MediaArgs>      p_media;
 Slot<ProgressArgs>   p_progress;
 Slot<int>            p_media_volume;
 Slot<ArtArgs>        p_art;
+Slot<PickArgs>       p_pick[media::kPickCount];
+Slot<const void *>   p_pick_art[media::kPickCount];
 Slot<PillArgs>       p_pill[kPillCount];
 Slot<LightsArgs>     p_lights;
 Slot<LightArgs>      p_light[kLightCount];
@@ -838,6 +843,14 @@ void apply_media_updates()
         apply_album_art(art.pixels, art.placeholder);
         release_held_media();
     }
+    for (int i = 0; i < media::kPickCount; ++i) {
+        if (PickArgs pick{}; take(p_pick[i], pick)) {
+            apply_pick(i, pick.name.get());
+        }
+        if (const void *pixels = nullptr; take(p_pick_art[i], pixels)) {
+            apply_pick_art(i, pixels);
+        }
+    }
     if (ProgressArgs progress{}; take(p_progress, progress)) {
         apply_media_progress(progress.position_s, progress.duration_s, progress.playing);
     }
@@ -1024,6 +1037,24 @@ esp_err_t set_media_volume(int percent)
 esp_err_t set_album_art(const void *pixels, bool placeholder)
 {
     put(p_art, ArtArgs{pixels, placeholder});
+    return ESP_OK;
+}
+
+esp_err_t set_pick(int index, const char *name)
+{
+    ESP_RETURN_ON_FALSE(index >= 0 && index < media::kPickCount, ESP_ERR_INVALID_ARG, TAG,
+                        "favourite %d", index);
+    PickArgs args{};
+    args.name.set(name);
+    put(p_pick[index], args);
+    return ESP_OK;
+}
+
+esp_err_t set_pick_art(int index, const void *pixels)
+{
+    ESP_RETURN_ON_FALSE(index >= 0 && index < media::kPickCount, ESP_ERR_INVALID_ARG, TAG,
+                        "favourite %d", index);
+    put(p_pick_art[index], pixels);
     return ESP_OK;
 }
 

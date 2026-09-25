@@ -5,6 +5,12 @@
 #include "esp_timer.h"
 #include "ha_ws.h"
 #include "media.h"
+#include "esp_crt_bundle.h"
+#include "esp_heap_caps.h"
+#include "esp_http_client.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "picks.h"
 #include "radar.h"
 #include "ui.h"
 #include "units.h"
@@ -14,7 +20,10 @@
 #include <ctime>
 #include <cctype>
 #include <cstring>
+#include <mutex>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace room {
 namespace {
@@ -75,6 +84,31 @@ constexpr char MEDIA_JELLYFIN[] = "media_player.macbook_pro";
 constexpr const char *MEDIA_PLAYERS[] = {MEDIA_SPEAKER, MEDIA_JELLYFIN};
 constexpr int  JELLYFIN_PRESET  = 1;  // holding the card for Jellyfin: Preset 2
 std::atomic<const char *> s_player{MEDIA_SPEAKER};
+
+// The favourites, in the order the popup shows them. For another: open it in
+// the Spotify app, Share, Copy link; open.spotify.com/playlist/ID is
+// spotify:playlist:ID here. A Daily Mix keeps its link as its songs change.
+constexpr const char *PICK_URIS[] = {
+    "spotify:playlist:37i9dQZEVXbMDoHDwVN2tF",  // Top 50 - Global
+    "spotify:playlist:37i9dQZEVXbKCF6dqVpDkS",  // Top 50 - Netherlands
+    "spotify:playlist:37i9dQZEVXbMDoHDwVN2tF",  // Hip Hop Mix
+    "spotify:playlist:37i9dQZEVXbMDoHDwVN2tF",  // Daily Mix 2
+    "spotify:playlist:37i9dQZEVXbMDoHDwVN2tF",  // Daily Mix 3
+    "spotify:playlist:37i9dQZEVXbMDoHDwVN2tF",  // Daily Mix 5
+    "spotify:playlist:37i9dQZEVXbMDoHDwVN2tF",  // Daily Mix 6
+    "spotify:playlist:37i9dQZEVXbMDoHDwVN2tF",  // On Repeat
+};
+static_assert(std::size(PICK_URIS) <= media::kPickCount, "more favourites than the popup holds");
+
+// Titles and covers change now and then, a Daily Mix's among them.
+constexpr TickType_t    PICKS_REFRESH     = pdMS_TO_TICKS(6 * units::kSecondsPerHour * units::kMsPerSecond);
+constexpr TickType_t    PICKS_RETRY       = pdMS_TO_TICKS(30 * units::kMsPerSecond);
+constexpr int           EMBED_TIMEOUT_MS  = 8 * units::kMsPerSecond;
+constexpr std::size_t   EMBED_MAX         = 8 * units::kBytesPerKiB;
+constexpr int           HTTP_OK           = 200;
+constexpr std::uint32_t PICKS_TASK_STACK  = 8192;  // TLS
+constexpr UBaseType_t   PICKS_TASK_PRIORITY = 2;
+constexpr BaseType_t    PICKS_TASK_CORE     = 0;
 
 /** Fraction of full scale, per press. */
 constexpr float VOLUME_STEP = 0.05f;
@@ -417,6 +451,101 @@ void render_media(const hass::ws::EntityStore &store)
     show_media_volume(*player);
 }
 
+// The favourites, locked: the lookup task names them and a tap reads them on
+// the LVGL task.
+std::mutex               s_picks_lock;
+std::vector<picks::Pick> s_picks;
+
+void show_picks()
+{
+    std::lock_guard<std::mutex> hold(s_picks_lock);
+    for (int i = 0; i < media::kPickCount; ++i) {
+        const bool here = i < static_cast<int>(s_picks.size());
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_pick(i, here ? s_picks[i].name.c_str() : ""));
+        media::set_pick_art(i, here ? s_picks[i].image.c_str() : "");
+    }
+}
+
+bool fetch_text(const std::string &url, std::string &out)
+{
+    esp_http_client_config_t cfg{};
+    cfg.url               = url.c_str();
+    cfg.timeout_ms        = EMBED_TIMEOUT_MS;
+    cfg.crt_bundle_attach = esp_crt_bundle_attach;
+    esp_http_client_handle_t client = esp_http_client_init(&cfg);
+    if (client == nullptr) {
+        return false;
+    }
+    out.clear();
+    bool ok = esp_http_client_open(client, 0) == ESP_OK &&
+              esp_http_client_fetch_headers(client) >= 0 &&
+              esp_http_client_get_status_code(client) == HTTP_OK;
+    char chunk[512];
+    while (ok && out.size() < EMBED_MAX) {
+        const int got = esp_http_client_read(client, chunk, sizeof(chunk));
+        if (got <= 0) {
+            break;
+        }
+        out.append(chunk, static_cast<std::size_t>(got));
+    }
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+    return ok && !out.empty();
+}
+
+/** Looks each favourite up now and then, and shows what it found. */
+[[noreturn]] void picks_task(void *)
+{
+    for (;;) {
+        bool all = true;
+        for (std::size_t i = 0; i < std::size(PICK_URIS); ++i) {
+            picks::Pick pick{PICK_URIS[i], "", ""};
+            std::string answer;
+            if (fetch_text(picks::embed_url(pick.uri), answer) && picks::take_embed(answer, pick)) {
+                std::lock_guard<std::mutex> hold(s_picks_lock);
+                s_picks[i] = pick;
+            } else {
+                all = false;
+                ESP_LOGW(TAG, "no title for %s yet", PICK_URIS[i]);
+            }
+        }
+        show_picks();
+        vTaskDelay(all ? PICKS_REFRESH : PICKS_RETRY);
+    }
+}
+
+/** From the first render, by when the covers can be fetched. */
+void start_picks()
+{
+    static bool started = false;
+    if (std::exchange(started, true)) {
+        return;
+    }
+    {
+        std::lock_guard<std::mutex> hold(s_picks_lock);
+        s_picks.clear();
+        for (const char *uri : PICK_URIS) {
+            s_picks.push_back({uri, "", ""});
+        }
+    }
+    static StaticTask_t task_ctrl;
+    auto *stack = static_cast<StackType_t *>(heap_caps_malloc(
+        PICKS_TASK_STACK * sizeof(StackType_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (stack == nullptr ||
+        xTaskCreateStaticPinnedToCore(picks_task, "picks", PICKS_TASK_STACK, nullptr,
+                                      PICKS_TASK_PRIORITY, stack, &task_ctrl,
+                                      PICKS_TASK_CORE) == nullptr) {
+        ESP_LOGE(TAG, "no room for the favourites' lookup");
+    }
+}
+
+void on_played(const cJSON *result)
+{
+    if (result == nullptr) {
+        ESP_LOGW(TAG, "the favourite did not start");
+    }
+}
+
 void send_volume(void *)
 {
     const int percent = s_volume_pending.exchange(-1, std::memory_order_relaxed);
@@ -463,6 +592,21 @@ void nudge_volume(float delta)
         ESP_ERROR_CHECK_WITHOUT_ABORT(
             esp_timer_start_once(s_volume_timer, VOLUME_MIN_GAP_US - since));
     }
+}
+
+void on_pick(int index)
+{
+    picks::Pick pick;
+    {
+        std::lock_guard<std::mutex> hold(s_picks_lock);
+        if (index < 0 || index >= static_cast<int>(s_picks.size())) {
+            return;
+        }
+        pick = s_picks[index];
+    }
+    ESP_LOGI(TAG, "playing %s", pick.name.c_str());
+    ESP_ERROR_CHECK_WITHOUT_ABORT(
+        hass::ws::request(picks::play_request(pick, MEDIA_SPEAKER), on_played));
 }
 
 void on_media(ui::MediaAction action)
@@ -532,6 +676,7 @@ void render(const hass::ws::EntityStore &store)
     }
 
     render_thermostat(store);
+    start_picks();
 
     for (int i = 0; i < PILL_COUNT; ++i) {
         const hass::ws::Entity *entity = store.find(PILLS[i].entity);

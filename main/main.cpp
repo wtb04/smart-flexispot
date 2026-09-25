@@ -352,6 +352,7 @@ extern "C" void app_main(void)
         .focus       = on_focus,
         .focus_plan  = on_focus_plan,
         .update_now  = ota::install,
+        .pick        = room::on_pick,
     };
     const int brightness = settings::get(settings::Key::Brightness);
     ui::set_cards(diagnostics::cards(), diagnostics::card_count());

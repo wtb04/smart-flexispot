@@ -26,6 +26,9 @@ int entity_count();
 
 void on_media(ui::MediaAction action);
 
+/** Plays one of the favourites the media card offers. */
+void on_pick(int index);
+
 void on_setpoint(float celsius);
 
 void on_mode();

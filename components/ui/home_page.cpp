@@ -531,6 +531,7 @@ lv_obj_t *s_panel_total    = nullptr;
 namespace {
 lv_obj_t *s_panel_quieter  = nullptr;
 lv_obj_t *s_panel_louder   = nullptr;
+lv_obj_t *s_panel_picks    = nullptr;  // the favourites, from what is playing
 }  // namespace
 
 lv_obj_t *s_panel_volume_pct  = nullptr;
@@ -619,6 +620,7 @@ void layout_panel_text(const TextBox &panel)
     const std::int32_t text_dy = (VOL_H - lv_font_get_line_height(fonts::size_20())) / 2;
     theme::align(s_panel_volume_icon, LV_ALIGN_TOP_LEFT, panel.x, y + text_dy);
     theme::align(s_panel_volume_pct, LV_ALIGN_TOP_LEFT, panel.x + VOLUME_PCT_X, y + text_dy);
+    theme::align(s_panel_picks, LV_ALIGN_TOP_RIGHT, -2 * (VOL_W + VOL_GAP), y);
     theme::align(s_panel_quieter, LV_ALIGN_TOP_RIGHT, -(VOL_W + VOL_GAP), y);
     theme::align(s_panel_louder, LV_ALIGN_TOP_RIGHT, 0, y);
 }
@@ -674,6 +676,122 @@ lv_obj_t *make_cover(lv_obj_t *frame, std::int32_t side)
     return art;
 }
 }  // namespace
+
+namespace {
+// Favourites, from holding the card while nothing plays: a cover each with its
+// name, as many columns as there are favourites up to a row's worth.
+constexpr std::int32_t PICK_COLUMNS  = 4;
+constexpr std::int32_t PICK_NAME_GAP   = 8;
+constexpr std::int32_t PICK_ART_RADIUS = 14;
+constexpr std::int32_t PICK_MIN_W      = 320;  // room for the title and the close button
+
+struct PickView {
+    lv_obj_t      *root;
+    lv_obj_t      *art;
+    lv_obj_t      *name;
+    lv_image_dsc_t dsc;
+    bool           named;
+};
+PickView                    s_pick_views[media::kPickCount]{};
+std::optional<ModalOverlay> s_pick_picker;
+
+std::int32_t pick_height()
+{
+    return media::kPickArtSize + PICK_NAME_GAP + lv_font_get_line_height(fonts::size_20());
+}
+
+void pick_clicked_cb(lv_event_t *e)
+{
+    const int index = static_cast<int>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e)));
+    s_pick_picker->close();
+    if (s_handlers.pick != nullptr) {
+        s_handlers.pick(index);
+    }
+}
+
+void build_pick(lv_obj_t *grid, int index)
+{
+    const std::int32_t side = media::kPickArtSize;
+    PickView          &view = s_pick_views[index];
+
+    view.root = lv_obj_create(grid);
+    lv_obj_set_size(view.root, side, pick_height());
+    lv_obj_set_style_bg_opa(view.root, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(view.root, 0, 0);
+    lv_obj_set_style_pad_all(view.root, 0, 0);
+    lv_obj_set_scrollable(view.root, false);
+    lv_obj_set_style_opa(view.root, LV_OPA_70, LV_STATE_PRESSED);
+    lv_obj_add_event_cb(view.root, pick_clicked_cb, LV_EVENT_CLICKED,
+                        reinterpret_cast<void *>(static_cast<std::intptr_t>(index)));
+    lv_obj_set_hidden(view.root, true);
+
+    lv_obj_t *frame = rounded_frame(view.root, side, PICK_ART_RADIUS);
+    lv_obj_align(frame, LV_ALIGN_TOP_LEFT, 0, 0);
+    view.art = make_cover(frame, side);
+    lv_obj_set_hidden(view.art, true);
+
+    view.name = theme::make_label(view.root, "", theme::text, fonts::size_20());
+    one_line(view.name, fonts::size_20(), side);
+    lv_obj_align(view.name, LV_ALIGN_TOP_LEFT, 0, side + PICK_NAME_GAP);
+}
+
+/** Sized for the favourites there are, since that changes between openings. */
+void fit_pick_picker(int count)
+{
+    const std::int32_t columns = std::min<std::int32_t>(count, PICK_COLUMNS);
+    const std::int32_t rows    = (count + PICK_COLUMNS - 1) / PICK_COLUMNS;
+    const std::int32_t grid_w  = columns * media::kPickArtSize + (columns - 1) * BUTTON_GAP;
+    const std::int32_t grid_h  = rows * pick_height() + (rows - 1) * BUTTON_GAP;
+    s_pick_picker->resize(std::max(grid_w, PICK_MIN_W) + 2 * PICKER_PAD,
+                          grid_h + PICKER_HEADER_H + 2 * PICKER_PAD);
+}
+
+void build_pick_picker(lv_obj_t *parent)
+{
+    s_pick_picker.emplace(parent, PICK_MIN_W, PICKER_HEADER_H);
+    lv_obj_t *card = s_pick_picker->content();
+    lv_obj_set_style_pad_all(card, PICKER_PAD, 0);
+
+    lv_obj_t *title = theme::make_accent_label(card, "FAVOURITES", fonts::size_22());
+    lv_obj_align(title, LV_ALIGN_TOP_LEFT, 0, 0);
+
+    lv_obj_t *grid = lv_obj_create(card);
+    lv_obj_set_pos(grid, 0, PICKER_HEADER_H);
+    lv_obj_set_size(grid, PICK_COLUMNS * (media::kPickArtSize + BUTTON_GAP), LV_SIZE_CONTENT);
+    theme::style_panel(grid, theme::panel, 0);
+    lv_obj_set_style_bg_opa(grid, LV_OPA_TRANSP, 0);
+    lv_obj_set_scrollable(grid, false);
+    lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
+    lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_set_style_pad_row(grid, BUTTON_GAP, 0);
+    lv_obj_set_style_pad_column(grid, BUTTON_GAP, 0);
+
+    for (int i = 0; i < media::kPickCount; ++i) {
+        build_pick(grid, i);
+    }
+    s_pick_picker->add_close_button();
+}
+
+int pick_count()
+{
+    int count = 0;
+    for (const PickView &view : s_pick_views) {
+        count += view.named ? 1 : 0;
+    }
+    return count;
+}
+
+void open_pick_picker()
+{
+    const int count = pick_count();
+    if (count == 0 || !s_pick_picker.has_value()) {
+        return;
+    }
+    fit_pick_picker(count);
+    s_pick_picker->open(s_media_card);
+}
+}  // namespace
+
 
 void write_clock(lv_obj_t *label, int seconds)
 {
@@ -764,6 +882,10 @@ void media_swiped(lv_dir_t direction)
 void media_held()
 {
     s_media_long = true;
+    if (!s_has_track_shown) {
+        open_pick_picker();
+        return;
+    }
     if (s_media_off) {
         return;
     }
@@ -772,6 +894,7 @@ void media_held()
             s_handlers.preset(s_media_hold, false);
         }
     } else if (s_media_panel.has_value()) {
+        lv_obj_set_hidden(s_panel_picks, pick_count() == 0);
         s_media_panel->open(s_media_card);
     }
 }
@@ -839,11 +962,21 @@ void build_panel_progress(lv_obj_t *card, std::int32_t text_w)
     s_panel_total   = theme::make_label(card, "0:00", theme::secondary, fonts::size_16());
 }
 
+void panel_picks_cb(lv_event_t *)
+{
+    s_media_panel->close();
+    open_pick_picker();
+}
+
 void build_panel_volume(lv_obj_t *card)
 {
     s_panel_volume_icon =
         theme::make_label(card, LV_SYMBOL_VOLUME_MAX, theme::secondary, fonts::size_20());
     s_panel_volume_pct = theme::make_label(card, "--", theme::text, fonts::size_20());
+
+    s_panel_picks = theme::make_button(card, LV_SYMBOL_LIST, theme::panel_light, fonts::size_32());
+    lv_obj_set_size(s_panel_picks, VOL_W, VOL_H);
+    lv_obj_add_event_cb(s_panel_picks, panel_picks_cb, LV_EVENT_CLICKED, nullptr);
 
     s_panel_quieter = media_button(card, LV_SYMBOL_MINUS, MediaAction::VolumeDown, VOL_W, VOL_H);
     s_panel_louder  = media_button(card, LV_SYMBOL_PLUS, MediaAction::VolumeUp, VOL_W, VOL_H);
@@ -959,6 +1092,39 @@ void show_speaker_face(bool shown)
     lv_obj_set_hidden(s_speaker_face, !shown);
 }
 
+void apply_pick(int index, const char *name)
+{
+    PickView &view = s_pick_views[index];
+    if (view.root == nullptr) {
+        return;
+    }
+    view.named = name != nullptr && name[0] != '\0';
+    theme::set_text(view.name, view.named ? name : "");
+    lv_obj_set_hidden(view.root, !view.named);
+}
+
+void apply_pick_art(int index, const void *pixels)
+{
+    PickView &view = s_pick_views[index];
+    if (view.art == nullptr) {
+        return;
+    }
+    lv_obj_set_hidden(view.art, pixels == nullptr);
+    if (pixels == nullptr) {
+        return;
+    }
+    const std::uint32_t bytes = lv_color_format_get_size(LV_COLOR_FORMAT_RGB565);
+    view.dsc.header.magic     = LV_IMAGE_HEADER_MAGIC;
+    view.dsc.header.cf        = LV_COLOR_FORMAT_RGB565;
+    view.dsc.header.w         = media::kPickArtSize;
+    view.dsc.header.h         = media::kPickArtSize;
+    view.dsc.header.stride    = media::kPickArtSize * bytes;
+    view.dsc.data_size        = media::kPickArtSize * media::kPickArtSize * bytes;
+    view.dsc.data             = static_cast<const std::uint8_t *>(pixels);
+    lv_image_set_src(view.art, &view.dsc);
+    lv_obj_invalidate(view.art);
+}
+
 void build_home_page(lv_obj_t *page)
 {
     const Layout l = layout();
@@ -983,6 +1149,7 @@ void build_home_page(lv_obj_t *page)
 
     build_light_picker(page);
     build_media_panel(page);
+    build_pick_picker(page);
 }
 
 }  // namespace ui::detail
