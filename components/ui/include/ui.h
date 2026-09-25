@@ -138,6 +138,7 @@ struct UpdateState {
     UpdatePhase  phase;         // arriving here, or going on to the companion
     int          percent;
     int          seconds_left;  // negative until known
+    bool         immediate;     // installed once in, rather than kept ready
     bool         panel_ready;
     bool         companion_ready;
 };

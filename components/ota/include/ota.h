@@ -18,6 +18,7 @@ struct Status {
     Phase  phase           = Phase::Receiving;  // the image arriving here, or going on to the companion
     int    percent         = 0;
     int    seconds_left    = -1;  // at the rate so far; negative until there is one
+    bool   immediate       = false;  // installed as soon as it is in, rather than kept
     bool   panel_ready     = false;
     bool   companion_ready = false;
 };

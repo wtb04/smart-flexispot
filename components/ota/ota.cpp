@@ -86,10 +86,11 @@ void publish()
     }
 }
 
-void set_busy(Target target, Phase phase = Phase::Receiving)
+void set_busy(Target target, Phase phase = Phase::Receiving, bool immediate = false)
 {
     s_status.busy         = target;
     s_status.phase        = phase;
+    s_status.immediate    = immediate || phase == Phase::Installing;
     s_status.percent      = 0;
     s_status.seconds_left = -1;
     s_busy_since          = esp_timer_get_time();
@@ -335,7 +336,7 @@ esp_err_t update_panel(httpd_req_t *req)
     // What was ready in the slot is overwritten from the first byte.
     remember_panel_ready(false);
     s_status.panel_ready = false;
-    set_busy(Target::Panel);
+    set_busy(Target::Panel, Phase::Receiving, now);
     esp_app_desc_t         arrived{};
     const esp_partition_t *slot = receive_panel(req, arrived);
     if (slot == nullptr) {
@@ -421,7 +422,7 @@ esp_err_t update_companion(httpd_req_t *req)
     if (!may_update(req, COMPANION_MAX, now)) {
         return ESP_OK;
     }
-    set_busy(Target::Companion);
+    set_busy(Target::Companion, Phase::Receiving, now);
     esp_app_desc_t arrived{};
     std::uint8_t  *image = receive_companion(req, arrived);
     if (image == nullptr) {

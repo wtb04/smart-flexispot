@@ -460,6 +460,9 @@ void paint_update_icon(const UpdateState &state)
     lv_obj_set_hidden(s_update_icon, !busy);
     lv_obj_set_hidden(s_update_bar, !busy);
     if (busy) {
+        // Accent for one that installs, and restarts, as soon as it is in.
+        lv_obj_set_style_image_recolor(
+            s_update_icon, lv_color_hex(state.immediate ? theme::primary : theme::text), 0);
         lv_image_set_src(s_update_icon, update_icon(state));
         lv_bar_set_value(s_update_bar, state.percent, LV_ANIM_OFF);
     }

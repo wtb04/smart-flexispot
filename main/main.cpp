@@ -299,7 +299,8 @@ void show_update(const ota::Status &status)
                                                                          : ui::UpdatePhase::Receiving;
     ESP_ERROR_CHECK_WITHOUT_ABORT(
         ui::set_update({.busy = busy, .phase = phase, .percent = status.percent,
-                        .seconds_left = status.seconds_left, .panel_ready = status.panel_ready,
+                        .seconds_left = status.seconds_left, .immediate = status.immediate,
+                        .panel_ready = status.panel_ready,
                         .companion_ready = status.companion_ready}));
 }
 
