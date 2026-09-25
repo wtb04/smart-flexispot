@@ -126,8 +126,9 @@ constexpr std::int32_t PHOTO_ASPECT_W = 3;
 constexpr std::int32_t PHOTO_ASPECT_H = 2;
 constexpr std::int32_t PHOTO_H        = INNER_W * PHOTO_ASPECT_H / PHOTO_ASPECT_W;
 
-constexpr std::int32_t  SPINNER_SIZE      = 40;
-constexpr std::int32_t  SPINNER_STROKE    = 4;
+constexpr std::int32_t  SPINNER_SIZE      = 104;  // round the plane waiting inside it
+constexpr std::int32_t  SPINNER_STROKE    = 3;
+constexpr lv_opa_t      WAITING_PLANE_OPA = LV_OPA_30;
 constexpr int           SPINNER_SWEEP_DEG = 90;
 constexpr std::uint32_t SPINNER_TURN_MS   = 900;
 
@@ -237,6 +238,7 @@ lv_obj_t *s_summary     = nullptr;
 lv_obj_t *s_photo       = nullptr;
 lv_obj_t *s_photo_frame = nullptr;
 lv_obj_t *s_photo_wait  = nullptr;
+lv_obj_t *s_photo_plane = nullptr;  // faint inside the spinner while it turns
 lv_obj_t *s_photo_none  = nullptr;
 lv_obj_t *s_identity    = nullptr;
 lv_obj_t *s_nearby      = nullptr;
@@ -1072,6 +1074,16 @@ void build_spinner(lv_obj_t *card)
     lv_obj_set_style_arc_color(s_photo_wait, lv_color_hex(theme::secondary), LV_PART_INDICATOR);
     lv_obj_set_hidden(s_photo_wait, true);
     quiet(s_photo_wait);
+
+    s_photo_plane = lv_image_create(card);
+    lv_image_set_src(s_photo_plane, &icons::plane_large_icon);
+    lv_obj_set_style_image_recolor(s_photo_plane, lv_color_hex(theme::secondary), 0);
+    lv_obj_set_style_image_recolor_opa(s_photo_plane, LV_OPA_COVER, 0);
+    lv_obj_set_style_image_opa(s_photo_plane, WAITING_PLANE_OPA, 0);
+    lv_obj_set_pos(s_photo_plane, (INNER_W - icons::plane_large_icon.header.w) / 2,
+                   (PHOTO_H - icons::plane_large_icon.header.h) / 2);
+    lv_obj_set_hidden(s_photo_plane, true);
+    quiet(s_photo_plane);
 }
 
 void build_no_photo()
@@ -1163,6 +1175,7 @@ void show_waiting(bool waiting)
         return;
     }
     lv_obj_set_hidden(s_photo_wait, !waiting);
+    lv_obj_set_hidden(s_photo_plane, !waiting);
     if (!waiting) {
         lv_anim_delete(s_photo_wait, nullptr);
         return;

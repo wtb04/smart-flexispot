@@ -134,12 +134,23 @@ CALENDAR = paint([(rounded(3, 5, 25, 25.5, 3.5), True),
                  28)
 
 PLANE_SIDE = 28
-PLANE = paint([(stroke(14, 3, 14, 24, 4), True),
-               (polygon((12.5, 10), (15.5, 10), (27, 17), (27, 19.5), (15.5, 16), (12.5, 16),
-                        (1, 19.5), (1, 17)), True),
-               (polygon((13, 21), (15, 21), (20.5, 25), (20.5, 26.5), (15, 25), (13, 25),
-                        (7.5, 26.5), (7.5, 25)), True)],
-              PLANE_SIDE)
+
+
+def plane_layers(k):
+    """The plane at 28 pixels, scaled by k."""
+    def at(*points):
+        return polygon(*[(x * k, y * k) for x, y in points])
+    return [(stroke(14 * k, 3 * k, 14 * k, 24 * k, 4 * k), True),
+            (at((12.5, 10), (15.5, 10), (27, 17), (27, 19.5), (15.5, 16), (12.5, 16),
+                (1, 19.5), (1, 17)), True),
+            (at((13, 21), (15, 21), (20.5, 25), (20.5, 26.5), (15, 25), (13, 25),
+                (7.5, 26.5), (7.5, 25)), True)]
+
+
+PLANE = paint(plane_layers(1), PLANE_SIDE)
+# The same plane, faint behind the radar's spinner while a photo is on its way.
+PLANE_LARGE_SIDE = 70
+PLANE_LARGE = paint(plane_layers(PLANE_LARGE_SIDE / PLANE_SIDE), PLANE_LARGE_SIDE)
 DESK = paint([(rounded(2, 5, 26, 9, 2), True),
               (rounded(7, 8, 10, 23, 0), True),
               (rounded(18, 8, 21, 23, 0), True),
@@ -266,7 +277,7 @@ out.write_text(f"""#pragma once
 
 namespace ui {{
 namespace icons {{
-{emit("train", TRAIN)}{emit("bus", BUS)}{emit("walk", WALK)}{emit("bike", BIKE)}{emit("no_photo", NO_PHOTO, NO_PHOTO_SIDE)}{emit("wifi", WIFI, STATUS_SIDE)}{emit("wifi_off", WIFI_OFF, STATUS_SIDE)}{emit("phone", PHONE, STATUS_SIDE)}{emit("phone_off", PHONE_OFF, STATUS_SIDE)}{emit("plane", PLANE, PLANE_SIDE)}{emit("calendar", CALENDAR, 28)}{emit("desk", DESK, STATUS_SIDE)}{emit("timer", TIMER, 28)}{emit("update_panel", UPDATE_PANEL, STATUS_SIDE)}{emit("update_companion", UPDATE_COMPANION, STATUS_SIDE)}{emit("install_companion", INSTALL_COMPANION, STATUS_SIDE)}{emit("plus", PLUS, MARK_SIDE)}{emit("minus", MINUS, MARK_SIDE)}{emit("times", TIMES, MARK_SIDE)}
+{emit("train", TRAIN)}{emit("bus", BUS)}{emit("walk", WALK)}{emit("bike", BIKE)}{emit("no_photo", NO_PHOTO, NO_PHOTO_SIDE)}{emit("wifi", WIFI, STATUS_SIDE)}{emit("wifi_off", WIFI_OFF, STATUS_SIDE)}{emit("phone", PHONE, STATUS_SIDE)}{emit("phone_off", PHONE_OFF, STATUS_SIDE)}{emit("plane", PLANE, PLANE_SIDE)}{emit("plane_large", PLANE_LARGE, PLANE_LARGE_SIDE)}{emit("calendar", CALENDAR, 28)}{emit("desk", DESK, STATUS_SIDE)}{emit("timer", TIMER, 28)}{emit("update_panel", UPDATE_PANEL, STATUS_SIDE)}{emit("update_companion", UPDATE_COMPANION, STATUS_SIDE)}{emit("install_companion", INSTALL_COMPANION, STATUS_SIDE)}{emit("plus", PLUS, MARK_SIDE)}{emit("minus", MINUS, MARK_SIDE)}{emit("times", TIMES, MARK_SIDE)}
 }}  // namespace icons
 }}  // namespace ui
 """)
