@@ -92,6 +92,7 @@ struct Ride {  // the line between two stops, and how it is travelled
 
 struct Block {  // one event in the week
     lv_obj_t *root  = nullptr;
+    lv_obj_t *time  = nullptr;
     lv_obj_t *title = nullptr;
 };
 
@@ -142,11 +143,11 @@ struct DayBlock {
 std::int32_t s_day_lane_h = DAY_LANE;  // as tall as the card has room for
 bool         s_day_two    = false;
 lv_obj_t *s_day       = nullptr;
-lv_obj_t *s_day_name  = nullptr;
 lv_obj_t *s_day_track = nullptr;
 lv_obj_t *s_day_now   = nullptr;
 lv_obj_t *s_day_tick[DAY_TICKS];
 DayBlock  s_day_block[DAY_BLOCKS];
+ical::Event s_day_event[DAY_BLOCKS];  // what each of the strip's blocks shows
 std::int32_t s_day_w = 0;
 
 lv_obj_t *s_list = nullptr;
@@ -164,6 +165,7 @@ lv_obj_t   *s_day_head[WEEK_DAYS];
 lv_obj_t   *s_hour_mark[HOURS_MAX + 1];
 lv_obj_t   *s_hour_line[HOURS_MAX + 1];
 Block       s_block[WEEK_EVENTS];
+ical::Event s_week_event[WEEK_EVENTS];
 std::int32_t s_grid_w = 0;
 std::int32_t s_grid_h = 0;
 
@@ -276,13 +278,15 @@ void day_name(std::int64_t now, std::int64_t at, char *out, std::size_t size)
     static const char *const WEEKDAYS[] = {"Sunday",   "Monday", "Tuesday", "Wednesday",
                                            "Thursday", "Friday", "Saturday"};
     const int away = days_from(now, at);
-    if (away <= 0) {
+    if (away == 0) {
         std::snprintf(out, size, "Today");
     } else if (away == 1) {
         std::snprintf(out, size, "Tomorrow");
+    } else if (away == -1) {
+        std::snprintf(out, size, "Yesterday");
     } else {
         const std::tm when = local(at);
-        if (away < 7) {
+        if (away > -7 && away < 7) {
             std::snprintf(out, size, "%s", WEEKDAYS[when.tm_wday]);
         } else {
             std::strftime(out, size, "%a %d %b", &when);
@@ -408,6 +412,88 @@ const char *via_of(const travel::Option &way)
     return way.leg_count > 0 ? way.legs[0].to : "";
 }
 
+// A tap on an event anywhere shows it whole: the strip and the week draw a
+// short one as a sliver with no room for words.
+std::optional<ModalOverlay> s_detail;
+lv_obj_t                   *s_detail_dot   = nullptr;
+lv_obj_t                   *s_detail_kind  = nullptr;
+lv_obj_t                   *s_detail_title = nullptr;
+lv_obj_t                   *s_detail_when  = nullptr;
+lv_obj_t                   *s_detail_place = nullptr;
+constexpr std::int32_t      DETAIL_W       = 620;
+
+void open_detail(const ical::Event &event)
+{
+    if (!s_detail.has_value()) {
+        return;
+    }
+    const auto now = static_cast<std::int64_t>(std::time(nullptr));
+    char       day[24];
+    char       text[96];
+    day_name(now, event.start, day, sizeof(day));
+    std::snprintf(text, sizeof(text), "%s, %s", feed_kind(event.feed), day);
+    theme::set_text(s_detail_kind, text);
+    lv_obj_set_style_bg_color(s_detail_dot, lv_color_hex(feed_ink(event.feed)), 0);
+    theme::set_text(s_detail_title, event.summary);
+
+    char from[16];
+    char to[16];
+    clock_of(event.start, from, sizeof(from));
+    clock_of(event.end, to, sizeof(to));
+    const int mins = static_cast<int>((event.end - event.start) / 60);
+    if (mins % 60 == 0) {
+        std::snprintf(text, sizeof(text), "%s \xe2\x80\x93 %s  \xc2\xb7  %d h", from, to, mins / 60);
+    } else if (mins > 60) {
+        std::snprintf(text, sizeof(text), "%s \xe2\x80\x93 %s  \xc2\xb7  %d h %d min", from, to,
+                      mins / 60, mins % 60);
+    } else {
+        std::snprintf(text, sizeof(text), "%s \xe2\x80\x93 %s  \xc2\xb7  %d min", from, to, mins);
+    }
+    theme::set_text(s_detail_when, text);
+    theme::set_text(s_detail_place, place_of(event));
+    lv_obj_set_hidden(s_detail_place, place_of(event)[0] == '\0');
+
+    lv_obj_t *body = lv_obj_get_parent(s_detail_title);
+    lv_obj_update_layout(body);
+    s_detail->resize(DETAIL_W, lv_obj_get_height(body) + 2 * space::l);
+    s_detail->open();
+}
+
+void build_detail(lv_obj_t *page)
+{
+    s_detail.emplace(page, DETAIL_W, 240);
+    lv_obj_t *card = s_detail->content();
+    lv_obj_t *body = column_of(card, space::s);
+    lv_obj_set_pos(body, space::l, space::l);
+    lv_obj_set_width(body, DETAIL_W - 2 * space::l - ModalOverlay::header_height());
+
+    lv_obj_t *kind = row_of(body, theme::type_label()->line_height, space::s);
+    s_detail_dot   = dot_of(kind);
+    s_detail_kind  = line_label(kind, theme::secondary, theme::type_label());
+
+    s_detail_title = theme::make_label(body, "", theme::text, theme::type_title());
+    lv_obj_set_width(s_detail_title, LV_PCT(100));
+    lv_label_set_long_mode(s_detail_title, LV_LABEL_LONG_MODE_WRAP);
+    quiet(s_detail_title);
+
+    s_detail_when  = line_label(body, theme::text, theme::type_body());
+    s_detail_place = line_label(body, theme::secondary, theme::type_body());
+    lv_obj_set_width(s_detail_place, LV_PCT(100));
+    s_detail->add_close_button();
+}
+
+void tappable(lv_obj_t *block, const ical::Event *events, int index)
+{
+    lv_obj_set_clickable(block, true);
+    lv_obj_set_ext_click_area(block, space::xs);
+    lv_obj_add_event_cb(
+        block,
+        [](lv_event_t *e) {
+            open_detail(*static_cast<const ical::Event *>(lv_event_get_user_data(e)));
+        },
+        LV_EVENT_CLICKED, const_cast<ical::Event *>(&events[index]));
+}
+
 // Without a route the event card keeps the column, its lines centred rather than
 // spread to the corners.
 bool         s_day_shown = false;
@@ -435,21 +521,6 @@ void show_day(const ical::Event *next, std::int64_t now)
     }
     s_day_shown = true;
     s_day_until = to;
-
-    {
-        char from_at[16];
-        char to_at[16];
-        clock_of(events[0].start, from_at, sizeof(from_at));
-        std::int64_t latest = events[0].end;
-        for (int i = 1; i < count; ++i) {
-            latest = std::max(latest, events[i].end);
-        }
-        clock_of(latest, to_at, sizeof(to_at));
-        char summary[64];
-        std::snprintf(summary, sizeof(summary), "%d %s  \xc2\xb7  %s \xe2\x80\x93 %s", count,
-                      count == 1 ? "event" : "events", from_at, to_at);
-        theme::set_text(s_day_name, summary);
-    }
 
     auto hour_at = [&](std::int64_t at) {
         return static_cast<float>(std::clamp<std::int64_t>(at - from, 0, 86400)) / 3600.0f;
@@ -489,6 +560,7 @@ void show_day(const ical::Event *next, std::int64_t now)
             continue;
         }
         const ical::Event &event = events[i];
+        s_day_event[i]           = event;
         const int lane = event.start >= lane_end[0] ? 0 : 1;
         lane_end[lane] = std::max(lane_end[lane], event.end);
 
@@ -528,14 +600,14 @@ void show_day(const ical::Event *next, std::int64_t now)
     }
     const bool two = lane_end[1] != 0;
     s_day_two      = two;
-    lv_obj_set_height(s_day_track,
-                      lanes_y + s_day_lane_h * (two ? 2 : 1) + (two ? space::s : 0));
+    const std::int32_t track_h = lanes_y + s_day_lane_h * (two ? 2 : 1) + (two ? space::s : 0);
+    lv_obj_set_height(s_day_track, track_h);
 
     const bool today = now >= from && now < to && hour_at(now) >= first && hour_at(now) <= last;
     lv_obj_set_hidden(s_day_now, !today);
     if (today) {
         lv_obj_set_pos(s_day_now, x_of(now) - 1, lanes_y);
-        lv_obj_set_height(s_day_now, lv_obj_get_height(s_day_track) - lanes_y);
+        lv_obj_set_height(s_day_now, track_h - lanes_y);
     }
 }
 
@@ -560,7 +632,7 @@ void place_left()
     lv_obj_set_y(s_day, top);
     lv_obj_set_height(s_day, s_page_h - top);
     const std::int32_t inner = s_page_h - top - 2 * space::l;
-    const std::int32_t head  = theme::type_label()->line_height + space::m;
+    const std::int32_t head  = 0;
     const std::int32_t ticks = theme::type_label()->line_height + space::s;
     const int          lanes = s_day_two ? 2 : 1;
     s_day_lane_h = std::clamp<std::int32_t>(
@@ -771,8 +843,7 @@ void show_next(const ical::Event *first, std::int64_t now)
         theme::set_text(s_big, text);
         theme::set_text_color(s_big, s_going->cancelled ? theme::red : theme::text);
         theme::set_text(s_big_note, span);
-        std::snprintf(text, sizeof(text), "starts %s", from);
-        theme::set_text(s_side, text);
+        theme::set_text(s_side, "");
     } else if (ongoing) {
         span_of(first->end - now, span, sizeof(span));
         theme::set_text(s_big_name, "Ends");
@@ -794,7 +865,9 @@ std::int64_t week_start(std::int64_t now, int weeks = 0);
 
 void show_list(const ical::Event *ahead, int count, std::int64_t now)
 {
-    const std::int64_t week_end = week_start(now, 1);
+    // The coming seven days rather than what is left of the calendar week,
+    // which on a Friday is nothing.
+    const std::int64_t week_end = now + 7 * 86400;
     int used     = 0;
     int last_day = -1;
     // While the strip shows the next event's day, the list starts after it.
@@ -842,7 +915,7 @@ void show_list(const ical::Event *ahead, int count, std::int64_t now)
         Item &none = s_item[used++];
         lv_obj_set_hidden(none.dot, true);
         lv_obj_set_hidden(none.time, true);
-        theme::set_text(none.title, "Nothing else this week");
+        theme::set_text(none.title, "Nothing else in the coming week");
         theme::set_text_color(none.title, theme::secondary);
         lv_obj_set_style_text_font(none.title, theme::type_body(), 0);
         lv_obj_set_height(none.title, theme::type_body()->line_height);
@@ -902,8 +975,9 @@ void show_week(std::int64_t now)
 
     char text[64];
     const std::int32_t line = theme::type_label()->line_height;
+    const int          every = hours > 8 ? 2 : 1;  // a line an hour is a grid, not a week
     for (int h = 0; h <= HOURS_MAX; ++h) {
-        const bool real = h <= hours;
+        const bool real = h <= hours && h % every == 0;
         lv_obj_set_hidden(s_hour_mark[h], !real || h == hours);
         lv_obj_set_hidden(s_hour_line[h], !real);
         if (!real) {
@@ -917,16 +991,15 @@ void show_week(std::int64_t now)
         lv_obj_set_width(s_hour_line[h], s_grid_w - axis);
     }
 
+    static const char *const NAMES[] = {"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"};
+    const int today = days_from(from, now);  // off the grid on another week
     for (int d = 0; d < WEEK_DAYS; ++d) {
-        lv_obj_set_hidden(s_day_lane[d], d >= days);
-        if (d < days) {
+        lv_obj_set_hidden(s_day_lane[d], d != today || d >= days);
+        if (d == today && d < days) {
             lv_obj_set_pos(s_day_lane[d], axis + d * col_w + 2, 0);
             lv_obj_set_size(s_day_lane[d], col_w - 4, s_grid_h);
         }
     }
-
-    static const char *const NAMES[] = {"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"};
-    const int today = days_from(from, now);  // off the grid on another week
     for (int d = 0; d < WEEK_DAYS; ++d) {
         lv_obj_set_hidden(s_day_head[d], d >= days);
         if (d >= days) {
@@ -936,7 +1009,10 @@ void show_week(std::int64_t now)
         std::snprintf(text, sizeof(text), "%s %d", NAMES[d], date.tm_mday);
         theme::set_text(s_day_head[d], text);
         theme::set_text_color(s_day_head[d], d == today ? theme::text : theme::secondary);
-        lv_obj_set_pos(s_day_head[d], axis + d * col_w + space::s, 0);
+        lv_obj_set_style_bg_opa(s_day_head[d], d == today ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+        const std::int32_t head_w = std::min<std::int32_t>(col_w - 2 * space::s, 96);
+        lv_obj_set_width(s_day_head[d], head_w);
+        lv_obj_set_pos(s_day_head[d], axis + d * col_w + (col_w - head_w) / 2, 0);
     }
 
     // Each event takes the first lane free at its start; a run of overlaps is as
@@ -979,6 +1055,7 @@ void show_week(std::int64_t now)
             continue;
         }
         const ical::Event &event = week[i];
+        s_week_event[i]          = event;
         const int          lanes = run_lanes[run_of[i]];
         const std::int32_t lane_w = col_w / lanes;
         const float        top_h  = std::max(hour_of(event.start), first) - first;
@@ -989,16 +1066,31 @@ void show_week(std::int64_t now)
         lv_obj_set_pos(block.root, axis + day_of[i] * col_w + lane[i] * lane_w + 4, y + 1);
         lv_obj_set_size(block.root, lane_w - 8, h);
 
-        const std::uint32_t ink = feed_ink(event.feed);
-        lv_obj_set_style_bg_color(block.root,
-                                  lv_color_mix(lv_color_hex(ink), lv_color_hex(theme::panel), 105),
+        // Faded by colour rather than by opacity, which would show the lines
+        // behind through a past event.
+        const std::uint32_t ink  = feed_ink(event.feed);
+        const bool          over = event.end < now;
+        const lv_color_t    card = lv_color_hex(theme::panel_light);
+        lv_obj_set_style_bg_color(block.root, lv_color_mix(lv_color_hex(ink), card, over ? 40 : 110),
                                   0);
-        lv_obj_set_style_border_color(block.root, lv_color_hex(ink), 0);
-        lv_obj_set_style_opa(block.root, event.end < now ? LV_OPA_50 : LV_OPA_COVER, 0);
+        lv_obj_set_style_border_color(
+            block.root, over ? lv_color_mix(lv_color_hex(ink), card, 110) : lv_color_hex(ink), 0);
 
+        // The start, and the title where there is width for words: a sliver
+        // shows only its colour, and a tap shows the rest.
+        const std::int32_t inner = lane_w - 8 - 12;
+        const bool         timed = inner >= 40;
+        const bool         words = inner >= 72 && h >= 2 * line + 4;
+        clock_of(event.start, text, sizeof(text));
+        theme::set_text(block.time, text);
+        theme::set_text_color(block.time, over ? theme::secondary : theme::text);
+        lv_obj_set_hidden(block.time, !timed);
         theme::set_text(block.title, event.summary);
-        const std::int32_t lines = std::max<std::int32_t>(1, (h - 6) / line);
-        lv_obj_set_size(block.title, lane_w - 8 - 12, lines * line);
+        theme::set_text_color(block.title, over ? theme::secondary : theme::text);
+        const std::int32_t lines = std::max<std::int32_t>(1, (h - 6 - line) / line);
+        lv_obj_set_pos(block.title, 0, line);
+        lv_obj_set_size(block.title, inner, lines * line);
+        lv_obj_set_hidden(block.title, !words);
         lv_obj_set_hidden(block.root, false);
     }
 
@@ -1132,7 +1224,6 @@ void build_overview(lv_obj_t *parent, std::int32_t width, std::int32_t height)
     lv_obj_set_size(s_day, left_w, height - EVENT_H - space::m);
     lv_obj_set_hidden(s_day, true);
     quiet(s_day);
-    s_day_name = line_label(s_day, theme::secondary, theme::type_label());
     s_day_w    = left_w - 2 * space::l;
     s_day_track = bare(s_day);
     lv_obj_set_size(s_day_track, s_day_w, 2 * DAY_LANE);
@@ -1155,6 +1246,7 @@ void build_overview(lv_obj_t *parent, std::int32_t width, std::int32_t height)
         quiet(block.title);
         block.place = line_label(block.root, theme::secondary, theme::type_label());
         lv_obj_set_hidden(block.root, true);
+        tappable(block.root, s_day_event, static_cast<int>(&block - s_day_block));
     }
     s_day_now = bare(s_day_track);
     lv_obj_set_width(s_day_now, 2);
@@ -1193,8 +1285,11 @@ void build_overview(lv_obj_t *parent, std::int32_t width, std::int32_t height)
     lv_obj_set_size(after, LIST_W, height);
     quiet(after);
 
+    theme::make_eyebrow(after, "COMING UP");
+    const std::int32_t list_y = theme::type_label()->line_height + space::l;
     s_list = column_of(after, space::s);
-    lv_obj_set_height(s_list, height - 2 * space::l - theme::chip::size);
+    lv_obj_set_y(s_list, list_y);
+    lv_obj_set_height(s_list, height - 2 * space::l - list_y - theme::chip::size);
     lv_obj_add_flag(s_list, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_scrollable(s_list, true);
     lv_obj_set_scroll_dir(s_list, LV_DIR_VER);
@@ -1234,11 +1329,15 @@ void build_week(lv_obj_t *parent, std::int32_t width, std::int32_t height)
 
     const std::int32_t inner_w = width - 2 * space::l;
     const std::int32_t inner_h = height - 2 * space::l;
-    const std::int32_t head_h  = theme::type_label()->line_height + space::m;
+    const std::int32_t head_h  = theme::type_label()->line_height + 4 + space::m;
     const std::int32_t foot_h  = theme::chip::size - space::l + theme::chip::inset + space::s;
 
     for (lv_obj_t *&head : s_day_head) {
         head = line_label(s_agenda, theme::secondary, theme::type_label());
+        lv_obj_set_style_text_align(head, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_style_radius(head, theme::radius::pill, 0);
+        lv_obj_set_style_pad_ver(head, 2, 0);
+        theme::fill_accent(head);
     }
 
     s_week_grid = bare(s_agenda);
@@ -1247,32 +1346,38 @@ void build_week(lv_obj_t *parent, std::int32_t width, std::int32_t height)
     lv_obj_set_pos(s_week_grid, 0, head_h);
     lv_obj_set_size(s_week_grid, s_grid_w, s_grid_h);
 
+    // Only today's column has a ground, so the week reads as its events rather
+    // than as a grid of dark columns.
     for (lv_obj_t *&lane : s_day_lane) {
         lane = bare(s_week_grid);
         lv_obj_set_style_bg_color(lane, lv_color_hex(theme::panel), 0);
-        lv_obj_set_style_bg_opa(lane, LV_OPA_COVER, 0);
+        lv_obj_set_style_bg_opa(lane, LV_OPA_60, 0);
         lv_obj_set_style_radius(lane, theme::radius::row, 0);
     }
     for (int h = 0; h <= HOURS_MAX; ++h) {
         s_hour_line[h] = bare(s_week_grid);
         lv_obj_set_height(s_hour_line[h], 1);
-        lv_obj_set_style_bg_color(s_hour_line[h], lv_color_hex(theme::panel_light), 0);
+        lv_obj_set_style_bg_color(s_hour_line[h], lv_color_hex(theme::panel), 0);
         lv_obj_set_style_bg_opa(s_hour_line[h], LV_OPA_COVER, 0);
         s_hour_mark[h] = line_label(s_week_grid, theme::secondary, theme::type_label());
+        lv_obj_set_style_text_opa(s_hour_mark[h], LV_OPA_70, 0);
     }
 
     for (Block &block : s_block) {
         block.root = bare(s_week_grid);
         lv_obj_set_style_bg_opa(block.root, LV_OPA_COVER, 0);
-        lv_obj_set_style_radius(block.root, 6, 0);
+        lv_obj_set_style_radius(block.root, theme::radius::row / 2, 0);
         lv_obj_set_style_border_side(block.root, LV_BORDER_SIDE_LEFT, 0);
         lv_obj_set_style_border_width(block.root, 3, 0);
         lv_obj_set_style_pad_left(block.root, 8, 0);
-        lv_obj_set_style_pad_top(block.root, 3, 0);
+        lv_obj_set_style_pad_top(block.root, 4, 0);
         lv_obj_set_hidden(block.root, true);
+        block.time = line_label(block.root, theme::text, theme::type_label());
+        lv_obj_set_style_text_opa(block.time, LV_OPA_80, 0);
         block.title = theme::make_label(block.root, "", theme::text, theme::type_label());
         lv_label_set_long_mode(block.title, LV_LABEL_LONG_MODE_DOTS);
         quiet(block.title);
+        tappable(block.root, s_week_event, static_cast<int>(&block - s_block));
     }
 
     s_week_now = bare(s_week_grid);
@@ -1365,6 +1470,7 @@ void build_calendar_page(lv_obj_t *page, std::int32_t width, std::int32_t height
                    height - theme::chip::inset - theme::chip::size);
     lv_obj_set_ext_click_area(s_toggle, space::m);
     lv_obj_add_event_cb(s_toggle, toggle_clicked, LV_EVENT_CLICKED, nullptr);
+    build_detail(page);  // last, so it covers the page and the chip
     show_view();
 
     lv_timer_create([](lv_timer_t *) { show_calendar(); }, 30000, nullptr);
