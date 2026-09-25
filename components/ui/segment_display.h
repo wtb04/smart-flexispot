@@ -16,16 +16,20 @@ public:
     lv_obj_t *object() const { return root_; }
 
 private:
+    static constexpr int kSegmentCount = 7;
+    static constexpr int kDigitCount   = 4;
+    static constexpr int kDash         = -2;
+
     struct Digit {
-        std::array<lv_obj_t *, 7> bars{};
-        int shown = -2;
+        std::array<lv_obj_t *, kSegmentCount> bars{};
+        int shown = kDash;
     };
 
     void set_digit(int index, int value);
 
-    lv_obj_t            *root_ = nullptr;
-    std::array<Digit, 4> digits_{};
-    lv_obj_t            *dot_ = nullptr;
+    lv_obj_t                       *root_ = nullptr;
+    std::array<Digit, kDigitCount> digits_{};
+    lv_obj_t                       *dot_ = nullptr;
 };
 
 }  // namespace ui

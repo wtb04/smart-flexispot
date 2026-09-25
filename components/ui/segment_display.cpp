@@ -10,59 +10,99 @@ constexpr std::uint8_t DIGIT_MASK[10] = {0x3f, 0x06, 0x5b, 0x4f, 0x66,
                                          0x6d, 0x7d, 0x07, 0x7f, 0x6f};
 
 constexpr std::uint8_t DASH_MASK = 0x40;
-constexpr int          DASH      = -2;
+constexpr int          BLANK     = -1;
 
-constexpr int DIGIT_X[4] = {0, 58, 116, 180};
-constexpr int BAR_LONG   = 36;
-constexpr int BAR_THICK  = 8;
-constexpr int BAR_TALL   = 42;
+constexpr int RADIX          = 10;
+constexpr int PLACE_VALUES[] = {1000, 100, 10, 1};
+constexpr int MAX_TENTHS     = PLACE_VALUES[0] * RADIX - 1;
 
+constexpr std::int32_t BAR_LONG    = 36;
+constexpr std::int32_t BAR_THICK   = 8;
+constexpr std::int32_t BAR_TALL    = 42;
+constexpr std::int32_t BAR_RADIUS  = BAR_THICK / 2;
+// The upright bars reach a pixel into the top and bottom bars.
+constexpr std::int32_t BAR_OVERLAP = 1;
+
+constexpr std::int32_t UPPER_Y  = BAR_THICK - BAR_OVERLAP;
+constexpr std::int32_t MIDDLE_Y = UPPER_Y + BAR_TALL;
+constexpr std::int32_t LOWER_Y  = MIDDLE_Y + BAR_THICK;
+constexpr std::int32_t BOTTOM_Y = LOWER_Y + BAR_TALL - BAR_OVERLAP;
+constexpr std::int32_t RIGHT_X  = BAR_LONG + BAR_THICK;
+
+constexpr std::int32_t DIGIT_W     = BAR_LONG + 2 * BAR_THICK;
+constexpr std::int32_t DIGIT_GAP   = 6;
+constexpr std::int32_t DIGIT_PITCH = DIGIT_W + DIGIT_GAP;
+// The last digit, the tenths, stands one gap further off to make room for the point.
+constexpr std::int32_t DIGIT_X[] = {0, DIGIT_PITCH, 2 * DIGIT_PITCH, 3 * DIGIT_PITCH + DIGIT_GAP};
+
+constexpr std::int32_t DOT_SIZE = 10;
+constexpr std::int32_t DOT_X    = 166;
+constexpr std::int32_t DOT_Y    = BOTTOM_Y + BAR_THICK - DOT_SIZE;
+
+constexpr std::int32_t EDGE_MARGIN = 6;
+constexpr std::int32_t DISPLAY_W   = DIGIT_X[std::size(DIGIT_X) - 1] + DIGIT_W + EDGE_MARGIN;
+constexpr std::int32_t DISPLAY_H   = BOTTOM_Y + BAR_THICK + EDGE_MARGIN;
+
+struct Bar {
+    std::int32_t x;
+    std::int32_t y;
+    std::int32_t w;
+    std::int32_t h;
+};
+
+// In the order of the masks' bits: top, upper right, lower right, bottom,
+// lower left, upper left, middle.
+constexpr Bar SEGMENTS[] = {
+    {BAR_THICK, 0, BAR_LONG, BAR_THICK},
+    {RIGHT_X, UPPER_Y, BAR_THICK, BAR_TALL},
+    {RIGHT_X, LOWER_Y, BAR_THICK, BAR_TALL},
+    {BAR_THICK, BOTTOM_Y, BAR_LONG, BAR_THICK},
+    {0, LOWER_Y, BAR_THICK, BAR_TALL},
+    {0, UPPER_Y, BAR_THICK, BAR_TALL},
+    {BAR_THICK, MIDDLE_Y, BAR_LONG, BAR_THICK},
+};
+
+constexpr lv_opa_t ON_OPACITY  = LV_OPA_COVER;
 constexpr lv_opa_t OFF_OPACITY = LV_OPA_10;
+
+lv_obj_t *make_lit_box(lv_obj_t *parent, std::int32_t radius)
+{
+    lv_obj_t *box = lv_obj_create(parent);
+    theme::fill_accent(box);
+    lv_obj_set_style_border_width(box, 0, 0);
+    lv_obj_set_style_radius(box, radius, 0);
+    lv_obj_set_scrollable(box, false);
+    return box;
+}
 
 }  // namespace
 
 SegmentDisplay::SegmentDisplay(lv_obj_t *parent)
 {
+    static_assert(std::size(SEGMENTS) == kSegmentCount);
+    static_assert(std::size(DIGIT_X) == kDigitCount && std::size(PLACE_VALUES) == kDigitCount);
+
     root_ = lv_obj_create(parent);
-    lv_obj_set_size(root_, 238, 112);
+    lv_obj_set_size(root_, DISPLAY_W, DISPLAY_H);
     lv_obj_set_style_bg_opa(root_, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(root_, 0, 0);
     lv_obj_set_style_pad_all(root_, 0, 0);
     lv_obj_set_scrollable(root_, false);
 
-    for (int d = 0; d < 4; ++d) {
-        for (lv_obj_t *&bar : digits_[d].bars) {
-            bar = lv_obj_create(root_);
-            theme::fill_accent(bar);
-            lv_obj_set_style_border_width(bar, 0, 0);
-            lv_obj_set_style_radius(bar, 4, 0);
-            lv_obj_set_scrollable(bar, false);
+    for (int d = 0; d < kDigitCount; ++d) {
+        for (int s = 0; s < kSegmentCount; ++s) {
+            const Bar &bar = SEGMENTS[s];
+            lv_obj_t  *obj = make_lit_box(root_, BAR_RADIUS);
+            lv_obj_set_pos(obj, DIGIT_X[d] + bar.x, bar.y);
+            lv_obj_set_size(obj, bar.w, bar.h);
+            digits_[d].bars[s] = obj;
         }
-        const int x = DIGIT_X[d];
-        lv_obj_set_pos(digits_[d].bars[0], x + BAR_THICK, 0);
-        lv_obj_set_size(digits_[d].bars[0], BAR_LONG, BAR_THICK);
-        lv_obj_set_pos(digits_[d].bars[1], x + BAR_LONG + BAR_THICK, 7);
-        lv_obj_set_size(digits_[d].bars[1], BAR_THICK, BAR_TALL);
-        lv_obj_set_pos(digits_[d].bars[2], x + BAR_LONG + BAR_THICK, 57);
-        lv_obj_set_size(digits_[d].bars[2], BAR_THICK, BAR_TALL);
-        lv_obj_set_pos(digits_[d].bars[3], x + BAR_THICK, 98);
-        lv_obj_set_size(digits_[d].bars[3], BAR_LONG, BAR_THICK);
-        lv_obj_set_pos(digits_[d].bars[4], x, 57);
-        lv_obj_set_size(digits_[d].bars[4], BAR_THICK, BAR_TALL);
-        lv_obj_set_pos(digits_[d].bars[5], x, 7);
-        lv_obj_set_size(digits_[d].bars[5], BAR_THICK, BAR_TALL);
-        lv_obj_set_pos(digits_[d].bars[6], x + BAR_THICK, 49);
-        lv_obj_set_size(digits_[d].bars[6], BAR_LONG, BAR_THICK);
     }
 
-    dot_ = lv_obj_create(root_);
-    theme::fill_accent(dot_);
+    dot_ = make_lit_box(root_, LV_RADIUS_CIRCLE);
     lv_obj_set_style_bg_opa(dot_, LV_OPA_COVER, 0);
-    lv_obj_set_pos(dot_, 166, 96);
-    lv_obj_set_size(dot_, 10, 10);
-    lv_obj_set_style_border_width(dot_, 0, 0);
-    lv_obj_set_style_radius(dot_, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_scrollable(dot_, false);
+    lv_obj_set_pos(dot_, DOT_X, DOT_Y);
+    lv_obj_set_size(dot_, DOT_SIZE, DOT_SIZE);
 }
 
 void SegmentDisplay::set_digit(int index, int value)
@@ -73,29 +113,29 @@ void SegmentDisplay::set_digit(int index, int value)
     }
     digit.shown = value;
 
-    const std::uint8_t mask = value == DASH             ? DASH_MASK
-                              : (value >= 0 && value <= 9) ? DIGIT_MASK[value]
-                                                           : 0;
-    for (int s = 0; s < 7; ++s) {
-        lv_obj_set_style_bg_opa(digit.bars[s],
-                                (mask & (1u << s)) ? static_cast<lv_opa_t>(LV_OPA_COVER) : OFF_OPACITY, 0);
+    const std::uint8_t mask = value == kDash                  ? DASH_MASK
+                              : (value >= 0 && value < RADIX) ? DIGIT_MASK[value]
+                                                              : 0;
+    for (int s = 0; s < kSegmentCount; ++s) {
+        lv_obj_set_style_bg_opa(digit.bars[s], (mask & (1u << s)) ? ON_OPACITY : OFF_OPACITY, 0);
     }
 }
 
 void SegmentDisplay::set_tenths(int tenths)
 {
     if (tenths < 0) {
-        for (int d = 0; d < 4; ++d) {
-            set_digit(d, d == 0 ? -1 : DASH);
+        for (int d = 0; d < kDigitCount; ++d) {
+            set_digit(d, d == 0 ? BLANK : kDash);
         }
         return;
     }
 
-    tenths = std::clamp(tenths, 0, 9999);
-    set_digit(0, tenths >= 1000 ? (tenths / 1000) % 10 : -1);
-    set_digit(1, (tenths / 100) % 10);
-    set_digit(2, (tenths / 10) % 10);
-    set_digit(3, tenths % 10);
+    tenths = std::clamp(tenths, 0, MAX_TENTHS);
+    for (int d = 0; d < kDigitCount; ++d) {
+        const int  place        = PLACE_VALUES[d];
+        const bool leading_zero = d == 0 && tenths < place;
+        set_digit(d, leading_zero ? BLANK : (tenths / place) % RADIX);
+    }
 }
 
 }  // namespace ui

@@ -3,6 +3,7 @@
 #include "deskproto.h"
 #include "esp_err.h"
 #include "radar.h"
+#include "units.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -132,7 +133,7 @@ using FocusHandler = void (*)(FocusAction action);
 using FocusPlanHandler = void (*)(int work_min, int break_min, int long_break_min, int rounds);
 
 /** How long before an appointment its journey is asked for and shown. */
-inline constexpr std::int64_t kJourneyAhead = 5 * 3600;
+inline constexpr std::int64_t kJourneyAhead = 5 * units::kSecondsPerHour;
 
 /** A card on the diagnostics view. What it covers is the caller's business:
  *  the screen draws a title, a glyph, a summary and named rows. */
@@ -226,9 +227,7 @@ struct Handlers {
 /** Requires the LVGL port to be running. A zero accent keeps the built-in
  *  colour; rail_right puts the rail against the right edge instead of the left.
  *  orientation only tells the page which choice to show; board::init() has
- *  already turned the display, and turns it again as the choice asks. It was
- *  the way board::init() already turned the
- *  panel. */
+ *  already turned the display, and turns it again as the choice asks. */
 esp_err_t init(const Handlers &handlers, int initial_brightness, std::uint32_t accent,
                bool rail_right, Orientation orientation);
 

@@ -28,11 +28,22 @@ inline constexpr std::array<std::uint32_t, 10> primaries{
     0x3fd0c0, 0x4fb0f5, 0x8b93ff, 0xb579f0, 0xff6fd0,
 };
 
+namespace rgb {
+inline constexpr int           red_shift    = 16;
+inline constexpr int           green_shift  = 8;
+inline constexpr int           blue_shift   = 0;
+inline constexpr std::uint32_t channel_mask = 0xff;
+}  // namespace rgb
+
 inline constexpr std::uint32_t dim_of(std::uint32_t colour)
 {
-    constexpr std::uint32_t PART = 78;
-    return ((((colour >> 16) & 0xff) * PART / 100) << 16) |
-           ((((colour >> 8) & 0xff) * PART / 100) << 8) | ((colour & 0xff) * PART / 100);
+    constexpr std::uint32_t KEPT_PERCENT = 78;
+    constexpr std::uint32_t ALL_PERCENT  = 100;
+    const auto dim_channel = [colour](int shift) {
+        return (((colour >> shift) & rgb::channel_mask) * KEPT_PERCENT / ALL_PERCENT) << shift;
+    };
+    return dim_channel(rgb::red_shift) | dim_channel(rgb::green_shift) |
+           dim_channel(rgb::blue_shift);
 }
 
 inline std::uint32_t primary     = default_primary;
@@ -245,7 +256,7 @@ inline void align(lv_obj_t *obj, lv_align_t alignment, std::int32_t x, std::int3
     lv_obj_set_pos(obj, x, y);
 }
 
-inline void style_panel(lv_obj_t *obj, std::uint32_t colour = panel, int radius = 16)
+inline void style_panel(lv_obj_t *obj, std::uint32_t colour = panel, int radius = radius::card)
 {
     lv_obj_set_style_bg_color(obj, lv_color_hex(colour), 0);
     lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
@@ -279,7 +290,7 @@ inline void hand_down_press(lv_event_t *event)
 
 inline void style_button(lv_obj_t *button, std::uint32_t colour = panel_light)
 {
-    style_panel(button, colour, 14);
+    style_panel(button, colour, radius::control);
     fill_dim_accent(button, LV_STATE_PRESSED);
     lv_obj_set_style_text_color(button, lv_color_hex(text), LV_STATE_PRESSED);
     lv_obj_add_event_cb(button, hand_down_press, LV_EVENT_PRESSED, nullptr);
@@ -306,7 +317,7 @@ inline lv_obj_t *make_label(lv_obj_t *parent, const char *value, std::uint32_t c
     set_text(label, value);
     lv_obj_set_style_text_color(label, lv_color_hex(colour), 0);
     lv_obj_set_style_text_color(label, lv_color_hex(text), LV_STATE_PRESSED);
-    lv_obj_set_style_text_font(label, font != nullptr ? font : fonts::size_20(), 0);
+    lv_obj_set_style_text_font(label, font != nullptr ? font : type_body(), 0);
     return label;
 }
 
@@ -394,9 +405,33 @@ inline Stat make_stat(lv_obj_t *parent, const char *name)
     return stat;
 }
 
-/** A Pozidriv screw head: the cross, and a finer one turned between its arms.
- *  Decoration that says a card is an instrument; it does nothing, so it is the
- *  quietest thing on it. The chips that do something are the same dot. */
+namespace utf8 {
+inline constexpr unsigned char four_byte_lead  = 0xf0;
+inline constexpr unsigned char three_byte_lead = 0xe0;
+inline constexpr unsigned char two_byte_lead   = 0xc0;
+inline constexpr std::uint32_t payload_mask    = 0x3f;
+inline constexpr int           payload_bits    = 6;
+
+inline int continuation_bytes(unsigned char lead)
+{
+    return lead >= four_byte_lead ? 3 : lead >= three_byte_lead ? 2 : lead >= two_byte_lead ? 1 : 0;
+}
+
+/** The code point starting at text[i], moving i past it. By hand, because LVGL
+ *  keeps its decoder in a private header. */
+inline std::uint32_t next_letter(const char *text, std::uint32_t &i)
+{
+    const auto    lead   = static_cast<unsigned char>(text[i]);
+    const int     extra  = continuation_bytes(lead);
+    std::uint32_t letter = extra == 0 ? lead : lead & (payload_mask >> extra);
+    ++i;
+    for (int k = 0; k < extra && text[i] != '\0'; ++k, ++i) {
+        letter = (letter << payload_bits) | (static_cast<unsigned char>(text[i]) & payload_mask);
+    }
+    return letter;
+}
+}  // namespace utf8
+
 /** Centres a short label by the ink of its glyphs rather than its line box,
  *  which leaves a plus or a digit visibly off the middle of a small chip. */
 inline void center_ink(lv_obj_t *label)
@@ -408,14 +443,7 @@ inline void center_ink(lv_obj_t *label)
     std::int32_t pen = 0;
     std::int32_t left = INT32_MAX, right = INT32_MIN, top = INT32_MAX, bottom = INT32_MIN;
     for (std::uint32_t i = 0; text[i] != '\0';) {
-        // UTF-8 by hand: LVGL keeps its decoder in a private header.
-        const auto    lead   = static_cast<unsigned char>(text[i]);
-        const int     extra  = lead >= 0xf0 ? 3 : lead >= 0xe0 ? 2 : lead >= 0xc0 ? 1 : 0;
-        std::uint32_t letter = extra == 0 ? lead : lead & (0x3f >> extra);
-        ++i;
-        for (int k = 0; k < extra && text[i] != '\0'; ++k, ++i) {
-            letter = (letter << 6) | (static_cast<unsigned char>(text[i]) & 0x3f);
-        }
+        const std::uint32_t letter = utf8::next_letter(text, i);
         lv_font_glyph_dsc_t glyph;
         if (!lv_font_get_glyph_dsc(font, &glyph, letter, 0)) {
             continue;
@@ -451,21 +479,23 @@ inline lv_obj_t *make_mark(lv_obj_t *parent, const lv_image_dsc_t *mark, lv_opa_
     return image;
 }
 
+/** A Pozidriv screw head: the cross, and a finer one turned between its arms.
+ *  Decoration that says a card is an instrument; it does nothing, so it is the
+ *  quietest thing on it. The chips that do something are the same dot. */
 inline lv_obj_t *make_screw(lv_obj_t *parent, std::int32_t size)
 {
     lv_obj_t *head = lv_obj_create(parent);
     lv_obj_set_size(head, size, size);
     style_panel(head, panel, size / 2);
     lv_obj_set_clickable(head, false);
-    // A plus with a smaller times sign over it: a Pozidriv head.
     make_mark(head, &icons::plus_icon);
     make_mark(head, &icons::times_icon, LV_OPA_50);
     return head;
 }
 
 /** A chip: a round button in a card's corner. The glyph is the screws' grey,
- *  so a row of chips and screws reads as one set, and lights when pressed. */
-/** The default font's digits stand as tall as the drawn plus on the screws. */
+ *  so a row of chips and screws reads as one set, and lights when pressed.
+ *  The default font's digits stand as tall as the drawn plus on the screws. */
 inline lv_obj_t *make_chip(lv_obj_t *parent, const char *value,
                            const lv_font_t *font = type_body())
 {
@@ -477,20 +507,6 @@ inline lv_obj_t *make_chip(lv_obj_t *parent, const char *value,
     lv_obj_set_style_text_opa(label, mark_opa, 0);
     center_ink(label);
     return chip;
-}
-
-inline lv_obj_t *make_page_title(lv_obj_t *parent, const char *value)
-{
-    lv_obj_t *label = make_label(parent, value, text, &lv_font_montserrat_32);
-    lv_obj_set_pos(label, 32, 22);
-    return label;
-}
-
-inline lv_obj_t *make_card_heading(lv_obj_t *parent, const char *value)
-{
-    lv_obj_t *label = make_accent_label(parent, value, &lv_font_montserrat_16);
-    lv_obj_set_pos(label, 20, 16);
-    return label;
 }
 
 }  // namespace ui::theme

@@ -12,6 +12,11 @@ namespace {
 constexpr std::uint32_t APPLY_PERIOD_MS = 20;
 
 constexpr std::int32_t NAV_GAP    = GAP;
+
+constexpr int DEFAULT_BRIGHTNESS_PERCENT = 80;
+
+constexpr std::uint32_t SHOT_START_MS = 25000;
+constexpr std::uint32_t SHOT_PAGE_MS  = 2000;
 }  // namespace
 
 bool s_rail_right = false;
@@ -37,7 +42,8 @@ Layout layout()
 Handlers s_handlers{};
 namespace {
 // The two move buttons and a button per preset, stand and sit among them.
-constexpr int DESK_CONTROL_MAX = 2 + kPresetCount;
+constexpr int MOVE_BUTTON_COUNT = 2;
+constexpr int DESK_CONTROL_MAX  = MOVE_BUTTON_COUNT + kPresetCount;
 bool          s_desk_available                  = true;
 
 lv_obj_t     *s_desk_controls[DESK_CONTROL_MAX] = {};
@@ -89,14 +95,14 @@ void register_desk_control(lv_obj_t *obj)
         s_desk_controls[s_desk_control_count++] = obj;
     }
 }
-int               s_initial_brightness = 80;
+int               s_initial_brightness = DEFAULT_BRIGHTNESS_PERCENT;
 
 std::optional<SegmentDisplay> s_height;
 lv_obj_t *s_rail          = nullptr;
 lv_obj_t *s_content       = nullptr;
 lv_obj_t *s_clock_box     = nullptr;
-lv_obj_t *s_side_buttons[2] = {};
-lv_obj_t *s_flip_buttons[3] = {};
+lv_obj_t *s_side_buttons[CHOICE_COUNT]      = {};
+lv_obj_t *s_flip_buttons[ORIENTATION_COUNT] = {};
 lv_obj_t *s_wifi_icon     = nullptr;
 lv_obj_t *s_phone_icon    = nullptr;
 lv_obj_t *s_clock_hours   = nullptr;
@@ -104,6 +110,35 @@ lv_obj_t *s_clock_colon   = nullptr;
 lv_obj_t *s_clock_minutes = nullptr;
 bool      s_clock_known   = false;
 namespace {
+// One page per tick rather than all at once: a tab's colour eases in, and a
+// picture taken straight after the switch shows the old tab lit. Pages hidden
+// while the phone is away are the ones most often worth looking at, so the gate
+// is lifted for as long as the pictures take.
+void take_screenshots(lv_timer_t *timer)
+{
+    // Only the pages being worked on: every one adds about a minute.
+    static const int PAGES[] = {CALENDAR_PAGE};
+    static int       step    = -1;
+    static bool      gated   = false;
+    if (step >= 0) {
+        screenshot();
+    } else {
+        gated           = s_presence_gate;
+        s_presence_gate = false;
+    }
+    if (++step < static_cast<int>(std::size(PAGES))) {
+        select_page(PAGES[step]);
+        if (SHOT_DRAWER) {
+            place_drawer(DRAWER_W);
+        }
+        lv_timer_set_period(timer, SHOT_PAGE_MS);
+        return;
+    }
+    s_presence_gate = gated;
+    select_page(HOME_PAGE);
+    lv_timer_delete(timer);
+}
+
 void build_screen()
 {
     lv_obj_t *scr = lv_screen_active();
@@ -119,37 +154,10 @@ void build_screen()
     create_rail(scr);
     create_content(scr);
     // Development: hands a picture of the screen to tools/screenshot.py a little
-    // after boot. SHOT_PAGE picks what to look at; -1 leaves the panel alone.
-    // It holds the LVGL lock for several seconds, so it is off unless wanted.
+    // after boot. It holds the LVGL lock for several seconds, so it is off
+    // unless wanted.
     if (SHOT_ENABLED) {
-        // One page per tick rather than all at once: a tab's colour eases in,
-        // and a picture taken straight after the switch shows the old tab lit.
-        // Pages hidden while the phone is away are the ones most often worth
-        // looking at, so the gate is lifted for as long as the pictures take.
-        lv_timer_t *shot = lv_timer_create([](lv_timer_t *timer) {
-            // Only the pages being worked on: every one adds about a minute.
-            static const int PAGES[] = {CALENDAR_PAGE};
-            static int       step    = -1;
-            static bool      gated   = false;
-            if (step >= 0) {
-                screenshot();
-            } else {
-                gated           = s_presence_gate;
-                s_presence_gate = false;
-            }
-            if (++step < static_cast<int>(std::size(PAGES))) {
-                select_page(PAGES[step]);
-                if (SHOT_DRAWER) {
-                    place_drawer(DRAWER_W);
-                }
-                lv_timer_set_period(timer, 2000);
-                return;
-            }
-            s_presence_gate = gated;
-            select_page(HOME_PAGE);
-            lv_timer_delete(timer);
-        }, 25000, nullptr);
-        (void)shot;
+        lv_timer_create(take_screenshots, SHOT_START_MS, nullptr);
     }
     create_drawer(scr);  // after the content, so it overlays it when open
     lv_obj_move_foreground(s_rail);  // and under the rail, which it slides out from
@@ -279,6 +287,7 @@ struct ThermostatArgs {
     Text<24> mode;
     Hvac     state;
 };
+using TimeText = Text<16>;
 struct PresenceArgs {
     bool has_key;
     bool present;
@@ -313,7 +322,7 @@ Slot<ToggleArgs>     p_toggle[kDialToggleCount];
 Slot<RangeArgs>      p_range;
 Slot<ThermostatArgs> p_thermostat;
 Slot<PresenceArgs>   p_presence;
-Slot<Text<16>>       p_time;
+Slot<TimeText>       p_time;
 Slot<bool>           p_wifi;
 // Kept in PSRAM: sized for the most any card can have, it is several
 // kilobytes, and static data would take them from internal RAM.
@@ -334,7 +343,18 @@ constexpr int NOTICE_INBOX_LEN = 4;
 Notice        s_inbox[NOTICE_INBOX_LEN];
 int           s_inbox_count = 0;
 
+void drop_oldest(Notice *queue, int &count)
+{
+    for (int i = 1; i < count; ++i) {
+        queue[i - 1] = queue[i];
+    }
+    --count;
+}
+
 // ---- What each update does, on the LVGL task. ----
+
+constexpr std::int32_t MEDIA_TITLE_Y          = 28;  // under the source line
+constexpr std::int32_t RGB565_BYTES_PER_PIXEL = 2;
 
 void apply_preset_active(int index, bool active)
 {
@@ -423,9 +443,44 @@ void apply_media_volume(int percent)
     if (s_panel_volume_pct == nullptr) {
         return;
     }
-    char text[8];
-    std::snprintf(text, sizeof(text), "%d%%", percent);
-    theme::set_text(s_panel_volume_pct, text);
+    write_percent(s_panel_volume_pct, percent);
+}
+
+void place_media_text(bool framed)
+{
+    const TextBox card  = framed ? s_card_with_art : s_card_bare;
+    const TextBox panel = framed ? s_panel_with_art : s_panel_bare;
+    theme::align(s_media_source, LV_ALIGN_TOP_LEFT, card.x, 0);
+    theme::align(s_media_title, LV_ALIGN_TOP_LEFT, card.x, MEDIA_TITLE_Y);
+    lv_obj_set_width(s_media_title, card.w);
+    lv_obj_set_width(s_media_artist, card.w);
+
+    theme::align(s_panel_title, LV_ALIGN_TOP_LEFT, panel.x, 0);
+    s_has_art = framed;
+    lv_obj_set_width(s_panel_title, panel.w);
+    lv_obj_set_width(s_panel_artist, panel.w);
+    lv_obj_set_width(s_panel_progress, panel.w);
+    layout_media_text();
+}
+
+void show_art_pixels(const void *pixels)
+{
+    // Two descriptors in turn, so the one on screen is never rewritten under it.
+    lv_image_dsc_t &dsc = s_art_dsc[s_art_slot];
+    s_art_slot          = 1 - s_art_slot;
+
+    dsc.header.magic  = LV_IMAGE_HEADER_MAGIC;
+    dsc.header.cf     = LV_COLOR_FORMAT_RGB565;
+    dsc.header.w      = media::kArtSize;
+    dsc.header.h      = media::kArtSize;
+    dsc.header.stride = media::kArtSize * RGB565_BYTES_PER_PIXEL;
+    dsc.data_size     = media::kArtSize * media::kArtSize * RGB565_BYTES_PER_PIXEL;
+    dsc.data          = static_cast<const std::uint8_t *>(pixels);
+
+    lv_image_set_src(s_media_art, &dsc);
+    lv_image_set_src(s_panel_art, &dsc);
+    lv_obj_invalidate(s_media_art);
+    lv_obj_invalidate(s_panel_art);
 }
 
 void apply_album_art(const void *pixels, bool placeholder)
@@ -439,40 +494,10 @@ void apply_album_art(const void *pixels, bool placeholder)
     lv_obj_set_hidden(s_panel_frame, !framed);
     lv_obj_set_hidden(s_media_art, !has_art);
     lv_obj_set_hidden(s_panel_art, !has_art);
-
-    const TextBox card  = framed ? s_card_with_art : s_card_bare;
-    const TextBox panel = framed ? s_panel_with_art : s_panel_bare;
-    theme::align(s_media_source, LV_ALIGN_TOP_LEFT, card.x, 0);
-    theme::align(s_media_title, LV_ALIGN_TOP_LEFT, card.x, 28);
-    lv_obj_set_width(s_media_title, card.w);
-    lv_obj_set_width(s_media_artist, card.w);
-
-    theme::align(s_panel_title, LV_ALIGN_TOP_LEFT, panel.x, 0);
-    s_has_art = framed;
-    lv_obj_set_width(s_panel_title, panel.w);
-    lv_obj_set_width(s_panel_artist, panel.w);
-    lv_obj_set_width(s_panel_progress, panel.w);
-    layout_media_text();
-
-    if (!has_art) {
-        return;
+    place_media_text(framed);
+    if (has_art) {
+        show_art_pixels(pixels);
     }
-
-    lv_image_dsc_t &dsc = s_art_dsc[s_art_slot];
-    s_art_slot          = 1 - s_art_slot;
-
-    dsc.header.magic  = LV_IMAGE_HEADER_MAGIC;
-    dsc.header.cf     = LV_COLOR_FORMAT_RGB565;
-    dsc.header.w      = media::kArtSize;
-    dsc.header.h      = media::kArtSize;
-    dsc.header.stride = media::kArtSize * 2;
-    dsc.data_size     = media::kArtSize * media::kArtSize * 2;
-    dsc.data          = static_cast<const std::uint8_t *>(pixels);
-
-    lv_image_set_src(s_media_art, &dsc);
-    lv_image_set_src(s_panel_art, &dsc);
-    lv_obj_invalidate(s_media_art);
-    lv_obj_invalidate(s_panel_art);
 }
 
 void apply_pill(int index, const char *label, const char *value, Level level)
@@ -538,7 +563,8 @@ void apply_dial_toggle(int index, const char *label, bool on)
         theme::center_ink(text);
         lv_obj_set_state(chip, LV_STATE_CHECKED, on);
         theme::set_text_color(text, on ? theme::text : theme::secondary);
-        lv_obj_set_style_text_opa(text, on ? LV_OPA_COVER : theme::mark_opa, 0);
+        lv_obj_set_style_text_opa(text, on ? static_cast<lv_opa_t>(LV_OPA_COVER) : theme::mark_opa,
+                                  0);
     }
 }
 
@@ -662,9 +688,7 @@ void apply_notification_volume(int percent)
         return;
     }
     lv_slider_set_value(s_volume_slider, percent, LV_ANIM_OFF);
-    char text[8];
-    std::snprintf(text, sizeof(text), "%d%%", percent);
-    theme::set_text(s_volume_value, text);
+    write_percent(s_volume_value, percent);
 }
 
 void apply_screen(bool on)
@@ -680,10 +704,7 @@ void apply_notice(const Notice &notice)
     }
     if (s_notice_count == NOTIFY_QUEUE_LEN) {
         ESP_LOGW(TAG, "notification queue full, dropping oldest");
-        for (int i = 1; i < NOTIFY_QUEUE_LEN; ++i) {
-            s_notice_queue[i - 1] = s_notice_queue[i];
-        }
-        --s_notice_count;
+        drop_oldest(s_notice_queue, s_notice_count);
     }
     s_notice_queue[s_notice_count++] = notice;
     if (lv_obj_is_hidden(s_notice_card)) {
@@ -691,14 +712,8 @@ void apply_notice(const Notice &notice)
     }
 }
 
-void apply_pending(lv_timer_t *)
+void apply_settings_and_presence()
 {
-    if (!s_pending.exchange(false, std::memory_order_acquire)) {
-        return;
-    }
-    apply_splash();
-
-    // Settings and presence first: they decide which pages and presets show.
     bool on = false;
     for (int i = 0; i < SETTING_COUNT; ++i) {
         if (take(p_setting[i], on)) {
@@ -711,7 +726,11 @@ void apply_pending(lv_timer_t *)
     if (bool screen = false; take(p_screen, screen)) {
         apply_screen(screen);
     }
+}
 
+void apply_desk_updates()
+{
+    bool on = false;
     for (int i = 0; i < kPresetCount; ++i) {
         if (take(p_preset_active[i], on)) {
             apply_preset_active(i, on);
@@ -723,7 +742,10 @@ void apply_pending(lv_timer_t *)
     if (int height = 0; take(p_height, height)) {
         apply_height(height);
     }
+}
 
+void apply_media_updates()
+{
     static MediaArgs media;  // large for the LVGL task's stack
     if (take(p_media, media)) {
         apply_media(media.source.get(), media.title.get(), media.artist.get(), media.state.get(),
@@ -741,7 +763,10 @@ void apply_pending(lv_timer_t *)
     if (int hold = 0; take(p_media_hold, hold)) {
         apply_media_hold(hold);
     }
+}
 
+void apply_home_updates()
+{
     for (int i = 0; i < kPillCount; ++i) {
         if (PillArgs pill{}; take(p_pill[i], pill)) {
             apply_pill(i, pill.label.get(), pill.value.get(), pill.level);
@@ -767,8 +792,11 @@ void apply_pending(lv_timer_t *)
         apply_thermostat(thermostat.current_c, thermostat.target_c, thermostat.mode.get(),
                          thermostat.state);
     }
+}
 
-    if (Text<16> time{}; take(p_time, time)) {
+void apply_rail_updates()
+{
+    if (TimeText time{}; take(p_time, time)) {
         apply_time(time.get());
     }
     if (bool wifi = false; take(p_wifi, wifi)) {
@@ -777,7 +805,10 @@ void apply_pending(lv_timer_t *)
     if (int volume = 0; take(p_notification_volume, volume)) {
         apply_notification_volume(volume);
     }
+}
 
+void apply_diagnostics_updates()
+{
     for (int c = 0; c < s_card_count; ++c) {
         if (InfoArgs card{}; take(p_card[c], card)) {
             apply_card(c, card.value.get(), card.level);
@@ -788,7 +819,10 @@ void apply_pending(lv_timer_t *)
             }
         }
     }
+}
 
+void apply_page_updates()
+{
     if (Focus focus{}; take(p_focus, focus)) {
         show_focus(focus);
     }
@@ -805,7 +839,10 @@ void apply_pending(lv_timer_t *)
     if (PhotoArgs photo{}; take(p_photo, photo)) {
         show_radar_photo(photo.hex, photo.pixels, photo.width, photo.height);
     }
+}
 
+void apply_inbox()
+{
     static Notice notices[NOTICE_INBOX_LEN];
     portENTER_CRITICAL(&s_pending_lock);
     const int count = s_inbox_count;
@@ -817,6 +854,23 @@ void apply_pending(lv_timer_t *)
     for (int i = 0; i < count; ++i) {
         apply_notice(notices[i]);
     }
+}
+
+void apply_pending(lv_timer_t *)
+{
+    if (!s_pending.exchange(false, std::memory_order_acquire)) {
+        return;
+    }
+    apply_splash();
+    // Settings and presence first: they decide which pages and presets show.
+    apply_settings_and_presence();
+    apply_desk_updates();
+    apply_media_updates();
+    apply_home_updates();
+    apply_rail_updates();
+    apply_diagnostics_updates();
+    apply_page_updates();
+    apply_inbox();
 }
 }  // namespace
 
@@ -951,7 +1005,7 @@ esp_err_t set_presence(bool has_key, bool present, bool ever_seen)
 
 esp_err_t set_time(const char *text)
 {
-    Text<16> args{};
+    TimeText args{};
     args.set(text);
     put(p_time, args);
     return ESP_OK;
@@ -1085,10 +1139,7 @@ esp_err_t notify(const char *title, const char *message, Level level, int timeou
 {
     portENTER_CRITICAL(&s_pending_lock);
     if (s_inbox_count == NOTICE_INBOX_LEN) {
-        for (int i = 1; i < NOTICE_INBOX_LEN; ++i) {
-            s_inbox[i - 1] = s_inbox[i];
-        }
-        --s_inbox_count;
+        drop_oldest(s_inbox, s_inbox_count);
     }
     Notice &slot = s_inbox[s_inbox_count++];
     copy_text(slot.title, sizeof(slot.title), title);

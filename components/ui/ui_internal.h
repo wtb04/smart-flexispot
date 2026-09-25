@@ -21,6 +21,7 @@
 #include "segment_display.h"
 #include "icons.h"
 #include "theme.h"
+#include "units.h"
 
 #include <algorithm>
 #include <atomic>
@@ -39,14 +40,14 @@ constexpr std::uint32_t LOCK_TIMEOUT_MS = 500;
 
 // Sized from the real display rather than with percentages: LV_PCT() returns an
 // encoded sentinel, so LV_PCT(100) - something lays out as nonsense.
+constexpr std::int32_t GAP        = 16;
+constexpr std::int32_t EDGE_GAP   = 0;   // navigation sits on the bottom edge
 constexpr std::int32_t RAIL_W      = 330;
 // The rail is a panel like the content beside it, set in by the same gap on its
 // outer sides rather than running flush to the edge of the glass.
-constexpr std::int32_t RAIL_CARD_W = RAIL_W - 16;
+constexpr std::int32_t RAIL_CARD_W = RAIL_W - GAP;
 constexpr std::int32_t NAV_H       = 92;
 constexpr std::int32_t RAIL_BTN_H  = 124;
-constexpr std::int32_t GAP        = 16;
-constexpr std::int32_t EDGE_GAP   = 0;   // navigation sits on the bottom edge
 
 constexpr std::int32_t PANEL_PAD  = 16;
 constexpr std::int32_t BUTTON_GAP = 16;
@@ -113,10 +114,34 @@ constexpr int PAGE_COUNT    = 5;
 
 constexpr int SETTING_COUNT = static_cast<int>(Setting::Count);
 
+// A choice card offers one way or the other; orientation offers each Orientation.
+constexpr int CHOICE_COUNT      = 2;
+constexpr int ORIENTATION_COUNT = static_cast<int>(Orientation::Auto) + 1;
+
+// The focus plan the panel shows until the timer reports one, and the limits
+// the Setup steppers keep it to, which the focus page is sized for.
+constexpr int FOCUS_WORK_MIN_DEFAULT       = 25;
+constexpr int FOCUS_BREAK_MIN_DEFAULT      = 5;
+constexpr int FOCUS_LONG_BREAK_MIN_DEFAULT = 20;
+constexpr int FOCUS_ROUNDS_DEFAULT         = 4;
+constexpr int FOCUS_WORK_MIN_MAX           = 90;
+constexpr int FOCUS_ROUNDS_MAX             = 8;
+
 constexpr std::int32_t ROW_CARD_H   = 88;
 constexpr std::int32_t DIAG_HEADER_H = 56;
 constexpr std::int32_t HEADER_GAP   = 22;
 constexpr std::int32_t DETAIL_PAD   = 24;
+
+// A modal's title sits this far down, level with its close button.
+constexpr std::int32_t MODAL_TITLE_Y = 6;
+inline std::int32_t modal_body_y()
+{
+    return ModalOverlay::header_height() + HEADER_GAP;
+}
+
+// A row card: a full-width strip with an icon, then whatever the row holds.
+constexpr std::int32_t ROW_CARD_PAD_X = 22;
+constexpr std::int32_t ROW_CARD_GAP   = 18;
 
 extern bool s_rail_right;
 extern Orientation s_orientation;
@@ -128,8 +153,8 @@ extern std::optional<SegmentDisplay> s_height;
 extern lv_obj_t *s_rail;
 extern lv_obj_t *s_content;
 extern lv_obj_t *s_clock_box;
-extern lv_obj_t *s_side_buttons[2];
-extern lv_obj_t *s_flip_buttons[3];
+extern lv_obj_t *s_side_buttons[CHOICE_COUNT];
+extern lv_obj_t *s_flip_buttons[ORIENTATION_COUNT];
 extern lv_obj_t *s_wifi_icon;
 extern lv_obj_t *s_phone_icon;
 extern lv_obj_t *s_clock_hours;
@@ -258,6 +283,10 @@ void build_info_tile(lv_obj_t *parent, int index, std::int32_t x, std::int32_t y
                      std::int32_t h);
 void build_detail_overlay(lv_obj_t *parent);
 void build_log_overlay(lv_obj_t *parent);
+/** A row card at y with its icon; clickable when clicked is given. */
+lv_obj_t *build_row_card(lv_obj_t *parent, std::int32_t y, std::int32_t w, const char *icon,
+                         lv_event_cb_t clicked);
+void write_percent(lv_obj_t *label, int percent);
 lv_obj_t *build_slider_card(lv_obj_t *parent, std::int32_t y, std::int32_t w, const char *icon,
                             const char *title, int value, int low, lv_event_cb_t changed,
                             lv_obj_t **out_value);

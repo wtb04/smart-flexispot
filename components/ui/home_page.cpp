@@ -2,13 +2,30 @@
 
 namespace ui::detail {
 namespace {
-constexpr float DEFAULT_MIN_C  = 15.0f;
-constexpr float DEFAULT_MAX_C  = 30.0f;
+constexpr float DEFAULT_MIN_C     = 15.0f;
+constexpr float DEFAULT_MAX_C     = 30.0f;
+constexpr int   TENTHS_PER_DEGREE = 10;
 
-constexpr std::int32_t DIAL_CARD_W = 480;
+constexpr std::int32_t DIAL_CARD_W   = 480;
 constexpr std::int32_t DIAL_INSET    = 100;
 constexpr std::int32_t DIAL_CHIP     = theme::chip::size;
 constexpr std::int32_t DIAL_CHIP_GAP = 10;
+constexpr std::int32_t DIAL_ARC_W    = 24;
+constexpr std::int32_t DIAL_KNOB_PAD = 10;
+// Three quarters of a turn, open at the bottom.
+constexpr std::int32_t DIAL_START_ANGLE = 135;
+constexpr std::int32_t DIAL_END_ANGLE   = 45;
+
+// From the middle of the ring.
+constexpr std::int32_t EYEBROW_TO_VALUE = 22;
+constexpr std::int32_t CURRENT_LABEL_DY = -80;
+constexpr std::int32_t CURRENT_VALUE_DY = CURRENT_LABEL_DY + EYEBROW_TO_VALUE;
+constexpr std::int32_t TARGET_LABEL_DY  = 24;
+constexpr std::int32_t TARGET_VALUE_DY  = TARGET_LABEL_DY + EYEBROW_TO_VALUE;
+
+constexpr int          MODE_W_PERCENT = 55;  // of the ring
+constexpr std::int32_t MODE_H         = 68;
+constexpr std::int32_t MODE_DROP      = 4;   // below the foot of the ring
 }  // namespace
 
 lv_obj_t *s_dial         = nullptr;
@@ -42,8 +59,9 @@ void write_temperature(lv_obj_t *label, float celsius, bool with_unit)
         return;
     }
     char      text[24];
-    const int tenths = static_cast<int>(celsius * 10.0f + 0.5f);
-    std::snprintf(text, sizeof(text), with_unit ? "%d.%d °C" : "%d.%d", tenths / 10, tenths % 10);
+    const int tenths = static_cast<int>(celsius * TENTHS_PER_DEGREE + 0.5f);
+    std::snprintf(text, sizeof(text), with_unit ? "%d.%d °C" : "%d.%d", tenths / TENTHS_PER_DEGREE,
+                  tenths % TENTHS_PER_DEGREE);
     theme::set_text(label, text);
 }
 namespace {
@@ -79,6 +97,71 @@ void dial_toggle_cb(lv_event_t *e)
     }
 }
 
+// Screwed down in every corner the chips leave free, like the radar's scope.
+void add_dial_screws(lv_obj_t *card, std::int32_t inner_w, std::int32_t inner_h)
+{
+    lv_obj_set_pos(theme::make_screw(card, DIAL_CHIP), 0, 0);
+    lv_obj_set_pos(theme::make_screw(card, DIAL_CHIP), 0, inner_h - DIAL_CHIP);
+    lv_obj_set_pos(theme::make_screw(card, DIAL_CHIP), inner_w - DIAL_CHIP, inner_h - DIAL_CHIP);
+}
+
+void build_dial_arc(lv_obj_t *card, std::int32_t ring, std::int32_t ring_y)
+{
+    s_dial = lv_arc_create(card);
+    lv_obj_set_size(s_dial, ring, ring);
+    lv_obj_align(s_dial, LV_ALIGN_TOP_MID, 0, ring_y);
+    lv_arc_set_bg_angles(s_dial, DIAL_START_ANGLE, DIAL_END_ANGLE);
+    lv_arc_set_rotation(s_dial, 0);
+    lv_arc_set_range(s_dial, static_cast<int>(DEFAULT_MIN_C * DIAL_SCALE),
+                     static_cast<int>(DEFAULT_MAX_C * DIAL_SCALE));
+
+    lv_obj_set_style_arc_width(s_dial, DIAL_ARC_W, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(s_dial, lv_color_hex(theme::panel), LV_PART_MAIN);
+    lv_obj_set_style_arc_width(s_dial, DIAL_ARC_W, LV_PART_INDICATOR);
+    theme::arc_accent(s_dial, LV_PART_INDICATOR);
+    theme::fill_accent(s_dial, LV_PART_KNOB);
+    lv_obj_set_style_pad_all(s_dial, DIAL_KNOB_PAD, LV_PART_KNOB);
+
+    lv_obj_add_event_cb(s_dial, arc_changed_cb, LV_EVENT_VALUE_CHANGED, nullptr);
+    lv_obj_add_event_cb(s_dial, arc_released_cb, LV_EVENT_RELEASED, nullptr);
+    lv_obj_add_event_cb(s_dial, arc_released_cb, LV_EVENT_PRESS_LOST, nullptr);
+}
+
+void add_dial_readings(lv_obj_t *card, std::int32_t centre)
+{
+    lv_obj_align(theme::make_label(card, "CURRENT", theme::secondary, fonts::size_16()),
+                 LV_ALIGN_TOP_MID, 0, centre + CURRENT_LABEL_DY);
+    s_dial_current = theme::make_label(card, "--", theme::text, fonts::temp_64());
+    lv_obj_align(s_dial_current, LV_ALIGN_TOP_MID, 0, centre + CURRENT_VALUE_DY);
+    lv_obj_align(theme::make_label(card, "TARGET", theme::secondary, fonts::size_16()),
+                 LV_ALIGN_TOP_MID, 0, centre + TARGET_LABEL_DY);
+    s_dial_target = theme::make_accent_label(card, "--", fonts::temp_34());
+    lv_obj_align(s_dial_target, LV_ALIGN_TOP_MID, 0, centre + TARGET_VALUE_DY);
+}
+
+void add_dial_toggles(lv_obj_t *card, std::int32_t inner_w)
+{
+    for (int i = 0; i < kDialToggleCount; ++i) {
+        lv_obj_t *chip = theme::make_chip(card, "");
+        theme::fill_accent(chip, LV_STATE_CHECKED);
+        lv_obj_set_pos(chip, inner_w - DIAL_CHIP - i * (DIAL_CHIP + DIAL_CHIP_GAP), 0);
+        lv_obj_add_event_cb(chip, dial_toggle_cb, LV_EVENT_CLICKED,
+                            reinterpret_cast<void *>(static_cast<std::intptr_t>(i)));
+        s_dial_toggles[i] = chip;
+        lv_obj_set_hidden(chip, true);
+    }
+}
+
+void add_mode_button(lv_obj_t *card, std::int32_t ring, std::int32_t ring_y)
+{
+    s_dial_mode = theme::make_button(card, "OFF", theme::panel);
+    lv_obj_set_size(s_dial_mode, ring * MODE_W_PERCENT / 100, MODE_H);
+    theme::fill_accent(s_dial_mode, LV_STATE_CHECKED);
+    lv_obj_set_style_radius(s_dial_mode, MODE_H / 2, 0);
+    lv_obj_align(s_dial_mode, LV_ALIGN_TOP_MID, 0, ring_y + ring - MODE_H + MODE_DROP);
+    lv_obj_add_event_cb(s_dial_mode, mode_clicked_cb, LV_EVENT_CLICKED, nullptr);
+}
+
 void build_thermostat(lv_obj_t *parent, std::int32_t y, std::int32_t w, std::int32_t h)
 {
     lv_obj_t *card = lv_obj_create(parent);
@@ -87,63 +170,16 @@ void build_thermostat(lv_obj_t *parent, std::int32_t y, std::int32_t w, std::int
     theme::style_panel(card, theme::panel_light, theme::radius::card);
     lv_obj_set_style_pad_all(card, PANEL_PAD, 0);
 
-    const std::int32_t inner   = w - 2 * PANEL_PAD;
+    const std::int32_t inner_w = w - 2 * PANEL_PAD;
     const std::int32_t inner_h = h - 2 * PANEL_PAD;
+    const std::int32_t ring    = std::min(w - DIAL_INSET, inner_h);
+    const std::int32_t ring_y  = (inner_h - ring) / 2;
 
-    // Screwed down in every corner the chips leave free, like the radar's scope.
-    lv_obj_set_pos(theme::make_screw(card, DIAL_CHIP), 0, 0);
-    lv_obj_set_pos(theme::make_screw(card, DIAL_CHIP), 0, inner_h - DIAL_CHIP);
-    lv_obj_set_pos(theme::make_screw(card, DIAL_CHIP), inner - DIAL_CHIP, inner_h - DIAL_CHIP);
-    const std::int32_t ring   = std::min(w - DIAL_INSET, inner_h);
-    const std::int32_t ring_y = (inner_h - ring) / 2;
-
-    s_dial = lv_arc_create(card);
-    lv_obj_set_size(s_dial, ring, ring);
-    lv_obj_align(s_dial, LV_ALIGN_TOP_MID, 0, ring_y);
-    lv_arc_set_bg_angles(s_dial, 135, 45);
-    lv_arc_set_rotation(s_dial, 0);
-    lv_arc_set_range(s_dial, static_cast<int>(DEFAULT_MIN_C * DIAL_SCALE),
-                     static_cast<int>(DEFAULT_MAX_C * DIAL_SCALE));
-
-    lv_obj_set_style_arc_width(s_dial, 24, LV_PART_MAIN);
-    lv_obj_set_style_arc_color(s_dial, lv_color_hex(theme::panel), LV_PART_MAIN);
-    lv_obj_set_style_arc_width(s_dial, 24, LV_PART_INDICATOR);
-    theme::arc_accent(s_dial, LV_PART_INDICATOR);
-    theme::fill_accent(s_dial, LV_PART_KNOB);
-    lv_obj_set_style_pad_all(s_dial, 10, LV_PART_KNOB);
-
-    lv_obj_add_event_cb(s_dial, arc_changed_cb, LV_EVENT_VALUE_CHANGED, nullptr);
-    lv_obj_add_event_cb(s_dial, arc_released_cb, LV_EVENT_RELEASED, nullptr);
-    lv_obj_add_event_cb(s_dial, arc_released_cb, LV_EVENT_PRESS_LOST, nullptr);
-
-    const std::int32_t centre = ring_y + ring / 2;
-    lv_obj_align(theme::make_label(card, "CURRENT", theme::secondary, fonts::size_16()),
-                 LV_ALIGN_TOP_MID, 0, centre - 80);
-    s_dial_current = theme::make_label(card, "--", theme::text, fonts::temp_64());
-    lv_obj_align(s_dial_current, LV_ALIGN_TOP_MID, 0, centre - 58);
-    lv_obj_align(theme::make_label(card, "TARGET", theme::secondary, fonts::size_16()),
-                 LV_ALIGN_TOP_MID, 0, centre + 24);
-    s_dial_target = theme::make_accent_label(card, "--", fonts::temp_34());
-    lv_obj_align(s_dial_target, LV_ALIGN_TOP_MID, 0, centre + 46);
-
-    for (int i = 0; i < kDialToggleCount; ++i) {
-        lv_obj_t *chip = theme::make_chip(card, "");
-        theme::fill_accent(chip, LV_STATE_CHECKED);
-        lv_obj_set_pos(chip, inner - DIAL_CHIP - i * (DIAL_CHIP + DIAL_CHIP_GAP), 0);
-        lv_obj_add_event_cb(chip, dial_toggle_cb, LV_EVENT_CLICKED,
-                            reinterpret_cast<void *>(static_cast<std::intptr_t>(i)));
-        s_dial_toggles[i] = chip;
-        lv_obj_set_hidden(chip, true);
-    }
-
-    const std::int32_t mode_w = ring * 11 / 20;
-    const std::int32_t mode_h = 68;
-    s_dial_mode               = theme::make_button(card, "OFF", theme::panel);
-    lv_obj_set_size(s_dial_mode, mode_w, mode_h);
-    theme::fill_accent(s_dial_mode, LV_STATE_CHECKED);
-    lv_obj_set_style_radius(s_dial_mode, mode_h / 2, 0);
-    lv_obj_align(s_dial_mode, LV_ALIGN_TOP_MID, 0, ring_y + ring - mode_h + 4);
-    lv_obj_add_event_cb(s_dial_mode, mode_clicked_cb, LV_EVENT_CLICKED, nullptr);
+    add_dial_screws(card, inner_w, inner_h);
+    build_dial_arc(card, ring, ring_y);
+    add_dial_readings(card, ring_y + ring / 2);
+    add_dial_toggles(card, inner_w);
+    add_mode_button(card, ring, ring_y);
 }
 
 Hvac s_dial_shown = Hvac::Heating;  // what build_thermostat leaves on screen
@@ -161,15 +197,16 @@ void paint_dial(Hvac state)
     theme::fill_accent_or(s_dial, heat, ink, LV_PART_KNOB);
 }
 namespace {
-constexpr std::int32_t PILL_H = 60;
-constexpr std::int32_t DOT    = 14;
+constexpr std::int32_t PILL_H       = 60;
+constexpr std::int32_t PILL_PAD     = 22;
+constexpr std::int32_t PILL_GAP     = 12;
+constexpr std::int32_t PILL_DOT     = 14;
+constexpr std::int32_t PILL_DOT_GAP = 10;
 }  // namespace
 
 Pill         s_pills[kPillCount];
 namespace {
 std::int32_t s_pill_row_w = 0;
-
-constexpr std::int32_t PILL_PAD = 22;
 }  // namespace
 
 void reflow_pills()
@@ -181,8 +218,8 @@ void reflow_pills()
     if (visible == 0) {
         return;
     }
-    const std::int32_t w    = (s_pill_row_w - (visible - 1) * 12) / visible;
-    const std::int32_t text = w - 2 * PILL_PAD - DOT - 10;
+    const std::int32_t w    = (s_pill_row_w - (visible - 1) * PILL_GAP) / visible;
+    const std::int32_t text = w - 2 * PILL_PAD - PILL_DOT - PILL_DOT_GAP;
     for (const Pill &pill : s_pills) {
         if (!pill.shown) {
             continue;
@@ -204,6 +241,40 @@ std::uint32_t level_ink(Level level)
     }
 }
 namespace {
+Pill make_pill(lv_obj_t *strip)
+{
+    lv_obj_t *pill = lv_obj_create(strip);
+    lv_obj_set_size(pill, s_pill_row_w / kPillCount, PILL_H);
+    theme::style_panel(pill, theme::panel_light, PILL_H / 2);
+    lv_obj_set_style_pad_hor(pill, PILL_PAD, 0);
+    lv_obj_set_flex_flow(pill, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(pill, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(pill, PILL_DOT_GAP, 0);
+
+    lv_obj_t *dot = lv_obj_create(pill);
+    lv_obj_set_size(dot, PILL_DOT, PILL_DOT);
+    theme::style_panel(dot, theme::secondary, PILL_DOT / 2);
+    lv_obj_set_clickable(dot, false);
+
+    lv_obj_t *column = lv_obj_create(pill);
+    lv_obj_set_size(column, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_grow(column, 1);
+    theme::style_panel(column, theme::panel_light, 0);
+    lv_obj_set_style_bg_opa(column, LV_OPA_TRANSP, 0);
+    lv_obj_set_clickable(column, false);
+    lv_obj_set_flex_flow(column, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(column, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_set_style_pad_row(column, -1, 0);
+
+    lv_obj_t *label = theme::make_label(column, "", theme::secondary, fonts::size_16());
+    lv_obj_t *value = theme::make_label(column, "", theme::text, fonts::size_22());
+    lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_DOTS);
+    lv_label_set_long_mode(value, LV_LABEL_LONG_MODE_DOTS);
+
+    lv_obj_set_hidden(pill, true);
+    return Pill{pill, dot, column, label, value, false};
+}
+
 void build_pills(lv_obj_t *parent, std::int32_t w)
 {
     s_pill_row_w = w;
@@ -215,46 +286,22 @@ void build_pills(lv_obj_t *parent, std::int32_t w)
     lv_obj_set_style_bg_opa(strip, LV_OPA_TRANSP, 0);
     lv_obj_set_flex_flow(strip, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(strip, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(strip, 12, 0);
+    lv_obj_set_style_pad_column(strip, PILL_GAP, 0);
 
-    for (int i = 0; i < kPillCount; ++i) {
-        lv_obj_t *pill = lv_obj_create(strip);
-        lv_obj_set_size(pill, s_pill_row_w / kPillCount, PILL_H);
-        theme::style_panel(pill, theme::panel_light, PILL_H / 2);
-        lv_obj_set_style_pad_hor(pill, PILL_PAD, 0);
-        lv_obj_set_flex_flow(pill, LV_FLEX_FLOW_ROW);
-        lv_obj_set_flex_align(pill, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
-                              LV_FLEX_ALIGN_CENTER);
-        lv_obj_set_style_pad_column(pill, 10, 0);
-
-        lv_obj_t *dot = lv_obj_create(pill);
-        lv_obj_set_size(dot, DOT, DOT);
-        theme::style_panel(dot, theme::secondary, DOT / 2);
-        lv_obj_set_clickable(dot, false);
-
-        lv_obj_t *column = lv_obj_create(pill);
-        lv_obj_set_size(column, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-        lv_obj_set_flex_grow(column, 1);
-        theme::style_panel(column, theme::panel_light, 0);
-        lv_obj_set_style_bg_opa(column, LV_OPA_TRANSP, 0);
-        lv_obj_set_clickable(column, false);
-        lv_obj_set_flex_flow(column, LV_FLEX_FLOW_COLUMN);
-        lv_obj_set_flex_align(column, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START,
-                              LV_FLEX_ALIGN_START);
-        lv_obj_set_style_pad_row(column, -1, 0);
-
-        lv_obj_t *label = theme::make_label(column, "", theme::secondary, fonts::size_16());
-        lv_obj_t *value = theme::make_label(column, "", theme::text, fonts::size_22());
-        lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_DOTS);
-        lv_label_set_long_mode(value, LV_LABEL_LONG_MODE_DOTS);
-
-        s_pills[i] = Pill{pill, dot, column, label, value, false};
-        lv_obj_set_hidden(pill, true);
+    for (Pill &pill : s_pills) {
+        pill = make_pill(strip);
     }
 }
 
-constexpr std::int32_t BULB_W = 34;
-constexpr std::int32_t BULB_H = 48;
+constexpr std::int32_t BULB_W           = 34;
+constexpr std::int32_t BULB_H           = 48;
+constexpr std::int32_t BULB_BASE_W      = 16;
+constexpr std::int32_t BULB_BASE_RADIUS = 3;
+constexpr std::int32_t BULB_NECK        = 3;  // between the glass and the base
+constexpr int          BULB_PARTS       = 2;  // the glass and the base
+constexpr std::int32_t BULB_GAP         = 14;
+
+constexpr std::int32_t LIGHTS_PAD = 28;
 }  // namespace
 
 lv_obj_t *s_lights_button = nullptr;
@@ -297,9 +344,9 @@ lv_obj_t *make_bulb(lv_obj_t *parent)
     lv_obj_set_clickable(glass, false);
 
     lv_obj_t *base = lv_obj_create(bulb);
-    lv_obj_set_size(base, 16, BULB_H - BULB_W - 3);
-    lv_obj_set_pos(base, (BULB_W - 16) / 2, BULB_W + 3);
-    theme::style_panel(base, theme::disabled_ink, 3);
+    lv_obj_set_size(base, BULB_BASE_W, BULB_H - BULB_W - BULB_NECK);
+    lv_obj_set_pos(base, (BULB_W - BULB_BASE_W) / 2, BULB_W + BULB_NECK);
+    theme::style_panel(base, theme::disabled_ink, BULB_BASE_RADIUS);
     bulb_states(base);
     lv_obj_set_clickable(base, false);
     return bulb;
@@ -312,7 +359,7 @@ void paint_bulbs()
         if (s_bulbs[i] == nullptr) {
             continue;
         }
-        for (int part = 0; part < 2; ++part) {
+        for (int part = 0; part < BULB_PARTS; ++part) {
             lv_obj_t *obj = lv_obj_get_child(s_bulbs[i], part);
             lv_obj_set_state(obj, LV_STATE_CHECKED, s_light_on[i]);
             lv_obj_set_state(obj, LV_STATE_USER_1, s_lights_on);
@@ -352,6 +399,24 @@ void light_clicked_cb(lv_event_t *e)
     }
 }
 
+void build_bulb_strip(lv_obj_t *button)
+{
+    lv_obj_t *strip = lv_obj_create(button);
+    lv_obj_set_size(strip, LV_SIZE_CONTENT, BULB_H);
+    theme::style_panel(strip, theme::panel, 0);
+    lv_obj_set_style_bg_opa(strip, LV_OPA_TRANSP, 0);
+    lv_obj_set_clickable(strip, false);
+    lv_obj_align(strip, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+    lv_obj_set_flex_flow(strip, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(strip, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
+    lv_obj_set_style_pad_column(strip, BULB_GAP, 0);
+
+    for (lv_obj_t *&bulb : s_bulbs) {
+        bulb = make_bulb(strip);
+        lv_obj_set_hidden(bulb, true);
+    }
+}
+
 void build_lights_button(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int32_t w,
                          std::int32_t h)
 {
@@ -360,7 +425,7 @@ void build_lights_button(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::
     lv_obj_set_size(s_lights_button, w, h);
     theme::style_button(s_lights_button, theme::panel_light);
     theme::fill_accent(s_lights_button, LV_STATE_CHECKED);
-    lv_obj_set_style_pad_all(s_lights_button, 28, 0);
+    lv_obj_set_style_pad_all(s_lights_button, LIGHTS_PAD, 0);
     lv_obj_add_event_cb(s_lights_button, lights_event_cb, LV_EVENT_CLICKED, nullptr);
     lv_obj_add_event_cb(s_lights_button, lights_event_cb, LV_EVENT_LONG_PRESSED, nullptr);
 
@@ -371,43 +436,56 @@ void build_lights_button(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::
     s_lights_state = theme::make_label(s_lights_button, "--", theme::text, fonts::size_48());
     lv_obj_align(s_lights_state, LV_ALIGN_BOTTOM_LEFT, 0, 0);
 
-    lv_obj_t *strip = lv_obj_create(s_lights_button);
-    lv_obj_set_size(strip, LV_SIZE_CONTENT, BULB_H);
-    theme::style_panel(strip, theme::panel, 0);
-    lv_obj_set_style_bg_opa(strip, LV_OPA_TRANSP, 0);
-    lv_obj_set_clickable(strip, false);
-    lv_obj_align(strip, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
-    lv_obj_set_flex_flow(strip, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(strip, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
-    lv_obj_set_style_pad_column(strip, 14, 0);
+    build_bulb_strip(s_lights_button);
+}
 
-    for (int i = 0; i < kLightCount; ++i) {
-        s_bulbs[i] = make_bulb(strip);
-        lv_obj_set_hidden(s_bulbs[i], true);
-    }
+constexpr std::int32_t PICKER_COLUMNS  = 2;
+constexpr std::int32_t PICKER_PAD      = theme::space::l;
+constexpr std::int32_t PICKER_HEADER_H = 52;
+constexpr std::int32_t LIGHT_BTN_W     = 272;
+constexpr std::int32_t LIGHT_BTN_H     = 170;
+constexpr std::int32_t LIGHT_BTN_PAD   = 20;
+
+LightButton make_light_button(lv_obj_t *grid, int index)
+{
+    lv_obj_t *btn = lv_button_create(grid);
+    lv_obj_set_size(btn, LIGHT_BTN_W, LIGHT_BTN_H);
+    theme::style_button(btn, theme::panel_light);
+    theme::fill_accent(btn, LV_STATE_CHECKED);
+    lv_obj_set_style_pad_all(btn, LIGHT_BTN_PAD, 0);
+    lv_obj_add_event_cb(btn, light_clicked_cb, LV_EVENT_CLICKED,
+                        reinterpret_cast<void *>(static_cast<std::intptr_t>(index)));
+
+    lv_obj_t *name = theme::make_label(btn, "", theme::secondary, fonts::size_20());
+    lv_obj_align(name, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_set_width(name, LIGHT_BTN_W - 2 * LIGHT_BTN_PAD);
+    lv_label_set_long_mode(name, LV_LABEL_LONG_MODE_DOTS);
+
+    lv_obj_t *state = theme::make_label(btn, "--", theme::text, fonts::size_32());
+    lv_obj_align(state, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+
+    lv_obj_set_hidden(btn, true);
+    return LightButton{btn, name, state};
 }
 
 void build_light_picker(lv_obj_t *parent)
 {
-    constexpr std::int32_t COLUMNS  = 2;
-    constexpr std::int32_t BTN_W    = 272;
-    constexpr std::int32_t BTN_H    = 170;
-    constexpr std::int32_t PAD      = 24;
-    const std::int32_t     rows     = (kLightCount + COLUMNS - 1) / COLUMNS;
-    const std::int32_t     card_w   = COLUMNS * BTN_W + (COLUMNS - 1) * BUTTON_GAP + 2 * PAD;
-    const std::int32_t     header_h = 52;
-    const std::int32_t card_h = rows * BTN_H + (rows - 1) * BUTTON_GAP + header_h + 2 * PAD;
+    const std::int32_t rows   = (kLightCount + PICKER_COLUMNS - 1) / PICKER_COLUMNS;
+    const std::int32_t card_w =
+        PICKER_COLUMNS * LIGHT_BTN_W + (PICKER_COLUMNS - 1) * BUTTON_GAP + 2 * PICKER_PAD;
+    const std::int32_t card_h =
+        rows * LIGHT_BTN_H + (rows - 1) * BUTTON_GAP + PICKER_HEADER_H + 2 * PICKER_PAD;
 
     s_light_picker.emplace(parent, card_w, card_h);
     lv_obj_t *card = s_light_picker->content();
-    lv_obj_set_style_pad_all(card, PAD, 0);
+    lv_obj_set_style_pad_all(card, PICKER_PAD, 0);
 
     lv_obj_t *title = theme::make_accent_label(card, "LIGHTS", fonts::size_22());
     lv_obj_align(title, LV_ALIGN_TOP_LEFT, 0, 0);
 
     lv_obj_t *grid = lv_obj_create(card);
-    lv_obj_set_pos(grid, 0, header_h);
-    lv_obj_set_size(grid, card_w - 2 * PAD, card_h - 2 * PAD - header_h);
+    lv_obj_set_pos(grid, 0, PICKER_HEADER_H);
+    lv_obj_set_size(grid, card_w - 2 * PICKER_PAD, card_h - 2 * PICKER_PAD - PICKER_HEADER_H);
     theme::style_panel(grid, theme::panel, 0);
     lv_obj_set_style_bg_opa(grid, LV_OPA_TRANSP, 0);
     lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
@@ -416,24 +494,7 @@ void build_light_picker(lv_obj_t *parent)
     lv_obj_set_style_pad_column(grid, BUTTON_GAP, 0);
 
     for (int i = 0; i < kLightCount; ++i) {
-        lv_obj_t *btn = lv_button_create(grid);
-        lv_obj_set_size(btn, BTN_W, BTN_H);
-        theme::style_button(btn, theme::panel_light);
-        theme::fill_accent(btn, LV_STATE_CHECKED);
-        lv_obj_set_style_pad_all(btn, 20, 0);
-        lv_obj_add_event_cb(btn, light_clicked_cb, LV_EVENT_CLICKED,
-                            reinterpret_cast<void *>(static_cast<std::intptr_t>(i)));
-
-        lv_obj_t *name = theme::make_label(btn, "", theme::secondary, fonts::size_20());
-        lv_obj_align(name, LV_ALIGN_TOP_LEFT, 0, 0);
-        lv_obj_set_width(name, BTN_W - 40);
-        lv_label_set_long_mode(name, LV_LABEL_LONG_MODE_DOTS);
-
-        lv_obj_t *state = theme::make_label(btn, "--", theme::text, fonts::size_32());
-        lv_obj_align(state, LV_ALIGN_BOTTOM_LEFT, 0, 0);
-
-        s_lights[i] = LightButton{btn, name, state};
-        lv_obj_set_hidden(btn, true);
+        s_lights[i] = make_light_button(grid, i);
     }
 
     s_light_picker->add_close_button();
@@ -475,16 +536,37 @@ lv_obj_t *s_panel_louder   = nullptr;
 lv_obj_t *s_panel_volume_pct  = nullptr;
 namespace {
 lv_obj_t *s_panel_volume_icon = nullptr;
-lv_timer_t *s_progress_timer = nullptr;
 }  // namespace
 
 TextBox s_card_with_art{}, s_card_bare{};
 TextBox s_panel_with_art{}, s_panel_bare{};
 bool    s_has_art = false;
 namespace {
-constexpr std::int32_t CARD_TITLE_Y = 28;
-constexpr std::int32_t VOL_W        = 88;
-constexpr std::int32_t VOL_H        = 60;
+constexpr std::int32_t MEDIA_CARD_PAD   = 18;
+constexpr std::int32_t CARD_ART_TRIM    = 61;  // how much shorter than the card its cover is
+constexpr std::int32_t CARD_ART_RADIUS  = 14;
+constexpr std::int32_t CARD_TITLE_Y     = 28;
+constexpr std::int32_t TITLE_TO_ARTIST  = 6;
+
+constexpr std::int32_t MEDIA_PANEL_W      = 700;
+constexpr std::int32_t MEDIA_PANEL_H      = 408;
+constexpr std::int32_t MEDIA_PANEL_PAD    = theme::space::l;
+constexpr std::int32_t PANEL_ART          = 200;
+constexpr std::int32_t PANEL_ART_RADIUS   = 18;
+constexpr std::int32_t ARTIST_TO_PROGRESS = 20;
+constexpr std::int32_t PROGRESS_H         = 8;
+constexpr std::int32_t PROGRESS_TO_TIMES  = 14;
+constexpr std::int32_t TIMES_TO_VOLUME    = 20;
+constexpr std::int32_t VOLUME_PCT_X       = 34;
+constexpr std::int32_t VOL_W              = 88;
+constexpr std::int32_t VOL_H              = 60;
+constexpr std::int32_t VOL_GAP            = 12;
+constexpr std::int32_t TRANSPORT_H        = 92;
+constexpr std::int32_t TRANSPORT_SIDE_W   = 150;
+constexpr std::int32_t TRANSPORT_PLAY_W   = 200;
+
+constexpr lv_opa_t PAUSED_ART_DIM  = LV_OPA_50;
+constexpr lv_opa_t PLAYING_ART_DIM = LV_OPA_TRANSP;
 
 std::int32_t s_card_inner_h  = 0;
 std::int32_t s_panel_inner_h = 0;
@@ -506,40 +588,46 @@ std::int32_t title_height(const char *text, const lv_font_t *font, std::int32_t 
     lv_text_get_size(&size, text, font, 0, 0, width, LV_TEXT_FLAG_NONE);
     return size.y > line ? 2 * line : line;
 }
+
+void layout_card_text(const TextBox &card)
+{
+    const std::int32_t title_h =
+        title_height(lv_label_get_text(s_media_title), fonts::size_20(), card.w);
+    const std::int32_t artist_y = CARD_TITLE_Y + title_h + TITLE_TO_ARTIST;
+    const std::int32_t artist_h = artist_height(fonts::size_16(), s_card_inner_h - artist_y);
+    lv_obj_set_height(s_media_artist, artist_h);
+    theme::align(s_media_artist, LV_ALIGN_TOP_LEFT, card.x, artist_y);
+}
+
+void layout_panel_text(const TextBox &panel)
+{
+    std::int32_t y =
+        title_height(lv_label_get_text(s_panel_title), fonts::size_28(), panel.w) + TITLE_TO_ARTIST;
+    const std::int32_t artist_h =
+        artist_height(fonts::size_22(), s_panel_inner_h - s_panel_below - y);
+    lv_obj_set_height(s_panel_artist, artist_h);
+    theme::align(s_panel_artist, LV_ALIGN_TOP_LEFT, panel.x, y);
+
+    y += artist_h + ARTIST_TO_PROGRESS;
+    theme::align(s_panel_progress, LV_ALIGN_TOP_LEFT, panel.x, y);
+
+    y += PROGRESS_TO_TIMES;
+    theme::align(s_panel_elapsed, LV_ALIGN_TOP_LEFT, panel.x, y);
+    theme::align(s_panel_total, LV_ALIGN_TOP_RIGHT, 0, y);
+
+    y += lv_font_get_line_height(fonts::size_16()) + TIMES_TO_VOLUME;
+    const std::int32_t text_dy = (VOL_H - lv_font_get_line_height(fonts::size_20())) / 2;
+    theme::align(s_panel_volume_icon, LV_ALIGN_TOP_LEFT, panel.x, y + text_dy);
+    theme::align(s_panel_volume_pct, LV_ALIGN_TOP_LEFT, panel.x + VOLUME_PCT_X, y + text_dy);
+    theme::align(s_panel_quieter, LV_ALIGN_TOP_RIGHT, -(VOL_W + VOL_GAP), y);
+    theme::align(s_panel_louder, LV_ALIGN_TOP_RIGHT, 0, y);
+}
 }  // namespace
 
 void layout_media_text()
 {
-    const TextBox card  = s_has_art ? s_card_with_art : s_card_bare;
-    const TextBox panel = s_has_art ? s_panel_with_art : s_panel_bare;
-
-    const std::int32_t card_title =
-        title_height(lv_label_get_text(s_media_title), fonts::size_20(), card.w);
-    const std::int32_t card_artist_y = CARD_TITLE_Y + card_title + 6;
-    const std::int32_t card_artist_h =
-        artist_height(fonts::size_16(), s_card_inner_h - card_artist_y);
-    lv_obj_set_height(s_media_artist, card_artist_h);
-    theme::align(s_media_artist, LV_ALIGN_TOP_LEFT, card.x, card_artist_y);
-
-    std::int32_t y = title_height(lv_label_get_text(s_panel_title), fonts::size_28(), panel.w) + 6;
-    const std::int32_t panel_artist_h =
-        artist_height(fonts::size_22(), s_panel_inner_h - s_panel_below - y);
-    lv_obj_set_height(s_panel_artist, panel_artist_h);
-    theme::align(s_panel_artist, LV_ALIGN_TOP_LEFT, panel.x, y);
-
-    y += panel_artist_h + 20;
-    theme::align(s_panel_progress, LV_ALIGN_TOP_LEFT, panel.x, y);
-
-    y += 14;
-    theme::align(s_panel_elapsed, LV_ALIGN_TOP_LEFT, panel.x, y);
-    theme::align(s_panel_total, LV_ALIGN_TOP_RIGHT, 0, y);
-
-    y += lv_font_get_line_height(fonts::size_16()) + 20;
-    const std::int32_t text_dy = (VOL_H - lv_font_get_line_height(fonts::size_20())) / 2;
-    theme::align(s_panel_volume_icon, LV_ALIGN_TOP_LEFT, panel.x, y + text_dy);
-    theme::align(s_panel_volume_pct, LV_ALIGN_TOP_LEFT, panel.x + 34, y + text_dy);
-    theme::align(s_panel_quieter, LV_ALIGN_TOP_RIGHT, -(VOL_W + 12), y);
-    theme::align(s_panel_louder, LV_ALIGN_TOP_RIGHT, 0, y);
+    layout_card_text(s_has_art ? s_card_with_art : s_card_bare);
+    layout_panel_text(s_has_art ? s_panel_with_art : s_panel_bare);
 }
 
 int        s_position_s   = 0;
@@ -547,6 +635,8 @@ int        s_duration_s   = 0;
 bool       s_media_playing = false;
 TickType_t s_position_at  = 0;
 namespace {
+constexpr int SECONDS_PER_MINUTE = 60;
+
 // LV_LABEL_LONG_MODE_DOTS only truncates once the text exceeds the label's
 // height, and a label left at content height simply grows.
 void one_line(lv_obj_t *label, const lv_font_t *font, std::int32_t width)
@@ -574,6 +664,15 @@ lv_obj_t *rounded_frame(lv_obj_t *parent, std::int32_t side, std::int32_t radius
     lv_obj_set_clickable(frame, false);
     return frame;
 }
+
+lv_obj_t *make_cover(lv_obj_t *frame, std::int32_t side)
+{
+    lv_obj_t *art = lv_image_create(frame);
+    lv_obj_set_size(art, side, side);
+    lv_obj_center(art);
+    lv_image_set_inner_align(art, LV_IMAGE_ALIGN_STRETCH);
+    return art;
+}
 }  // namespace
 
 void write_clock(lv_obj_t *label, int seconds)
@@ -582,7 +681,8 @@ void write_clock(lv_obj_t *label, int seconds)
         seconds = 0;
     }
     char text[16];
-    std::snprintf(text, sizeof(text), "%d:%02d", seconds / 60, seconds % 60);
+    std::snprintf(text, sizeof(text), "%d:%02d", seconds / SECONDS_PER_MINUTE,
+                  seconds % SECONDS_PER_MINUTE);
     theme::set_text(label, text);
 }
 namespace {
@@ -614,7 +714,7 @@ void apply_playing(bool playing)
     s_playing_shown = playing;
     theme::set_text(lv_obj_get_child(s_panel_play, 0), playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
 
-    const lv_opa_t dim = s_has_track_shown && !playing ? LV_OPA_50 : LV_OPA_TRANSP;
+    const lv_opa_t dim = s_has_track_shown && !playing ? PAUSED_ART_DIM : PLAYING_ART_DIM;
     for (lv_obj_t *art : {s_media_art, s_panel_art}) {
         if (lv_obj_get_style_image_recolor_opa(art, LV_PART_MAIN) != dim) {
             lv_obj_set_style_image_recolor(art, lv_color_hex(theme::background), 0);
@@ -650,36 +750,34 @@ void media_action_cb(lv_event_t *e)
     }
 }
 
-void media_card_cb(lv_event_t *e)
+void media_swiped(lv_dir_t direction)
 {
-    const lv_event_code_t code = lv_event_get_code(e);
-
-    if (code == LV_EVENT_GESTURE) {
-        const lv_dir_t direction = lv_indev_get_gesture_dir(lv_indev_active());
-        if (direction != LV_DIR_LEFT && direction != LV_DIR_RIGHT) {
-            return;
-        }
-        s_media_swiped = true;
-        if (s_handlers.media != nullptr) {
-            s_handlers.media(direction == LV_DIR_LEFT ? MediaAction::Next : MediaAction::Previous);
-        }
+    if (direction != LV_DIR_LEFT && direction != LV_DIR_RIGHT) {
         return;
     }
+    s_media_swiped = true;
+    if (s_handlers.media != nullptr) {
+        s_handlers.media(direction == LV_DIR_LEFT ? MediaAction::Next : MediaAction::Previous);
+    }
+}
 
-    if (code == LV_EVENT_LONG_PRESSED) {
-        s_media_long = true;
-        if (s_media_off) {
-            return;
-        }
-        if (s_media_hold >= 0) {
-            if (s_handlers.preset != nullptr) {
-                s_handlers.preset(s_media_hold, false);
-            }
-        } else if (s_media_panel.has_value()) {
-            s_media_panel->open(s_media_card);
-        }
+void media_held()
+{
+    s_media_long = true;
+    if (s_media_off) {
         return;
     }
+    if (s_media_hold >= 0) {
+        if (s_handlers.preset != nullptr) {
+            s_handlers.preset(s_media_hold, false);
+        }
+    } else if (s_media_panel.has_value()) {
+        s_media_panel->open(s_media_card);
+    }
+}
+
+void media_tapped()
+{
     if (std::exchange(s_media_long, false) || std::exchange(s_media_swiped, false)) {
         return;
     }
@@ -687,6 +785,18 @@ void media_card_cb(lv_event_t *e)
     apply_playing(!s_playing_shown);
     if (s_handlers.media != nullptr) {
         s_handlers.media(MediaAction::PlayPause);
+    }
+}
+
+void media_card_cb(lv_event_t *e)
+{
+    const lv_event_code_t code = lv_event_get_code(e);
+    if (code == LV_EVENT_GESTURE) {
+        media_swiped(lv_indev_get_gesture_dir(lv_indev_active()));
+    } else if (code == LV_EVENT_LONG_PRESSED) {
+        media_held();
+    } else {
+        media_tapped();
     }
 }
 
@@ -700,35 +810,11 @@ lv_obj_t *media_button(lv_obj_t *parent, const char *symbol, MediaAction action,
     return button;
 }
 
-void build_media_panel(lv_obj_t *parent)
+void build_panel_track(lv_obj_t *card, std::int32_t text_x, std::int32_t text_w)
 {
-    constexpr std::int32_t PAD    = 24;
-    constexpr std::int32_t ART    = 200;
-    constexpr std::int32_t BTN_H  = 92;
-    constexpr std::int32_t CARD_W = 700;
-    constexpr std::int32_t CARD_H = 408;
-
-    s_media_panel.emplace(parent, CARD_W, CARD_H);
-    lv_obj_t *card = s_media_panel->content();
-    lv_obj_set_style_pad_all(card, PAD, 0);
-
-    const std::int32_t inner_w = CARD_W - 2 * PAD;
-    const std::int32_t inner_h = CARD_H - 2 * PAD;
-    s_panel_inner_h            = inner_h;
-    s_panel_below = 20 + 8 + 14 + lv_font_get_line_height(fonts::size_16()) + 20 + VOL_H + 16 +
-                    BTN_H;
-
-    s_panel_frame = rounded_frame(card, ART, 18);
+    s_panel_frame = rounded_frame(card, PANEL_ART, PANEL_ART_RADIUS);
     lv_obj_align(s_panel_frame, LV_ALIGN_TOP_LEFT, 0, 0);
-    s_panel_art = lv_image_create(s_panel_frame);
-    lv_obj_set_size(s_panel_art, ART, ART);
-    lv_obj_center(s_panel_art);
-    lv_image_set_inner_align(s_panel_art, LV_IMAGE_ALIGN_STRETCH);
-
-    s_panel_with_art = {ART + PAD, inner_w - ART - PAD};
-    s_panel_bare     = {0, inner_w};
-    const std::int32_t text_x = s_panel_with_art.x;
-    const std::int32_t text_w = s_panel_with_art.w;
+    s_panel_art = make_cover(s_panel_frame, PANEL_ART);
 
     s_panel_title = theme::make_label(card, "--", theme::text, fonts::size_28());
     two_lines(s_panel_title, fonts::size_28(), text_w);
@@ -736,41 +822,73 @@ void build_media_panel(lv_obj_t *parent)
 
     s_panel_artist = theme::make_label(card, "", theme::secondary, fonts::size_22());
     one_line(s_panel_artist, fonts::size_22(), text_w);
+}
 
+void build_panel_progress(lv_obj_t *card, std::int32_t text_w)
+{
     s_panel_progress = lv_bar_create(card);
-    lv_obj_set_size(s_panel_progress, text_w, 8);
-    theme::style_panel(s_panel_progress, theme::panel_light, 4);
+    lv_obj_set_size(s_panel_progress, text_w, PROGRESS_H);
+    theme::style_panel(s_panel_progress, theme::panel_light, PROGRESS_H / 2);
     theme::fill_accent(s_panel_progress, LV_PART_INDICATOR);
-    lv_obj_set_style_radius(s_panel_progress, 4, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(s_panel_progress, PROGRESS_H / 2, LV_PART_INDICATOR);
 
     s_panel_elapsed = theme::make_label(card, "0:00", theme::secondary, fonts::size_16());
     s_panel_total   = theme::make_label(card, "0:00", theme::secondary, fonts::size_16());
+}
 
+void build_panel_volume(lv_obj_t *card)
+{
     s_panel_volume_icon =
         theme::make_label(card, LV_SYMBOL_VOLUME_MAX, theme::secondary, fonts::size_20());
     s_panel_volume_pct = theme::make_label(card, "--", theme::text, fonts::size_20());
 
     s_panel_quieter = media_button(card, LV_SYMBOL_MINUS, MediaAction::VolumeDown, VOL_W, VOL_H);
     s_panel_louder  = media_button(card, LV_SYMBOL_PLUS, MediaAction::VolumeUp, VOL_W, VOL_H);
+}
 
-    constexpr std::int32_t SIDE_W = 150;
-    constexpr std::int32_t PLAY_W = 200;
-    constexpr std::int32_t GAP    = 16;
-    const std::int32_t     row_w  = 2 * SIDE_W + PLAY_W + 2 * GAP;
-    const std::int32_t     row_x  = (inner_w - row_w) / 2;
-    const std::int32_t     row_y  = inner_h - BTN_H;
+void build_transport(lv_obj_t *card, std::int32_t inner_w, std::int32_t inner_h)
+{
+    const std::int32_t row_w = 2 * TRANSPORT_SIDE_W + TRANSPORT_PLAY_W + 2 * BUTTON_GAP;
+    const std::int32_t row_x = (inner_w - row_w) / 2;
+    const std::int32_t row_y = inner_h - TRANSPORT_H;
 
-    lv_obj_t *previous = media_button(card, LV_SYMBOL_PREV, MediaAction::Previous, SIDE_W, BTN_H);
+    lv_obj_t *previous =
+        media_button(card, LV_SYMBOL_PREV, MediaAction::Previous, TRANSPORT_SIDE_W, TRANSPORT_H);
     lv_obj_align(previous, LV_ALIGN_TOP_LEFT, row_x, row_y);
 
-    s_panel_play = media_button(card, LV_SYMBOL_PLAY, MediaAction::PlayPause, PLAY_W, BTN_H);
-    lv_obj_align(s_panel_play, LV_ALIGN_TOP_LEFT, row_x + SIDE_W + GAP, row_y);
+    s_panel_play =
+        media_button(card, LV_SYMBOL_PLAY, MediaAction::PlayPause, TRANSPORT_PLAY_W, TRANSPORT_H);
+    lv_obj_align(s_panel_play, LV_ALIGN_TOP_LEFT, row_x + TRANSPORT_SIDE_W + BUTTON_GAP, row_y);
     theme::fill_accent(s_panel_play);
 
-    lv_obj_t *next = media_button(card, LV_SYMBOL_NEXT, MediaAction::Next, SIDE_W, BTN_H);
-    lv_obj_align(next, LV_ALIGN_TOP_LEFT, row_x + SIDE_W + PLAY_W + 2 * GAP, row_y);
+    lv_obj_t *next =
+        media_button(card, LV_SYMBOL_NEXT, MediaAction::Next, TRANSPORT_SIDE_W, TRANSPORT_H);
+    lv_obj_align(next, LV_ALIGN_TOP_LEFT,
+                 row_x + TRANSPORT_SIDE_W + TRANSPORT_PLAY_W + 2 * BUTTON_GAP, row_y);
+}
 
-    s_progress_timer = lv_timer_create(progress_tick, PROGRESS_TICK_MS, nullptr);
+void build_media_panel(lv_obj_t *parent)
+{
+    s_media_panel.emplace(parent, MEDIA_PANEL_W, MEDIA_PANEL_H);
+    lv_obj_t *card = s_media_panel->content();
+    lv_obj_set_style_pad_all(card, MEDIA_PANEL_PAD, 0);
+
+    const std::int32_t inner_w = MEDIA_PANEL_W - 2 * MEDIA_PANEL_PAD;
+    const std::int32_t inner_h = MEDIA_PANEL_H - 2 * MEDIA_PANEL_PAD;
+    s_panel_inner_h            = inner_h;
+    s_panel_below = ARTIST_TO_PROGRESS + PROGRESS_H + PROGRESS_TO_TIMES +
+                    lv_font_get_line_height(fonts::size_16()) + TIMES_TO_VOLUME + VOL_H +
+                    BUTTON_GAP + TRANSPORT_H;
+
+    s_panel_with_art = {PANEL_ART + MEDIA_PANEL_PAD, inner_w - PANEL_ART - MEDIA_PANEL_PAD};
+    s_panel_bare     = {0, inner_w};
+
+    build_panel_track(card, s_panel_with_art.x, s_panel_with_art.w);
+    build_panel_progress(card, s_panel_with_art.w);
+    build_panel_volume(card);
+    build_transport(card, inner_w, inner_h);
+
+    lv_timer_create(progress_tick, PROGRESS_TICK_MS, nullptr);
 
     s_media_panel->add_close_button();
 }
@@ -782,39 +900,40 @@ void build_media_card(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int
     lv_obj_set_pos(s_media_card, x, y);
     lv_obj_set_size(s_media_card, w, h);
     theme::style_button(s_media_card, theme::panel_light);
-    lv_obj_set_style_pad_all(s_media_card, 18, 0);
+    lv_obj_set_style_pad_all(s_media_card, MEDIA_CARD_PAD, 0);
     lv_obj_add_event_cb(s_media_card, media_card_cb, LV_EVENT_CLICKED, nullptr);
     lv_obj_add_event_cb(s_media_card, media_card_cb, LV_EVENT_LONG_PRESSED, nullptr);
     lv_obj_add_event_cb(s_media_card, media_card_cb, LV_EVENT_GESTURE, nullptr);
     // Gestures bubble by default, so LVGL walks past the card to the screen and a
     // handler here never runs.
-    lv_obj_remove_flag(s_media_card, LV_OBJ_FLAG_GESTURE_BUBBLE);
+    lv_obj_set_gesture_bubble(s_media_card, false);
 
-    const std::int32_t art = h - 61;
-    s_media_frame          = rounded_frame(s_media_card, art, 14);
+    const std::int32_t art = h - CARD_ART_TRIM;
+    s_media_frame          = rounded_frame(s_media_card, art, CARD_ART_RADIUS);
     lv_obj_align(s_media_frame, LV_ALIGN_LEFT_MID, 0, 0);
-    s_media_art = lv_image_create(s_media_frame);
-    lv_obj_set_size(s_media_art, art, art);
-    lv_obj_center(s_media_art);
-    lv_image_set_inner_align(s_media_art, LV_IMAGE_ALIGN_STRETCH);
+    s_media_art = make_cover(s_media_frame, art);
     lv_obj_set_hidden(s_media_frame, true);
 
-    s_card_inner_h  = h - 36;
-    s_card_with_art = {art + 18, w - 36 - art - 18};
-    s_card_bare     = {0, w - 36};
-    const std::int32_t text_x = s_card_bare.x;
-    const std::int32_t text_w = s_card_bare.w;
+    const std::int32_t inner_w = w - 2 * MEDIA_CARD_PAD;
+    s_card_inner_h             = h - 2 * MEDIA_CARD_PAD;
+    s_card_with_art            = {art + MEDIA_CARD_PAD, inner_w - art - MEDIA_CARD_PAD};
+    s_card_bare                = {0, inner_w};
+    const std::int32_t text_x  = s_card_bare.x;
+    const std::int32_t text_w  = s_card_bare.w;
 
     s_media_source = theme::make_label(s_media_card, "SPEAKER", theme::secondary, fonts::size_16());
     lv_obj_align(s_media_source, LV_ALIGN_TOP_LEFT, text_x, 0);
 
     s_media_title = theme::make_label(s_media_card, "--", theme::text, fonts::size_20());
     two_lines(s_media_title, fonts::size_20(), text_w);
-    lv_obj_align(s_media_title, LV_ALIGN_TOP_LEFT, text_x, 28);
+    lv_obj_align(s_media_title, LV_ALIGN_TOP_LEFT, text_x, CARD_TITLE_Y);
 
     s_media_artist = theme::make_label(s_media_card, "", theme::secondary, fonts::size_16());
     one_line(s_media_artist, fonts::size_16(), text_w);
 }
+
+constexpr int LIGHTS_SHARE_NUM = 5;
+constexpr int LIGHTS_SHARE_DEN = 9;
 }  // namespace
 
 void build_home_page(lv_obj_t *page)
@@ -833,7 +952,7 @@ void build_home_page(lv_obj_t *page)
 
     const std::int32_t col_x    = DIAL_CARD_W + BUTTON_GAP;
     const std::int32_t col_w    = inner_w - col_x;
-    const std::int32_t lights_h = body_h * 5 / 9;
+    const std::int32_t lights_h = body_h * LIGHTS_SHARE_NUM / LIGHTS_SHARE_DEN;
     build_lights_button(page, col_x, body_y, col_w, lights_h);
 
     const std::int32_t media_y = body_y + lights_h + BUTTON_GAP;

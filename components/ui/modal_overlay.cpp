@@ -4,16 +4,18 @@
 
 namespace ui {
 namespace {
-constexpr lv_opa_t     SCRIM_OPA = LV_OPA_70;
-constexpr std::int32_t  SLIDE    = 48;
-constexpr std::uint32_t OPEN_MS  = 240;
-constexpr std::uint32_t CLOSE_MS = 160;
+constexpr lv_opa_t      SCRIM_OPA      = LV_OPA_70;
+constexpr std::int32_t  CARD_RADIUS    = 24;
+constexpr std::int32_t  SLIDE_DISTANCE = 48;
+constexpr std::uint32_t OPEN_MS        = 240;
+constexpr std::uint32_t CLOSE_MS       = 160;
 
 // A larger card, the log's say, costs more per frame than a slide can afford
 // here and is better shown at once.
 constexpr std::int32_t MAX_SLIDE_AREA = 720 * 440;
 
 constexpr std::int32_t CLOSE_SIZE = 48;
+constexpr std::int32_t CLOSE_LIFT = 8;
 
 constexpr std::int32_t PROGRESS_MAX = 255;
 
@@ -33,7 +35,7 @@ ModalOverlay::ModalOverlay(lv_obj_t *parent, std::int32_t width, std::int32_t he
     card_ = lv_obj_create(scrim_);
     lv_obj_set_size(card_, width_, height_);
     lv_obj_set_align(card_, LV_ALIGN_TOP_LEFT);
-    theme::style_panel(card_, theme::panel, 24);
+    theme::style_panel(card_, theme::panel, CARD_RADIUS);
     lv_obj_set_clickable(card_, true);
 }
 
@@ -42,7 +44,7 @@ void ModalOverlay::add_close_button()
     lv_obj_t *close = lv_button_create(card_);
     lv_obj_set_size(close, CLOSE_SIZE, CLOSE_SIZE);
     lv_obj_set_align(close, LV_ALIGN_TOP_RIGHT);
-    lv_obj_set_pos(close, 0, -8);
+    lv_obj_set_pos(close, 0, -CLOSE_LIFT);
     theme::style_button(close, theme::panel_light);
     lv_obj_center(theme::make_label(close, LV_SYMBOL_CLOSE, theme::text, fonts::size_22()));
     lv_obj_add_event_cb(close, close_clicked, LV_EVENT_CLICKED, this);
@@ -132,7 +134,8 @@ void ModalOverlay::start(std::int32_t from, std::int32_t to, std::uint32_t durat
 void ModalOverlay::slide(void *target, std::int32_t value)
 {
     auto *self = static_cast<ModalOverlay *>(target);
-    lv_obj_set_y(self->card_, self->rest_y_ + SLIDE * (PROGRESS_MAX - value) / PROGRESS_MAX);
+    lv_obj_set_y(self->card_,
+                 self->rest_y_ + SLIDE_DISTANCE * (PROGRESS_MAX - value) / PROGRESS_MAX);
 }
 
 void ModalOverlay::hide_when_done(lv_anim_t *anim)

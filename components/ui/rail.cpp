@@ -2,6 +2,44 @@
 
 namespace ui::detail {
 namespace {
+constexpr std::int32_t RAIL_INNER_W = RAIL_CARD_W - 2 * PANEL_PAD;
+
+constexpr std::int32_t  STRIP_H           = 44;
+constexpr std::int32_t  PHONE_ICON_OFFSET = 44;
+constexpr std::uint32_t COLON_BLINK_MS    = 1000;
+
+// Above the heading and below the reading, setting the desk's height apart.
+constexpr std::int32_t HEIGHT_BLOCK_MARGIN = 18;
+
+constexpr int STAND_PRESET = 2;
+constexpr int SIT_PRESET   = 3;
+// Stand and Sit are on the rail.
+constexpr int DRAWER_PRESETS[] = {0, 1, 4, 5};
+
+constexpr std::int32_t PRESET_LABEL_SHIFT = 34;  // past the desk drawn beside it
+
+constexpr std::int32_t DRAWER_TOGGLE_W = 84;
+constexpr std::int32_t DRAWER_TOGGLE_H = 64;
+constexpr std::int32_t DRAWER_INNER_W  = DRAWER_W - 2 * PANEL_PAD;
+
+// The desk drawn on Stand and Sit: a top, two legs and two feet.
+constexpr std::int32_t DESK_ICON_W        = 58;
+constexpr std::int32_t DESK_ICON_H        = 56;
+constexpr std::int32_t DESK_ICON_X        = 20;
+constexpr std::int32_t DESK_ICON_MARGIN   = 2;
+constexpr std::int32_t DESK_ICON_RADIUS   = 2;
+constexpr std::int32_t DESK_TOP_W         = DESK_ICON_W - 2 * DESK_ICON_MARGIN;
+constexpr std::int32_t DESK_TOP_H         = 7;
+constexpr std::int32_t DESK_TOP_Y_RAISED  = 7;
+constexpr std::int32_t DESK_TOP_Y_LOWERED = 20;
+constexpr std::int32_t DESK_LEG_W         = 6;
+constexpr std::int32_t DESK_LEG_INSET     = 8;
+constexpr std::int32_t DESK_LEG_BOTTOM    = 52;
+constexpr std::int32_t DESK_FOOT_W        = 14;
+constexpr std::int32_t DESK_FOOT_H        = 5;
+constexpr std::int32_t DESK_FOOT_INSET    = 4;
+constexpr std::int32_t DESK_FOOT_Y        = DESK_ICON_H - DESK_ICON_MARGIN - DESK_FOOT_H;
+
 void clock_blink(lv_timer_t *)
 {
     if (!s_clock_known) {
@@ -42,7 +80,7 @@ lv_obj_t *icon_bar(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int32_
     lv_obj_t *bar = lv_obj_create(parent);
     lv_obj_set_pos(bar, x, y);
     lv_obj_set_size(bar, w, h);
-    theme::style_panel(bar, theme::panel, 2);
+    theme::style_panel(bar, theme::panel, DESK_ICON_RADIUS);
     theme::fill_accent(bar);
     lv_obj_set_style_bg_color(bar, lv_color_hex(theme::text), LV_STATE_CHECKED);
     lv_obj_set_style_bg_color(bar, lv_color_hex(theme::text), LV_STATE_PRESSED);
@@ -53,18 +91,21 @@ lv_obj_t *icon_bar(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int32_
 void add_desk_icon(lv_obj_t *button, bool high)
 {
     lv_obj_t *icon = lv_obj_create(button);
-    lv_obj_set_size(icon, 58, 56);
-    lv_obj_align(icon, LV_ALIGN_LEFT_MID, 20, 0);
+    lv_obj_set_size(icon, DESK_ICON_W, DESK_ICON_H);
+    lv_obj_align(icon, LV_ALIGN_LEFT_MID, DESK_ICON_X, 0);
     theme::style_panel(icon, theme::panel_light, 0);
     lv_obj_set_style_bg_opa(icon, LV_OPA_TRANSP, 0);
     lv_obj_set_clickable(icon, false);
 
-    const std::int32_t top = high ? 7 : 20;
-    icon_bar(icon, 2, top, 54, 7);
-    icon_bar(icon, 8, top + 7, 6, 45 - top);
-    icon_bar(icon, 44, top + 7, 6, 45 - top);
-    icon_bar(icon, 4, 49, 14, 5);
-    icon_bar(icon, 40, 49, 14, 5);
+    const std::int32_t top   = high ? DESK_TOP_Y_RAISED : DESK_TOP_Y_LOWERED;
+    const std::int32_t leg_y = top + DESK_TOP_H;
+    const std::int32_t leg_h = DESK_LEG_BOTTOM - leg_y;
+    icon_bar(icon, DESK_ICON_MARGIN, top, DESK_TOP_W, DESK_TOP_H);
+    icon_bar(icon, DESK_LEG_INSET, leg_y, DESK_LEG_W, leg_h);
+    icon_bar(icon, DESK_ICON_W - DESK_LEG_INSET - DESK_LEG_W, leg_y, DESK_LEG_W, leg_h);
+    icon_bar(icon, DESK_FOOT_INSET, DESK_FOOT_Y, DESK_FOOT_W, DESK_FOOT_H);
+    icon_bar(icon, DESK_ICON_W - DESK_FOOT_INSET - DESK_FOOT_W, DESK_FOOT_Y, DESK_FOOT_W,
+             DESK_FOOT_H);
 }
 
 void place_strip()
@@ -72,14 +113,14 @@ void place_strip()
     const bool right = s_rail_right;
     theme::align(s_clock_box, right ? LV_ALIGN_RIGHT_MID : LV_ALIGN_LEFT_MID, 0, 0);
     theme::align(s_wifi_icon, right ? LV_ALIGN_LEFT_MID : LV_ALIGN_RIGHT_MID, 0, 0);
-    theme::align(s_phone_icon, right ? LV_ALIGN_LEFT_MID : LV_ALIGN_RIGHT_MID, right ? 44 : -44,
-                 0);
+    theme::align(s_phone_icon, right ? LV_ALIGN_LEFT_MID : LV_ALIGN_RIGHT_MID,
+                 right ? PHONE_ICON_OFFSET : -PHONE_ICON_OFFSET, 0);
 }
 
 lv_obj_t *make_rail_button(lv_obj_t *parent, const char *text)
 {
     lv_obj_t *btn = theme::make_button(parent, text);
-    lv_obj_set_size(btn, RAIL_CARD_W - 2 * PANEL_PAD, RAIL_BTN_H);
+    lv_obj_set_size(btn, RAIL_INNER_W, RAIL_BTN_H);
     theme::fill_accent(btn, LV_STATE_CHECKED);
     register_desk_control(btn);
     return btn;
@@ -94,10 +135,9 @@ namespace {
 void bind_preset(lv_obj_t *button, int index)
 {
     s_preset_buttons[index] = button;
-    lv_obj_add_event_cb(button, preset_clicked_cb, LV_EVENT_SHORT_CLICKED,
-                        reinterpret_cast<void *>(static_cast<std::intptr_t>(index)));
-    lv_obj_add_event_cb(button, preset_clicked_cb, LV_EVENT_LONG_PRESSED,
-                        reinterpret_cast<void *>(static_cast<std::intptr_t>(index)));
+    auto *user_data         = reinterpret_cast<void *>(static_cast<std::intptr_t>(index));
+    lv_obj_add_event_cb(button, preset_clicked_cb, LV_EVENT_SHORT_CLICKED, user_data);
+    lv_obj_add_event_cb(button, preset_clicked_cb, LV_EVENT_LONG_PRESSED, user_data);
 }
 
 void preset_clicked_cb(lv_event_t *e)
@@ -108,17 +148,99 @@ void preset_clicked_cb(lv_event_t *e)
         return;
     }
     if (s_handlers.preset != nullptr) {
-        s_handlers.preset(static_cast<int>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e))),
-                    lv_event_get_code(e) == LV_EVENT_LONG_PRESSED);
+        s_handlers.preset(index, store);
     }
 }
 
+void add_preset_button(lv_obj_t *rail, const char *name, bool high, int index)
+{
+    lv_obj_t *button = make_rail_button(rail, name);
+    add_desk_icon(button, high);
+    lv_obj_align(lv_obj_get_child(button, 0), LV_ALIGN_CENTER, PRESET_LABEL_SHIFT, 0);
+    bind_preset(button, index);
+}
+
 void manual_clicked_cb(lv_event_t *);
+
+lv_obj_t *make_status_icon(lv_obj_t *strip, const lv_image_dsc_t *src)
+{
+    lv_obj_t *icon = lv_image_create(strip);
+    lv_image_set_src(icon, src);
+    lv_obj_set_style_image_recolor(icon, lv_color_hex(theme::text), 0);
+    lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
+    lv_obj_set_clickable(icon, false);
+    return icon;
+}
+
+void build_clock(lv_obj_t *strip)
+{
+    lv_obj_t *clock = lv_obj_create(strip);
+    s_clock_box     = clock;
+    lv_obj_set_size(clock, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    theme::style_panel(clock, theme::panel, 0);
+    lv_obj_set_style_bg_opa(clock, LV_OPA_TRANSP, 0);
+    lv_obj_set_clickable(clock, false);
+    lv_obj_set_flex_flow(clock, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(clock, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(clock, 0, 0);
+
+    s_clock_hours   = theme::make_label(clock, "--", theme::text, fonts::size_28());
+    s_clock_colon   = theme::make_label(clock, ":", theme::text, fonts::size_28());
+    lv_obj_set_style_pad_left(s_clock_colon, theme::space::xs, 0);
+    lv_obj_set_style_pad_right(s_clock_colon, theme::space::xs, 0);
+    s_clock_minutes = theme::make_label(clock, "--", theme::text, fonts::size_28());
+    lv_timer_create(clock_blink, COLON_BLINK_MS, nullptr);
+}
+
+void build_status_strip(lv_obj_t *rail)
+{
+    lv_obj_t *strip = lv_obj_create(rail);
+    lv_obj_set_size(strip, RAIL_INNER_W, STRIP_H);
+    lv_obj_set_style_bg_opa(strip, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(strip, 0, 0);
+    lv_obj_set_style_pad_all(strip, 0, 0);
+    lv_obj_set_scrollable(strip, false);
+
+    build_clock(strip);
+    s_wifi_icon  = make_status_icon(strip, &icons::wifi_off_icon);
+    s_phone_icon = make_status_icon(strip, &icons::phone_off_icon);
+    place_strip();
+}
+
+void build_height_readout(lv_obj_t *rail)
+{
+    lv_obj_t *heading = theme::make_label(rail, "DESK HEIGHT", theme::secondary,
+                                          &lv_font_montserrat_18);
+    lv_obj_set_style_margin_top(heading, HEIGHT_BLOCK_MARGIN, 0);
+
+    lv_obj_t *readout = lv_obj_create(rail);
+    lv_obj_set_size(readout, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    theme::style_panel(readout, theme::panel, 0);
+    lv_obj_set_style_bg_opa(readout, LV_OPA_TRANSP, 0);
+    lv_obj_set_flex_flow(readout, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(readout, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_START);
+    lv_obj_set_style_pad_bottom(readout, HEIGHT_BLOCK_MARGIN, 0);
+
+    s_height.emplace(readout);
+    s_height->set_tenths(-1);
+
+    theme::make_label(readout, "CM", theme::secondary, fonts::size_22());
+}
+
+lv_align_t drawer_toggle_corner(bool rail_right)
+{
+    return rail_right ? LV_ALIGN_BOTTOM_LEFT : LV_ALIGN_BOTTOM_RIGHT;
+}
+
+const char *drawer_toggle_arrow(bool open, bool rail_right)
+{
+    return open != rail_right ? LV_SYMBOL_LEFT : LV_SYMBOL_RIGHT;
+}
 }  // namespace
 
 lv_obj_t *s_drawer        = nullptr;
-lv_obj_t *s_drawer_frame  = nullptr;  // clips the drawer to beside the rail as it slides
 namespace {
+lv_obj_t *s_drawer_frame  = nullptr;  // clips the drawer to beside the rail as it slides
 lv_obj_t *s_drawer_toggle = nullptr;
 bool      s_drawer_open   = false;
 }  // namespace
@@ -137,85 +259,26 @@ void create_rail(lv_obj_t *parent)
     lv_obj_set_flex_align(rail, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_row(rail, BUTTON_GAP, 0);
 
-    lv_obj_t *strip = lv_obj_create(rail);
-    lv_obj_set_size(strip, RAIL_CARD_W - 2 * PANEL_PAD, 44);
-    lv_obj_set_style_bg_opa(strip, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(strip, 0, 0);
-    lv_obj_set_style_pad_all(strip, 0, 0);
-    lv_obj_set_scrollable(strip, false);
-
-    lv_obj_t *clock = lv_obj_create(strip);
-    s_clock_box     = clock;
-    lv_obj_set_size(clock, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    theme::style_panel(clock, theme::panel, 0);
-    lv_obj_set_style_bg_opa(clock, LV_OPA_TRANSP, 0);
-    lv_obj_set_clickable(clock, false);
-    lv_obj_set_flex_flow(clock, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(clock, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(clock, 0, 0);
-
-    s_clock_hours   = theme::make_label(clock, "--", theme::text, fonts::size_28());
-    s_clock_colon   = theme::make_label(clock, ":", theme::text, fonts::size_28());
-    lv_obj_set_style_pad_left(s_clock_colon, 4, 0);
-    lv_obj_set_style_pad_right(s_clock_colon, 4, 0);
-    s_clock_minutes = theme::make_label(clock, "--", theme::text, fonts::size_28());
-    lv_timer_create(clock_blink, 1000, nullptr);
-
-    auto status_icon = [&](const lv_image_dsc_t *src) {
-        lv_obj_t *icon = lv_image_create(strip);
-        lv_image_set_src(icon, src);
-        lv_obj_set_style_image_recolor(icon, lv_color_hex(theme::text), 0);
-        lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
-        lv_obj_set_clickable(icon, false);
-        return icon;
-    };
-    s_wifi_icon  = status_icon(&icons::wifi_off_icon);
-    s_phone_icon = status_icon(&icons::phone_off_icon);
-    place_strip();
-
-    lv_obj_t *heading = theme::make_label(rail, "DESK HEIGHT", theme::secondary,
-                                          &lv_font_montserrat_18);
-    lv_obj_set_style_margin_top(heading, 18, 0);
-
-    lv_obj_t *readout = lv_obj_create(rail);
-    lv_obj_set_size(readout, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    theme::style_panel(readout, theme::panel, 0);
-    lv_obj_set_style_bg_opa(readout, LV_OPA_TRANSP, 0);
-    lv_obj_set_flex_flow(readout, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(readout, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_START);
-    lv_obj_set_style_pad_bottom(readout, 18, 0);
-
-    s_height.emplace(readout);
-    s_height->set_tenths(-1);
-
-    theme::make_label(readout, "CM", theme::secondary, fonts::size_22());
-
-    lv_obj_t *stand = make_rail_button(rail, "STAND");
-    add_desk_icon(stand, true);
-    lv_obj_align(lv_obj_get_child(stand, 0), LV_ALIGN_CENTER, 34, 0);
-    bind_preset(stand, 2);
-
-    lv_obj_t *sit = make_rail_button(rail, "SIT");
-    add_desk_icon(sit, false);
-    lv_obj_align(lv_obj_get_child(sit, 0), LV_ALIGN_CENTER, 34, 0);
-    bind_preset(sit, 3);
+    build_status_strip(rail);
+    build_height_readout(rail);
+    add_preset_button(rail, "STAND", true, STAND_PRESET);
+    add_preset_button(rail, "SIT", false, SIT_PRESET);
 
     s_drawer_toggle = theme::make_button(rail, LV_SYMBOL_RIGHT);
-    lv_obj_set_size(s_drawer_toggle, 84, 64);
+    lv_obj_set_size(s_drawer_toggle, DRAWER_TOGGLE_W, DRAWER_TOGGLE_H);
     lv_obj_set_ignore_layout(s_drawer_toggle, true);
-    lv_obj_align(s_drawer_toggle, l.rail_right ? LV_ALIGN_BOTTOM_LEFT : LV_ALIGN_BOTTOM_RIGHT, 0,
-                 0);
+    lv_obj_align(s_drawer_toggle, drawer_toggle_corner(l.rail_right), 0, 0);
     lv_obj_add_event_cb(s_drawer_toggle, manual_clicked_cb, LV_EVENT_CLICKED, nullptr);
 }
 namespace {
 constexpr std::uint32_t DRAWER_MS = 200;
-}  // namespace
 
 // A card of its own beside the rail, slid rather than resized: resizing it laid
 // every button out again on every frame. It slides inside a frame that starts
 // at the rail's edge, so it comes out from beside the rail and never over its
 // rounded corners, which tucking it under the rail showed through.
 constexpr std::int32_t DRAWER_FRAME_W = DRAWER_W + 2 * GAP;
+}  // namespace
 
 void place_drawer(std::int32_t shown)
 {
@@ -241,7 +304,7 @@ void animate_drawer(bool open)
     s_drawer_open = open;
     if (s_drawer_toggle != nullptr) {
         theme::set_text(lv_obj_get_child(s_drawer_toggle, 0),
-                        open != s_rail_right ? LV_SYMBOL_LEFT : LV_SYMBOL_RIGHT);
+                        drawer_toggle_arrow(open, s_rail_right));
     }
     lv_anim_t anim;
     lv_anim_init(&anim);
@@ -254,22 +317,22 @@ void animate_drawer(bool open)
 }
 
 void manual_clicked_cb(lv_event_t *) { animate_drawer(!s_drawer_open); }
-}  // namespace
 
-void create_drawer(lv_obj_t *parent)
+void build_drawer_frame(lv_obj_t *parent, std::int32_t screen_h)
 {
-    const Layout l = layout();
-
     s_drawer_frame = lv_obj_create(parent);
     lv_obj_set_pos(s_drawer_frame, 0, 0);
-    lv_obj_set_size(s_drawer_frame, DRAWER_FRAME_W, l.screen_h);
+    lv_obj_set_size(s_drawer_frame, DRAWER_FRAME_W, screen_h);
     theme::style_panel(s_drawer_frame, theme::panel, 0);
     lv_obj_set_style_bg_opa(s_drawer_frame, LV_OPA_TRANSP, 0);
-    lv_obj_remove_flag(s_drawer_frame, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_clickable(s_drawer_frame, false);
+}
 
+void build_drawer_card(std::int32_t screen_h)
+{
     s_drawer = lv_obj_create(s_drawer_frame);
     lv_obj_set_y(s_drawer, GAP);
-    lv_obj_set_size(s_drawer, DRAWER_W, l.screen_h - 2 * GAP);
+    lv_obj_set_size(s_drawer, DRAWER_W, screen_h - 2 * GAP);
     place_drawer(0);
     theme::style_panel(s_drawer, theme::panel, theme::radius::card);
     // It lies over the same surface, so a ring of background makes the card gap.
@@ -281,22 +344,34 @@ void create_drawer(lv_obj_t *parent)
     lv_obj_set_flex_align(s_drawer, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
                           LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_row(s_drawer, BUTTON_GAP, 0);
+}
 
-    create_move_button(s_drawer, LV_SYMBOL_UP, Move::Up, DRAWER_W - 2 * PANEL_PAD, RAIL_BTN_H);
-    create_move_button(s_drawer, LV_SYMBOL_DOWN, Move::Down, DRAWER_W - 2 * PANEL_PAD, RAIL_BTN_H);
+void add_drawer_preset(int index)
+{
+    char label[24];
+    std::snprintf(label, sizeof(label), "%s", preset_name(index));
+    for (char *c = label; *c != '\0'; ++c) {
+        *c = static_cast<char>(std::toupper(static_cast<unsigned char>(*c)));
+    }
+    lv_obj_t *btn = theme::make_button(s_drawer, label);
+    lv_obj_set_size(btn, DRAWER_INNER_W, RAIL_BTN_H);
+    theme::fill_accent(btn, LV_STATE_CHECKED);
+    bind_preset(btn, index);
+    register_desk_control(btn);
+}
+}  // namespace
 
-    // 3 and 4 are Stand and Sit on the rail.
-    for (const int index : {0, 1, 4, 5}) {
-        char label[24];
-        std::snprintf(label, sizeof(label), "%s", preset_name(index));
-        for (char *c = label; *c != '\0'; ++c) {
-            *c = static_cast<char>(std::toupper(static_cast<unsigned char>(*c)));
-        }
-        lv_obj_t *btn = theme::make_button(s_drawer, label);
-        lv_obj_set_size(btn, DRAWER_W - 2 * PANEL_PAD, RAIL_BTN_H);
-        theme::fill_accent(btn, LV_STATE_CHECKED);
-        bind_preset(btn, index);
-        register_desk_control(btn);
+void create_drawer(lv_obj_t *parent)
+{
+    const Layout l = layout();
+
+    build_drawer_frame(parent, l.screen_h);
+    build_drawer_card(l.screen_h);
+
+    create_move_button(s_drawer, LV_SYMBOL_UP, Move::Up, DRAWER_INNER_W, RAIL_BTN_H);
+    create_move_button(s_drawer, LV_SYMBOL_DOWN, Move::Down, DRAWER_INNER_W, RAIL_BTN_H);
+    for (const int index : DRAWER_PRESETS) {
+        add_drawer_preset(index);
     }
     show_guest_presets();
 }
@@ -308,10 +383,9 @@ void place_for_side()
     lv_obj_set_pos(s_content, l.content_x, GAP);
     pad_drawer();
     place_drawer(s_drawer_open ? DRAWER_W : 0);
-    theme::align(s_drawer_toggle,
-                 l.rail_right ? LV_ALIGN_BOTTOM_LEFT : LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+    theme::align(s_drawer_toggle, drawer_toggle_corner(l.rail_right), 0, 0);
     theme::set_text(lv_obj_get_child(s_drawer_toggle, 0),
-                    s_drawer_open != l.rail_right ? LV_SYMBOL_LEFT : LV_SYMBOL_RIGHT);
+                    drawer_toggle_arrow(s_drawer_open, l.rail_right));
     place_strip();
     lv_obj_set_pos(s_notice_scrim, l.rail_right ? 0 : RAIL_W, 0);
     lv_obj_align(s_notice_card, LV_ALIGN_CENTER, l.content_x + l.content_w / 2 - l.screen_w / 2,
@@ -331,12 +405,7 @@ void paint_pick(lv_obj_t *const *buttons, int count, int picked)
 
 void paint_choice(lv_obj_t *const buttons[2], bool second)
 {
-    for (int i = 0; i < 2; ++i) {
-        const bool chosen = second == (i == 1);
-        lv_obj_set_state(buttons[i], LV_STATE_CHECKED, chosen);
-        theme::set_text_color(lv_obj_get_child(buttons[i], 0),
-                              chosen ? theme::text : theme::secondary);
-    }
+    paint_pick(buttons, 2, second ? 1 : 0);
 }
 
 void paint_side_buttons()

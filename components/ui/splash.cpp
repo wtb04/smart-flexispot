@@ -1,5 +1,7 @@
 #include "ui_internal.h"
 
+#include <numbers>
+
 namespace ui::detail {
 namespace {
 lv_obj_t     *s_splash                      = nullptr;
@@ -35,11 +37,41 @@ lv_timer_t   *s_splash_tick     = nullptr;
 std::uint32_t s_splash_start    = 0;
 bool          s_splash_ready    = false;
 
-constexpr std::int32_t DESK_W    = 300;
-constexpr std::int32_t DESK_H    = 160;
-constexpr std::int32_t DESK_BAR  = 16;
-constexpr std::int32_t DESK_LOW  = DESK_H - 58;
-constexpr std::int32_t DESK_HIGH = 6;
+constexpr std::int32_t DESK_W            = 300;
+constexpr std::int32_t DESK_H            = 160;
+constexpr std::int32_t DESK_BAR          = 16;
+constexpr std::int32_t DESK_LOWEST_H     = 58;  // floor to top of the desktop
+constexpr std::int32_t DESK_LOW          = DESK_H - DESK_LOWEST_H;
+constexpr std::int32_t DESK_HIGH         = 6;
+constexpr std::int32_t DESK_FOOT_W       = 88;
+constexpr std::int32_t DESK_FOOT_H       = 12;
+constexpr std::int32_t DESK_FOOT_INSET   = 8;
+constexpr std::int32_t DESK_LEG_INSET    = 44;
+constexpr std::int32_t DESK_LEG_FIRST_H  = 10;
+constexpr std::int32_t SPLASH_BAR_RADIUS = 3;
+
+constexpr std::int32_t STEPS_W = 360;
+constexpr std::int32_t SEG_W   = 30;
+constexpr std::int32_t SEG_H   = 10;
+constexpr std::int32_t SEG_GAP = 8;
+
+// Driven by the clock alone, so a slow frame does not slow the splash.
+constexpr std::uint32_t SPLASH_MS       = 12000;
+constexpr std::uint32_t FRAME_MS        = 16;
+constexpr std::uint32_t SPLASH_HOLD_MS  = 400;
+constexpr float         RISE_FROM_MS    = 300.0f;
+constexpr float         RISE_MS         = 5200.0f;
+constexpr float         ICONS_FROM_MS   = 6000.0f;
+constexpr float         ICON_STAGGER_MS = 1000.0f;
+constexpr float         ICON_FLIGHT_MS  = 600.0f;
+// Each icon is full size by two fifths of its flight and opaque by a third.
+constexpr float         ICON_GROW_RATE  = 2.5f;
+constexpr float         ICON_FADE_RATE  = 3.0f;
+constexpr float         BACK_OVERSHOOT  = 1.70158f;
+
+constexpr float COVER             = LV_OPA_COVER;
+constexpr float PI                = std::numbers::pi_v<float>;
+constexpr float HALF_TURN_DEGREES = 180.0f;
 
 void splash_hide(lv_anim_t *)
 {
@@ -49,9 +81,6 @@ void splash_hide(lv_anim_t *)
         s_splash_tick = nullptr;
     }
 }
-
-// Driven by the clock alone, so a slow frame does not slow the splash.
-constexpr std::uint32_t SPLASH_MS = 12000;
 
 // LVGL redraws whatever a style is set on, changed or not, so each frame sets
 // only what moved.
@@ -69,61 +98,105 @@ void set_pos_once(lv_obj_t *obj, std::int32_t x, std::int32_t y)
     }
 }
 
-void splash_frame(std::uint32_t elapsed)
+float ease_in_out(float t)
+{
+    return 0.5f - 0.5f * std::cos(t * PI);
+}
+
+float ease_out_back(float t)
+{
+    return 1.0f + (BACK_OVERSHOOT + 1.0f) * std::pow(t - 1.0f, 3.0f) +
+           BACK_OVERSHOOT * std::pow(t - 1.0f, 2.0f);
+}
+
+float radians(float degrees)
+{
+    return degrees * PI / HALF_TURN_DEGREES;
+}
+
+std::int32_t rounded(float value)
+{
+    return static_cast<std::int32_t>(std::lround(value));
+}
+
+float phase(std::uint32_t elapsed, float from_ms, float length_ms)
+{
+    return std::clamp((static_cast<float>(elapsed) - from_ms) / length_ms, 0.0f, 1.0f);
+}
+
+void light_segments(std::uint32_t elapsed)
 {
     const float run = std::min(static_cast<float>(elapsed) / SPLASH_MS, 1.0f);
     for (int i = 0; i < SPLASH_SEGMENTS; ++i) {
         const float lit = std::clamp(run * SPLASH_SEGMENTS - static_cast<float>(i), 0.0f, 1.0f);
         set_colour_once(s_splash_seg[i],
                         lv_color_mix(lv_color_hex(theme::primary), lv_color_hex(theme::panel),
-                                     static_cast<std::uint8_t>(255 * lit)));
+                                     static_cast<std::uint8_t>(COVER * lit)));
     }
+}
 
-    auto phase = [&](float from_ms, float length_ms) {
-        return std::clamp((static_cast<float>(elapsed) - from_ms) / length_ms, 0.0f, 1.0f);
-    };
-    const float        rise = 0.5f - 0.5f * std::cos(phase(300.0f, 5200.0f) * 3.14159265f);
-    const std::int32_t top =
-        DESK_LOW - static_cast<std::int32_t>(std::lround((DESK_LOW - DESK_HIGH) * rise));
-    set_pos_once(s_splash_top, 0, top);
+/** Where the desktop stands: DESK_LOW at the start, rising to DESK_HIGH. */
+std::int32_t desktop_y(std::uint32_t elapsed)
+{
+    const float rise = ease_in_out(phase(elapsed, RISE_FROM_MS, RISE_MS));
+    return DESK_LOW - rounded((DESK_LOW - DESK_HIGH) * rise);
+}
 
+void fly_icon(int i, float t, std::int32_t top)
+{
+    const float back  = ease_out_back(t);
+    const float angle = radians(-SPLASH_SPREAD + 2.0f * SPLASH_SPREAD * static_cast<float>(i) /
+                                                     (SPLASH_ICON_COUNT - 1));
+    const float ox    = static_cast<float>(s_splash_origin.x);
+    const float oy    = static_cast<float>(s_splash_origin.y + top - DESK_LOW);
+    const float to_x  = ox + SPLASH_REACH * std::sin(angle);
+    const float to_y  = static_cast<float>(s_splash_origin.y + DESK_HIGH - DESK_LOW) -
+                       SPLASH_REACH * std::cos(angle);
+    set_pos_once(s_splash_icon[i], rounded(ox + (to_x - ox) * back) - SPLASH_CHIP / 2,
+                 rounded(oy + (to_y - oy) * back) - SPLASH_CHIP / 2);
+
+    const auto scale =
+        static_cast<std::int32_t>(LV_SCALE_NONE * std::min(t * ICON_GROW_RATE, 1.0f));
+    if (lv_obj_get_style_transform_scale_x(s_splash_icon[i], LV_PART_MAIN) != scale) {
+        lv_obj_set_style_transform_scale(s_splash_icon[i], scale, 0);
+    }
+    const auto opa = static_cast<lv_opa_t>(COVER * std::min(t * ICON_FADE_RATE, 1.0f));
+    if (lv_obj_get_style_opa(s_splash_icon[i], LV_PART_MAIN) != opa) {
+        lv_obj_set_style_opa(s_splash_icon[i], opa, 0);
+    }
+}
+
+void fly_icons(std::uint32_t elapsed, std::int32_t top)
+{
+    static bool landed[SPLASH_ICON_COUNT] = {};
     for (int i = 0; i < SPLASH_ICON_COUNT; ++i) {
-        const float t = phase(6000.0f + 1000.0f * static_cast<float>(i), 600.0f);
-        const float back =
-            1.0f + 2.70158f * std::pow(t - 1.0f, 3.0f) + 1.70158f * std::pow(t - 1.0f, 2.0f);
-        const float angle = (-SPLASH_SPREAD + 2.0f * SPLASH_SPREAD * static_cast<float>(i) /
-                                                  (SPLASH_ICON_COUNT - 1)) *
-                            3.14159265f / 180.0f;
-        const float ox    = static_cast<float>(s_splash_origin.x);
-        const float oy    = static_cast<float>(s_splash_origin.y + top - DESK_LOW);
-        const float to_x  = ox + SPLASH_REACH * std::sin(angle);
-        const float to_y  = static_cast<float>(s_splash_origin.y + DESK_HIGH - DESK_LOW) -
-                            SPLASH_REACH * std::cos(angle);
-        static bool landed[SPLASH_ICON_COUNT] = {};
+        const float t =
+            phase(elapsed, ICONS_FROM_MS + ICON_STAGGER_MS * static_cast<float>(i), ICON_FLIGHT_MS);
         if (t <= 0.0f || landed[i]) {
             continue;
         }
         landed[i] = t >= 1.0f;
-        set_pos_once(
-            s_splash_icon[i],
-            static_cast<std::int32_t>(std::lround(ox + (to_x - ox) * back)) - SPLASH_CHIP / 2,
-            static_cast<std::int32_t>(std::lround(oy + (to_y - oy) * back)) - SPLASH_CHIP / 2);
-        const auto scale = static_cast<std::int32_t>(256 * std::min(t * 2.5f, 1.0f));
-        if (lv_obj_get_style_transform_scale_x(s_splash_icon[i], LV_PART_MAIN) != scale) {
-            lv_obj_set_style_transform_scale(s_splash_icon[i], scale, 0);
-        }
-        const auto opa = static_cast<lv_opa_t>(255 * std::min(t * 3.0f, 1.0f));
-        if (lv_obj_get_style_opa(s_splash_icon[i], LV_PART_MAIN) != opa) {
-            lv_obj_set_style_opa(s_splash_icon[i], opa, 0);
-        }
+        fly_icon(i, t, top);
     }
+}
 
+void stretch_legs(std::int32_t top)
+{
     for (lv_obj_t *leg : s_splash_leg) {
         if (lv_obj_get_y_aligned(leg) != top + DESK_BAR) {
             lv_obj_set_y(leg, top + DESK_BAR);
-            lv_obj_set_height(leg, DESK_H - DESK_BAR - 12 - top);
+            lv_obj_set_height(leg, DESK_H - DESK_BAR - DESK_FOOT_H - top);
         }
     }
+}
+
+void splash_frame(std::uint32_t elapsed)
+{
+    light_segments(elapsed);
+    const std::int32_t top = desktop_y(elapsed);
+    set_pos_once(s_splash_top, 0, top);
+    fly_icons(elapsed, top);
+    stretch_legs(top);
 }
 
 // Boot takes nine to ten seconds; the splash always takes twelve, one even
@@ -142,8 +215,8 @@ void hide_under_splash()
     int       used = 0;
     for (std::uint32_t i = 0; i < lv_obj_get_child_count(scr) && used < SPLASH_HIDDEN_MAX; ++i) {
         lv_obj_t *child = lv_obj_get_child(scr, i);
-        if (!lv_obj_has_flag(child, LV_OBJ_FLAG_HIDDEN)) {
-            lv_obj_add_flag(child, LV_OBJ_FLAG_HIDDEN);
+        if (!lv_obj_is_hidden(child)) {
+            lv_obj_set_hidden(child, true);
             s_splash_hid[used++] = child;
         }
     }
@@ -155,7 +228,7 @@ void splash_leave()
     s_splash_leaving = true;
     for (lv_obj_t *&obj : s_splash_hid) {
         if (obj != nullptr) {
-            lv_obj_remove_flag(obj, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_hidden(obj, false);
             obj = nullptr;
         }
     }
@@ -166,7 +239,7 @@ void splash_animate(lv_timer_t *)
 {
     const std::uint32_t elapsed = lv_tick_elaps(s_splash_start);
     splash_frame(elapsed);
-    if (elapsed >= SPLASH_MS + 400 && s_splash_ready && !s_splash_leaving) {
+    if (elapsed >= SPLASH_MS + SPLASH_HOLD_MS && s_splash_ready && !s_splash_leaving) {
         splash_leave();
     }
 }
@@ -183,9 +256,19 @@ lv_obj_t *splash_bar(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int3
     lv_obj_t *bar = lv_obj_create(parent);
     lv_obj_set_pos(bar, x, y);
     lv_obj_set_size(bar, w, h);
-    theme::style_panel(bar, colour, 3);
+    theme::style_panel(bar, colour, SPLASH_BAR_RADIUS);
     lv_obj_set_clickable(bar, false);
     return bar;
+}
+
+lv_obj_t *make_bare_box(lv_obj_t *parent)
+{
+    lv_obj_t *box = lv_obj_create(parent);
+    lv_obj_set_style_bg_opa(box, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(box, 0, 0);
+    lv_obj_set_style_pad_all(box, 0, 0);
+    lv_obj_set_clickable(box, false);
+    return box;
 }
 
 // Asked for from other tasks, drawn by apply_splash() on the LVGL task.
@@ -204,6 +287,172 @@ void splash_mark(int current)
         lv_obj_set_style_text_opa(state, i > current ? LV_OPA_60 : LV_OPA_COVER, 0);
     }
 }
+
+lv_obj_t *build_splash_panel(const Layout &l)
+{
+    lv_obj_t *panel = lv_obj_create(s_splash);
+    lv_obj_set_pos(panel, GAP, GAP);
+    lv_obj_set_size(panel, l.screen_w - 2 * GAP, l.screen_h - 2 * GAP);
+    theme::style_panel(panel, theme::panel, theme::radius::card);
+    lv_obj_set_style_pad_all(panel, PANEL_PAD, 0);
+    lv_obj_set_clickable(panel, false);
+    return panel;
+}
+
+void build_flying_icons(lv_obj_t *hero)
+{
+    for (int i = 0; i < SPLASH_ICON_COUNT; ++i) {
+        lv_obj_t *icon   = theme::make_chip(hero, SPLASH_ICONS[i], theme::type_value());
+        s_splash_icon[i] = icon;
+        lv_obj_set_size(icon, SPLASH_CHIP, SPLASH_CHIP);
+        lv_obj_set_style_radius(icon, SPLASH_CHIP / 2, 0);
+        lv_obj_set_style_transform_pivot_x(icon, SPLASH_CHIP / 2, 0);
+        lv_obj_set_style_transform_pivot_y(icon, SPLASH_CHIP / 2, 0);
+        lv_obj_set_style_opa(icon, LV_OPA_TRANSP, 0);
+        lv_obj_t *glyph = lv_obj_get_child(icon, 0);
+        if (SPLASH_IMAGES[i] != nullptr) {
+            lv_obj_delete(glyph);
+            glyph = lv_image_create(icon);
+            lv_image_set_src(glyph, SPLASH_IMAGES[i]);
+            lv_obj_set_style_image_recolor(glyph, lv_color_hex(theme::primary), 0);
+            lv_obj_set_style_image_recolor_opa(glyph, LV_OPA_COVER, 0);
+            lv_obj_center(glyph);
+        } else {
+            theme::set_text_color(glyph, theme::primary);
+            lv_obj_set_style_text_opa(glyph, LV_OPA_COVER, 0);
+        }
+        lv_obj_set_clickable(icon, false);
+    }
+}
+
+void build_desk(lv_obj_t *hero, std::int32_t top)
+{
+    lv_obj_t *desk = make_bare_box(hero);
+    lv_obj_set_size(desk, DESK_W, DESK_H);
+    lv_obj_align(desk, LV_ALIGN_TOP_MID, 0, top);
+
+    const std::int32_t foot_y = DESK_H - DESK_FOOT_H;
+    splash_bar(desk, DESK_FOOT_INSET, foot_y, DESK_FOOT_W, DESK_FOOT_H, theme::panel);
+    splash_bar(desk, DESK_W - DESK_FOOT_INSET - DESK_FOOT_W, foot_y, DESK_FOOT_W, DESK_FOOT_H,
+               theme::panel);
+    s_splash_leg[0] = splash_bar(desk, DESK_LEG_INSET, 0, DESK_BAR, DESK_LEG_FIRST_H, theme::panel);
+    s_splash_leg[1] = splash_bar(desk, DESK_W - DESK_LEG_INSET - DESK_BAR, 0, DESK_BAR,
+                                 DESK_LEG_FIRST_H, theme::panel);
+    s_splash_top    = splash_bar(desk, 0, 0, DESK_W, DESK_BAR, theme::panel);
+    lv_obj_set_style_radius(s_splash_top, DESK_BAR / 2, 0);
+    theme::fill_accent(s_splash_top);
+}
+
+void build_titles(lv_obj_t *hero, std::int32_t y)
+{
+    lv_obj_align(theme::make_label(hero, "Smart Flexispot", theme::text, theme::type_display()),
+                 LV_ALIGN_TOP_MID, 0, y);
+    lv_obj_align(
+        theme::make_label(hero, "by Wouter ten Brinke", theme::secondary, theme::type_body()),
+        LV_ALIGN_TOP_MID, 0, y + theme::type_display()->line_height);
+}
+
+void build_progress_bar(lv_obj_t *hero, std::int32_t y)
+{
+    lv_obj_t *segments = make_bare_box(hero);
+    lv_obj_set_size(segments, SPLASH_SEGMENTS * (SEG_W + SEG_GAP) - SEG_GAP, SEG_H);
+    lv_obj_align(segments, LV_ALIGN_TOP_MID, 0, y);
+    for (int i = 0; i < SPLASH_SEGMENTS; ++i) {
+        s_splash_seg[i] =
+            splash_bar(segments, i * (SEG_W + SEG_GAP), 0, SEG_W, SEG_H, theme::panel);
+        lv_obj_set_style_radius(s_splash_seg[i], SEG_H / 2, 0);
+    }
+}
+
+void toggle_about(lv_event_t *)
+{
+    lv_obj_set_hidden(s_splash_about, !lv_obj_is_hidden(s_splash_about));
+}
+
+void build_about(lv_obj_t *hero)
+{
+    char about[80];
+    std::snprintf(about, sizeof(about), "M5Stack Tab5, build %s",
+                  esp_app_get_description()->version);
+    s_splash_about = theme::make_label(hero, about, theme::secondary, theme::type_label());
+    lv_obj_set_style_text_opa(s_splash_about, LV_OPA_60, 0);
+    lv_obj_align(s_splash_about, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_hidden(s_splash_about, true);
+    lv_obj_add_event_cb(s_splash, toggle_about, LV_EVENT_CLICKED, nullptr);
+}
+
+/** The icons, the desk, the name and the progress bar, as one block in the middle. */
+void build_hero(lv_obj_t *panel, std::int32_t w, std::int32_t h)
+{
+    lv_obj_t *hero = theme::make_card(panel);
+    lv_obj_set_pos(hero, 0, 0);
+    lv_obj_set_size(hero, w, h);
+    lv_obj_set_clickable(hero, false);
+
+    const std::int32_t inner_w = w - 2 * theme::space::l;
+    const std::int32_t arc_h   = static_cast<std::int32_t>(SPLASH_REACH) + SPLASH_CHIP / 2;
+    const std::int32_t titles_h =
+        theme::type_display()->line_height + theme::type_body()->line_height;
+    const std::int32_t block =
+        arc_h + DESK_H + theme::space::l + titles_h + theme::space::xl + SEG_H;
+    const std::int32_t top = (h - 2 * theme::space::l - block) / 2 + arc_h;
+
+    // Created before the desk, so they come out from behind it.
+    build_flying_icons(hero);
+    s_splash_origin = {inner_w / 2, top + DESK_LOW};
+    build_desk(hero, top);
+
+    const std::int32_t title_y = top + DESK_H + theme::space::l;
+    build_titles(hero, title_y);
+    build_progress_bar(hero, title_y + titles_h + theme::space::xl);
+    build_about(hero);
+}
+
+void build_step_chip(lv_obj_t *card, const lv_image_dsc_t *image)
+{
+    lv_obj_t *chip = theme::make_chip(card, image != nullptr ? "" : LV_SYMBOL_HOME,
+                                      fonts::size_28());
+    lv_obj_set_clickable(chip, false);
+    if (image != nullptr) {
+        lv_obj_t *mark = lv_image_create(chip);
+        lv_image_set_src(mark, image);
+        lv_obj_set_style_image_recolor(mark, lv_color_hex(theme::secondary), 0);
+        lv_obj_set_style_image_recolor_opa(mark, LV_OPA_COVER, 0);
+        lv_obj_set_style_image_opa(mark, theme::mark_opa, 0);
+        lv_obj_center(mark);
+    }
+}
+
+void build_steps(lv_obj_t *panel, std::int32_t x, std::int32_t h)
+{
+    const std::int32_t step_h = (h - (SPLASH_STEP_COUNT - 1) * GAP) / SPLASH_STEP_COUNT;
+    const lv_image_dsc_t *const STEP_ICONS[SPLASH_STEP_COUNT] = {&icons::desk_icon,
+                                                                 &icons::wifi_icon, nullptr};
+    for (int i = 0; i < SPLASH_STEP_COUNT; ++i) {
+        lv_obj_t *card = theme::make_card(panel);
+        lv_obj_set_pos(card, x, i * (step_h + GAP));
+        lv_obj_set_size(card, STEPS_W, step_h);
+        lv_obj_set_clickable(card, false);
+        build_step_chip(card, STEP_ICONS[i]);
+
+        lv_obj_t *text = make_bare_box(card);
+        lv_obj_set_size(text, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        lv_obj_align(text, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+        lv_obj_set_flex_flow(text, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_style_pad_row(text, theme::space::xs, 0);
+        theme::make_label(text, s_splash_steps[i].name, theme::secondary, theme::type_label());
+        s_splash_steps[i].state = theme::make_label(text, "", theme::text, theme::type_title());
+    }
+}
+
+void start_splash_timers()
+{
+    s_splash_start = lv_tick_get();
+    s_splash_tick  = lv_timer_create(splash_animate, FRAME_MS, nullptr);
+
+    s_splash_guard = lv_timer_create(splash_expired, SPLASH_GUARD_MS, nullptr);
+    lv_timer_set_repeat_count(s_splash_guard, 1);
+}
 } // namespace
 
 void build_splash()
@@ -218,146 +467,16 @@ void build_splash()
     s_splash_up = true;
     hide_under_splash();
 
-    constexpr std::int32_t STEPS_W = 360;
-    lv_obj_t              *panel   = lv_obj_create(s_splash);
-    lv_obj_set_pos(panel, GAP, GAP);
-    lv_obj_set_size(panel, l.screen_w - 2 * GAP, l.screen_h - 2 * GAP);
-    theme::style_panel(panel, theme::panel, theme::radius::card);
-    lv_obj_set_style_pad_all(panel, PANEL_PAD, 0);
-    lv_obj_set_clickable(panel, false);
-    const std::int32_t inner_w     = l.screen_w - 2 * GAP - 2 * PANEL_PAD;
-    const std::int32_t inner_h     = l.screen_h - 2 * GAP - 2 * PANEL_PAD;
-    const std::int32_t hero_h      = inner_h;
-    const std::int32_t hero_full_w = inner_w - STEPS_W - GAP;
+    lv_obj_t          *panel   = build_splash_panel(l);
+    const std::int32_t inner_w = l.screen_w - 2 * GAP - 2 * PANEL_PAD;
+    const std::int32_t inner_h = l.screen_h - 2 * GAP - 2 * PANEL_PAD;
+    const std::int32_t hero_w  = inner_w - STEPS_W - GAP;
+    build_hero(panel, hero_w, inner_h);
+    build_steps(panel, hero_w + GAP, inner_h);
 
-    lv_obj_t *hero = theme::make_card(panel);
-    lv_obj_set_pos(hero, 0, 0);
-    lv_obj_set_size(hero, hero_full_w, hero_h);
-    lv_obj_set_clickable(hero, false);
-
-    constexpr std::int32_t SEG_W = 30, SEG_H = 10, SEG_GAP = 8;
-    const std::int32_t     hero_w = hero_full_w - 2 * theme::space::l;
-    const std::int32_t     arc_h  = static_cast<std::int32_t>(SPLASH_REACH) + SPLASH_CHIP / 2;
-    const std::int32_t     block  = arc_h + DESK_H + theme::space::l +
-                                    theme::type_display()->line_height +
-                                    theme::type_body()->line_height + theme::space::xl + SEG_H;
-    const std::int32_t     top    = (hero_h - 2 * theme::space::l - block) / 2 + arc_h;
-
-    // Created before the desk, so they come out from behind it.
-    for (int i = 0; i < SPLASH_ICON_COUNT; ++i) {
-        s_splash_icon[i] = theme::make_chip(hero, SPLASH_ICONS[i], theme::type_value());
-        lv_obj_set_size(s_splash_icon[i], SPLASH_CHIP, SPLASH_CHIP);
-        lv_obj_set_style_radius(s_splash_icon[i], SPLASH_CHIP / 2, 0);
-        lv_obj_set_style_transform_pivot_x(s_splash_icon[i], SPLASH_CHIP / 2, 0);
-        lv_obj_set_style_transform_pivot_y(s_splash_icon[i], SPLASH_CHIP / 2, 0);
-        lv_obj_set_style_opa(s_splash_icon[i], LV_OPA_TRANSP, 0);
-        lv_obj_t *glyph = lv_obj_get_child(s_splash_icon[i], 0);
-        if (SPLASH_IMAGES[i] != nullptr) {
-            lv_obj_delete(glyph);
-            glyph = lv_image_create(s_splash_icon[i]);
-            lv_image_set_src(glyph, SPLASH_IMAGES[i]);
-            lv_obj_set_style_image_recolor(glyph, lv_color_hex(theme::primary), 0);
-            lv_obj_set_style_image_recolor_opa(glyph, LV_OPA_COVER, 0);
-            lv_obj_center(glyph);
-        } else {
-            theme::set_text_color(glyph, theme::primary);
-            lv_obj_set_style_text_opa(glyph, LV_OPA_COVER, 0);
-        }
-        lv_obj_set_clickable(s_splash_icon[i], false);
-    }
-    s_splash_origin = {hero_w / 2, top + DESK_LOW};
-
-    lv_obj_t *desk = lv_obj_create(hero);
-    lv_obj_set_size(desk, DESK_W, DESK_H);
-    lv_obj_align(desk, LV_ALIGN_TOP_MID, 0, top);
-    lv_obj_set_style_bg_opa(desk, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(desk, 0, 0);
-    lv_obj_set_style_pad_all(desk, 0, 0);
-    lv_obj_set_clickable(desk, false);
-    splash_bar(desk, 8, DESK_H - 12, 88, 12, theme::panel);
-    splash_bar(desk, DESK_W - 96, DESK_H - 12, 88, 12, theme::panel);
-    s_splash_leg[0] = splash_bar(desk, 44, 0, DESK_BAR, 10, theme::panel);
-    s_splash_leg[1] = splash_bar(desk, DESK_W - 44 - DESK_BAR, 0, DESK_BAR, 10, theme::panel);
-    s_splash_top    = splash_bar(desk, 0, 0, DESK_W, DESK_BAR, theme::panel);
-    lv_obj_set_style_radius(s_splash_top, DESK_BAR / 2, 0);
-    theme::fill_accent(s_splash_top);
-
-    const std::int32_t title_y = top + DESK_H + theme::space::l;
-    lv_obj_align(theme::make_label(hero, "Smart Flexispot", theme::text, theme::type_display()),
-                 LV_ALIGN_TOP_MID, 0, title_y);
-    lv_obj_align(
-        theme::make_label(hero, "by Wouter ten Brinke", theme::secondary, theme::type_body()),
-        LV_ALIGN_TOP_MID, 0, title_y + theme::type_display()->line_height);
-
-    const std::int32_t bar_y    = title_y + theme::type_display()->line_height +
-                                  theme::type_body()->line_height + theme::space::xl;
-    lv_obj_t          *segments = lv_obj_create(hero);
-    lv_obj_set_size(segments, SPLASH_SEGMENTS * (SEG_W + SEG_GAP) - SEG_GAP, SEG_H);
-    lv_obj_align(segments, LV_ALIGN_TOP_MID, 0, bar_y);
-    lv_obj_set_style_bg_opa(segments, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(segments, 0, 0);
-    lv_obj_set_style_pad_all(segments, 0, 0);
-    lv_obj_set_clickable(segments, false);
-    for (int i = 0; i < SPLASH_SEGMENTS; ++i) {
-        s_splash_seg[i] =
-            splash_bar(segments, i * (SEG_W + SEG_GAP), 0, SEG_W, SEG_H, theme::panel);
-        lv_obj_set_style_radius(s_splash_seg[i], SEG_H / 2, 0);
-    }
-
-    char about[80];
-    std::snprintf(about, sizeof(about), "M5Stack Tab5, build %s",
-                  esp_app_get_description()->version);
-    s_splash_about = theme::make_label(hero, about, theme::secondary, theme::type_label());
-    lv_obj_set_style_text_opa(s_splash_about, LV_OPA_60, 0);
-    lv_obj_align(s_splash_about, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_set_hidden(s_splash_about, true);
-    lv_obj_add_event_cb(
-        s_splash,
-        [](lv_event_t *) {
-            lv_obj_set_hidden(s_splash_about, !lv_obj_has_flag(s_splash_about, LV_OBJ_FLAG_HIDDEN));
-        },
-        LV_EVENT_CLICKED, nullptr);
-
-    const std::int32_t step_h = (inner_h - (SPLASH_STEP_COUNT - 1) * GAP) / SPLASH_STEP_COUNT;
-    const lv_image_dsc_t *const STEP_ICONS[SPLASH_STEP_COUNT] = {&icons::desk_icon,
-                                                                 &icons::wifi_icon, nullptr};
-    for (int i = 0; i < SPLASH_STEP_COUNT; ++i) {
-        lv_obj_t *card = theme::make_card(panel);
-        lv_obj_set_pos(card, hero_full_w + GAP, i * (step_h + GAP));
-        lv_obj_set_size(card, STEPS_W, step_h);
-        lv_obj_set_clickable(card, false);
-
-        lv_obj_t *chip = theme::make_chip(card, STEP_ICONS[i] != nullptr ? "" : LV_SYMBOL_HOME,
-                                          fonts::size_28());
-        lv_obj_set_clickable(chip, false);
-        if (STEP_ICONS[i] != nullptr) {
-            lv_obj_t *image = lv_image_create(chip);
-            lv_image_set_src(image, STEP_ICONS[i]);
-            lv_obj_set_style_image_recolor(image, lv_color_hex(theme::secondary), 0);
-            lv_obj_set_style_image_recolor_opa(image, LV_OPA_COVER, 0);
-            lv_obj_set_style_image_opa(image, theme::mark_opa, 0);
-            lv_obj_center(image);
-        }
-
-        lv_obj_t *text = lv_obj_create(card);
-        lv_obj_set_size(text, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-        lv_obj_align(text, LV_ALIGN_BOTTOM_LEFT, 0, 0);
-        lv_obj_set_style_bg_opa(text, LV_OPA_TRANSP, 0);
-        lv_obj_set_style_border_width(text, 0, 0);
-        lv_obj_set_style_pad_all(text, 0, 0);
-        lv_obj_set_flex_flow(text, LV_FLEX_FLOW_COLUMN);
-        lv_obj_set_style_pad_row(text, theme::space::xs, 0);
-        lv_obj_set_clickable(text, false);
-        theme::make_label(text, s_splash_steps[i].name, theme::secondary, theme::type_label());
-        s_splash_steps[i].state = theme::make_label(text, "", theme::text, theme::type_title());
-    }
     splash_mark(0);
     splash_frame(0);
-    s_splash_start = lv_tick_get();
-    s_splash_tick  = lv_timer_create(splash_animate, 16, nullptr);
-
-    s_splash_guard = lv_timer_create(splash_expired, SPLASH_GUARD_MS, nullptr);
-    lv_timer_set_repeat_count(s_splash_guard, 1);
+    start_splash_timers();
 }
 
 void apply_splash()
