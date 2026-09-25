@@ -9,9 +9,8 @@ namespace focus {
 namespace {
 constexpr char TAG[] = "focus";
 
-constexpr Plan PLAN{};
-
 portMUX_TYPE       s_lock  = portMUX_INITIALIZER_UNLOCKED;
+Plan               s_plan{};
 State              s_state{};
 esp_timer_handle_t s_timer = nullptr;
 ChangeHandler      s_on_change = nullptr;
@@ -45,7 +44,7 @@ void settle(const State &next, bool finished)
 
 void ran_out(void *)
 {
-    settle(after(state(), PLAN, now_ms()), true);
+    settle(after(state(), plan(), now_ms()), true);
 }
 
 }  // namespace
@@ -64,10 +63,11 @@ void act(Action action)
         return;
     }
     const State        now_state = state();
+    const Plan         now_plan  = plan();
     const std::int64_t now       = now_ms();
     switch (action) {
-        case Action::Toggle: settle(toggled(now_state, PLAN, now), false); break;
-        case Action::Skip:   settle(after(now_state, PLAN, now), false); break;
+        case Action::Toggle: settle(toggled(now_state, now_plan, now), false); break;
+        case Action::Skip:   settle(after(now_state, now_plan, now), false); break;
         case Action::Reset:  settle(State{}, false); break;
     }
 }
@@ -82,7 +82,20 @@ State state()
 
 Plan plan()
 {
-    return PLAN;
+    portENTER_CRITICAL(&s_lock);
+    const Plan copy = s_plan;
+    portEXIT_CRITICAL(&s_lock);
+    return copy;
+}
+
+void set_plan(const Plan &plan)
+{
+    portENTER_CRITICAL(&s_lock);
+    s_plan = plan;
+    portEXIT_CRITICAL(&s_lock);
+    if (s_on_change != nullptr) {
+        s_on_change(state(), false);  // so whatever shows the plan shows the new one
+    }
 }
 
 std::int64_t now_ms()

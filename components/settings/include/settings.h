@@ -16,6 +16,10 @@ enum class Key : std::uint8_t {
     Flipped,
     OrientAuto,  // follow the IMU rather than Flipped
     OrientSign,  // which way along the IMU's x gravity points with the screen upright, -1 or 1
+    FocusWork,   // minutes of the focus timer's parts, and rounds before the long break
+    FocusBreak,
+    FocusLong,
+    FocusRounds,
     Count,
 };
 

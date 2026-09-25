@@ -177,6 +177,25 @@ void on_focus_change(const focus::State &state, bool finished)
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::notify("Focus", message, ui::Level::Good, 5000));
 }
 
+focus::Plan stored_plan()
+{
+    focus::Plan plan;
+    plan.work_min       = settings::get(settings::Key::FocusWork);
+    plan.break_min      = settings::get(settings::Key::FocusBreak);
+    plan.long_break_min = settings::get(settings::Key::FocusLong);
+    plan.rounds         = settings::get(settings::Key::FocusRounds);
+    return plan;
+}
+
+void on_focus_plan(int work_min, int break_min, int long_break_min, int rounds)
+{
+    settings::set(settings::Key::FocusWork, work_min);
+    settings::set(settings::Key::FocusBreak, break_min);
+    settings::set(settings::Key::FocusLong, long_break_min);
+    settings::set(settings::Key::FocusRounds, rounds);
+    focus::set_plan(stored_plan());  // settings has clamped them
+}
+
 void on_focus(ui::FocusAction action)
 {
     focus::act(action == ui::FocusAction::Toggle ? focus::Action::Toggle
@@ -285,6 +304,7 @@ extern "C" void app_main(void)
         .screen      = on_screen,
         .details     = on_details,
         .focus       = on_focus,
+        .focus_plan  = on_focus_plan,
     };
     const int brightness = settings::get(settings::Key::Brightness);
     ui::set_cards(diagnostics::cards(), diagnostics::card_count());
@@ -324,7 +344,7 @@ extern "C" void app_main(void)
     ESP_ERROR_CHECK_WITHOUT_ABORT(battery::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(sound::init());
     ESP_ERROR_CHECK_WITHOUT_ABORT(focus::start(on_focus_change));
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_focus(focus_view(focus::state())));
+    focus::set_plan(stored_plan());  // which shows it too
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("desk"));
     ESP_ERROR_CHECK_WITHOUT_ABORT(wifi::start());
     ESP_ERROR_CHECK(wallclock::start());

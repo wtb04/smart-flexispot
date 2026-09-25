@@ -36,6 +36,10 @@ constexpr Spec SPECS[] = {
     // landscape, so upright reads it negative. Replaced when Auto is picked
     // with the panel standing, by whatever is upright then.
     {"orient_sign", -1, -1, 1},
+    {"focus_work", 25, 5, 90},
+    {"focus_break", 5, 1, 30},
+    {"focus_long", 20, 5, 60},
+    {"focus_rounds", 4, 1, 8},
 };
 constexpr int COUNT = static_cast<int>(Key::Count);
 static_assert(std::size(SPECS) == COUNT, "every key needs a spec");

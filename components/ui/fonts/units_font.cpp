@@ -36,5 +36,6 @@ const lv_font_t *size_48() { return &s_48; }
 
 const lv_font_t *temp_34() { return &lv_font_temp_34; }
 const lv_font_t *temp_64() { return &lv_font_temp_64; }
+const lv_font_t *clock_104() { return &lv_font_clock_104; }
 
 }  // namespace ui::fonts

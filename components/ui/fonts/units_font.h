@@ -12,6 +12,7 @@ LV_FONT_DECLARE(lv_font_units_48)
 
 LV_FONT_DECLARE(lv_font_temp_34)
 LV_FONT_DECLARE(lv_font_temp_64)
+LV_FONT_DECLARE(lv_font_clock_104)
 }
 
 namespace ui::fonts {
@@ -28,5 +29,6 @@ const lv_font_t *size_48();
 /** Digits only, semibold. Anything else in a label using these comes out blank. */
 const lv_font_t *temp_34();
 const lv_font_t *temp_64();
+const lv_font_t *clock_104();  // digits only, for the focus clock
 
 }  // namespace ui::fonts

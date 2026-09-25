@@ -19,6 +19,9 @@ void act(Action action);
 State state();
 Plan  plan();
 
+/** Takes effect from the next part; the one under way keeps its length. */
+void set_plan(const Plan &plan);
+
 /** The clock State's times are on: milliseconds since boot. */
 std::int64_t now_ms();
 

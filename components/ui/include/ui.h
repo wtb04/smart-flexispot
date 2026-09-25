@@ -128,6 +128,8 @@ struct Focus {
 };
 enum class FocusAction : std::uint8_t { Toggle, Skip, Reset };
 using FocusHandler = void (*)(FocusAction action);
+/** Minutes of focus, break and long break, and rounds before the long one. */
+using FocusPlanHandler = void (*)(int work_min, int break_min, int long_break_min, int rounds);
 
 /** How long before an appointment its journey is asked for and shown. */
 inline constexpr std::int64_t kJourneyAhead = 5 * 3600;
@@ -218,6 +220,7 @@ struct Handlers {
     ScreenHandler      screen;
     DetailsHandler     details;
     FocusHandler       focus;
+    FocusPlanHandler   focus_plan;
 };
 
 /** Requires the LVGL port to be running. A zero accent keeps the built-in

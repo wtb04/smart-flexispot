@@ -205,6 +205,55 @@ lv_obj_t *build_page_tile(lv_obj_t *parent, std::int32_t y, std::int32_t w, std:
 
 namespace {
 lv_obj_t *s_behaviour_view = nullptr;
+lv_obj_t *s_focus_view     = nullptr;
+
+// The focus timer's plan, a stepper each: focus, break, long break, rounds.
+struct Stepper {
+    const char *icon;
+    const char *title;
+    const char *unit;
+    int         step;
+    int         low;
+    int         high;
+    int         value;
+    lv_obj_t   *shown = nullptr;
+    lv_obj_t   *less  = nullptr;
+    lv_obj_t   *more  = nullptr;
+};
+Stepper s_plan[4] = {
+    {LV_SYMBOL_PLAY, "Focus", "min", 5, 5, 90, 25},
+    {LV_SYMBOL_PAUSE, "Break", "min", 1, 1, 30, 5},
+    {LV_SYMBOL_STOP, "Long break", "min", 5, 5, 60, 20},
+    {LV_SYMBOL_LOOP, "Rounds before the long break", "", 1, 1, 8, 4},
+};
+
+void paint_stepper(Stepper &stepper)
+{
+    if (stepper.shown == nullptr) {
+        return;
+    }
+    char text[16];
+    if (stepper.unit[0] != '\0') {
+        std::snprintf(text, sizeof(text), "%d %s", stepper.value, stepper.unit);
+    } else {
+        std::snprintf(text, sizeof(text), "%d", stepper.value);
+    }
+    theme::set_text(stepper.shown, text);
+    theme::set_usable(stepper.less, stepper.value > stepper.low);
+    theme::set_usable(stepper.more, stepper.value < stepper.high);
+}
+
+void step_clicked_cb(lv_event_t *e)
+{
+    const auto code  = reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e));
+    Stepper   &stepper = s_plan[code / 2];
+    const int  toward  = code % 2 == 0 ? -1 : 1;
+    stepper.value = std::clamp(stepper.value + toward * stepper.step, stepper.low, stepper.high);
+    paint_stepper(stepper);
+    if (s_handlers.focus_plan != nullptr) {
+        s_handlers.focus_plan(s_plan[0].value, s_plan[1].value, s_plan[2].value, s_plan[3].value);
+    }
+}
 
 // Each setting is two ways, painted like the sidebar and orientation choices.
 lv_obj_t *s_setting_choice[SETTING_COUNT][2] = {};
@@ -262,6 +311,12 @@ void show_appearance_cb(lv_event_t *)
     lv_obj_set_hidden(s_appearance_view, false);
 }
 
+void show_focus_cb(lv_event_t *)
+{
+    lv_obj_set_hidden(s_settings_view, true);
+    lv_obj_set_hidden(s_focus_view, false);
+}
+
 void show_behaviour_cb(lv_event_t *)
 {
     lv_obj_set_hidden(s_settings_view, true);
@@ -273,6 +328,7 @@ void show_settings_cb(lv_event_t *)
     lv_obj_set_hidden(s_diag_view, true);
     lv_obj_set_hidden(s_appearance_view, true);
     lv_obj_set_hidden(s_behaviour_view, true);
+    lv_obj_set_hidden(s_focus_view, true);
     lv_obj_set_hidden(s_settings_view, false);
 }
 
@@ -286,12 +342,17 @@ void build_settings_view(lv_obj_t *parent, std::int32_t w, std::int32_t h)
     const std::int32_t pitch   = tile_h + BUTTON_GAP;
     const std::int32_t half    = (w - BUTTON_GAP) / 2;
     const std::int32_t right   = half + BUTTON_GAP;
+    const std::int32_t third   = (w - 2 * BUTTON_GAP) / 3;
 
-    build_page_tile(view, tiles_y, half, tile_h, LV_SYMBOL_IMAGE, "Appearance", show_appearance_cb);
+    build_page_tile(view, tiles_y, third, tile_h, LV_SYMBOL_IMAGE, "Appearance", show_appearance_cb);
 
-    lv_obj_t *behave = build_page_tile(view, tiles_y, half, tile_h, LV_SYMBOL_SETTINGS,
+    lv_obj_t *behave = build_page_tile(view, tiles_y, third, tile_h, LV_SYMBOL_SETTINGS,
                                        "Behaviour", show_behaviour_cb);
-    lv_obj_set_x(behave, right);
+    lv_obj_set_x(behave, third + BUTTON_GAP);
+
+    lv_obj_t *focus = build_page_tile(view, tiles_y, third, tile_h, LV_SYMBOL_LOOP, "Focus",
+                                      show_focus_cb);
+    lv_obj_set_x(focus, 2 * (third + BUTTON_GAP));
 
     lv_obj_t *diag = build_page_tile(view, tiles_y + pitch, w, tile_h, LV_SYMBOL_LIST,
                                      "Diagnostics", show_diagnostics_cb);
@@ -337,6 +398,35 @@ void build_behaviour_view(lv_obj_t *parent, std::int32_t w, std::int32_t h)
     }
 
     s_behaviour_view = view;
+}
+
+void build_focus_view(lv_obj_t *parent, std::int32_t w, std::int32_t h)
+{
+    lv_obj_t *view = build_sub_view(parent, w, h);
+    lv_obj_set_hidden(view, true);
+    build_sub_header(view, "Focus");
+
+    constexpr std::int32_t VALUE_W = 130;
+    const std::int32_t     body_y  = DIAG_HEADER_H + BUTTON_GAP;
+    const std::int32_t     pitch   = ROW_CARD_H + BUTTON_GAP;
+    for (int i = 0; i < 4; ++i) {
+        Stepper  &stepper = s_plan[i];
+        lv_obj_t *root    = build_row_card(view, body_y + i * pitch, w, stepper.icon, stepper.title,
+                                           nullptr);
+        stepper.less = theme::make_chip(root, "");
+        theme::make_mark(stepper.less, &icons::minus_icon);
+        stepper.shown = theme::make_label(root, "", theme::text, fonts::size_28());
+        lv_obj_set_width(stepper.shown, VALUE_W);
+        lv_obj_set_style_text_align(stepper.shown, LV_TEXT_ALIGN_CENTER, 0);
+        stepper.more = theme::make_chip(root, "");
+        theme::make_mark(stepper.more, &icons::plus_icon);
+        lv_obj_add_event_cb(stepper.less, step_clicked_cb, LV_EVENT_CLICKED,
+                            reinterpret_cast<void *>(static_cast<std::intptr_t>(2 * i)));
+        lv_obj_add_event_cb(stepper.more, step_clicked_cb, LV_EVENT_CLICKED,
+                            reinterpret_cast<void *>(static_cast<std::intptr_t>(2 * i + 1)));
+        paint_stepper(stepper);
+    }
+    s_focus_view = view;
 }
 
 void build_appearance_view(lv_obj_t *parent, std::int32_t w, std::int32_t h)
@@ -400,11 +490,23 @@ void build_settings_page(lv_obj_t *page)
     build_settings_view(page, inner_w, inner_h);
     build_appearance_view(page, inner_w, inner_h);
     build_behaviour_view(page, inner_w, inner_h);
+    build_focus_view(page, inner_w, inner_h);
     build_diagnostics_view(page, inner_w, inner_h);
     build_detail_overlay(page);
     build_log_overlay(page);
     build_colour_picker(page);
     refresh_diag_summary();
+}
+
+void paint_focus_plan(const Focus &focus)
+{
+    const int values[4] = {focus.work_min, focus.break_min, focus.long_break_min, focus.rounds};
+    for (int i = 0; i < 4; ++i) {
+        if (s_plan[i].value != values[i]) {
+            s_plan[i].value = values[i];
+            paint_stepper(s_plan[i]);
+        }
+    }
 }
 
 }  // namespace ui::detail

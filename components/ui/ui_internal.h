@@ -195,6 +195,9 @@ extern lv_obj_t *s_brightness_value;
 extern lv_obj_t *s_settings_view;
 extern lv_obj_t *s_appearance_view;
 extern lv_obj_t *s_diag_view;
+
+/** The focus plan as the timer has it, onto the settings that change it. */
+void paint_focus_plan(const Focus &focus);
 extern lv_obj_t *s_diag_summary;
 extern lv_obj_t *s_volume_value;
 extern lv_obj_t *s_volume_slider;
