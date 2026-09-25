@@ -230,6 +230,38 @@ lv_obj_t *build_page_tile(lv_obj_t *parent, std::int32_t y, std::int32_t w, std:
 }  // namespace
 
 namespace {
+// Three readings along the Diagnostics tile's foot, value over name, as the
+// radar gives an aircraft's, clear of the chevron.
+constexpr const char  *GLANCE_NAMES[kGlanceCount] = {"up", "Wi-Fi", "desk link"};
+constexpr std::int32_t GLANCE_W        = 132;
+constexpr std::int32_t GLANCE_CHEVRON  = 56;
+lv_obj_t              *s_glance[kGlanceCount] = {};
+
+void build_glances(lv_obj_t *tile)
+{
+    const std::int32_t name_h = theme::type_label()->line_height;
+    for (int i = 0; i < kGlanceCount; ++i) {
+        const std::int32_t right = GLANCE_CHEVRON + (kGlanceCount - 1 - i) * GLANCE_W;
+        lv_obj_t *name = theme::make_label(tile, GLANCE_NAMES[i], theme::secondary,
+                                           theme::type_label());
+        lv_obj_set_width(name, GLANCE_W);
+        lv_obj_align(name, LV_ALIGN_BOTTOM_RIGHT, -right, 0);
+        s_glance[i] = theme::make_label(tile, "--", theme::text, theme::type_value());
+        lv_obj_set_width(s_glance[i], GLANCE_W);
+        lv_label_set_long_mode(s_glance[i], LV_LABEL_LONG_MODE_CLIP);
+        lv_obj_align(s_glance[i], LV_ALIGN_BOTTOM_RIGHT, -right, -name_h);
+    }
+}
+}  // namespace
+
+void apply_glance(int index, const char *value)
+{
+    if (s_glance[index] != nullptr) {
+        theme::set_text(s_glance[index], value != nullptr && value[0] != '\0' ? value : "--");
+    }
+}
+
+namespace {
 // The restart tile doubles as the one that installs an update, while there is
 // one: restarting into it is what installing is.
 lv_obj_t *s_restart_tile = nullptr;
@@ -494,6 +526,7 @@ void build_settings_view(lv_obj_t *parent, std::int32_t w, std::int32_t h)
     lv_obj_t *diag = build_page_tile(view, DIAGNOSTICS_ROW * pitch, w, tile_h, LV_SYMBOL_LIST,
                                      "Diagnostics", show_diagnostics_cb);
     s_diag_summary = tile_note(diag, w, "");
+    build_glances(diag);
 
     lv_obj_t *screen = build_tile(view, 0, POWER_ROW * pitch, half, tile_h,
                                   LV_SYMBOL_EYE_CLOSE, "Screen off", true);

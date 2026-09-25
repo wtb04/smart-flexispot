@@ -334,6 +334,7 @@ Slot<bool>           p_wifi;
 // kilobytes, and static data would take them from internal RAM.
 Slot<InfoArgs>      *p_rows = nullptr;  // [card * kMaxRows + row]
 Slot<InfoArgs>       p_card[kMaxCards];
+Slot<Text<24>>       p_glance[kGlanceCount];
 Slot<int>            p_media_hold;
 Slot<int>            p_notification_volume;
 Slot<bool>           p_screen;
@@ -921,6 +922,15 @@ void apply_diagnostics_updates()
     }
 }
 
+void apply_glances()
+{
+    for (int i = 0; i < kGlanceCount; ++i) {
+        if (Text<24> value{}; take(p_glance[i], value)) {
+            apply_glance(i, value.get());
+        }
+    }
+}
+
 void apply_page_updates()
 {
     if (Focus focus{}; take(p_focus, focus)) {
@@ -976,6 +986,7 @@ void apply_pending(lv_timer_t *)
     apply_home_updates();
     apply_rail_updates();
     apply_diagnostics_updates();
+    apply_glances();
     apply_page_updates();
     apply_inbox();
 }
@@ -1170,6 +1181,17 @@ esp_err_t set_card(int card, const char *summary, Level level)
     args.value.set(summary);
     args.level = level;
     put(p_card[card], args);
+    return ESP_OK;
+}
+
+esp_err_t set_glance(Glance which, const char *value)
+{
+    const int index = static_cast<int>(which);
+    ESP_RETURN_ON_FALSE(index >= 0 && index < kGlanceCount, ESP_ERR_INVALID_ARG, TAG, "glance %d",
+                        index);
+    Text<24> text{};
+    text.set(value);
+    put(p_glance[index], text);
     return ESP_OK;
 }
 

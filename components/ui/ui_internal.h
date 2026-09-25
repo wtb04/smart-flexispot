@@ -232,6 +232,7 @@ const lv_image_dsc_t *update_icon(const UpdateState &state);
 void paint_setup_dot(bool ready);
 void paint_update_tile(const UpdateState &state);
 extern lv_obj_t *s_diag_summary;
+void apply_glance(int index, const char *value);
 extern lv_obj_t *s_volume_value;
 extern lv_obj_t *s_volume_slider;
 extern const Card *s_cards;

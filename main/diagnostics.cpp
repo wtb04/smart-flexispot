@@ -195,6 +195,7 @@ void update_wifi()
     row(WIFI, WIFI_MAC, info.mac[0] != '\0' ? info.mac : nullptr);
     if (!info.connected) {
         summary(WIFI, "offline", Level::Bad);
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_glance(ui::Glance::Wifi, "offline"));
         row(WIFI, WIFI_NETWORK, "not joined", Level::Bad);
         row(WIFI, WIFI_SIGNAL, nullptr);
         row(WIFI, WIFI_ADDRESS, nullptr);
@@ -205,6 +206,7 @@ void update_wifi()
     row(WIFI, WIFI_ADDRESS, info.ip[0] != '\0' ? info.ip : nullptr);
     if (info.have_ap) {
         std::snprintf(text, sizeof(text), "%d dBm", info.rssi_dbm);
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_glance(ui::Glance::Wifi, text));
         row(WIFI, WIFI_SIGNAL, text, signal_level(info.rssi_dbm));
         summary(WIFI, text, signal_level(info.rssi_dbm));
         std::snprintf(text, sizeof(text), "%d", info.channel);
@@ -303,6 +305,7 @@ void update_wire_link()
     row(LINK, LINK_BOX, linked ? "answering" : "silent", linked ? Level::Good : Level::Bad);
     row(LINK, LINK_COMPANION, "not used");
     row(LINK, LINK_TRIP, nullptr);
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_glance(ui::Glance::DeskLink, linked ? "wire" : nullptr));
     row(LINK, LINK_HEARD, nullptr);
     summary(LINK, linked ? "wire" : "box silent", linked ? Level::Good : Level::Bad);
 }
@@ -320,10 +323,14 @@ void update_bluetooth_link()
     row(LINK, LINK_BOX, !link.connected ? nullptr : box ? "answering" : "silent",
         !link.connected ? Level::Neutral : box ? Level::Good : Level::Bad);
     if (link.samples > 0) {
+        std::snprintf(text, sizeof(text), "%d ms", ms_from_us(link.median_us));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_glance(ui::Glance::DeskLink, text));
         std::snprintf(text, sizeof(text), "%d ms, worst %d", ms_from_us(link.median_us),
                       ms_from_us(link.max_us));
         row(LINK, LINK_TRIP, text);
     } else {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(
+            ui::set_glance(ui::Glance::DeskLink, link.connected ? nullptr : "searching"));
         row(LINK, LINK_TRIP, nullptr);
     }
     const int quiet = ble::desk::quiet_ms();
@@ -500,6 +507,7 @@ void update_system()
     uptime_text(text, sizeof(text),
                 static_cast<unsigned>(esp_timer_get_time() / units::kUsPerSecond));
     row(SYSTEM, SYS_UPTIME, text);
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_glance(ui::Glance::Uptime, text));
 
     const std::size_t internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     const Level       ram      = internal < INTERNAL_RAM_LOW_BYTES     ? Level::Bad

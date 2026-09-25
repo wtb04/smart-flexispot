@@ -296,6 +296,12 @@ esp_err_t set_card(int card, const char *summary, Level level);
  *  null shows "--". Strings are copied. */
 esp_err_t set_row(int card, int row, const char *value, Level level = Level::Neutral);
 
+/** The readings Setup's Diagnostics tile shows at a glance, each a few
+ *  characters; null shows "--". */
+enum class Glance : std::uint8_t { Uptime, Wifi, DeskLink };
+inline constexpr int kGlanceCount = 3;
+esp_err_t set_glance(Glance which, const char *value);
+
 
 /** Re-reads the calendar and redraws its page. Thread-safe. */
 esp_err_t set_calendar();
