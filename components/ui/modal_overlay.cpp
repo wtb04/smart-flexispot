@@ -4,20 +4,11 @@
 
 namespace ui {
 namespace {
-constexpr lv_opa_t      SCRIM_OPA      = LV_OPA_70;
-constexpr std::int32_t  CARD_RADIUS    = 24;
-constexpr std::int32_t  SLIDE_DISTANCE = 48;
-constexpr std::uint32_t OPEN_MS        = 240;
-constexpr std::uint32_t CLOSE_MS       = 160;
-
-// A larger card, the log's say, costs more per frame than a slide can afford
-// here and is better shown at once.
-constexpr std::int32_t MAX_SLIDE_AREA = 720 * 440;
+constexpr lv_opa_t     SCRIM_OPA   = LV_OPA_70;
+constexpr std::int32_t CARD_RADIUS = 24;
 
 constexpr std::int32_t CLOSE_SIZE = 48;
 constexpr std::int32_t CLOSE_LIFT = 8;
-
-constexpr std::int32_t PROGRESS_MAX = 255;
 
 }  // namespace
 
@@ -68,6 +59,8 @@ void ModalOverlay::close_clicked(lv_event_t *event)
     static_cast<ModalOverlay *>(lv_event_get_user_data(event))->close();
 }
 
+// Shown and hidden at once: behind the scrim the whole page is drawn again for
+// every frame, some 70 ms of them here, so a slide could only stutter.
 void ModalOverlay::open(lv_obj_t *)
 {
     lv_obj_update_layout(scrim_);
@@ -78,27 +71,11 @@ void ModalOverlay::open(lv_obj_t *)
     lv_obj_set_size(scrim_, lv_obj_get_width(parent), lv_obj_get_height(parent));
     lv_obj_update_layout(scrim_);
 
-    lv_obj_set_x(card_, (lv_obj_get_width(scrim_) - width_) / 2);
-    rest_y_ = (lv_obj_get_height(scrim_) - height_) / 2;
-
-    lv_anim_delete(this, nullptr);
+    lv_obj_set_pos(card_, (lv_obj_get_width(scrim_) - width_) / 2,
+                   (lv_obj_get_height(scrim_) - height_) / 2);
     lv_obj_set_hidden(scrim_, false);
     lv_obj_move_foreground(scrim_);
     visible_ = true;
-    if (!slides()) {
-        slide(this, PROGRESS_MAX);
-        return;
-    }
-    slide(this, 0);
-    // The first frame covers the whole page, far slower than the card's own:
-    // drawn before the slide starts, it does not eat the first frames of it.
-    lv_refr_now(nullptr);
-    start(0, PROGRESS_MAX, OPEN_MS, false);
-}
-
-bool ModalOverlay::slides() const
-{
-    return width_ * height_ <= MAX_SLIDE_AREA;
 }
 
 void ModalOverlay::close()
@@ -107,40 +84,7 @@ void ModalOverlay::close()
         return;
     }
     visible_ = false;
-    lv_anim_delete(this, nullptr);
-    if (!slides()) {
-        lv_obj_set_hidden(scrim_, true);
-        return;
-    }
-    start(PROGRESS_MAX, 0, CLOSE_MS, true);
-}
-
-void ModalOverlay::start(std::int32_t from, std::int32_t to, std::uint32_t duration,
-                         bool hide_at_end)
-{
-    lv_anim_t anim;
-    lv_anim_init(&anim);
-    lv_anim_set_var(&anim, this);
-    lv_anim_set_exec_cb(&anim, slide);
-    lv_anim_set_values(&anim, from, to);
-    lv_anim_set_duration(&anim, duration);
-    lv_anim_set_path_cb(&anim, hide_at_end ? lv_anim_path_ease_in : lv_anim_path_ease_out);
-    if (hide_at_end) {
-        lv_anim_set_completed_cb(&anim, hide_when_done);
-    }
-    lv_anim_start(&anim);
-}
-
-void ModalOverlay::slide(void *target, std::int32_t value)
-{
-    auto *self = static_cast<ModalOverlay *>(target);
-    lv_obj_set_y(self->card_,
-                 self->rest_y_ + SLIDE_DISTANCE * (PROGRESS_MAX - value) / PROGRESS_MAX);
-}
-
-void ModalOverlay::hide_when_done(lv_anim_t *anim)
-{
-    lv_obj_set_hidden(static_cast<ModalOverlay *>(anim->var)->scrim_, true);
+    lv_obj_set_hidden(scrim_, true);
 }
 
 void ModalOverlay::scrim_clicked(lv_event_t *event)
