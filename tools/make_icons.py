@@ -252,6 +252,32 @@ BULB_BASE = paint([(rounded(10, 34.5, 24, 45, 2), True),
                    (stroke(10, 39.8, 24, 39.8, 1.4), False)], BULB_W, BULB_H)
 
 
+# A standing desk: its top, the long feet, and legs of three telescoping tubes,
+# each slimmer out of the one below. Sitting they are shorter, never all the
+# way in.
+DESK_W, DESK_H = 58, 56
+LEG_X = (13, 45)
+FOOT_TOP = 50
+TUBES = ((2.1, 0.0), (2.8, 0.3), (3.6, 0.6))  # half-width, and where it starts down the leg
+RAISED_TOP, LOWERED_TOP = 5, 20
+
+
+def desk_layers(top):
+    layers = [(rounded(1, top, 57, top + 6.5, 2.5), True),
+              (rounded(3, 49.5, 23, 54, 2.2), True),
+              (rounded(35, 49.5, 55, 54, 2.2), True)]
+    leg_top = top + 6
+    span = FOOT_TOP - leg_top
+    for x in LEG_X:
+        for half, start in TUBES:
+            layers.append((rounded(x - half, leg_top + span * start, x + half, FOOT_TOP, 0.5), True))
+    return layers
+
+
+DESK_UP = paint(desk_layers(RAISED_TOP), DESK_W, DESK_H)
+DESK_DOWN = paint(desk_layers(LOWERED_TOP), DESK_W, DESK_H)
+
+
 def emit(name, data, side=SIDE, height=None):
     rows = []
     for at in range(0, len(data), 16):
@@ -289,7 +315,7 @@ out.write_text(f"""#pragma once
 
 namespace ui {{
 namespace icons {{
-{emit("train", TRAIN)}{emit("bus", BUS)}{emit("walk", WALK)}{emit("bike", BIKE)}{emit("no_photo", NO_PHOTO, NO_PHOTO_SIDE)}{emit("wifi", WIFI, STATUS_SIDE)}{emit("wifi_off", WIFI_OFF, STATUS_SIDE)}{emit("phone", PHONE, STATUS_SIDE)}{emit("phone_off", PHONE_OFF, STATUS_SIDE)}{emit("plane", PLANE, PLANE_SIDE)}{emit("plane_large", PLANE_LARGE, PLANE_LARGE_SIDE)}{emit("calendar", CALENDAR, 28)}{emit("desk", DESK, STATUS_SIDE)}{emit("timer", TIMER, 28)}{emit("update_panel", UPDATE_PANEL, STATUS_SIDE)}{emit("update_companion", UPDATE_COMPANION, STATUS_SIDE)}{emit("install_companion", INSTALL_COMPANION, STATUS_SIDE)}{emit("bulb_glass", BULB_GLASS, BULB_W, BULB_H)}{emit("bulb_base", BULB_BASE, BULB_W, BULB_H)}{emit("plus", PLUS, MARK_SIDE)}{emit("minus", MINUS, MARK_SIDE)}{emit("times", TIMES, MARK_SIDE)}
+{emit("train", TRAIN)}{emit("bus", BUS)}{emit("walk", WALK)}{emit("bike", BIKE)}{emit("no_photo", NO_PHOTO, NO_PHOTO_SIDE)}{emit("wifi", WIFI, STATUS_SIDE)}{emit("wifi_off", WIFI_OFF, STATUS_SIDE)}{emit("phone", PHONE, STATUS_SIDE)}{emit("phone_off", PHONE_OFF, STATUS_SIDE)}{emit("plane", PLANE, PLANE_SIDE)}{emit("plane_large", PLANE_LARGE, PLANE_LARGE_SIDE)}{emit("calendar", CALENDAR, 28)}{emit("desk", DESK, STATUS_SIDE)}{emit("timer", TIMER, 28)}{emit("update_panel", UPDATE_PANEL, STATUS_SIDE)}{emit("update_companion", UPDATE_COMPANION, STATUS_SIDE)}{emit("install_companion", INSTALL_COMPANION, STATUS_SIDE)}{emit("bulb_glass", BULB_GLASS, BULB_W, BULB_H)}{emit("bulb_base", BULB_BASE, BULB_W, BULB_H)}{emit("desk_up", DESK_UP, DESK_W, DESK_H)}{emit("desk_down", DESK_DOWN, DESK_W, DESK_H)}{emit("plus", PLUS, MARK_SIDE)}{emit("minus", MINUS, MARK_SIDE)}{emit("times", TIMES, MARK_SIDE)}
 }}  // namespace icons
 }}  // namespace ui
 """)

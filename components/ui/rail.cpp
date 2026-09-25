@@ -32,22 +32,9 @@ constexpr std::int32_t DRAWER_TOGGLE_H = 64;
 constexpr std::int32_t DRAWER_INNER_W  = DRAWER_W - 2 * PANEL_PAD;
 
 // The desk drawn on Stand and Sit: a top, two legs and two feet.
-constexpr std::int32_t DESK_ICON_W        = 58;
-constexpr std::int32_t DESK_ICON_H        = 56;
-constexpr std::int32_t DESK_ICON_X        = 20;
-constexpr std::int32_t DESK_ICON_MARGIN   = 2;
-constexpr std::int32_t DESK_ICON_RADIUS   = 2;
-constexpr std::int32_t DESK_TOP_W         = DESK_ICON_W - 2 * DESK_ICON_MARGIN;
-constexpr std::int32_t DESK_TOP_H         = 7;
-constexpr std::int32_t DESK_TOP_Y_RAISED  = 7;
-constexpr std::int32_t DESK_TOP_Y_LOWERED = 20;
-constexpr std::int32_t DESK_LEG_W         = 6;
-constexpr std::int32_t DESK_LEG_INSET     = 8;
-constexpr std::int32_t DESK_LEG_BOTTOM    = 52;
-constexpr std::int32_t DESK_FOOT_W        = 14;
-constexpr std::int32_t DESK_FOOT_H        = 5;
-constexpr std::int32_t DESK_FOOT_INSET    = 4;
-constexpr std::int32_t DESK_FOOT_Y        = DESK_ICON_H - DESK_ICON_MARGIN - DESK_FOOT_H;
+constexpr std::int32_t DESK_ICON_W = 58;  // the size its pictures are drawn at
+constexpr std::int32_t DESK_ICON_H = 56;
+constexpr std::int32_t DESK_ICON_X = 20;
 
 void clock_blink(lv_timer_t *)
 {
@@ -83,20 +70,9 @@ void create_move_button(lv_obj_t *parent, const char *symbol, Move direction, st
     register_desk_control(btn);
 }
 
-lv_obj_t *icon_bar(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int32_t w,
-                   std::int32_t h)
-{
-    lv_obj_t *bar = lv_obj_create(parent);
-    lv_obj_set_pos(bar, x, y);
-    lv_obj_set_size(bar, w, h);
-    theme::style_panel(bar, theme::panel, DESK_ICON_RADIUS);
-    theme::fill_accent(bar);
-    lv_obj_set_style_bg_color(bar, lv_color_hex(theme::text), LV_STATE_CHECKED);
-    lv_obj_set_style_bg_color(bar, lv_color_hex(theme::text), LV_STATE_PRESSED);
-    lv_obj_set_clickable(bar, false);
-    return bar;
-}
-
+// The desk raised or lowered, in the accent until pressed or the preset in use.
+// The picture sits in a box of its own, since those states are handed down to
+// the button's grandchildren.
 void add_desk_icon(lv_obj_t *button, bool high)
 {
     lv_obj_t *icon = lv_obj_create(button);
@@ -106,15 +82,14 @@ void add_desk_icon(lv_obj_t *button, bool high)
     lv_obj_set_style_bg_opa(icon, LV_OPA_TRANSP, 0);
     lv_obj_set_clickable(icon, false);
 
-    const std::int32_t top   = high ? DESK_TOP_Y_RAISED : DESK_TOP_Y_LOWERED;
-    const std::int32_t leg_y = top + DESK_TOP_H;
-    const std::int32_t leg_h = DESK_LEG_BOTTOM - leg_y;
-    icon_bar(icon, DESK_ICON_MARGIN, top, DESK_TOP_W, DESK_TOP_H);
-    icon_bar(icon, DESK_LEG_INSET, leg_y, DESK_LEG_W, leg_h);
-    icon_bar(icon, DESK_ICON_W - DESK_LEG_INSET - DESK_LEG_W, leg_y, DESK_LEG_W, leg_h);
-    icon_bar(icon, DESK_FOOT_INSET, DESK_FOOT_Y, DESK_FOOT_W, DESK_FOOT_H);
-    icon_bar(icon, DESK_ICON_W - DESK_FOOT_INSET - DESK_FOOT_W, DESK_FOOT_Y, DESK_FOOT_W,
-             DESK_FOOT_H);
+    lv_obj_t *desk = lv_image_create(icon);
+    lv_image_set_src(desk, high ? &icons::desk_up_icon : &icons::desk_down_icon);
+    lv_obj_set_pos(desk, 0, 0);
+    lv_obj_set_style_image_recolor_opa(desk, LV_OPA_COVER, 0);
+    theme::tint_accent(desk);
+    lv_obj_set_style_image_recolor(desk, lv_color_hex(theme::text), LV_STATE_CHECKED);
+    lv_obj_set_style_image_recolor(desk, lv_color_hex(theme::text), LV_STATE_PRESSED);
+    lv_obj_set_clickable(desk, false);
 }
 
 void place_strip()
