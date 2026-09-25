@@ -73,7 +73,7 @@ struct Notice {
 
 // What the screen calls each preset. Everything off the screen says Preset 1 to 6.
 constexpr const char *PRESET_NAMES[kPresetCount] = {
-    "Preset 1", "Preset 2", "Stand", "Sit", "Sit 2", "Stand 2",
+    "Preset 1", "Ultra low", "Stand", "Sit", "Sit 2", "Stand 2",
 };
 
 constexpr std::int32_t DRAWER_W  = 340;
@@ -277,6 +277,24 @@ void apply_playing(bool playing);
 void cancel_pause_settle();
 void pause_settled(lv_timer_t *);
 void build_home_page(lv_obj_t *page);
+
+// The presets the rail's Stand and Sit buttons send the desk to.
+constexpr int STAND_PRESET     = 2;
+constexpr int SIT_PRESET       = 3;
+constexpr int ULTRA_LOW_PRESET = 1;  // Preset 2, as the cinema view sends the desk down
+
+// What plays on the media card, for the cinema view to show and control too.
+int         media_position_now();  // seconds, carried forward while it plays
+void        media_seek_by(int delta_s);
+void        media_toggle_play();
+const char *media_skip_text();     // what the skip button offers, null for nothing
+void        media_skip();
+bool        media_is_video();
+
+// Jellyfin fullscreen: the film, its controls, the desk and the lights.
+void build_cinema(lv_obj_t *screen);
+void open_cinema();
+void apply_cinema_still(const void *pixels);
 void show_guest_presets();
 void select_page(int index);
 void brightness_event_cb(lv_event_t *e);

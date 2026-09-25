@@ -20,8 +20,6 @@ constexpr std::uint32_t COLON_BLINK_MS    = 1000;
 // Above the heading and below the reading, setting the desk's height apart.
 constexpr std::int32_t HEIGHT_BLOCK_MARGIN = 18;
 
-constexpr int STAND_PRESET = 2;
-constexpr int SIT_PRESET   = 3;
 // Stand and Sit are on the rail.
 constexpr int DRAWER_PRESETS[] = {0, 1, 4, 5};
 

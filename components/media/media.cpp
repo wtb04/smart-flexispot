@@ -67,6 +67,7 @@ StackType_t *s_task_stack = nullptr;
 
 ArtHandler     s_on_art      = nullptr;
 PickArtHandler s_on_pick_art = nullptr;
+StillHandler   s_on_still    = nullptr;
 
 std::uint8_t  *s_body = nullptr;  // the cover as downloaded
 std::uint16_t *s_art[ART_BUFFERS] = {};
@@ -88,6 +89,7 @@ struct PickCover {
     std::uint16_t *pixels;
 };
 PickCover *s_picks = nullptr;  // kPickCount of them, in PSRAM
+PickCover *s_still = nullptr;  // the same, for the wide still, of kStillW by kStillH
 
 void copy_path(char *dest, const char *path)
 {
@@ -131,46 +133,55 @@ std::size_t download(const char *url)
     return total;
 }
 
-/** The card's frame is square; a wide episode still shows its middle. */
-struct Square {
-    int left;
-    int top;
-    int side;
-};
-
-Square middle(int width, int height)
-{
-    const int side = width < height ? width : height;
-    return {(width - side) / 2, (height - side) / 2, side};
-}
-
 /** Where a decoded cover goes, and how big. */
 struct Target {
     std::uint16_t *pixels;
-    int            side;
+    int            w;
+    int            h;
 };
 
-/** Nearest neighbour: a box filter would read every source pixel, not one in 16. */
-void shrink(const std::uint16_t *src, Square from, int stride, Target to)
+/** The part of the picture kept: as much of its middle as has the target's
+ *  shape, so a wide still shows its middle in a square frame and a square
+ *  cover its middle band in a wide one. */
+struct Crop {
+    int left;
+    int top;
+    int w;
+    int h;
+};
+
+Crop middle(int width, int height, Target to)
 {
-    for (int y = 0; y < to.side; ++y) {
+    int w = width;
+    int h = width * to.h / to.w;
+    if (h > height) {
+        h = height;
+        w = height * to.w / to.h;
+    }
+    return {(width - w) / 2, (height - h) / 2, w, h};
+}
+
+/** Nearest neighbour: a box filter would read every source pixel, not one in 16. */
+void shrink(const std::uint16_t *src, Crop from, int stride, Target to)
+{
+    for (int y = 0; y < to.h; ++y) {
         const std::uint16_t *row =
-            src + static_cast<std::size_t>(from.top + y * from.side / to.side) * stride + from.left;
-        std::uint16_t *out = to.pixels + static_cast<std::size_t>(y) * to.side;
-        for (int x = 0; x < to.side; ++x) {
-            out[x] = row[x * from.side / to.side];
+            src + static_cast<std::size_t>(from.top + y * from.h / to.h) * stride + from.left;
+        std::uint16_t *out = to.pixels + static_cast<std::size_t>(y) * to.w;
+        for (int x = 0; x < to.w; ++x) {
+            out[x] = row[x * from.w / to.w];
         }
     }
 }
 
-void shrink_grey(const std::uint8_t *src, Square from, int stride, Target to)
+void shrink_grey(const std::uint8_t *src, Crop from, int stride, Target to)
 {
-    for (int y = 0; y < to.side; ++y) {
+    for (int y = 0; y < to.h; ++y) {
         const std::uint8_t *row =
-            src + static_cast<std::size_t>(from.top + y * from.side / to.side) * stride + from.left;
-        std::uint16_t *out = to.pixels + static_cast<std::size_t>(y) * to.side;
-        for (int x = 0; x < to.side; ++x) {
-            out[x] = jpeg::grey_to_rgb565(row[x * from.side / to.side]);
+            src + static_cast<std::size_t>(from.top + y * from.h / to.h) * stride + from.left;
+        std::uint16_t *out = to.pixels + static_cast<std::size_t>(y) * to.w;
+        for (int x = 0; x < to.w; ++x) {
+            out[x] = jpeg::grey_to_rgb565(row[x * from.w / to.w]);
         }
     }
 }
@@ -180,15 +191,15 @@ bool s_last_hardware = false;
 void take_cover(const jpeg::Picture &picture, void *target)
 {
     const Target to   = *static_cast<const Target *>(target);
-    const Square from = middle(picture.width, picture.height);
+    const Crop   from = middle(picture.width, picture.height, to);
     if (picture.grey) {
         shrink_grey(static_cast<const std::uint8_t *>(picture.pixels), from, picture.stride, to);
     } else {
         shrink(static_cast<const std::uint16_t *>(picture.pixels), from, picture.stride, to);
     }
     s_last_hardware = picture.hardware;
-    ESP_LOGI(TAG, "cover %dx%d%s%s -> %d, stack left %u", picture.width, picture.height,
-             picture.grey ? " grey" : "", picture.hardware ? "" : " in software", to.side,
+    ESP_LOGI(TAG, "cover %dx%d%s%s -> %dx%d, stack left %u", picture.width, picture.height,
+             picture.grey ? " grey" : "", picture.hardware ? "" : " in software", to.w, to.h,
              static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
 }
 
@@ -214,7 +225,7 @@ bool fetch_playing(const char *path)
     const bool whole = std::strncmp(path, "http", std::strlen("http")) == 0;
     std::snprintf(url, sizeof(url), "%s%s", whole ? "" : s_origin, path);
     std::uint16_t *art = s_art[s_next];
-    if (!fetch(url, {art, kArtSize})) {
+    if (!fetch(url, {art, kArtSize, kArtSize})) {
         return false;
     }
     s_next = (s_next + 1) % ART_BUFFERS;
@@ -301,7 +312,7 @@ void refresh_picks()
         if (std::strcmp(wanted, pick.loaded) == 0 || esp_timer_get_time() < pick.retry_at) {
             continue;
         }
-        const bool got = wanted[0] != '\0' && fetch(wanted, {pick.pixels, kPickArtSize});
+        const bool got = wanted[0] != '\0' && fetch(wanted, {pick.pixels, kPickArtSize, kPickArtSize});
         if (wanted[0] != '\0' && !got) {
             pick.retry_at = esp_timer_get_time() + PICK_RETRY_US;
             ESP_LOGW(TAG, "favourite %d's cover failed", i);
@@ -314,23 +325,46 @@ void refresh_picks()
     }
 }
 
+void refresh_still()
+{
+    char wanted[PATH_SIZE];
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    copy_path(wanted, s_still->wanted);
+    xSemaphoreGive(s_lock);
+    if (std::strcmp(wanted, s_still->loaded) == 0 || esp_timer_get_time() < s_still->retry_at) {
+        return;
+    }
+    const bool got = wanted[0] != '\0' && fetch(wanted, {s_still->pixels, kStillW, kStillH});
+    if (wanted[0] != '\0' && !got) {
+        s_still->retry_at = esp_timer_get_time() + PICK_RETRY_US;
+        return;
+    }
+    copy_path(s_still->loaded, wanted);
+    if (s_on_still != nullptr) {
+        s_on_still(got ? s_still->pixels : nullptr);
+    }
+}
+
 [[noreturn]] void media_task(void *)
 {
     Playing playing;
     for (;;) {
         ulTaskNotifyTake(pdTRUE, WAKE_INTERVAL);
         refresh_playing(playing);
+        refresh_still();
         refresh_picks();
     }
 }
 
 }  // namespace
 
-esp_err_t start(const char *origin, ArtHandler on_art, PickArtHandler on_pick_art)
+esp_err_t start(const char *origin, ArtHandler on_art, PickArtHandler on_pick_art,
+                StillHandler on_still)
 {
     std::snprintf(s_origin, sizeof(s_origin), "%s", origin != nullptr ? origin : "");
     s_on_art      = on_art;
     s_on_pick_art = on_pick_art;
+    s_on_still    = on_still;
     s_lock   = xSemaphoreCreateMutexStatic(&s_lock_ctrl);
     ESP_RETURN_ON_FALSE(s_lock != nullptr, ESP_ERR_NO_MEM, TAG, "lock");
 
@@ -351,6 +385,12 @@ esp_err_t start(const char *origin, ArtHandler on_art, PickArtHandler on_pick_ar
             kPickArtSize * kPickArtSize * sizeof(std::uint16_t), MALLOC_CAP_SPIRAM));
         ESP_RETURN_ON_FALSE(s_picks[i].pixels != nullptr, ESP_ERR_NO_MEM, TAG, "favourite cover");
     }
+    s_still = static_cast<PickCover *>(
+        heap_caps_calloc(1, sizeof(PickCover), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    ESP_RETURN_ON_FALSE(s_still != nullptr, ESP_ERR_NO_MEM, TAG, "still");
+    s_still->pixels = static_cast<std::uint16_t *>(
+        heap_caps_malloc(kStillW * kStillH * sizeof(std::uint16_t), MALLOC_CAP_SPIRAM));
+    ESP_RETURN_ON_FALSE(s_still->pixels != nullptr, ESP_ERR_NO_MEM, TAG, "still pixels");
 
     s_task_stack = static_cast<StackType_t *>(
         heap_caps_malloc(TASK_STACK * sizeof(StackType_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
@@ -393,6 +433,24 @@ void set_pick_art(int index, const char *url)
     }
     xSemaphoreGive(s_lock);
 
+    if (changed && s_task != nullptr) {
+        xTaskNotifyGive(s_task);
+    }
+}
+
+void set_still_url(const char *url)
+{
+    if (s_lock == nullptr || s_still == nullptr) {
+        return;
+    }
+    const char *wanted = url != nullptr ? url : "";
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    const bool changed = std::strncmp(s_still->wanted, wanted, PATH_SIZE) != 0;
+    if (changed) {
+        copy_path(s_still->wanted, wanted);
+        s_still->retry_at = 0;
+    }
+    xSemaphoreGive(s_lock);
     if (changed && s_task != nullptr) {
         xTaskNotifyGive(s_task);
     }

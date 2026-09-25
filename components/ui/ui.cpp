@@ -160,6 +160,7 @@ void build_screen()
         lv_timer_create(take_screenshots, SHOT_START_MS, nullptr);
     }
     create_drawer(scr);  // after the content, so it overlays it when open
+    build_cinema(scr);
     lv_obj_move_foreground(s_rail);  // and under the rail, which it slides out from
     create_notice_card();
     build_splash();  // last, so it covers everything until startup finishes
@@ -327,6 +328,7 @@ Slot<PickArgs>       p_pick[media::kPickCount];
 Slot<const void *>   p_pick_art[media::kPickCount];
 Slot<SegmentsArgs>   p_segments;
 Slot<bool>           p_media_seeks;
+Slot<const void *>   p_still;
 Slot<PillArgs>       p_pill[kPillCount];
 Slot<LightsArgs>     p_lights;
 Slot<LightArgs>      p_light[kLightCount];
@@ -859,6 +861,9 @@ void apply_media_updates()
     if (bool seeks = false; take(p_media_seeks, seeks)) {
         apply_media_seeks(seeks);
     }
+    if (const void *still = nullptr; take(p_still, still)) {
+        apply_cinema_still(still);
+    }
     for (int i = 0; i < media::kPickCount; ++i) {
         if (PickArgs pick{}; take(p_pick[i], pick)) {
             apply_pick(i, pick.name.get());
@@ -1074,6 +1079,12 @@ esp_err_t set_media_segments(const MediaSegment *segments, int count)
         args.items[i] = segments[i];
     }
     put(p_segments, args);
+    return ESP_OK;
+}
+
+esp_err_t set_cinema_still(const void *pixels)
+{
+    put(p_still, pixels);
     return ESP_OK;
 }
 

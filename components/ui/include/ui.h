@@ -219,6 +219,10 @@ esp_err_t set_media_segments(const MediaSegment *segments, int count);
  *  rather than to the next or last track. */
 esp_err_t set_media_seeks(bool seeks);
 
+/** A video's own still for the cinema view, media::kStillW by kStillH of
+ *  RGB565, or null for none. The buffer must live until it is replaced. */
+esp_err_t set_cinema_still(const void *pixels);
+
 /** A favourite offered by holding the media card while nothing plays, index
  *  below media::kPickCount. An empty name leaves it out. */
 esp_err_t set_pick(int index, const char *name);

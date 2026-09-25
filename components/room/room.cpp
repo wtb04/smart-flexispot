@@ -322,6 +322,7 @@ struct PlayerView {
     float       volume     = NO_NUMBER;
     bool        muted      = false;
     std::string episode;       // a Jellyfin episode, whose segments are asked for
+    std::string still;         // a video's own picture, for the cinema view
 };
 
 bool view_going(const PlayerView &view)
@@ -368,11 +369,12 @@ PlayerView jellyfin_view(const jellyfin::NowPlaying &now)
     view.title        = now.title;
     view.artist       = episode_line(now.series, now.season, now.episode);
     // An episode's own picture is a still from it: the card shows its season's
-    // poster, or its series'.
+    // poster, or its series', and the cinema view the still.
     const std::string &poster = !now.season_id.empty() ? now.season_id
                               : !now.series_id.empty() ? now.series_id
                                                        : now.item;
     view.picture = jellyfin::cover_url(now.kind == "Episode" ? poster : now.item, JELLYFIN_COVER_H);
+    view.still   = jellyfin::cover_url(now.item, JELLYFIN_COVER_H);
     view.position_s   = now.position_s;
     view.duration_s   = now.duration_s;
     view.position_key = now.item + ':' + std::to_string(now.position_s) + (now.paused ? "p" : "");
@@ -493,6 +495,7 @@ void show_media()
 {
     const PlayerView &view = choose_view();
     want_segments(view.jellyfin ? view.episode : "", view.jellyfin);
+    media::set_still_url(view.jellyfin ? view.still.c_str() : "");
     if (gone_only_briefly(view)) {
         return;
     }

@@ -926,11 +926,13 @@ constexpr int           END_MARGIN_S   = 1;   // where going on seeks to, just s
 constexpr std::uint32_t SKIP_CHECK_MS  = 500;
 constexpr std::int32_t  SKIP_H         = 40;
 constexpr std::int32_t  SKIP_PAD       = 16;
+constexpr std::int32_t  EXPAND_CHIP    = 48;
 
 MediaSegment s_segments[kMaxSegments]{};
 int          s_segment_count = 0;
 bool         s_media_seeks   = false;
 lv_obj_t    *s_skip          = nullptr;
+lv_obj_t    *s_expand        = nullptr;  // into the cinema view, for a video
 int          s_skip_to       = -1;
 const char  *s_skip_text     = nullptr;
 
@@ -979,6 +981,7 @@ void skip_check(lv_timer_t *)
     s_skip_to   = to;
     s_skip_text = text;
     lv_obj_set_hidden(s_skip, text == nullptr);
+    lv_obj_set_hidden(s_expand, !(s_media_seeks && s_has_track_shown));
     if (text != nullptr) {
         theme::set_text(lv_obj_get_child(s_skip, 0), text);
     }
@@ -998,11 +1001,19 @@ void build_skip_button(lv_obj_t *card)
     theme::fill_accent(s_skip);
     lv_obj_set_size(s_skip, LV_SIZE_CONTENT, SKIP_H);
     lv_obj_set_style_pad_hor(s_skip, SKIP_PAD, 0);
-    lv_obj_align(s_skip, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+    lv_obj_align(s_skip, LV_ALIGN_BOTTOM_RIGHT, -(EXPAND_CHIP + BUTTON_GAP), 0);
     lv_obj_add_event_cb(s_skip, skip_clicked_cb, LV_EVENT_CLICKED, nullptr);
     lv_obj_set_hidden(s_skip, true);
     lv_timer_create(skip_check, SKIP_CHECK_MS, nullptr);
 
+    // A corner chip, as the dial's, sized down for the smaller card.
+    s_expand = theme::make_chip(card, "");
+    lv_obj_set_size(s_expand, EXPAND_CHIP, EXPAND_CHIP);
+    lv_obj_set_style_radius(s_expand, EXPAND_CHIP / 2, 0);
+    theme::make_mark(s_expand, &icons::expand_icon);
+    lv_obj_align(s_expand, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+    lv_obj_add_event_cb(s_expand, [](lv_event_t *) { open_cinema(); }, LV_EVENT_CLICKED, nullptr);
+    lv_obj_set_hidden(s_expand, true);
 }
 
 void media_swiped(lv_dir_t direction)
@@ -1238,6 +1249,42 @@ std::int32_t idle_media_text_top()
 void show_speaker_face(bool shown)
 {
     lv_obj_set_hidden(s_speaker_face, !shown);
+}
+
+int media_position_now()
+{
+    return position_now();
+}
+
+void media_seek_by(int delta_s)
+{
+    seek_to(position_now() + delta_s);
+}
+
+void media_toggle_play()
+{
+    cancel_pause_settle();
+    apply_playing(!s_playing_shown);
+    if (s_handlers.media != nullptr) {
+        s_handlers.media(MediaAction::PlayPause);
+    }
+}
+
+const char *media_skip_text()
+{
+    return s_skip_text;
+}
+
+void media_skip()
+{
+    if (s_skip_to >= 0) {
+        seek_to(s_skip_to);
+    }
+}
+
+bool media_is_video()
+{
+    return s_media_seeks && s_has_track_shown;
 }
 
 void apply_media_segments(const MediaSegment *segments, int count)

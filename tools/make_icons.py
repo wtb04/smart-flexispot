@@ -283,6 +283,52 @@ DESK_UP = paint(desk_layers(RAISED_TOP), DESK_W, DESK_H)
 DESK_DOWN = paint(desk_layers(LOWERED_TOP), DESK_W, DESK_H)
 
 
+# Ten seconds back or on: a circle turning the one way or the other, its arrow
+# at the top, and the 10 inside it.
+SEEK_SIDE = 56
+
+
+def arc(cx, cy, outer, inner, gap_from, gap_to):
+    """A ring less the part between two angles, clockwise from straight up."""
+    import math
+    def inside(x, y):
+        dx, dy = x - cx, y - cy
+        if not inner * inner <= dx * dx + dy * dy <= outer * outer:
+            return False
+        angle = math.degrees(math.atan2(dx, -dy)) % 360
+        return not (gap_from <= angle <= gap_to)
+    return inside
+
+
+def seek_layers(forward):
+    import math
+    cx, cy, r, w = 28, 29, 21, 3.4
+    # The gap sits just past the top, where the arrow turns into it.
+    gap = (20, 58) if forward else (302, 340)
+    tip = gap[0] if forward else gap[1]
+    ax = cx + r * math.sin(math.radians(tip - (6 if forward else -6)))
+    ay = cy - r * math.cos(math.radians(tip - (6 if forward else -6)))
+    head = 7.5
+    along = 1 if forward else -1  # the way the arrow points, along the circle
+    tx, ty = ax + along * head, ay
+    layers = [(arc(cx, cy, r + w / 2, r - w / 2, *gap), True),
+              (polygon((tx, ty), (ax - along * 1.5, ay - head * 0.85), (ax - along * 1.5, ay + head * 0.85)), True)]
+    # The 10, drawn rather than set, so it sits in the circle's middle.
+    layers += [(stroke(21.5, 23, 21.5, 36, 3), True), (stroke(21.5, 23, 18.5, 25.8, 2.6), True)]
+    layers += [(disc(31.5, 29.5, 6.8), True), (rounded(29.2, 25.6, 33.8, 33.4, 2.3), False)]
+    return layers
+
+
+SEEK_BACK = paint(seek_layers(False), SEEK_SIDE)
+SEEK_ON = paint(seek_layers(True), SEEK_SIDE)
+
+
+# Four corners pulled out, as a picture going fullscreen.
+EXPAND = paint([(stroke(x0, y0, x1, y1, 2.6), True) for x0, y0, x1, y1 in (
+    (4, 4, 11, 4), (4, 4, 4, 11), (24, 4, 17, 4), (24, 4, 24, 11),
+    (4, 24, 11, 24), (4, 24, 4, 17), (24, 24, 17, 24), (24, 24, 24, 17))], STATUS_SIDE)
+
+
 def emit(name, data, side=SIDE, height=None):
     rows = []
     for at in range(0, len(data), 16):
@@ -320,7 +366,7 @@ out.write_text(f"""#pragma once
 
 namespace ui {{
 namespace icons {{
-{emit("train", TRAIN)}{emit("bus", BUS)}{emit("walk", WALK)}{emit("bike", BIKE)}{emit("no_photo", NO_PHOTO, NO_PHOTO_SIDE)}{emit("wifi", WIFI, STATUS_SIDE)}{emit("wifi_off", WIFI_OFF, STATUS_SIDE)}{emit("phone", PHONE, STATUS_SIDE)}{emit("phone_off", PHONE_OFF, STATUS_SIDE)}{emit("plane", PLANE, PLANE_SIDE)}{emit("plane_large", PLANE_LARGE, PLANE_LARGE_SIDE)}{emit("calendar", CALENDAR, 28)}{emit("desk", DESK, STATUS_SIDE)}{emit("timer", TIMER, 28)}{emit("update_panel", UPDATE_PANEL, STATUS_SIDE)}{emit("update_companion", UPDATE_COMPANION, STATUS_SIDE)}{emit("install_companion", INSTALL_COMPANION, STATUS_SIDE)}{emit("bulb_glass", BULB_GLASS, BULB_W, BULB_H)}{emit("bulb_base", BULB_BASE, BULB_W, BULB_H)}{emit("desk_up", DESK_UP, DESK_W, DESK_H)}{emit("desk_down", DESK_DOWN, DESK_W, DESK_H)}{emit("plus", PLUS, MARK_SIDE)}{emit("minus", MINUS, MARK_SIDE)}{emit("times", TIMES, MARK_SIDE)}
+{emit("train", TRAIN)}{emit("bus", BUS)}{emit("walk", WALK)}{emit("bike", BIKE)}{emit("no_photo", NO_PHOTO, NO_PHOTO_SIDE)}{emit("wifi", WIFI, STATUS_SIDE)}{emit("wifi_off", WIFI_OFF, STATUS_SIDE)}{emit("phone", PHONE, STATUS_SIDE)}{emit("phone_off", PHONE_OFF, STATUS_SIDE)}{emit("plane", PLANE, PLANE_SIDE)}{emit("plane_large", PLANE_LARGE, PLANE_LARGE_SIDE)}{emit("calendar", CALENDAR, 28)}{emit("desk", DESK, STATUS_SIDE)}{emit("timer", TIMER, 28)}{emit("update_panel", UPDATE_PANEL, STATUS_SIDE)}{emit("update_companion", UPDATE_COMPANION, STATUS_SIDE)}{emit("install_companion", INSTALL_COMPANION, STATUS_SIDE)}{emit("bulb_glass", BULB_GLASS, BULB_W, BULB_H)}{emit("bulb_base", BULB_BASE, BULB_W, BULB_H)}{emit("desk_up", DESK_UP, DESK_W, DESK_H)}{emit("desk_down", DESK_DOWN, DESK_W, DESK_H)}{emit("expand", EXPAND, STATUS_SIDE)}{emit("seek_back", SEEK_BACK, SEEK_SIDE)}{emit("seek_on", SEEK_ON, SEEK_SIDE)}{emit("plus", PLUS, MARK_SIDE)}{emit("minus", MINUS, MARK_SIDE)}{emit("times", TIMES, MARK_SIDE)}
 }}  // namespace icons
 }}  // namespace ui
 """)
