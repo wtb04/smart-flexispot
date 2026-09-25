@@ -270,6 +270,8 @@ std::int32_t idle_media_text_top();
 const lv_image_dsc_t *speaker_picture(std::int32_t side);
 void apply_pick(int index, const char *name);
 void apply_pick_art(int index, const void *pixels);
+void apply_media_segments(const MediaSegment *segments, int count);
+void apply_media_seeks(bool seeks);
 void write_clock(lv_obj_t *label, int seconds);
 void apply_playing(bool playing);
 void cancel_pause_settle();

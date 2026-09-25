@@ -12,6 +12,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "picks.h"
+#include "segments.h"
 #include "radar.h"
 #include "ui.h"
 #include "units.h"
@@ -110,6 +111,7 @@ constexpr int           HTTP_OK           = 200;
 constexpr std::uint32_t PICKS_TASK_STACK  = 8192;  // TLS
 constexpr UBaseType_t   PICKS_TASK_PRIORITY = 2;
 constexpr BaseType_t    PICKS_TASK_CORE     = 0;
+constexpr std::uint32_t SEGMENTS_TASK_STACK = 8192;  // TLS
 
 /** Fraction of full scale, per press. */
 constexpr float VOLUME_STEP = 0.05f;
@@ -319,6 +321,7 @@ struct PlayerView {
     int         duration_s = 0;
     float       volume     = NO_NUMBER;
     bool        muted      = false;
+    std::string episode;       // a Jellyfin episode, whose segments are asked for
 };
 
 bool view_going(const PlayerView &view)
@@ -373,6 +376,7 @@ PlayerView jellyfin_view(const jellyfin::NowPlaying &now)
     view.position_s   = now.position_s;
     view.duration_s   = now.duration_s;
     view.position_key = now.item + ':' + std::to_string(now.position_s) + (now.paused ? "p" : "");
+    view.episode      = now.kind == "Episode" ? now.item : "";
     return view;
 }
 
@@ -482,10 +486,13 @@ bool ask_for_art(const std::string &picture, const std::string &title)
     return other;
 }
 
+void want_segments(const std::string &episode, bool video);
+
 /** With s_media_lock held. */
 void show_media()
 {
     const PlayerView &view = choose_view();
+    want_segments(view.jellyfin ? view.episode : "", view.jellyfin);
     if (gone_only_briefly(view)) {
         return;
     }
@@ -558,6 +565,74 @@ bool fetch_text(const std::string &url, std::string &out)
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
     return ok && !out.empty();
+}
+
+// A video's intro and credits, asked of Jellyfin when an episode starts, so the
+// card can offer skipping them. On a task of its own: a slow server must not
+// hold up the socket the page is drawn from.
+std::mutex   s_segments_lock;
+std::string  s_segments_item;  // the episode wanted, empty for none
+TaskHandle_t s_segments_task = nullptr;
+
+void show_segments(const std::vector<segments::Segment> &found)
+{
+    ui::MediaSegment shown[ui::kMaxSegments];
+    int              count = 0;
+    for (const segments::Segment &segment : found) {
+        if (count < ui::kMaxSegments) {
+            shown[count++] = {segment.kind == segments::Kind::Intro ? ui::MediaSegment::Kind::Intro
+                                                                    : ui::MediaSegment::Kind::Credits,
+                              segment.start_s, segment.end_s};
+        }
+    }
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_segments(shown, count));
+}
+
+[[noreturn]] void segments_task(void *)
+{
+    for (;;) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        std::string item;
+        {
+            std::lock_guard<std::mutex> hold(s_segments_lock);
+            item = s_segments_item;
+        }
+        std::string answer;
+        if (item.empty() || !jellyfin::fetch(segments::path_for(item), answer)) {
+            show_segments({});
+            continue;
+        }
+        const std::vector<segments::Segment> found = segments::parse(answer);
+        ESP_LOGI(TAG, "%u segments for the episode", static_cast<unsigned>(found.size()));
+        show_segments(found);
+    }
+}
+
+/** Asks for a new episode's segments, or drops them when no episode shows. */
+void want_segments(const std::string &episode, bool video)
+{
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_seeks(video));
+    {
+        std::lock_guard<std::mutex> hold(s_segments_lock);
+        if (episode == s_segments_item) {
+            return;
+        }
+        s_segments_item = episode;
+    }
+    if (s_segments_task == nullptr) {
+        static StaticTask_t task_ctrl;
+        auto *stack = static_cast<StackType_t *>(heap_caps_malloc(
+            SEGMENTS_TASK_STACK * sizeof(StackType_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+        s_segments_task =
+            stack == nullptr ? nullptr
+                             : xTaskCreateStaticPinnedToCore(segments_task, "segments",
+                                                             SEGMENTS_TASK_STACK, nullptr,
+                                                             PICKS_TASK_PRIORITY, stack, &task_ctrl,
+                                                             PICKS_TASK_CORE);
+    }
+    if (s_segments_task != nullptr) {
+        xTaskNotifyGive(s_segments_task);
+    }
 }
 
 /** Looks each favourite up now and then, and shows what it found. */
@@ -666,6 +741,17 @@ void on_jellyfin(const jellyfin::NowPlaying &now)
     std::lock_guard<std::mutex> hold(s_media_lock);
     s_jellyfin_view = jellyfin_view(now);
     show_media();
+}
+
+void on_seek(int position_s)
+{
+    if (s_on_jellyfin.load(std::memory_order_relaxed)) {
+        jellyfin::seek(position_s);
+        return;
+    }
+    ESP_ERROR_CHECK_WITHOUT_ABORT(hass::ws::call_service_with(
+        "media_player", "media_seek", MEDIA_SPEAKER, "seek_position",
+        std::to_string(position_s).c_str()));
 }
 
 void on_pick(int index)

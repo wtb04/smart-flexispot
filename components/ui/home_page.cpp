@@ -917,12 +917,105 @@ void media_action_cb(lv_event_t *e)
     }
 }
 
+// A video's intro and credits, and the button that skips them: into the intro
+// it skips to the intro's end, into the credits on to the next episode, which
+// Jellyfin starts once this one runs out.
+constexpr int           SEEK_STEP_S    = 10;
+constexpr int           NEXT_UP_TAIL_S = 30;  // with no credits marked, the end is near
+constexpr int           END_MARGIN_S   = 1;   // where going on seeks to, just short of it
+constexpr std::uint32_t SKIP_CHECK_MS  = 500;
+constexpr std::int32_t  SKIP_H         = 40;
+constexpr std::int32_t  SKIP_PAD       = 16;
+
+MediaSegment s_segments[kMaxSegments]{};
+int          s_segment_count = 0;
+bool         s_media_seeks   = false;
+lv_obj_t    *s_skip          = nullptr;
+int          s_skip_to       = -1;
+const char  *s_skip_text     = nullptr;
+
+/** Seconds into what plays, carried forward while it plays. */
+int position_now()
+{
+    int at = s_position_s;
+    if (s_media_playing) {
+        at += static_cast<int>((xTaskGetTickCount() - s_position_at) / configTICK_RATE_HZ);
+    }
+    return s_duration_s > 0 ? std::min(at, s_duration_s) : at;
+}
+
+void seek_to(int position_s)
+{
+    position_s    = std::max(0, s_duration_s > 0 ? std::min(position_s, s_duration_s) : position_s);
+    s_position_s  = position_s;
+    s_position_at = xTaskGetTickCount();
+    if (s_handlers.seek != nullptr) {
+        s_handlers.seek(position_s);
+    }
+}
+
+void skip_check(lv_timer_t *)
+{
+    const char *text = nullptr;
+    int         to   = -1;
+    if (s_media_seeks && s_has_track_shown && s_duration_s > 0) {
+        const int at            = position_now();
+        bool      credits_known = false;
+        for (int i = 0; i < s_segment_count; ++i) {
+            const MediaSegment &segment = s_segments[i];
+            const bool          intro   = segment.kind == MediaSegment::Kind::Intro;
+            credits_known               = credits_known || !intro;
+            if (at >= segment.start_s && at < segment.end_s) {
+                text = intro ? "Skip intro" : "Next episode";
+                to   = intro ? segment.end_s : s_duration_s - END_MARGIN_S;
+            }
+        }
+        if (text == nullptr && !credits_known && s_duration_s > NEXT_UP_TAIL_S &&
+            at >= s_duration_s - NEXT_UP_TAIL_S) {
+            text = "Next episode";
+            to   = s_duration_s - END_MARGIN_S;
+        }
+    }
+    s_skip_to   = to;
+    s_skip_text = text;
+    lv_obj_set_hidden(s_skip, text == nullptr);
+    if (text != nullptr) {
+        theme::set_text(lv_obj_get_child(s_skip, 0), text);
+    }
+}
+
+void skip_clicked_cb(lv_event_t *)
+{
+    if (s_skip_to >= 0) {
+        seek_to(s_skip_to);
+        lv_obj_set_hidden(s_skip, true);
+    }
+}
+
+void build_skip_button(lv_obj_t *card)
+{
+    s_skip = theme::make_button(card, "Skip intro", theme::panel_light, theme::type_body());
+    theme::fill_accent(s_skip);
+    lv_obj_set_size(s_skip, LV_SIZE_CONTENT, SKIP_H);
+    lv_obj_set_style_pad_hor(s_skip, SKIP_PAD, 0);
+    lv_obj_align(s_skip, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+    lv_obj_add_event_cb(s_skip, skip_clicked_cb, LV_EVENT_CLICKED, nullptr);
+    lv_obj_set_hidden(s_skip, true);
+    lv_timer_create(skip_check, SKIP_CHECK_MS, nullptr);
+
+}
+
 void media_swiped(lv_dir_t direction)
 {
     if (direction != LV_DIR_LEFT && direction != LV_DIR_RIGHT) {
         return;
     }
     s_media_swiped = true;
+    // A video goes ten seconds on or back, as its own player does.
+    if (s_media_seeks) {
+        seek_to(position_now() + (direction == LV_DIR_LEFT ? SEEK_STEP_S : -SEEK_STEP_S));
+        return;
+    }
     if (s_handlers.media != nullptr) {
         s_handlers.media(direction == LV_DIR_LEFT ? MediaAction::Next : MediaAction::Previous);
     }
@@ -1129,7 +1222,7 @@ void build_media_card(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int
 
     s_media_artist = theme::make_label(s_media_card, "", theme::secondary, fonts::size_16());
     one_line(s_media_artist, fonts::size_16(), text_w);
-
+    build_skip_button(s_media_card);
 }
 
 constexpr int LIGHTS_SHARE_NUM = 5;
@@ -1145,6 +1238,17 @@ std::int32_t idle_media_text_top()
 void show_speaker_face(bool shown)
 {
     lv_obj_set_hidden(s_speaker_face, !shown);
+}
+
+void apply_media_segments(const MediaSegment *segments, int count)
+{
+    s_segment_count = count;
+    std::copy(segments, segments + count, s_segments);
+}
+
+void apply_media_seeks(bool seeks)
+{
+    s_media_seeks = seeks;
 }
 
 void apply_pick(int index, const char *name)

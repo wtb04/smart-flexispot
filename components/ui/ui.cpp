@@ -302,6 +302,10 @@ struct DetailsArgs {
     char            hex[radar::kHexLen];
     radar::Details  details;
 };
+struct SegmentsArgs {
+    MediaSegment items[kMaxSegments];
+    int          count;
+};
 struct PickArgs {
     Text<48> name;
 };
@@ -321,6 +325,8 @@ Slot<int>            p_media_volume;
 Slot<ArtArgs>        p_art;
 Slot<PickArgs>       p_pick[media::kPickCount];
 Slot<const void *>   p_pick_art[media::kPickCount];
+Slot<SegmentsArgs>   p_segments;
+Slot<bool>           p_media_seeks;
 Slot<PillArgs>       p_pill[kPillCount];
 Slot<LightsArgs>     p_lights;
 Slot<LightArgs>      p_light[kLightCount];
@@ -847,6 +853,12 @@ void apply_media_updates()
         apply_album_art(art.pixels, art.placeholder);
         release_held_media();
     }
+    if (SegmentsArgs segments{}; take(p_segments, segments)) {
+        apply_media_segments(segments.items, segments.count);
+    }
+    if (bool seeks = false; take(p_media_seeks, seeks)) {
+        apply_media_seeks(seeks);
+    }
     for (int i = 0; i < media::kPickCount; ++i) {
         if (PickArgs pick{}; take(p_pick[i], pick)) {
             apply_pick(i, pick.name.get());
@@ -1051,6 +1063,23 @@ esp_err_t set_media_volume(int percent)
 esp_err_t set_album_art(const void *pixels, bool placeholder)
 {
     put(p_art, ArtArgs{pixels, placeholder});
+    return ESP_OK;
+}
+
+esp_err_t set_media_segments(const MediaSegment *segments, int count)
+{
+    SegmentsArgs args{};
+    args.count = std::clamp(count, 0, kMaxSegments);
+    for (int i = 0; i < args.count; ++i) {
+        args.items[i] = segments[i];
+    }
+    put(p_segments, args);
+    return ESP_OK;
+}
+
+esp_err_t set_media_seeks(bool seeks)
+{
+    put(p_media_seeks, seeks);
     return ESP_OK;
 }
 

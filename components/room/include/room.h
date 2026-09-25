@@ -30,6 +30,9 @@ void on_media(ui::MediaAction action);
 /** What Jellyfin's followed session plays, from its socket's task. */
 void on_jellyfin(const jellyfin::NowPlaying &now);
 
+/** Jumps the playing video to `position_s`. */
+void on_seek(int position_s);
+
 /** Plays one of the favourites the media card offers. */
 void on_pick(int index);
 

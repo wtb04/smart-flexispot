@@ -146,6 +146,8 @@ struct UpdateState {
 using UpdateHandler = void (*)();
 /** One of the favourites, picked from the media card's popup. */
 using PickHandler = void (*)(int index);
+/** Jumps the playing video to a position, in seconds. */
+using SeekHandler = void (*)(int position_s);
 
 /** Minutes of focus, break and long break, and rounds before the long one. */
 using FocusPlanHandler = void (*)(int work_min, int break_min, int long_break_min, int rounds);
@@ -202,6 +204,21 @@ esp_err_t set_media_progress(int position_s, int duration_s, bool playing);
 
 esp_err_t set_media_volume(int percent);
 
+/** Where a video's intro and credits are, in seconds into it, for the media card
+ *  to offer skipping the one and going on after the other. */
+struct MediaSegment {
+    enum class Kind : std::uint8_t { Intro, Credits };
+    Kind kind;
+    int  start_s;
+    int  end_s;
+};
+inline constexpr int kMaxSegments = 4;
+esp_err_t set_media_segments(const MediaSegment *segments, int count);
+
+/** Whether a swipe across the media card jumps ten seconds, as for a video,
+ *  rather than to the next or last track. */
+esp_err_t set_media_seeks(bool seeks);
+
 /** A favourite offered by holding the media card while nothing plays, index
  *  below media::kPickCount. An empty name leaves it out. */
 esp_err_t set_pick(int index, const char *name);
@@ -252,6 +269,7 @@ struct Handlers {
     FocusPlanHandler   focus_plan;
     UpdateHandler      update_now;
     PickHandler        pick;
+    SeekHandler        seek;
 };
 
 /** Requires the LVGL port to be running. A zero accent keeps the built-in
