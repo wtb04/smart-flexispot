@@ -161,6 +161,7 @@ lv_obj_t   *s_week_next = nullptr;
 lv_obj_t   *s_week_back = nullptr;  // to this week, when looking at another
 int         s_week_shift = 0;  // weeks away from the one worth looking at
 lv_obj_t   *s_week_name = nullptr;
+lv_obj_t   *s_week_no   = nullptr;  // in the corner over the hours
 lv_obj_t   *s_week_now  = nullptr;
 lv_obj_t   *s_day_head[WEEK_DAYS];
 lv_obj_t   *s_hour_mark[HOURS_MAX + 1];
@@ -328,7 +329,7 @@ void mode_of(const travel::Leg &leg, char *out, std::size_t size)
     const bool bike  = std::strcmp(leg.mode, "bike") == 0;
     const int  mins  = static_cast<int>((leg.arrive - leg.depart + 59) / 60);
     if (walk || bike) {
-        std::snprintf(out, size, "%s  \xc2\xb7  %d min", walk ? "Walk" : "Bike", mins);
+        std::snprintf(out, size, "%s, %d min", walk ? "Walk" : "Bike", mins);
     } else if (train && leg.line[0] != '\0') {
         // The backend writes a trip with changes as "SPR +1".
         char        kind[travel::kLineMax];
@@ -338,15 +339,15 @@ void mode_of(const travel::Leg &leg, char *out, std::size_t size)
                       static_cast<int>(plus != nullptr ? plus - leg.line : std::strlen(leg.line)),
                       leg.line);
         if (changes > 0) {
-            std::snprintf(out, size, "%s, %d change%s  \xc2\xb7  %d min", line_name(kind), changes,
-                          changes == 1 ? "" : "s", mins);
+            std::snprintf(out, size, "%s, %d min, %d change%s", line_name(kind), mins, changes,
+                          changes == 1 ? "" : "s");
         } else {
-            std::snprintf(out, size, "%s  \xc2\xb7  %d min", line_name(kind), mins);
+            std::snprintf(out, size, "%s, %d min", line_name(kind), mins);
         }
     } else if (leg.line[0] != '\0') {
-        std::snprintf(out, size, "Bus %s  \xc2\xb7  %d min", leg.line, mins);
+        std::snprintf(out, size, "Bus %s, %d min", leg.line, mins);
     } else {
-        std::snprintf(out, size, "%s  \xc2\xb7  %d min", train ? "Train" : "Bus", mins);
+        std::snprintf(out, size, "%s, %d min", train ? "Train" : "Bus", mins);
     }
 }
 
@@ -445,12 +446,12 @@ void open_detail(const ical::Event &event)
     clock_of(event.end, to, sizeof(to));
     const int mins = static_cast<int>((event.end - event.start) / 60);
     if (mins % 60 == 0) {
-        std::snprintf(text, sizeof(text), "%s \xe2\x80\x93 %s  \xc2\xb7  %d h", from, to, mins / 60);
+        std::snprintf(text, sizeof(text), "%s \xe2\x80\x93 %s, %d h", from, to, mins / 60);
     } else if (mins > 60) {
-        std::snprintf(text, sizeof(text), "%s \xe2\x80\x93 %s  \xc2\xb7  %d h %d min", from, to,
+        std::snprintf(text, sizeof(text), "%s \xe2\x80\x93 %s, %d h %d min", from, to,
                       mins / 60, mins % 60);
     } else {
-        std::snprintf(text, sizeof(text), "%s \xe2\x80\x93 %s  \xc2\xb7  %d min", from, to, mins);
+        std::snprintf(text, sizeof(text), "%s \xe2\x80\x93 %s, %d min", from, to, mins);
     }
     theme::set_text(s_detail_when, text);
     theme::set_text(s_detail_place, place_of(event));
@@ -786,7 +787,7 @@ void show_journey(std::int64_t now, std::int64_t starts)
 
         mode_of(leg, text, sizeof(text));
         if (leg.cancelled) {
-            std::strncat(text, "  \xc2\xb7  cancelled", sizeof(text) - std::strlen(text) - 1);
+            std::strncat(text, ", cancelled", sizeof(text) - std::strlen(text) - 1);
         }
         theme::set_text(ride.what, text);
         theme::set_text_color(ride.what, leg.cancelled ? theme::red : theme::secondary);
@@ -829,7 +830,7 @@ void show_next(const ical::Event *first, std::int64_t now)
     clock_of(first->start, from, sizeof(from));
     clock_of(first->end, to, sizeof(to));
     if (place_of(*first)[0] != '\0') {
-        std::snprintf(text, sizeof(text), "%s \xe2\x80\x93 %s  \xc2\xb7  %s", from, to,
+        std::snprintf(text, sizeof(text), "%s \xe2\x80\x93 %s, %s", from, to,
                       place_of(*first));
     } else {
         std::snprintf(text, sizeof(text), "%s \xe2\x80\x93 %s", from, to);
@@ -1123,10 +1124,19 @@ void show_week(std::int64_t now)
     const std::tm sunday = local(from + (days - 1) * 86400 + 12 * 3600);
     char          week_no[8];
     std::strftime(week_no, sizeof(week_no), "%V", &monday);
-    char span[32];
-    std::strftime(span, sizeof(span), "%d %b", &sunday);
-    std::snprintf(text, sizeof(text), "Week %s  \xc2\xb7  %d \xe2\x80\x93 %s", week_no,
-                  monday.tm_mday, span);
+    char first_month[8];
+    char last_month[8];
+    std::strftime(first_month, sizeof(first_month), "%b", &monday);
+    std::strftime(last_month, sizeof(last_month), "%b", &sunday);
+    std::snprintf(text, sizeof(text), "W%s", week_no);
+    theme::set_text(s_week_no, text);
+    if (monday.tm_mon == sunday.tm_mon) {
+        std::snprintf(text, sizeof(text), "%d \xe2\x80\x93 %d %s", monday.tm_mday, sunday.tm_mday,
+                      last_month);
+    } else {
+        std::snprintf(text, sizeof(text), "%d %s \xe2\x80\x93 %d %s", monday.tm_mday, first_month,
+                      sunday.tm_mday, last_month);
+    }
     theme::set_text(s_week_name, text);
     lv_obj_set_hidden(s_week_back, s_week_shift == 0);
 }
@@ -1349,6 +1359,9 @@ void build_week(lv_obj_t *parent, std::int32_t width, std::int32_t height)
     const std::int32_t head_h  = theme::type_label()->line_height + 4 + space::m;
     const std::int32_t foot_h  = theme::chip::size - space::l + theme::chip::inset + space::s;
 
+    s_week_no = line_label(s_agenda, theme::text, theme::type_label());
+    lv_obj_set_width(s_week_no, 48);
+    lv_obj_set_pos(s_week_no, 0, 2);
     for (lv_obj_t *&head : s_day_head) {
         head = line_label(s_agenda, theme::secondary, theme::type_label());
         lv_obj_set_height(head, theme::type_label()->line_height + 4);
@@ -1423,12 +1436,13 @@ void build_week(lv_obj_t *parent, std::int32_t width, std::int32_t height)
     };
     const std::int32_t start = theme::chip::inset - space::l;
     s_week_prev = week_chip(start, LV_SYMBOL_LEFT, -1);
+    constexpr std::int32_t DATES_W = 180;  // "28 Sep – 4 Oct" at the widest
     s_week_name = line_label(s_agenda, theme::text, theme::type_body());
-    lv_obj_set_width(s_week_name, 260);
+    lv_obj_set_width(s_week_name, DATES_W);
     lv_obj_set_style_text_align(s_week_name, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_pos(s_week_name, start + theme::chip::size + space::s,
                    chip_y + (theme::chip::size - theme::type_body()->line_height) / 2);
-    const std::int32_t next_x = start + theme::chip::size + 2 * space::s + 260;
+    const std::int32_t next_x = start + theme::chip::size + 2 * space::s + DATES_W;
     s_week_next               = week_chip(next_x, LV_SYMBOL_RIGHT, 1);
 
     s_week_back = theme::make_button(s_agenda, "This week", theme::panel, theme::type_body());

@@ -1227,7 +1227,7 @@ void show_selected(const radar::Aircraft &aircraft)
     }
 
     if (aircraft.reg[0] != '\0' && shape[0] != '\0') {
-        std::snprintf(text, sizeof(text), "%s  ·  %s", aircraft.reg, shape);
+        std::snprintf(text, sizeof(text), "%s, %s", aircraft.reg, shape);
     } else {
         std::snprintf(text, sizeof(text), "%s",
                       aircraft.reg[0] != '\0' ? aircraft.reg
