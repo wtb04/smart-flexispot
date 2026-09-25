@@ -163,6 +163,8 @@ inline lv_style_t accent_fill_style;
 inline lv_style_t accent_dim_style;
 inline lv_style_t accent_ink_style;
 inline lv_style_t accent_arc_style;
+inline lv_style_t accent_tint_style;
+inline lv_style_t accent_dim_tint_style;
 
 inline void set_primary(std::uint32_t colour)
 {
@@ -172,14 +174,16 @@ inline void set_primary(std::uint32_t colour)
     lv_style_set_bg_color(&accent_dim_style, lv_color_hex(primary_dim));
     lv_style_set_text_color(&accent_ink_style, lv_color_hex(primary));
     lv_style_set_arc_color(&accent_arc_style, lv_color_hex(primary));
+    lv_style_set_image_recolor(&accent_tint_style, lv_color_hex(primary));
+    lv_style_set_image_recolor(&accent_dim_tint_style, lv_color_hex(primary_dim));
     lv_obj_report_style_change(nullptr);
 }
 
 /** Once, before anything is built. */
 inline void init_accents()
 {
-    for (lv_style_t *style :
-         {&accent_fill_style, &accent_dim_style, &accent_ink_style, &accent_arc_style}) {
+    for (lv_style_t *style : {&accent_fill_style, &accent_dim_style, &accent_ink_style,
+                              &accent_arc_style, &accent_tint_style, &accent_dim_tint_style}) {
         lv_style_init(style);
     }
     set_primary(primary);
@@ -210,6 +214,25 @@ inline void ink_accent(lv_obj_t *obj, lv_style_selector_t selector = 0)
     }
     lv_obj_remove_local_style_prop(obj, LV_STYLE_TEXT_COLOR, selector);
     lv_obj_add_style(obj, &accent_ink_style, selector);
+}
+
+/** A picture drawn in the accent, as an A8 icon takes it. */
+inline void tint_accent(lv_obj_t *obj, lv_style_selector_t selector = 0)
+{
+    if (obj == nullptr) {
+        return;
+    }
+    lv_obj_remove_local_style_prop(obj, LV_STYLE_IMAGE_RECOLOR, selector);
+    lv_obj_add_style(obj, &accent_tint_style, selector);
+}
+
+inline void tint_dim_accent(lv_obj_t *obj, lv_style_selector_t selector)
+{
+    if (obj == nullptr) {
+        return;
+    }
+    lv_obj_remove_local_style_prop(obj, LV_STYLE_IMAGE_RECOLOR, selector);
+    lv_obj_add_style(obj, &accent_dim_tint_style, selector);
 }
 
 inline void arc_accent(lv_obj_t *obj, lv_style_selector_t selector)

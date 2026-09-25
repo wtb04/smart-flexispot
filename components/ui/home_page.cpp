@@ -293,12 +293,9 @@ void build_pills(lv_obj_t *parent, std::int32_t w)
     }
 }
 
-constexpr std::int32_t BULB_W           = 34;
-constexpr std::int32_t BULB_H           = 48;
-constexpr std::int32_t BULB_BASE_W      = 16;
-constexpr std::int32_t BULB_BASE_RADIUS = 3;
-constexpr std::int32_t BULB_NECK        = 3;  // between the glass and the base
-constexpr int          BULB_PARTS       = 2;  // the glass and the base
+constexpr std::int32_t BULB_W     = 34;  // the size its pictures are drawn at
+constexpr std::int32_t BULB_H     = 48;
+constexpr int          BULB_PARTS = 2;  // the glass and the base
 constexpr std::int32_t BULB_GAP         = 14;
 
 constexpr std::int32_t LIGHTS_PAD = 28;
@@ -322,12 +319,16 @@ LightButton s_lights[kLightCount];
 namespace {
 void bulb_states(lv_obj_t *part)
 {
-    theme::fill_accent(part, LV_STATE_CHECKED);
-    theme::fill_dim_accent(part, LV_STATE_USER_1);
-    lv_obj_set_style_bg_color(part, lv_color_hex(theme::text),
-                              LV_STATE_CHECKED | LV_STATE_USER_1);
+    lv_obj_set_style_image_recolor_opa(part, LV_OPA_COVER, 0);
+    lv_obj_set_style_image_recolor(part, lv_color_hex(theme::disabled_ink), 0);
+    theme::tint_accent(part, LV_STATE_CHECKED);
+    theme::tint_dim_accent(part, LV_STATE_USER_1);
+    lv_obj_set_style_image_recolor(part, lv_color_hex(theme::text),
+                                   LV_STATE_CHECKED | LV_STATE_USER_1);
 }
 
+// The glass and the base are two pictures over the same ground, each coloured
+// by the light's state.
 lv_obj_t *make_bulb(lv_obj_t *parent)
 {
     lv_obj_t *bulb = lv_obj_create(parent);
@@ -336,19 +337,13 @@ lv_obj_t *make_bulb(lv_obj_t *parent)
     lv_obj_set_style_bg_opa(bulb, LV_OPA_TRANSP, 0);
     lv_obj_set_clickable(bulb, false);
 
-    lv_obj_t *glass = lv_obj_create(bulb);
-    lv_obj_set_size(glass, BULB_W, BULB_W);
-    lv_obj_set_pos(glass, 0, 0);
-    theme::style_panel(glass, theme::disabled_ink, BULB_W / 2);
-    bulb_states(glass);
-    lv_obj_set_clickable(glass, false);
-
-    lv_obj_t *base = lv_obj_create(bulb);
-    lv_obj_set_size(base, BULB_BASE_W, BULB_H - BULB_W - BULB_NECK);
-    lv_obj_set_pos(base, (BULB_W - BULB_BASE_W) / 2, BULB_W + BULB_NECK);
-    theme::style_panel(base, theme::disabled_ink, BULB_BASE_RADIUS);
-    bulb_states(base);
-    lv_obj_set_clickable(base, false);
+    for (const lv_image_dsc_t *part : {&icons::bulb_glass_icon, &icons::bulb_base_icon}) {
+        lv_obj_t *image = lv_image_create(bulb);
+        lv_image_set_src(image, part);
+        lv_obj_set_pos(image, 0, 0);
+        bulb_states(image);
+        lv_obj_set_clickable(image, false);
+    }
     return bulb;
 }
 }  // namespace

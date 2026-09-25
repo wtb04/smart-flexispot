@@ -61,20 +61,22 @@ def struck(layers, x0, y0, x1, y1):
     return layers + [(stroke(x0, y0, x1, y1, 7), False), (stroke(x0, y0, x1, y1, 2.5), True)]
 
 
-def paint(layers, side=SIDE):
-    """Each layer is (shape, ink): ink paints it in, no ink cuts it out, in order."""
+def paint(layers, side=SIDE, height=None):
+    """Each layer is (shape, ink), later ones over earlier: ink paints it in, True
+    fully and a fraction faintly, and no ink cuts it out. `side` wide, `height`
+    tall when not square."""
     out = bytearray()
-    for py in range(side):
+    for py in range(height or side):
         for px in range(side):
-            hit = 0
+            hit = 0.0
             for sy in range(SUB):
                 for sx in range(SUB):
                     x = px + (sx + 0.5) / SUB
                     y = py + (sy + 0.5) / SUB
-                    on = False
+                    on = 0.0
                     for shape, ink in layers:
                         if shape(x, y):
-                            on = ink
+                            on = float(ink)
                     hit += on
             out.append(round(255 * hit / (SUB * SUB)))
     return bytes(out)
@@ -240,7 +242,17 @@ INSTALL_COMPANION = paint([(rounded(6, 3, 22, 20, 3), True),
                           + [(part, False) for part in rune(14, 5, 18, 1.6)], STATUS_SIDE)
 
 
-def emit(name, data, side=SIDE):
+# A bulb in two layers over the same ground, the glass and the base, so each can
+# take its own colour: a globe narrowing into its neck over a threaded base.
+BULB_W, BULB_H = 34, 48
+BULB_GLASS = paint([(disc(17, 15, 14.5), True),
+                    (polygon((5.2, 21), (28.8, 21), (23.6, 33), (10.4, 33)), True)],
+                   BULB_W, BULB_H)
+BULB_BASE = paint([(rounded(10, 34.5, 24, 45, 2), True),
+                   (stroke(10, 39.8, 24, 39.8, 1.4), False)], BULB_W, BULB_H)
+
+
+def emit(name, data, side=SIDE, height=None):
     rows = []
     for at in range(0, len(data), 16):
         rows.append("    " + " ".join(f"0x{b:02x}," for b in data[at:at + 16]))
@@ -255,7 +267,7 @@ const lv_image_dsc_t {name.lower()}_icon = {{
                .cf = LV_COLOR_FORMAT_A8,
                .flags = 0,
                .w = {side},
-               .h = {side},
+               .h = {height or side},
                .stride = {side},
                .reserved_2 = 0}},
     .data_size = sizeof({name.upper()}_PIXELS),
@@ -277,7 +289,7 @@ out.write_text(f"""#pragma once
 
 namespace ui {{
 namespace icons {{
-{emit("train", TRAIN)}{emit("bus", BUS)}{emit("walk", WALK)}{emit("bike", BIKE)}{emit("no_photo", NO_PHOTO, NO_PHOTO_SIDE)}{emit("wifi", WIFI, STATUS_SIDE)}{emit("wifi_off", WIFI_OFF, STATUS_SIDE)}{emit("phone", PHONE, STATUS_SIDE)}{emit("phone_off", PHONE_OFF, STATUS_SIDE)}{emit("plane", PLANE, PLANE_SIDE)}{emit("plane_large", PLANE_LARGE, PLANE_LARGE_SIDE)}{emit("calendar", CALENDAR, 28)}{emit("desk", DESK, STATUS_SIDE)}{emit("timer", TIMER, 28)}{emit("update_panel", UPDATE_PANEL, STATUS_SIDE)}{emit("update_companion", UPDATE_COMPANION, STATUS_SIDE)}{emit("install_companion", INSTALL_COMPANION, STATUS_SIDE)}{emit("plus", PLUS, MARK_SIDE)}{emit("minus", MINUS, MARK_SIDE)}{emit("times", TIMES, MARK_SIDE)}
+{emit("train", TRAIN)}{emit("bus", BUS)}{emit("walk", WALK)}{emit("bike", BIKE)}{emit("no_photo", NO_PHOTO, NO_PHOTO_SIDE)}{emit("wifi", WIFI, STATUS_SIDE)}{emit("wifi_off", WIFI_OFF, STATUS_SIDE)}{emit("phone", PHONE, STATUS_SIDE)}{emit("phone_off", PHONE_OFF, STATUS_SIDE)}{emit("plane", PLANE, PLANE_SIDE)}{emit("plane_large", PLANE_LARGE, PLANE_LARGE_SIDE)}{emit("calendar", CALENDAR, 28)}{emit("desk", DESK, STATUS_SIDE)}{emit("timer", TIMER, 28)}{emit("update_panel", UPDATE_PANEL, STATUS_SIDE)}{emit("update_companion", UPDATE_COMPANION, STATUS_SIDE)}{emit("install_companion", INSTALL_COMPANION, STATUS_SIDE)}{emit("bulb_glass", BULB_GLASS, BULB_W, BULB_H)}{emit("bulb_base", BULB_BASE, BULB_W, BULB_H)}{emit("plus", PLUS, MARK_SIDE)}{emit("minus", MINUS, MARK_SIDE)}{emit("times", TIMES, MARK_SIDE)}
 }}  // namespace icons
 }}  // namespace ui
 """)
