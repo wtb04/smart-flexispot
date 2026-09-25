@@ -146,7 +146,7 @@ void build_screen()
                 return;
             }
             s_presence_gate = gated;
-            select_page(0);
+            select_page(HOME_PAGE);
             lv_timer_delete(timer);
         }, 25000, nullptr);
         (void)shot;

@@ -7,9 +7,10 @@ constexpr int SPLASH_SEGMENTS               = 12;
 lv_obj_t     *s_splash_seg[SPLASH_SEGMENTS] = {};
 lv_obj_t     *s_splash_about                = nullptr;
 
-constexpr const char *SPLASH_ICONS[] = {LV_SYMBOL_HOME, "", LV_SYMBOL_BELL, "", LV_SYMBOL_SETTINGS};
-const lv_image_dsc_t *const SPLASH_IMAGES[]   = {nullptr, &icons::calendar_icon, nullptr,
-                                                 &icons::plane_icon, nullptr};
+// The tabs, in their order along the bottom.
+constexpr const char *SPLASH_ICONS[] = {LV_SYMBOL_HOME, "", "", LV_SYMBOL_BELL, LV_SYMBOL_SETTINGS};
+const lv_image_dsc_t *const SPLASH_IMAGES[]   = {nullptr, &icons::plane_icon, &icons::calendar_icon,
+                                                 nullptr, nullptr};
 constexpr int               SPLASH_ICON_COUNT = static_cast<int>(std::size(SPLASH_ICONS));
 constexpr std::int32_t      SPLASH_CHIP       = 56;
 constexpr float             SPLASH_REACH      = 158.0f;

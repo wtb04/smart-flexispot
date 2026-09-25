@@ -2,7 +2,6 @@
 
 namespace ui::detail {
 namespace {
-constexpr int PAGE_COUNT = 5;
 lv_obj_t *s_pages[PAGE_COUNT]    = {};
 lv_obj_t *s_nav_tabs[PAGE_COUNT] = {};
 
@@ -13,17 +12,16 @@ struct NavItem {
     const lv_image_dsc_t *image = nullptr;  // drawn here, where the fonts have no glyph
 };
 constexpr NavItem NAV_ITEMS[PAGE_COUNT] = {
-    {LV_SYMBOL_HOME, "Home", false},    {"", "Calendar", true, &icons::calendar_icon},
-    {LV_SYMBOL_BELL, "Alerts", true},   {"", "Radar", true, &icons::plane_icon},
-    {LV_SYMBOL_SETTINGS, "Setup", false},
+    [HOME_PAGE]     = {LV_SYMBOL_HOME, "Home", false},
+    [RADAR_PAGE]    = {"", "Radar", true, &icons::plane_icon},
+    [CALENDAR_PAGE] = {"", "Calendar", true, &icons::calendar_icon},
+    [ALERTS_PAGE]   = {LV_SYMBOL_BELL, "Alerts", true},
+    [SETUP_PAGE]    = {LV_SYMBOL_SETTINGS, "Setup", false},
 };
 }  // namespace
 
 bool s_present        = false;
-int  s_page           = 0;
-namespace {
-constexpr int SETUP_PAGE = 4;
-}  // namespace
+int  s_page           = HOME_PAGE;
 
 std::atomic<bool> s_setup_visible{false};
 
@@ -56,7 +54,7 @@ bool page_available(int index)
 void select_page(int index)
 {
     if (!page_available(index)) {
-        index = 0;
+        index = HOME_PAGE;
     }
     s_page = index;
     s_setup_visible.store(index == SETUP_PAGE, std::memory_order_relaxed);
@@ -180,23 +178,18 @@ void create_content(lv_obj_t *parent)
         s_pages[i] = page;
     }
 
-    build_home_page(s_pages[0]);
+    build_home_page(s_pages[HOME_PAGE]);
 
-    {
-        const Layout cl = layout();
-        lv_obj_set_style_pad_all(s_pages[1], PANEL_PAD, 0);
-        build_calendar_page(s_pages[1], cl.content_w - 2 * PANEL_PAD,
-                            cl.content_h - 2 * PANEL_PAD);
-    }
-    build_placeholder_page(s_pages[2], "Alerts", "Reminders to stand, and whatever Home Assistant sends.");
-    {
-        const Layout rl = layout();
-        lv_obj_set_style_pad_all(s_pages[3], PANEL_PAD, 0);
-        build_radar_page(s_pages[3], rl.content_w - 2 * PANEL_PAD, rl.content_h - 2 * PANEL_PAD);
-    }
-    build_settings_page(s_pages[4]);
+    lv_obj_set_style_pad_all(s_pages[RADAR_PAGE], PANEL_PAD, 0);
+    build_radar_page(s_pages[RADAR_PAGE], l.content_w - 2 * PANEL_PAD, l.content_h - 2 * PANEL_PAD);
+    lv_obj_set_style_pad_all(s_pages[CALENDAR_PAGE], PANEL_PAD, 0);
+    build_calendar_page(s_pages[CALENDAR_PAGE], l.content_w - 2 * PANEL_PAD,
+                        l.content_h - 2 * PANEL_PAD);
+    build_placeholder_page(s_pages[ALERTS_PAGE], "Alerts",
+                           "Reminders to stand, and whatever Home Assistant sends.");
+    build_settings_page(s_pages[SETUP_PAGE]);
 
-    select_page(0);
+    select_page(HOME_PAGE);
 }
 
 }  // namespace ui::detail

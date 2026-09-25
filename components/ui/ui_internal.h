@@ -101,8 +101,13 @@ constexpr int PROGRESS_SCALE   = 10;  // bar units per second
 
 constexpr std::uint32_t PAUSE_SETTLE_MS = 1500;
 
-constexpr int CALENDAR_PAGE = 1;
-constexpr int RADAR_PAGE    = 3;
+// The tabs, in the order they stand along the bottom.
+constexpr int HOME_PAGE     = 0;
+constexpr int RADAR_PAGE    = 1;
+constexpr int CALENDAR_PAGE = 2;
+constexpr int ALERTS_PAGE   = 3;
+constexpr int SETUP_PAGE    = 4;
+constexpr int PAGE_COUNT    = 5;
 
 
 constexpr int SETTING_COUNT = static_cast<int>(Setting::Count);
