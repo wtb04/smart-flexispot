@@ -45,7 +45,8 @@ constexpr std::uint32_t INK_OTHER      = 0xb0805a;
 constexpr std::uint32_t INK_WORK       = 0xf0923c;
 
 constexpr int EVENTS_AHEAD    = 40;  // read per refresh
-constexpr int LIST_ITEMS      = 40;  // day names and events in the overview's list
+constexpr int LIST_ITEMS      = 40;
+constexpr std::int32_t LIST_FADE_H = 28;  // day names and events in the overview's list
 constexpr int WEEK_EVENTS     = 48;
 constexpr int WEEK_DAYS       = units::kDaysPerWeek;
 constexpr int WORKDAYS        = 5;
@@ -1654,6 +1655,17 @@ void build_coming_up(std::int32_t x)
         build_list_item(item);
     }
     s_item_w = LIST_W - 2 * space::l - DOT - TIME_W - 2 * space::s;
+
+    // The list scrolls on below; its last lines fade into the card, rather than
+    // stop at a day's name whose events are out of sight.
+    lv_obj_t *fade = lv_obj_create(s_after);
+    lv_obj_set_size(fade, LIST_W - 2 * space::l, LIST_FADE_H);
+    lv_obj_set_pos(fade, 0, list_y + lv_obj_get_style_height(s_list, LV_PART_MAIN) - LIST_FADE_H);
+    theme::style_panel(fade, theme::panel_light, 0);
+    lv_obj_set_style_bg_main_opa(fade, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_bg_grad_color(fade, lv_color_hex(theme::panel_light), 0);
+    lv_obj_set_style_bg_grad_dir(fade, LV_GRAD_DIR_VER, 0);
+    lv_obj_set_clickable(fade, false);
 }
 
 void build_overview(lv_obj_t *parent, std::int32_t width, std::int32_t height)
