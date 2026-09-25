@@ -24,14 +24,14 @@ int main()
 
     State s = toggled(State{}, plan, 1000);
     check(s.phase == Phase::Work && s.round == 1 && s.running, "the button starts round one");
-    check(s.ends_at == 1000 + 30 * min, "a focus part is thirty minutes");
-    check(left_of(s, 1000 + 10 * min) == 20 * min, "left is read off the clock");
+    check(s.ends_at == 1000 + 25 * min, "a focus part is twenty-five minutes");
+    check(left_of(s, 1000 + 10 * min) == 15 * min, "left is read off the clock");
 
     State paused = toggled(s, plan, 1000 + 10 * min);
-    check(!paused.running && paused.left == 20 * min, "pausing keeps what is left");
-    check(left_of(paused, 1000 + 25 * min) == 20 * min, "time does not pass while paused");
+    check(!paused.running && paused.left == 15 * min, "pausing keeps what is left");
+    check(left_of(paused, 1000 + 25 * min) == 15 * min, "time does not pass while paused");
     State resumed = toggled(paused, plan, 1000 + 25 * min);
-    check(resumed.running && resumed.ends_at == 1000 + 45 * min, "carrying on ends later by the pause");
+    check(resumed.running && resumed.ends_at == 1000 + 40 * min, "carrying on ends later by the pause");
 
     State b = after(s, plan, 0);
     check(b.phase == Phase::Break && b.round == 1 && b.length == 5 * min, "focus is followed by a break");
@@ -42,7 +42,9 @@ int main()
     State longer = after(fourth, plan, 0);
     check(longer.phase == Phase::LongBreak && longer.length == 20 * min,
           "the fourth round is followed by the long break");
-    check(after(longer, plan, 0).phase == Phase::Idle, "the long break ends the set");
+    const State again = after(longer, plan, 0);
+    check(again.phase == Phase::Work && again.round == 1 && again.running,
+          "after the long break the next set starts at round one");
 
     check(left_of(s, s.ends_at + 5000) == 0, "left never goes below zero");
     check(left_of(State{}, 12345) == 0, "nothing is left when idle");

@@ -150,7 +150,7 @@ ui::Focus focus_view(const focus::State &state)
     };
 }
 
-// A part running out is said out loud, on whatever page is up.
+// A part running out chimes and says what comes next, on whatever page is up.
 void on_focus_change(const focus::State &state, bool finished)
 {
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_focus(focus_view(state)));
@@ -168,11 +168,10 @@ void on_focus_change(const focus::State &state, bool finished)
                           plan.long_break_min);
             break;
         case focus::Phase::Work:
-            std::snprintf(message, sizeof(message), "Round %d of %d", state.round, plan.rounds);
+            std::snprintf(message, sizeof(message), "Focus, round %d of %d", state.round, plan.rounds);
             break;
         case focus::Phase::Idle:
-            std::snprintf(message, sizeof(message), "The set is done");
-            break;
+            return;
     }
     sound::ding();
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::notify("Focus", message, ui::Level::Good, 5000));

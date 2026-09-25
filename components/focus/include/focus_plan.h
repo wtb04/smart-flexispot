@@ -6,7 +6,7 @@ namespace focus {
 enum class Phase : std::uint8_t { Idle, Work, Break, LongBreak };
 
 struct Plan {
-    int work_min       = 30;
+    int work_min       = 25;
     int break_min      = 5;
     int rounds         = 4;
     int long_break_min = 20;
@@ -64,8 +64,8 @@ inline State part(Phase phase, int round, const Plan &plan, std::int64_t now)
     return state;
 }
 
-/** What follows a part that ran out or was skipped. The long break ends the
- *  set: another one is started by hand. */
+/** What follows a part that ran out or was skipped. After the long break the
+ *  next set starts on its own, until the timer is reset. */
 inline State after(const State &state, const Plan &plan, std::int64_t now)
 {
     switch (state.phase) {
@@ -75,6 +75,7 @@ inline State after(const State &state, const Plan &plan, std::int64_t now)
         case Phase::Break:
             return part(Phase::Work, state.round + 1, plan, now);
         case Phase::LongBreak:
+            return part(Phase::Work, 1, plan, now);
         case Phase::Idle:
             break;
     }
