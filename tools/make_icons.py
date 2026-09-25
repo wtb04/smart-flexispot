@@ -123,8 +123,13 @@ STATUS_SIDE = 28
 WIFI_LAYERS = [(disc(14, 23, 3), True),
                (fan(14, 23, 8, 11.5, 45), True),
                (fan(14, 23, 15, 18.5, 45), True)]
-PHONE_LAYERS = [(rounded(6.5, 2, 21.5, 26, 3.5), True),
-                (rounded(8.8, 4.5, 19.2, 20.5, 1), False)]
+# An iPhone 15 Pro from the front: a hairline round a faintly lit screen, the
+# Dynamic Island at its top and the home bar at its foot. Stouter than the real
+# one, which at this size reads as a sliver.
+PHONE_LAYERS = [(rounded(6.5, 2, 21.5, 26, 2.8), True),
+                (rounded(7.6, 3.1, 20.4, 24.9, 1.9), 0.28),
+                (rounded(11.8, 4.1, 16.2, 5.6, 0.75), True),
+                (rounded(11.3, 22.9, 16.7, 23.8, 0.45), True)]
 CALENDAR = paint([(rounded(3, 5, 25, 25.5, 3.5), True),
                   (rounded(5.5, 11.5, 22.5, 23, 1.5), False),
                   (stroke(9.5, 2.5, 9.5, 7.5, 3.2), False),
