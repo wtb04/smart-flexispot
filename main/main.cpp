@@ -3,6 +3,7 @@
 #include "board.h"
 #include "desk.h"
 #include "diagnostics.h"
+#include "focus.h"
 #include "ical.h"
 #include "imu.h"
 #include "orientation.h"
@@ -26,6 +27,8 @@
 #include "ui.h"
 #include "wallclock.h"
 #include "wifi.h"
+
+#include <cstdio>
 
 namespace {
 constexpr char TAG[] = "tab5";
@@ -130,6 +133,58 @@ void on_orientation(ui::Orientation orientation)
     settings::set(settings::Key::Flipped, flipped);
 }
 
+ui::Focus focus_view(const focus::State &state)
+{
+    const focus::Plan plan = focus::plan();
+    return ui::Focus{
+        .phase          = static_cast<ui::FocusPhase>(state.phase),
+        .round          = state.round,
+        .rounds         = plan.rounds,
+        .running        = state.running,
+        .ends_at_ms     = state.ends_at,
+        .left_ms        = state.left,
+        .length_ms      = state.length,
+        .work_min       = plan.work_min,
+        .break_min      = plan.break_min,
+        .long_break_min = plan.long_break_min,
+    };
+}
+
+// A part running out is said out loud, on whatever page is up.
+void on_focus_change(const focus::State &state, bool finished)
+{
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_focus(focus_view(state)));
+    if (!finished) {
+        return;
+    }
+    const focus::Plan plan = focus::plan();
+    char              message[64];
+    switch (state.phase) {
+        case focus::Phase::Break:
+            std::snprintf(message, sizeof(message), "Break, %d min", plan.break_min);
+            break;
+        case focus::Phase::LongBreak:
+            std::snprintf(message, sizeof(message), "All %d rounds done, %d min break", plan.rounds,
+                          plan.long_break_min);
+            break;
+        case focus::Phase::Work:
+            std::snprintf(message, sizeof(message), "Round %d of %d", state.round, plan.rounds);
+            break;
+        case focus::Phase::Idle:
+            std::snprintf(message, sizeof(message), "The set is done");
+            break;
+    }
+    sound::ding();
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::notify("Focus", message, ui::Level::Good, 5000));
+}
+
+void on_focus(ui::FocusAction action)
+{
+    focus::act(action == ui::FocusAction::Toggle ? focus::Action::Toggle
+               : action == ui::FocusAction::Skip ? focus::Action::Skip
+                                                 : focus::Action::Reset);
+}
+
 void on_details(const char *hex, const char *callsign)
 {
     radar::request_details(hex, callsign);
@@ -230,6 +285,7 @@ extern "C" void app_main(void)
         .orientation = on_orientation,
         .screen      = on_screen,
         .details     = on_details,
+        .focus       = on_focus,
     };
     const int brightness = settings::get(settings::Key::Brightness);
     ui::set_cards(diagnostics::cards(), diagnostics::card_count());
@@ -268,6 +324,8 @@ extern "C" void app_main(void)
 
     ESP_ERROR_CHECK_WITHOUT_ABORT(battery::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(sound::init());
+    ESP_ERROR_CHECK_WITHOUT_ABORT(focus::start(on_focus_change));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_focus(focus_view(focus::state())));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("desk"));
     ESP_ERROR_CHECK_WITHOUT_ABORT(wifi::start());
     ESP_ERROR_CHECK(wallclock::start());

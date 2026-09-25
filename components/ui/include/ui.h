@@ -111,6 +111,24 @@ using RadarHandler = void (*)(bool showing, bool reachable);
 /** A plane picked on the radar: find out who it is. */
 using DetailsHandler = void (*)(const char *hex, const char *callsign);
 
+/** The focus timer, as the page shows it. Times are milliseconds since boot,
+ *  esp_timer's clock: the page counts down against it on its own. */
+enum class FocusPhase : std::uint8_t { Idle, Work, Break, LongBreak };
+struct Focus {
+    FocusPhase   phase;
+    int          round;
+    int          rounds;
+    bool         running;
+    std::int64_t ends_at_ms;
+    std::int32_t left_ms;
+    std::int32_t length_ms;
+    int          work_min;
+    int          break_min;
+    int          long_break_min;
+};
+enum class FocusAction : std::uint8_t { Toggle, Skip, Reset };
+using FocusHandler = void (*)(FocusAction action);
+
 /** How long before an appointment its journey is asked for and shown. */
 inline constexpr std::int64_t kJourneyAhead = 5 * 3600;
 
@@ -199,6 +217,7 @@ struct Handlers {
     OrientationHandler orientation;
     ScreenHandler      screen;
     DetailsHandler     details;
+    FocusHandler       focus;
 };
 
 /** Requires the LVGL port to be running. A zero accent keeps the built-in
@@ -269,6 +288,8 @@ esp_err_t set_radar_details(const char *hex, const radar::Details &details);
 
 /** RGB565. Null clears the frame. Ignored unless still selected. */
 esp_err_t set_radar_photo(const char *hex, const void *pixels, int width, int height);
+
+esp_err_t set_focus(const Focus &focus);
 
 
 /** Queued rather than shown at once: they arrive in bursts. A full queue drops the oldest. */

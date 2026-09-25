@@ -15,6 +15,7 @@
 #include "lvgl.h"
 #include "modal_overlay.h"
 #include "calendar_page.h"
+#include "focus_page.h"
 #include "screenshot.h"
 #include "radar_page.h"
 #include "segment_display.h"
@@ -105,7 +106,7 @@ constexpr std::uint32_t PAUSE_SETTLE_MS = 1500;
 constexpr int HOME_PAGE     = 0;
 constexpr int RADAR_PAGE    = 1;
 constexpr int CALENDAR_PAGE = 2;
-constexpr int ALERTS_PAGE   = 3;
+constexpr int FOCUS_PAGE    = 3;
 constexpr int SETUP_PAGE    = 4;
 constexpr int PAGE_COUNT    = 5;
 

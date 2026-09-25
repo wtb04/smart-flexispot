@@ -187,6 +187,16 @@ BIKE = paint(ring(5.2, 14.5, 4.4, 2.8) + ring(16.8, 14.5, 4.4, 2.8)
                 (stroke(13.5, 4.5, 16.5, 4.5, 2), True)])
 
 
+# A stopwatch: the dial, the crown it is started by, and one hand.
+TIMER = paint(ring(14, 16, 10.5, 8) +
+              [(rounded(11, 1.5, 17, 4.5, 1), True),
+               (rounded(12.8, 4, 15.2, 6.5, 0), True),
+               (stroke(21.2, 6.2, 23.4, 8.4, 2.4), True),
+               (stroke(14, 16, 14, 10.5, 2.4), True),
+               (disc(14, 16, 1.8), True)],
+              28)
+
+
 def emit(name, data, side=SIDE):
     rows = []
     for at in range(0, len(data), 16):
@@ -223,7 +233,7 @@ out.write_text(f"""#pragma once
 
 namespace ui {{
 namespace icons {{
-{emit("train", TRAIN)}{emit("bus", BUS)}{emit("walk", WALK)}{emit("bike", BIKE)}{emit("no_photo", NO_PHOTO, NO_PHOTO_SIDE)}{emit("wifi", WIFI, STATUS_SIDE)}{emit("wifi_off", WIFI_OFF, STATUS_SIDE)}{emit("phone", PHONE, STATUS_SIDE)}{emit("phone_off", PHONE_OFF, STATUS_SIDE)}{emit("plane", PLANE, PLANE_SIDE)}{emit("calendar", CALENDAR, 28)}{emit("desk", DESK, STATUS_SIDE)}{emit("plus", PLUS, MARK_SIDE)}{emit("minus", MINUS, MARK_SIDE)}{emit("times", TIMES, MARK_SIDE)}
+{emit("train", TRAIN)}{emit("bus", BUS)}{emit("walk", WALK)}{emit("bike", BIKE)}{emit("no_photo", NO_PHOTO, NO_PHOTO_SIDE)}{emit("wifi", WIFI, STATUS_SIDE)}{emit("wifi_off", WIFI_OFF, STATUS_SIDE)}{emit("phone", PHONE, STATUS_SIDE)}{emit("phone_off", PHONE_OFF, STATUS_SIDE)}{emit("plane", PLANE, PLANE_SIDE)}{emit("calendar", CALENDAR, 28)}{emit("desk", DESK, STATUS_SIDE)}{emit("timer", TIMER, 28)}{emit("plus", PLUS, MARK_SIDE)}{emit("minus", MINUS, MARK_SIDE)}{emit("times", TIMES, MARK_SIDE)}
 }}  // namespace icons
 }}  // namespace ui
 """)

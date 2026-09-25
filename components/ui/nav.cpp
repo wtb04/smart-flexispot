@@ -15,7 +15,7 @@ constexpr NavItem NAV_ITEMS[PAGE_COUNT] = {
     [HOME_PAGE]     = {LV_SYMBOL_HOME, "Home", false},
     [RADAR_PAGE]    = {"", "Radar", true, &icons::plane_icon},
     [CALENDAR_PAGE] = {"", "Calendar", true, &icons::calendar_icon},
-    [ALERTS_PAGE]   = {LV_SYMBOL_BELL, "Alerts", true},
+    [FOCUS_PAGE]    = {"", "Focus", true, &icons::timer_icon},
     [SETUP_PAGE]    = {LV_SYMBOL_SETTINGS, "Setup", false},
 };
 }  // namespace
@@ -109,16 +109,6 @@ void brightness_event_cb(lv_event_t *e)
         s_handlers.brightness(percent);
     }
 }
-namespace {
-void build_placeholder_page(lv_obj_t *page, const char *title, const char *blurb)
-{
-    lv_obj_set_flex_flow(page, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(page, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_row(page, 14, 0);
-    theme::make_label(page, title, theme::text, fonts::size_32());
-    theme::make_label(page, blurb, theme::secondary, fonts::size_20());
-}
-}  // namespace
 
 void create_content(lv_obj_t *parent)
 {
@@ -185,8 +175,8 @@ void create_content(lv_obj_t *parent)
     lv_obj_set_style_pad_all(s_pages[CALENDAR_PAGE], PANEL_PAD, 0);
     build_calendar_page(s_pages[CALENDAR_PAGE], l.content_w - 2 * PANEL_PAD,
                         l.content_h - 2 * PANEL_PAD);
-    build_placeholder_page(s_pages[ALERTS_PAGE], "Alerts",
-                           "Reminders to stand, and whatever Home Assistant sends.");
+    lv_obj_set_style_pad_all(s_pages[FOCUS_PAGE], PANEL_PAD, 0);
+    build_focus_page(s_pages[FOCUS_PAGE], l.content_w - 2 * PANEL_PAD, l.content_h - 2 * PANEL_PAD);
     build_settings_page(s_pages[SETUP_PAGE]);
 
     select_page(HOME_PAGE);

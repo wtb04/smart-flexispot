@@ -480,7 +480,7 @@ constexpr const char *CALENDAR_TAGS[] = {"ical", "travel"};
 constexpr const char *SYSTEM_TAGS[]   = {
     "tab5",  "ui",     "shot",   "diag",      "clock",     "settings", "logbuf",   "board",
     "rtc",   "main_task", "cpu_start", "heap_init", "spiram", "esp_psram", "esp_image",
-    "jpeg",  "sound",  "imu",    "BMI270",    "orientation"};
+    "jpeg",  "sound",  "imu",    "BMI270",    "orientation", "focus"};
 
 struct TagSet {
     Card               card;

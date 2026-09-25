@@ -324,6 +324,7 @@ Slot<int>            p_notification_volume;
 Slot<bool>           p_screen;
 Slot<bool>           p_setting[SETTING_COUNT];
 Slot<bool>           p_calendar;
+Slot<Focus>          p_focus;
 Slot<bool>           p_radar;
 Slot<DetailsArgs>    p_details;
 Slot<PhotoArgs>      p_photo;
@@ -794,6 +795,9 @@ void apply_pending(lv_timer_t *)
         }
     }
 
+    if (Focus focus{}; take(p_focus, focus)) {
+        show_focus(focus);
+    }
     if (bool calendar = false; take(p_calendar, calendar)) {
         show_calendar();
     }
@@ -1011,6 +1015,12 @@ esp_err_t set_row(int card, int row, const char *value, Level level)
 esp_err_t set_calendar()
 {
     put(p_calendar, true);
+    return ESP_OK;
+}
+
+esp_err_t set_focus(const Focus &focus)
+{
+    put(p_focus, focus);
     return ESP_OK;
 }
 
