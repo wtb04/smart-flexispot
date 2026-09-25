@@ -8,11 +8,9 @@
 #include <algorithm>
 #include <ctime>
 #include <cstdio>
-#include <optional>
 
-// The desk's own digits, bent round: a dial of ticks, one for every minute of
-// the part, around the height display's seven-segment figures, and under it
-// the whole set as the calendar draws a day.
+// A dial of ticks, one for every minute of the part, around a flip clock's two
+// leaves, and under it the whole set as the calendar draws a day.
 namespace ui {
 namespace {
 using detail::BUTTON_GAP;
@@ -26,15 +24,21 @@ constexpr int          ROUNDS_MAX = 8;
 constexpr int          PARTS_MAX  = 2 * ROUNDS_MAX;
 constexpr std::int32_t ROUND_DOT  = 22;
 constexpr std::int32_t CHIP       = theme::chip::size;
+constexpr std::int32_t LEAF_W     = 136;
+constexpr std::int32_t LEAF_H     = 118;
+constexpr std::int32_t COLON      = 9;
 
 // As last told; until then, the plan as it stands at boot.
 Focus s_focus{FocusPhase::Idle, 0, 4, false, 0, 0, 0, 25, 5, 20};
 
-lv_obj_t                     *s_tick[TICKS_MAX];
-int                           s_tick_count = 0;
-std::optional<SegmentDisplay> s_digits;
-lv_obj_t                     *s_phase = nullptr;
-lv_obj_t                     *s_ends  = nullptr;
+lv_obj_t *s_tick[TICKS_MAX];
+int       s_tick_count = 0;
+lv_obj_t *s_leaves     = nullptr;  // the two leaves and the colon between them
+lv_obj_t *s_minutes    = nullptr;
+lv_obj_t *s_seconds    = nullptr;
+lv_obj_t *s_colon[2]   = {};
+lv_obj_t *s_phase      = nullptr;
+lv_obj_t *s_ends       = nullptr;
 
 lv_obj_t *s_go       = nullptr;  // the card that starts and pauses
 lv_obj_t *s_go_round = nullptr;
@@ -125,9 +129,15 @@ void show_second(bool force)
     const bool idle   = s_focus.phase == FocusPhase::Idle;
     const bool paused = !idle && !s_focus.running;
     const bool beat   = seconds % 2 == 0;
-    s_digits->set_clock(seconds / 60, seconds % 60);
-    s_digits->set_colon(!s_focus.running || beat);
-    lv_obj_set_style_opa(s_digits->object(), paused && !beat ? LV_OPA_30 : LV_OPA_COVER, 0);
+    char       text[8];
+    std::snprintf(text, sizeof(text), "%02d", seconds / 60);
+    theme::set_text(s_minutes, text);
+    std::snprintf(text, sizeof(text), "%02d", seconds % 60);
+    theme::set_text(s_seconds, text);
+    for (lv_obj_t *dot : s_colon) {
+        lv_obj_set_style_bg_opa(dot, !s_focus.running || beat ? LV_OPA_COVER : LV_OPA_20, 0);
+    }
+    lv_obj_set_style_opa(s_leaves, paused && !beat ? LV_OPA_40 : LV_OPA_COVER, 0);
 
     const std::int32_t length  = idle ? 0 : s_focus.length_ms;
     const std::int32_t elapsed = length > 0 ? length - left : 0;
@@ -154,7 +164,7 @@ void show_second(bool force)
 
 void timer_tick(lv_timer_t *)
 {
-    if (detail::s_page == detail::FOCUS_PAGE && s_digits.has_value()) {
+    if (detail::s_page == detail::FOCUS_PAGE && s_leaves != nullptr) {
         show_second(false);
     }
 }
@@ -239,15 +249,44 @@ void build_dial(lv_obj_t *parent, std::int32_t w, std::int32_t h)
         lv_obj_set_style_pad_all(tick, 0, LV_PART_KNOB);
     }
 
-    constexpr int SCALE = 110;
-    s_digits.emplace(card, SCALE, true);
-    lv_obj_center(s_digits->object());
-    const std::int32_t digits_h = 112 * SCALE / 100;
+    // Minutes and seconds each on a leaf, cut across the middle where a flip
+    // clock's leaves fold, with a colon that beats the seconds between them.
+    s_leaves = clear_box(card);
+    lv_obj_set_size(s_leaves, LV_SIZE_CONTENT, LEAF_H);
+    lv_obj_set_flex_flow(s_leaves, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(s_leaves, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(s_leaves, 14, 0);
+    lv_obj_center(s_leaves);
+    const auto leaf = [](lv_obj_t *parent) {
+        lv_obj_t *root = lv_obj_create(parent);
+        theme::style_panel(root, theme::panel, theme::radius::control);
+        lv_obj_set_clickable(root, false);
+        lv_obj_set_size(root, LEAF_W, LEAF_H);
+        lv_obj_t *digits = theme::make_label(root, "00", theme::text, fonts::temp_64());
+        lv_obj_center(digits);
+        lv_obj_t *fold = lv_obj_create(root);
+        theme::style_panel(fold, theme::panel_light, 0);
+        lv_obj_set_clickable(fold, false);
+        lv_obj_set_size(fold, LEAF_W, 3);
+        lv_obj_align(fold, LV_ALIGN_LEFT_MID, 0, 0);
+        return digits;
+    };
+    s_minutes       = leaf(s_leaves);
+    lv_obj_t *colon = clear_box(s_leaves);
+    lv_obj_set_size(colon, COLON, 3 * COLON + 14);
+    for (int i = 0; i < 2; ++i) {
+        s_colon[i] = lv_obj_create(colon);
+        theme::style_panel(s_colon[i], theme::secondary, LV_RADIUS_CIRCLE);
+        lv_obj_set_clickable(s_colon[i], false);
+        lv_obj_set_size(s_colon[i], COLON, COLON);
+        lv_obj_align(s_colon[i], i == 0 ? LV_ALIGN_TOP_MID : LV_ALIGN_BOTTOM_MID, 0, 0);
+    }
+    s_seconds = leaf(s_leaves);
 
     s_phase = theme::make_eyebrow(card, "READY");
-    lv_obj_align(s_phase, LV_ALIGN_CENTER, 0, -digits_h / 2 - 30);
+    lv_obj_align(s_phase, LV_ALIGN_CENTER, 0, -LEAF_H / 2 - 30);
     s_ends = theme::make_label(card, "", theme::secondary, theme::type_body());
-    lv_obj_align(s_ends, LV_ALIGN_CENTER, 0, digits_h / 2 + 30);
+    lv_obj_align(s_ends, LV_ALIGN_CENTER, 0, LEAF_H / 2 + 30);
 }
 
 // The whole card is the button, lit while the time runs, as the lights card
@@ -408,7 +447,7 @@ void show_focus(const Focus &focus)
     const bool new_part = focus.phase != s_focus.phase || focus.round != s_focus.round ||
                           s_tick_count == 0;
     s_focus = focus;
-    if (!s_digits.has_value()) {
+    if (s_leaves == nullptr) {
         return;
     }
     const bool idle   = focus.phase == FocusPhase::Idle;
@@ -418,7 +457,6 @@ void show_focus(const Focus &focus)
         const int minutes = idle ? focus.work_min : std::max<int>(1, focus.length_ms / 60000);
         lay_ticks(minutes);
     }
-    s_digits->set_ink(!resting(), theme::green);
 
     char text[48];
     std::snprintf(text, sizeof(text), "%s%s", phase_name(focus.phase), paused ? ", PAUSED" : "");
