@@ -9,6 +9,10 @@ constexpr std::int32_t  SLIDE    = 48;
 constexpr std::uint32_t OPEN_MS  = 240;
 constexpr std::uint32_t CLOSE_MS = 160;
 
+// A larger card, the log's say, costs more per frame than a slide can afford
+// here and is better shown at once.
+constexpr std::int32_t MAX_SLIDE_AREA = 720 * 440;
+
 constexpr std::int32_t CLOSE_SIZE = 48;
 
 constexpr std::int32_t PROGRESS_MAX = 255;
@@ -78,12 +82,21 @@ void ModalOverlay::open(lv_obj_t *)
     lv_anim_delete(this, nullptr);
     lv_obj_set_hidden(scrim_, false);
     lv_obj_move_foreground(scrim_);
-    slide(this, 0);
     visible_ = true;
+    if (!slides()) {
+        slide(this, PROGRESS_MAX);
+        return;
+    }
+    slide(this, 0);
     // The first frame covers the whole page, far slower than the card's own:
     // drawn before the slide starts, it does not eat the first frames of it.
     lv_refr_now(nullptr);
     start(0, PROGRESS_MAX, OPEN_MS, false);
+}
+
+bool ModalOverlay::slides() const
+{
+    return width_ * height_ <= MAX_SLIDE_AREA;
 }
 
 void ModalOverlay::close()
@@ -93,6 +106,10 @@ void ModalOverlay::close()
     }
     visible_ = false;
     lv_anim_delete(this, nullptr);
+    if (!slides()) {
+        lv_obj_set_hidden(scrim_, true);
+        return;
+    }
     start(PROGRESS_MAX, 0, CLOSE_MS, true);
 }
 

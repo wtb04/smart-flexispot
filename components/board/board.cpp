@@ -5,6 +5,9 @@
 #include "esp_check.h"
 #include "esp_heap_caps.h"
 #include "esp_lcd_mipi_dsi.h"
+#include "esp_lcd_panel_ops.h"
+#include "esp_log.h"
+#include "freertos/semphr.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -41,37 +44,127 @@ esp_err_t power_up_panel()
     return ESP_OK;
 }
 
-// The port rotates each rendered area into a buffer of its own and then copies
-// that into the panel's frame buffer: twice through PSRAM, which is what a frame
-// costs most here. This rotates straight into the frame buffer instead, and
-// without waiting, so the next area renders while the last one is on its way.
-ppa_client_handle_t s_ppa = nullptr;
-void               *s_frame = nullptr;
+// The port rotates each rendered area into a buffer of its own, then copies that
+// into the one frame buffer the panel is reading from, so a page change arrives
+// as a wipe across a few refreshes. Here each frame is rotated straight into a
+// second, hidden frame buffer, and the panel swaps to it between two refreshes.
+// Before the next frame is drawn, what changed is copied back into the buffer
+// that has just been hidden, so both hold the same picture.
+constexpr int MAX_DIRTY = 16;
 
-bool rotated(ppa_client_handle_t, ppa_event_data_t *, void *user)
+struct Rect {
+    std::uint32_t x, y, w, h;
+};
+
+esp_lcd_panel_handle_t s_panel = nullptr;
+ppa_client_handle_t    s_ppa   = nullptr;
+std::uint8_t          *s_fbs[2] = {};
+int                    s_back   = 1;  // the panel starts out on the first
+SemaphoreHandle_t      s_swapped = nullptr;
+bool                   s_swap_pending = false;
+
+// What the frame on show changed, and what the one being drawn has changed so far.
+Rect s_shown[MAX_DIRTY];
+int  s_shown_count = 0;
+Rect s_drawn[MAX_DIRTY];
+int  s_drawn_count = 0;
+
+constexpr std::uint32_t FRAME_BYTES = BSP_LCD_H_RES * BSP_LCD_V_RES * 2;
+
+// What the port's own flush waits on; its last copy may still be under way
+// when this one takes over.
+bool copied(esp_lcd_panel_handle_t, esp_lcd_dpi_panel_event_data_t *, void *disp)
 {
-    lv_display_flush_ready(static_cast<lv_display_t *>(user));
+    lv_display_flush_ready(static_cast<lv_display_t *>(disp));
     return false;
+}
+
+bool frame_done(esp_lcd_panel_handle_t, esp_lcd_dpi_panel_event_data_t *, void *)
+{
+    BaseType_t woken = pdFALSE;
+    xSemaphoreGiveFromISR(s_swapped, &woken);
+    return woken == pdTRUE;
+}
+
+esp_err_t copy_rect(const std::uint8_t *from, std::uint8_t *to, const Rect &r,
+                    ppa_srm_rotation_angle_t angle, std::uint32_t in_w, std::uint32_t in_h,
+                    std::uint32_t in_x, std::uint32_t in_y, std::uint32_t out_x, std::uint32_t out_y)
+{
+    ppa_srm_oper_config_t op{};
+    op.in.buffer          = from;
+    op.in.pic_w           = in_w;
+    op.in.pic_h           = in_h;
+    op.in.block_w         = r.w;
+    op.in.block_h         = r.h;
+    op.in.block_offset_x  = in_x;
+    op.in.block_offset_y  = in_y;
+    op.in.srm_cm          = PPA_SRM_COLOR_MODE_RGB565;
+    op.out.buffer         = to;
+    op.out.buffer_size    = FRAME_BYTES;
+    op.out.pic_w          = BSP_LCD_H_RES;
+    op.out.pic_h          = BSP_LCD_V_RES;
+    op.out.block_offset_x = out_x;
+    op.out.block_offset_y = out_y;
+    op.out.srm_cm         = PPA_SRM_COLOR_MODE_RGB565;
+    op.rotation_angle     = angle;
+    op.scale_x            = 1.0f;
+    op.scale_y            = 1.0f;
+    op.mode               = PPA_TRANS_MODE_BLOCKING;
+    return ppa_do_scale_rotate_mirror(s_ppa, &op);
+}
+
+void note(Rect *list, int &count, const Rect &r)
+{
+    if (count < MAX_DIRTY) {
+        list[count++] = r;
+    } else {
+        list[0] = {0, 0, BSP_LCD_H_RES, BSP_LCD_V_RES};
+        count   = 1;
+    }
+}
+
+// The first area of a frame waits for the panel to have let go of the buffer
+// it last showed, which is at most one refresh, then brings it up to date.
+void prepare_back()
+{
+    if (!s_swap_pending) {
+        return;
+    }
+    s_swap_pending = false;
+    if (xSemaphoreTake(s_swapped, pdMS_TO_TICKS(100)) != pdTRUE) {
+        ESP_LOGW(TAG, "panel did not swap buffers");
+    }
+    const std::uint8_t *front = s_fbs[1 - s_back];
+    for (int i = 0; i < s_shown_count; ++i) {
+        const Rect &r = s_shown[i];
+        copy_rect(front, s_fbs[s_back], r, PPA_SRM_ROTATION_ANGLE_0, BSP_LCD_H_RES, BSP_LCD_V_RES,
+                  r.x, r.y, r.x, r.y);
+    }
+    s_shown_count = 0;
 }
 
 void flush_rotated(lv_display_t *disp, const lv_area_t *area, std::uint8_t *pixels)
 {
+    prepare_back();
+
     const std::int32_t hres = lv_display_get_horizontal_resolution(disp);
     const std::int32_t vres = lv_display_get_vertical_resolution(disp);
-    const std::int32_t w    = lv_area_get_width(area);
-    const std::int32_t h    = lv_area_get_height(area);
-    const auto rotation     = lv_display_get_rotation(disp);
+    const auto         w    = static_cast<std::uint32_t>(lv_area_get_width(area));
+    const auto         h    = static_cast<std::uint32_t>(lv_area_get_height(area));
 
     // Where the area lands on the panel, which is portrait. The PPA turns
     // anticlockwise, as LVGL's rotations count.
-    std::int32_t x = area->x1;
-    std::int32_t y = area->y1;
+    std::int32_t             x     = area->x1;
+    std::int32_t             y     = area->y1;
+    Rect                     r{0, 0, w, h};
     ppa_srm_rotation_angle_t angle = PPA_SRM_ROTATION_ANGLE_0;
-    switch (rotation) {
+    switch (lv_display_get_rotation(disp)) {
         case LV_DISPLAY_ROTATION_90:
             angle = PPA_SRM_ROTATION_ANGLE_90;
             x     = area->y1;
             y     = hres - area->x2 - 1;
+            r.w   = h;
+            r.h   = w;
             break;
         case LV_DISPLAY_ROTATION_180:
             angle = PPA_SRM_ROTATION_ANGLE_180;
@@ -82,33 +175,33 @@ void flush_rotated(lv_display_t *disp, const lv_area_t *area, std::uint8_t *pixe
             angle = PPA_SRM_ROTATION_ANGLE_270;
             x     = vres - area->y2 - 1;
             y     = area->x1;
+            r.w   = h;
+            r.h   = w;
             break;
         default:
             break;
     }
+    r.x = static_cast<std::uint32_t>(x);
+    r.y = static_cast<std::uint32_t>(y);
 
-    ppa_srm_oper_config_t op{};
-    op.in.buffer         = pixels;
-    op.in.pic_w          = static_cast<std::uint32_t>(w);
-    op.in.pic_h          = static_cast<std::uint32_t>(h);
-    op.in.block_w        = static_cast<std::uint32_t>(w);
-    op.in.block_h        = static_cast<std::uint32_t>(h);
-    op.in.srm_cm         = PPA_SRM_COLOR_MODE_RGB565;
-    op.out.buffer        = s_frame;
-    op.out.buffer_size   = BSP_LCD_H_RES * BSP_LCD_V_RES * 2;
-    op.out.pic_w         = BSP_LCD_H_RES;
-    op.out.pic_h         = BSP_LCD_V_RES;
-    op.out.block_offset_x = static_cast<std::uint32_t>(x);
-    op.out.block_offset_y = static_cast<std::uint32_t>(y);
-    op.out.srm_cm        = PPA_SRM_COLOR_MODE_RGB565;
-    op.rotation_angle    = angle;
-    op.scale_x           = 1.0f;
-    op.scale_y           = 1.0f;
-    op.mode              = PPA_TRANS_MODE_NON_BLOCKING;
-    op.user_data         = disp;
-    if (ppa_do_scale_rotate_mirror(s_ppa, &op) != ESP_OK) {
-        lv_display_flush_ready(disp);
+    const Rect in{0, 0, w, h};
+    copy_rect(pixels, s_fbs[s_back], in, angle, w, h, 0, 0, r.x, r.y);
+    note(s_drawn, s_drawn_count, r);
+
+    if (lv_display_flush_is_last(disp)) {
+        // Handing the driver one of its own buffers makes it the one shown from
+        // the next refresh; the one-line area keeps its cache flush to a line.
+        // A refresh ending in between is discarded with the stale ones, which
+        // costs at most a refresh of waiting rather than drawing into view.
+        esp_lcd_panel_draw_bitmap(s_panel, 0, 0, 1, 1, s_fbs[s_back]);
+        xSemaphoreTake(s_swapped, 0);
+        s_back         = 1 - s_back;
+        s_swap_pending = true;
+        std::copy(s_drawn, s_drawn + s_drawn_count, s_shown);
+        s_shown_count = s_drawn_count;
+        s_drawn_count = 0;
     }
+    lv_display_flush_ready(disp);
 }
 
 // esp_lvgl_port 2.9 keeps the panel only in its display context, whose first
@@ -123,12 +216,24 @@ esp_err_t flush_straight_to_panel(lv_display_t *disp)
 {
     const auto *port = static_cast<const PortDisplayHead *>(lv_display_get_driver_data(disp));
     ESP_RETURN_ON_FALSE(port != nullptr && port->panel != nullptr, ESP_ERR_INVALID_STATE, TAG, "no panel");
-    ESP_RETURN_ON_ERROR(esp_lcd_dpi_panel_get_frame_buffer(port->panel, 1, &s_frame), TAG, "frame buffer");
+    s_panel = port->panel;
+    void *fb0 = nullptr;
+    void *fb1 = nullptr;
+    ESP_RETURN_ON_ERROR(esp_lcd_dpi_panel_get_frame_buffer(s_panel, 2, &fb0, &fb1), TAG, "frame buffers");
+    s_fbs[0] = static_cast<std::uint8_t *>(fb0);
+    s_fbs[1] = static_cast<std::uint8_t *>(fb1);
+
+    static StaticSemaphore_t swapped;
+    s_swapped = xSemaphoreCreateBinaryStatic(&swapped);
 
     const ppa_client_config_t client{.oper_type = PPA_OPERATION_SRM};
     ESP_RETURN_ON_ERROR(ppa_register_client(&client, &s_ppa), TAG, "ppa");
-    const ppa_event_callbacks_t callbacks{.on_trans_done = rotated};
-    ESP_RETURN_ON_ERROR(ppa_client_register_event_callbacks(s_ppa, &callbacks), TAG, "ppa callback");
+
+    esp_lcd_dpi_panel_event_callbacks_t callbacks{};
+    callbacks.on_color_trans_done   = copied;
+    callbacks.on_frame_buf_complete = frame_done;
+    ESP_RETURN_ON_ERROR(esp_lcd_dpi_panel_register_event_callbacks(s_panel, &callbacks, disp), TAG,
+                        "panel callbacks");
 
     lv_display_set_flush_cb(disp, flush_rotated);
     return ESP_OK;

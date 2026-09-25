@@ -21,7 +21,7 @@ public:
     /** For a card whose contents differ each time it is opened. Call before open(). */
     void resize(std::int32_t width, std::int32_t height);
 
-    /** origin is ignored: the card slides rather than growing out of it. */
+    /** origin is ignored: a card small enough slides in, a larger one appears. */
     void open(lv_obj_t *origin = nullptr);
     void close();
     bool visible() const { return visible_; }
@@ -33,6 +33,7 @@ private:
     static void close_clicked(lv_event_t *event);
 
     void start(std::int32_t from, std::int32_t to, std::uint32_t duration, bool hide_at_end);
+    bool slides() const;
 
     lv_obj_t    *scrim_ = nullptr;
     lv_obj_t    *card_  = nullptr;

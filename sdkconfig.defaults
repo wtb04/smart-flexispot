@@ -230,3 +230,7 @@ CONFIG_LWIP_MAX_SOCKETS=16
 CONFIG_SPIRAM_XIP_FROM_PSRAM=y
 CONFIG_CACHE_L2_CACHE_256KB=y
 CONFIG_CACHE_L2_CACHE_LINE_128B=y
+
+# Two frame buffers, so a frame is drawn out of sight and shown whole: see
+# board.cpp. With one, the panel shows each new page as a wipe.
+CONFIG_BSP_LCD_DPI_BUFFER_NUMS=2
