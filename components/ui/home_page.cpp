@@ -876,7 +876,8 @@ void build_media_panel(lv_obj_t *parent)
     const std::int32_t inner_w = MEDIA_PANEL_W - 2 * MEDIA_PANEL_PAD;
     const std::int32_t inner_h = MEDIA_PANEL_H - 2 * MEDIA_PANEL_PAD;
     s_panel_inner_h            = inner_h;
-    s_panel_below = ARTIST_TO_PROGRESS + PROGRESS_H + PROGRESS_TO_TIMES +
+    // The bar sits within PROGRESS_TO_TIMES, which is measured from its top.
+    s_panel_below = ARTIST_TO_PROGRESS + PROGRESS_TO_TIMES +
                     lv_font_get_line_height(fonts::size_16()) + TIMES_TO_VOLUME + VOL_H +
                     BUTTON_GAP + TRANSPORT_H;
 

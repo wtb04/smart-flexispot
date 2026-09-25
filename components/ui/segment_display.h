@@ -19,10 +19,11 @@ private:
     static constexpr int kSegmentCount = 7;
     static constexpr int kDigitCount   = 4;
     static constexpr int kDash         = -2;
+    static constexpr int kUndrawn      = -3;  // nothing drawn yet, so the first value always is
 
     struct Digit {
         std::array<lv_obj_t *, kSegmentCount> bars{};
-        int shown = kDash;
+        int shown = kUndrawn;
     };
 
     void set_digit(int index, int value);

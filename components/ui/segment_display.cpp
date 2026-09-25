@@ -103,6 +103,8 @@ SegmentDisplay::SegmentDisplay(lv_obj_t *parent)
     lv_obj_set_style_bg_opa(dot_, LV_OPA_COVER, 0);
     lv_obj_set_pos(dot_, DOT_X, DOT_Y);
     lv_obj_set_size(dot_, DOT_SIZE, DOT_SIZE);
+
+    set_tenths(-1);  // dashes until there is a height, not every bar lit
 }
 
 void SegmentDisplay::set_digit(int index, int value)
