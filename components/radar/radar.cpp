@@ -112,6 +112,15 @@ Aircraft    *s_list       = nullptr;
 int          s_count      = 0;
 Aircraft    *s_scratch    = nullptr;
 Snapshot    *s_published  = nullptr;
+
+// What prefetch_visible() asks about, gathered under the lock and looked up
+// after it; in PSRAM, as the lists it is taken from are.
+struct Want {
+    char  hex[kHexLen];
+    char  flight[kFlightLen];
+    float distance;
+};
+Want *s_wanted = nullptr;
 bool         s_ok         = false;
 std::int64_t s_fetched_us = 0;
 
@@ -457,13 +466,8 @@ bool tap_waiting()
 
 void prefetch_visible()
 {
-    struct Want {
-        char  hex[kHexLen];
-        char  flight[kFlightLen];
-        float distance;
-    };
-    static Want wanted[kMaxAircraft];
-    int         count = 0;
+    Want *wanted = s_wanted;
+    int   count  = 0;
 
     xSemaphoreTake(s_lock, portMAX_DELAY);
     for (int i = 0; i < s_count && count < kMaxAircraft; ++i) {
@@ -633,7 +637,10 @@ esp_err_t start(UpdateHandler on_update, DetailsHandler on_details, PhotoHandler
         heap_caps_calloc(kMaxAircraft, sizeof(Aircraft), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     s_published = static_cast<Snapshot *>(
         heap_caps_calloc(1, sizeof(Snapshot), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    ESP_RETURN_ON_FALSE(s_list != nullptr && s_scratch != nullptr && s_published != nullptr,
+    s_wanted = static_cast<Want *>(
+        heap_caps_calloc(kMaxAircraft, sizeof(Want), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    ESP_RETURN_ON_FALSE(s_list != nullptr && s_scratch != nullptr && s_published != nullptr &&
+                            s_wanted != nullptr,
                         ESP_ERR_NO_MEM, TAG, "aircraft buffers");
 
     s_cache = static_cast<CacheEntry *>(
