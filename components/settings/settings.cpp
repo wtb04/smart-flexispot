@@ -35,10 +35,10 @@ constexpr Spec SPECS[] = {
     {"rail_right", 0, 0, 1},
     {"flipped", 0, 0, 1},
     {"orient_auto", 0, 0, 1},
-    // What M5's demo implies about how the IMU sits: x runs down the screen in
-    // landscape, so upright reads it negative. Replaced when Auto is picked
-    // with the panel standing, by whatever is upright then.
-    {"orient_sign", -1, -1, 1},
+    // Upright reads x positive on this board, against what M5's demo implies:
+    // taken the other way, Auto turned the screen upside down. Replaced when
+    // Auto is picked with the panel standing, by whatever is upright then.
+    {"orient_sign", 1, -1, 1},
     {"focus_work", 25, 5, 90},
     {"focus_break", 5, 1, 30},
     {"focus_long", 20, 5, 60},

@@ -14,7 +14,7 @@ namespace orientation {
 namespace {
 constexpr char TAG[] = "orientation";
 
-constexpr TickType_t TICK = pdMS_TO_TICKS(250);
+constexpr TickType_t TICK = pdMS_TO_TICKS(100);
 
 // Standing, not lying on the desk or held at an angle: most of gravity along
 // the screen's long-side axis.
@@ -22,7 +22,7 @@ constexpr float STANDING_G = 0.6f;
 
 // Turned only once it has stayed the other way up this long, so a panel being
 // picked up or knocked does not spin the screen.
-constexpr int SETTLED_TICKS = 6;
+constexpr int SETTLED_TICKS = 5;
 
 constexpr std::uint32_t TASK_STACK    = 3072;
 constexpr UBaseType_t   TASK_PRIORITY = 1;
