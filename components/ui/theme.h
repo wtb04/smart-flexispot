@@ -93,6 +93,16 @@ inline const lv_font_t *type_value() { return fonts::size_22(); }    // a readin
 inline const lv_font_t *type_body() { return fonts::size_20(); }     // everything else
 inline const lv_font_t *type_label() { return fonts::size_16(); }    // eyebrows and names
 
+/** How wide a line of ASCII sets in `font`. */
+inline std::int32_t text_width(const char *text, const lv_font_t *font)
+{
+    std::int32_t width = 0;
+    for (const char *c = text; *c != '\0'; ++c) {
+        width += lv_font_get_glyph_width(font, static_cast<std::uint32_t>(*c), 0);
+    }
+    return width;
+}
+
 inline void set_text(lv_obj_t *label, const char *value)
 {
     if (label == nullptr || value == nullptr) {

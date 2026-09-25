@@ -364,14 +364,6 @@ const char *blip_name(const radar::Aircraft &aircraft)
     return aircraft.flight[0] != '\0' ? aircraft.flight : aircraft.hex;
 }
 
-std::int32_t text_width(const char *text, const lv_font_t *font)
-{
-    std::int32_t width = 0;
-    for (const char *c = text; *c != '\0'; ++c) {
-        width += lv_font_get_glyph_width(font, static_cast<std::uint32_t>(*c), 0);
-    }
-    return width;
-}
 
 void quiet(lv_obj_t *obj)
 {
@@ -414,7 +406,7 @@ void ring(lv_obj_t *parent, std::int32_t radius, lv_opa_t opa)
 void compass(lv_obj_t *parent, const char *text, char side)
 {
     lv_obj_t          *label = theme::make_label(parent, text, theme::secondary, marking_font());
-    const std::int32_t w     = text_width(text, marking_font());
+    const std::int32_t w     = theme::text_width(text, marking_font());
     const std::int32_t h     = marking_font()->line_height;
     const std::int32_t edge  = s_radius + COMPASS_GAP;
 
@@ -431,7 +423,7 @@ void compass(lv_obj_t *parent, const char *text, char side)
 void place_ring_label(lv_obj_t *label, std::int32_t radius)
 {
     const std::int32_t w =
-        text_width(lv_label_get_text(label), marking_font()) + 2 * RING_LABEL_PAD;
+        theme::text_width(lv_label_get_text(label), marking_font()) + 2 * RING_LABEL_PAD;
     const std::int32_t h  = marking_font()->line_height;
     const lv_point_t   at = on_circle(RING_LABEL_ANGLE, static_cast<float>(radius));
     lv_obj_set_pos(label, at.x - w / 2, at.y - h / 2);
@@ -576,7 +568,7 @@ void build_key_scale(lv_obj_t *scope, std::int32_t mid)
 void build_key_end(lv_obj_t *scope, const char *text, float end_deg, float direction,
                    std::int32_t mid)
 {
-    const std::int32_t w     = text_width(text, marking_font());
+    const std::int32_t w     = theme::text_width(text, marking_font());
     const std::int32_t h     = marking_font()->line_height;
     const float        half  = static_cast<float>(w) / 2.0f / static_cast<float>(mid) / DEG;
     const float        angle = end_deg + direction * (half + KEY_LABEL_GAP_DEG);
@@ -1212,7 +1204,7 @@ void place_blip(Plot &plot, float range_km)
     plot.x = static_cast<std::int32_t>(std::lround(s_centre + plot.east_km * scale));
     plot.y = static_cast<std::int32_t>(std::lround(s_centre - plot.north_km * scale));
 
-    const std::int32_t span = text_width(blip_name(*plot.aircraft), marking_font());
+    const std::int32_t span = theme::text_width(blip_name(*plot.aircraft), marking_font());
     plot.label_x = plot.x > s_centre ? plot.x - LABEL_SIDE_GAP - span : plot.x + LABEL_SIDE_GAP;
     plot.label_w = span;
 }

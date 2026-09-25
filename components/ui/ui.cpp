@@ -334,6 +334,7 @@ Slot<bool>           p_screen;
 Slot<bool>           p_setting[SETTING_COUNT];
 Slot<bool>           p_calendar;
 Slot<Focus>          p_focus;
+Slot<UpdateState>    p_update;
 Slot<bool>           p_radar;
 Slot<DetailsArgs>    p_details;
 Slot<PhotoArgs>      p_photo;
@@ -826,6 +827,13 @@ void apply_page_updates()
     if (Focus focus{}; take(p_focus, focus)) {
         show_focus(focus);
     }
+    if (UpdateState update{}; take(p_update, update)) {
+        paint_update_icon(update);
+        // Only once all that arrives is in and checked, not while any still comes.
+        paint_setup_dot((update.panel_ready || update.companion_ready) &&
+                        update.busy == UpdateTarget::None);
+        paint_update_tile(update);
+    }
     if (bool calendar = false; take(p_calendar, calendar)) {
         show_calendar();
     }
@@ -1069,6 +1077,12 @@ esp_err_t set_calendar()
 esp_err_t set_focus(const Focus &focus)
 {
     put(p_focus, focus);
+    return ESP_OK;
+}
+
+esp_err_t set_update(const UpdateState &state)
+{
+    put(p_update, state);
     return ESP_OK;
 }
 

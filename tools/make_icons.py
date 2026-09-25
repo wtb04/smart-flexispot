@@ -197,6 +197,38 @@ TIMER = paint(ring(14, 16, 10.5, 8) +
               28)
 
 
+# An update on its way in: an arrow down into what it is for, the screen or
+# the companion's little box with its cable.
+def arrow_down(cx, top, bottom):
+    return [(stroke(cx, top, cx, bottom - 3.5, 2.6), True),
+            (polygon((cx - 5, bottom - 5), (cx + 5, bottom - 5), (cx, bottom)), True)]
+
+
+UPDATE_PANEL = paint([(rounded(2, 4, 26, 21, 3), True),
+                      (rounded(4.5, 6.5, 23.5, 18.5, 1.5), False),
+                      (rounded(10, 23, 18, 25.5, 1.2), True)]
+                     + arrow_down(14, 8, 17.5), STATUS_SIDE)
+UPDATE_COMPANION = paint([(rounded(6, 3, 22, 20, 3), True),
+                          (rounded(8.5, 5.5, 19.5, 17.5, 1.5), False),
+                          (stroke(14, 20, 14, 26, 2.6), True)]
+                         + arrow_down(14, 7, 16.5), STATUS_SIDE)
+
+# The image going on to the companion, over Bluetooth: its box filled, with the
+# rune cut out, so it reads apart from the outlined boxes of an image arriving.
+def rune(cx, top, bottom, width):
+    mid, reach = (top + bottom) / 2, (bottom - top) / 4
+    return [stroke(cx, top, cx, bottom, width),
+            stroke(cx, top, cx + reach * 1.3, top + reach, width),
+            stroke(cx + reach * 1.3, top + reach, cx - reach * 1.3, mid + reach, width),
+            stroke(cx - reach * 1.3, mid - reach, cx + reach * 1.3, bottom - reach, width),
+            stroke(cx + reach * 1.3, bottom - reach, cx, bottom, width)]
+
+
+INSTALL_COMPANION = paint([(rounded(6, 3, 22, 20, 3), True),
+                           (stroke(14, 20, 14, 26, 2.6), True)]
+                          + [(part, False) for part in rune(14, 5, 18, 1.6)], STATUS_SIDE)
+
+
 def emit(name, data, side=SIDE):
     rows = []
     for at in range(0, len(data), 16):
@@ -234,7 +266,7 @@ out.write_text(f"""#pragma once
 
 namespace ui {{
 namespace icons {{
-{emit("train", TRAIN)}{emit("bus", BUS)}{emit("walk", WALK)}{emit("bike", BIKE)}{emit("no_photo", NO_PHOTO, NO_PHOTO_SIDE)}{emit("wifi", WIFI, STATUS_SIDE)}{emit("wifi_off", WIFI_OFF, STATUS_SIDE)}{emit("phone", PHONE, STATUS_SIDE)}{emit("phone_off", PHONE_OFF, STATUS_SIDE)}{emit("plane", PLANE, PLANE_SIDE)}{emit("calendar", CALENDAR, 28)}{emit("desk", DESK, STATUS_SIDE)}{emit("timer", TIMER, 28)}{emit("plus", PLUS, MARK_SIDE)}{emit("minus", MINUS, MARK_SIDE)}{emit("times", TIMES, MARK_SIDE)}
+{emit("train", TRAIN)}{emit("bus", BUS)}{emit("walk", WALK)}{emit("bike", BIKE)}{emit("no_photo", NO_PHOTO, NO_PHOTO_SIDE)}{emit("wifi", WIFI, STATUS_SIDE)}{emit("wifi_off", WIFI_OFF, STATUS_SIDE)}{emit("phone", PHONE, STATUS_SIDE)}{emit("phone_off", PHONE_OFF, STATUS_SIDE)}{emit("plane", PLANE, PLANE_SIDE)}{emit("calendar", CALENDAR, 28)}{emit("desk", DESK, STATUS_SIDE)}{emit("timer", TIMER, 28)}{emit("update_panel", UPDATE_PANEL, STATUS_SIDE)}{emit("update_companion", UPDATE_COMPANION, STATUS_SIDE)}{emit("install_companion", INSTALL_COMPANION, STATUS_SIDE)}{emit("plus", PLUS, MARK_SIDE)}{emit("minus", MINUS, MARK_SIDE)}{emit("times", TIMES, MARK_SIDE)}
 }}  // namespace icons
 }}  // namespace ui
 """)

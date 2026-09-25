@@ -4,6 +4,10 @@ namespace ui::detail {
 namespace {
 lv_obj_t *s_pages[PAGE_COUNT]    = {};
 lv_obj_t *s_nav_tabs[PAGE_COUNT] = {};
+lv_obj_t *s_setup_dot            = nullptr;  // an update is waiting in Setup
+
+constexpr std::int32_t SETUP_DOT        = 12;
+constexpr std::int32_t SETUP_DOT_INSET  = 10;
 
 struct NavItem {
     const char           *icon;
@@ -219,6 +223,15 @@ void create_content(lv_obj_t *parent)
     const std::int32_t tab_w = (l.content_w - (PAGE_COUNT - 1) * BUTTON_GAP) / PAGE_COUNT;
     for (int i = 0; i < PAGE_COUNT; ++i) {
         s_nav_tabs[i] = make_nav_tab(nav, i, tab_w);
+        if (i == SETUP_PAGE) {
+            s_setup_dot = lv_obj_create(s_nav_tabs[i]);
+            theme::style_panel(s_setup_dot, theme::panel, SETUP_DOT / 2);
+            theme::fill_accent(s_setup_dot);
+            lv_obj_set_clickable(s_setup_dot, false);
+            lv_obj_set_size(s_setup_dot, SETUP_DOT, SETUP_DOT);
+            lv_obj_align(s_setup_dot, LV_ALIGN_TOP_RIGHT, -SETUP_DOT_INSET, SETUP_DOT_INSET);
+            lv_obj_set_hidden(s_setup_dot, true);
+        }
         s_pages[i]    = make_page(area, l);
     }
 
@@ -229,6 +242,13 @@ void create_content(lv_obj_t *parent)
     build_settings_page(s_pages[SETUP_PAGE]);
 
     select_page(HOME_PAGE);
+}
+
+void paint_setup_dot(bool ready)
+{
+    if (s_setup_dot != nullptr) {
+        lv_obj_set_hidden(s_setup_dot, !ready);
+    }
 }
 
 }  // namespace ui::detail

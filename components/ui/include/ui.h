@@ -129,6 +129,21 @@ struct Focus {
 };
 enum class FocusAction : std::uint8_t { Toggle, Skip, Reset };
 using FocusHandler = void (*)(FocusAction action);
+/** A firmware update on its way in or waiting: which board it is for while it
+ *  arrives, and whether one is ready for each. */
+enum class UpdateTarget : std::uint8_t { None, Panel, Companion };
+enum class UpdatePhase : std::uint8_t { Receiving, Installing };
+struct UpdateState {
+    UpdateTarget busy;
+    UpdatePhase  phase;         // arriving here, or going on to the companion
+    int          percent;
+    int          seconds_left;  // negative until known
+    bool         panel_ready;
+    bool         companion_ready;
+};
+/** Install what is ready now. */
+using UpdateHandler = void (*)();
+
 /** Minutes of focus, break and long break, and rounds before the long one. */
 using FocusPlanHandler = void (*)(int work_min, int break_min, int long_break_min, int rounds);
 
@@ -222,6 +237,7 @@ struct Handlers {
     DetailsHandler     details;
     FocusHandler       focus;
     FocusPlanHandler   focus_plan;
+    UpdateHandler      update_now;
 };
 
 /** Requires the LVGL port to be running. A zero accent keeps the built-in
@@ -292,6 +308,8 @@ esp_err_t set_radar_details(const char *hex, const radar::Details &details);
 esp_err_t set_radar_photo(const char *hex, const void *pixels, int width, int height);
 
 esp_err_t set_focus(const Focus &focus);
+
+esp_err_t set_update(const UpdateState &state);
 
 
 /** Queued rather than shown at once: they arrive in bursts. A full queue drops the oldest. */

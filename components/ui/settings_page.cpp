@@ -230,6 +230,49 @@ lv_obj_t *build_page_tile(lv_obj_t *parent, std::int32_t y, std::int32_t w, std:
 }  // namespace
 
 namespace {
+// The restart tile doubles as the one that installs an update, while there is
+// one: restarting into it is what installing is.
+lv_obj_t *s_restart_tile = nullptr;
+lv_obj_t *s_update_icon  = nullptr;  // in the glyph's place while updating
+lv_obj_t *s_update_bar   = nullptr;  // along the foot, the time left after it
+bool      s_update_ready = false;
+
+constexpr std::int32_t UPDATE_BAR_H   = 6;
+constexpr std::int32_t UPDATE_BAR_GAP = 16;
+constexpr std::int32_t PERCENT_ALL    = 100;
+constexpr char         LONGEST_LEFT[] = "00:00 left";
+
+void update_clicked_cb(lv_event_t *)
+{
+    if (s_update_ready && s_handlers.update_now != nullptr) {
+        s_handlers.update_now();
+    }
+}
+
+void build_update_progress(lv_obj_t *tile, std::int32_t w)
+{
+    s_update_icon = lv_image_create(tile);
+    lv_obj_set_style_image_recolor(s_update_icon, lv_color_hex(theme::primary), 0);
+    lv_obj_set_style_image_recolor_opa(s_update_icon, LV_OPA_COVER, 0);
+    lv_obj_set_clickable(s_update_icon, false);
+    lv_obj_align(s_update_icon, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_set_hidden(s_update_icon, true);
+
+    const lv_font_t   *font  = theme::type_body();
+    const std::int32_t inner = w - 2 * lv_obj_get_style_pad_left(tile, LV_PART_MAIN);
+    s_update_bar             = lv_bar_create(tile);
+    lv_obj_set_size(s_update_bar, inner - theme::text_width(LONGEST_LEFT, font) - UPDATE_BAR_GAP,
+                    UPDATE_BAR_H);
+    lv_bar_set_range(s_update_bar, 0, PERCENT_ALL);
+    theme::style_panel(s_update_bar, theme::panel, UPDATE_BAR_H / 2);
+    theme::fill_accent(s_update_bar, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(s_update_bar, UPDATE_BAR_H / 2, LV_PART_INDICATOR);
+    lv_obj_align(s_update_bar, LV_ALIGN_BOTTOM_LEFT, 0, -(font->line_height - UPDATE_BAR_H) / 2);
+    lv_obj_set_hidden(s_update_bar, true);
+}
+}  // namespace
+
+namespace {
 lv_obj_t *s_behaviour_view = nullptr;
 lv_obj_t *s_focus_view     = nullptr;
 
@@ -460,7 +503,10 @@ void build_settings_view(lv_obj_t *parent, std::int32_t w, std::int32_t h)
     lv_obj_t *restart = build_tile(view, right, POWER_ROW * pitch, half, tile_h,
                                    LV_SYMBOL_POWER, "Restart", true);
     lv_obj_add_event_cb(restart, restart_held_cb, LV_EVENT_LONG_PRESSED, nullptr);
+    lv_obj_add_event_cb(restart, update_clicked_cb, LV_EVENT_CLICKED, nullptr);
     tile_note(restart, half, "Hold to restart");
+    build_update_progress(restart, half);
+    s_restart_tile = restart;
 
     s_settings_view = view;
 }
@@ -590,6 +636,45 @@ void paint_focus_plan(const Focus &focus)
             paint_stepper(s_plan[i]);
         }
     }
+}
+
+void paint_update_tile(const UpdateState &state)
+{
+    if (s_restart_tile == nullptr) {
+        return;
+    }
+    constexpr std::uint32_t GLYPH = 0, CAPTION = 1, NOTE = 2;
+    lv_obj_t *glyph   = lv_obj_get_child(s_restart_tile, GLYPH);
+    lv_obj_t *caption = lv_obj_get_child(s_restart_tile, CAPTION);
+    lv_obj_t *note    = lv_obj_get_child(s_restart_tile, NOTE);
+
+    const bool busy  = state.busy != UpdateTarget::None;
+    const bool ready = state.panel_ready || state.companion_ready;
+    s_update_ready   = ready && !busy;
+
+    const char *what = state.panel_ready && state.companion_ready ? "Panel and companion ready"
+                       : state.panel_ready                        ? "Panel ready"
+                                                                  : "Companion ready";
+    const char *doing = state.phase == UpdatePhase::Installing ? "Installing" : "Downloading";
+    char        left[24] = "";
+    if (state.seconds_left >= 0) {
+        std::snprintf(left, sizeof(left), "%d:%02d left", state.seconds_left / units::kSecondsPerMinute,
+                      state.seconds_left % units::kSecondsPerMinute);
+    }
+    lv_obj_set_hidden(glyph, busy);
+    lv_obj_set_hidden(s_update_icon, !busy);
+    lv_obj_set_hidden(s_update_bar, !busy);
+    if (busy) {
+        lv_image_set_src(s_update_icon, update_icon(state));
+        lv_bar_set_value(s_update_bar, state.percent, LV_ANIM_OFF);
+    }
+    lv_obj_set_style_text_align(note, busy ? LV_TEXT_ALIGN_RIGHT : LV_TEXT_ALIGN_LEFT, 0);
+    theme::set_text(glyph, ready ? LV_SYMBOL_DOWNLOAD : LV_SYMBOL_POWER);
+    theme::set_text(caption, busy ? doing : ready ? "Update now" : "Restart");
+    theme::set_text(note, busy ? left : ready ? what : "Hold to restart");
+    theme::fill_accent_or(s_restart_tile, s_update_ready, theme::panel_light);
+    theme::set_text_color(glyph, s_update_ready ? theme::text : theme::primary);
+    theme::set_text_color(note, s_update_ready ? theme::text : theme::secondary);
 }
 
 }  // namespace ui::detail

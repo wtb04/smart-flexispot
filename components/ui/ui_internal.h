@@ -223,6 +223,14 @@ extern lv_obj_t *s_diag_view;
 
 /** The focus plan as the timer has it, onto the settings that change it. */
 void paint_focus_plan(const Focus &focus);
+
+/** An update arriving or ready: the rail's icon, the dot on Setup and the
+ *  tile that installs it. Each with the LVGL lock held. */
+void paint_update_icon(const UpdateState &state);
+/** The rail's symbol for what is updating: the screen or companion arriving, or going on. */
+const lv_image_dsc_t *update_icon(const UpdateState &state);
+void paint_setup_dot(bool ready);
+void paint_update_tile(const UpdateState &state);
 extern lv_obj_t *s_diag_summary;
 extern lv_obj_t *s_volume_value;
 extern lv_obj_t *s_volume_slider;

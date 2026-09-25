@@ -10,8 +10,13 @@
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
+#include "esp_partition.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "mbedtls/sha256.h"
+#include "nvs.h"
 
 #if __has_include("ota_secrets.h")
 #include "ota_secrets.h"
@@ -20,6 +25,7 @@
 #define OTA_KEY ""
 #endif
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 
@@ -27,25 +33,86 @@ namespace ota {
 namespace {
 constexpr char TAG[] = "ota";
 
-constexpr char KEY_HEADER[]         = "X-Update-Key";
-constexpr char COMPANION_PROJECT[]  = "desk_companion";
-constexpr std::size_t KEY_MAX       = 64;
-constexpr std::size_t CHUNK         = 4 * units::kBytesPerKiB;
+constexpr char KEY_HEADER[]        = "X-Update-Key";
+constexpr char INSTALL_KEY[]       = "install";
+constexpr char INSTALL_NOW[]       = "now";
+constexpr char COMPANION_PROJECT[] = "desk_companion";
+constexpr std::size_t KEY_MAX      = 64;
+constexpr std::size_t QUERY_MAX    = 32;
+constexpr std::size_t CHUNK        = 4 * units::kBytesPerKiB;
 constexpr std::size_t COMPANION_MAX = 960 * units::kBytesPerKiB;  // one of its app slots
 
 // The image's own description sits after its header and first segment's.
 constexpr std::size_t APP_DESC_AT = sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t);
+constexpr std::size_t DIGEST      = 32;  // the SHA-256 an image ends with
+
+// A panel image waits in the app slot it will boot from, marked in NVS; a
+// companion's waits in the storage partition, behind a header written last so
+// half an image is never taken for a whole one.
+constexpr char        NVS_NAMESPACE[]  = "ota";
+constexpr char        NVS_PANEL_KEY[]  = "panel_ready";
+constexpr char        STORE_LABEL[]    = "storage";
+constexpr std::uint32_t STORE_MAGIC    = 0x57464643;  // "CFFW"
+constexpr std::size_t STORE_IMAGE_AT   = 4 * units::kBytesPerKiB;  // a sector past the header
+
+struct Stored {
+    std::uint32_t magic;
+    std::uint32_t size;
+    std::uint32_t crc;
+};
 
 constexpr std::int64_t PROVE_WITHIN_US  = 3 * units::kUsPerMinute;
 constexpr std::int64_t RESTART_AFTER_US = units::kUsPerSecond;  // for the answer to get out
 constexpr int          RECV_TIMEOUT_S   = 30;
 constexpr std::uint32_t SERVER_STACK    = 8 * units::kBytesPerKiB;
-constexpr int          PROGRESS_STEP    = 25;  // percent between notices
+constexpr std::uint32_t INSTALL_STACK   = 6 * units::kBytesPerKiB;
+constexpr UBaseType_t   INSTALL_PRIORITY = 3;
+constexpr TickType_t    STILL_CHECK     = pdMS_TO_TICKS(500);
+constexpr int           PERCENT_ALL     = 100;
+constexpr std::int64_t  ESTIMATE_AFTER_US = 2 * units::kUsPerSecond;  // before it, the rate is noise
 
 Hooks              s_hooks{};
+Status             s_status{};
 httpd_handle_t     s_server   = nullptr;
 esp_timer_handle_t s_deadline = nullptr;
 std::uint8_t      *s_chunk    = nullptr;
+TaskHandle_t       s_installer = nullptr;
+std::int64_t       s_busy_since = 0;
+
+void publish()
+{
+    if (s_hooks.status != nullptr) {
+        s_hooks.status(s_status);
+    }
+}
+
+void set_busy(Target target, Phase phase = Phase::Receiving)
+{
+    s_status.busy         = target;
+    s_status.phase        = phase;
+    s_status.percent      = 0;
+    s_status.seconds_left = -1;
+    s_busy_since          = esp_timer_get_time();
+    publish();
+}
+
+/** How far it is, and how long the rest takes at the rate so far. */
+void advance(std::size_t done, std::size_t total)
+{
+    const std::int64_t elapsed = esp_timer_get_time() - s_busy_since;
+    const int          percent = static_cast<int>(done * PERCENT_ALL / total);
+    int                left    = -1;
+    if (done > 0 && elapsed >= ESTIMATE_AFTER_US) {
+        const std::int64_t rest_us = elapsed * static_cast<std::int64_t>(total - done) /
+                                     static_cast<std::int64_t>(done);
+        left = static_cast<int>((rest_us + units::kUsPerSecond - 1) / units::kUsPerSecond);
+    }
+    if (percent != s_status.percent || left != s_status.seconds_left) {
+        s_status.percent      = percent;
+        s_status.seconds_left = left;
+        publish();
+    }
+}
 
 void restart_now(void *)
 {
@@ -65,12 +132,105 @@ void restart_in(std::int64_t after_us, esp_timer_handle_t *timer, const char *na
     }
 }
 
-void notice(const char *message)
+void remember_panel_ready(bool ready)
 {
-    ESP_LOGI(TAG, "%s", message);
-    if (s_hooks.notice != nullptr) {
-        s_hooks.notice(message);
+    nvs_handle_t nvs;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) {
+        return;
     }
+    nvs_set_u8(nvs, NVS_PANEL_KEY, ready ? 1 : 0);
+    nvs_commit(nvs);
+    nvs_close(nvs);
+}
+
+bool remembered_panel_ready()
+{
+    nvs_handle_t nvs;
+    std::uint8_t ready = 0;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs) == ESP_OK) {
+        nvs_get_u8(nvs, NVS_PANEL_KEY, &ready);
+        nvs_close(nvs);
+    }
+    return ready != 0;
+}
+
+const esp_partition_t *store()
+{
+    return esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, STORE_LABEL);
+}
+
+bool stored_header(Stored &out)
+{
+    const esp_partition_t *part = store();
+    return part != nullptr && esp_partition_read(part, 0, &out, sizeof(out)) == ESP_OK &&
+           out.magic == STORE_MAGIC && out.size > 0 && out.size <= COMPANION_MAX;
+}
+
+esp_err_t keep_companion(const std::uint8_t *image, std::size_t size, std::uint32_t crc)
+{
+    const esp_partition_t *part = store();
+    ESP_RETURN_ON_FALSE(part != nullptr && STORE_IMAGE_AT + size <= part->size, ESP_ERR_NO_MEM,
+                        TAG, "no room to keep the companion's image");
+    const std::size_t span = (STORE_IMAGE_AT + size + part->erase_size - 1) / part->erase_size *
+                             part->erase_size;
+    ESP_RETURN_ON_ERROR(esp_partition_erase_range(part, 0, span), TAG, "erase");
+    ESP_RETURN_ON_ERROR(esp_partition_write(part, STORE_IMAGE_AT, image, size), TAG, "image");
+    const Stored header{STORE_MAGIC, static_cast<std::uint32_t>(size), crc};
+    return esp_partition_write(part, 0, &header, sizeof(header));
+}
+
+void forget_companion()
+{
+    if (const esp_partition_t *part = store(); part != nullptr) {
+        esp_partition_erase_range(part, 0, part->erase_size);
+    }
+}
+
+/** An image is whole when its last bytes are the SHA-256 of all before them. */
+bool whole(const std::uint8_t *image, std::size_t size)
+{
+    const auto *header = reinterpret_cast<const esp_image_header_t *>(image);
+    if (size <= sizeof(*header) + DIGEST || header->hash_appended != 1) {
+        return false;
+    }
+    std::uint8_t digest[DIGEST];
+    return mbedtls_sha256(image, size - DIGEST, digest, 0) == 0 &&
+           std::memcmp(digest, image + size - DIGEST, DIGEST) == 0;
+}
+
+/** The kept companion image, read back from flash and whole; nullptr when there
+ *  is none. The caller frees it. */
+std::uint8_t *load_companion(Stored &header)
+{
+    if (!stored_header(header)) {
+        return nullptr;
+    }
+    auto *image = static_cast<std::uint8_t *>(
+        heap_caps_malloc(header.size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (image == nullptr) {
+        return nullptr;
+    }
+    if (esp_partition_read(store(), STORE_IMAGE_AT, image, header.size) != ESP_OK ||
+        deskproto::crc32(0, image, header.size) != header.crc || !whole(image, header.size)) {
+        heap_caps_free(image);
+        return nullptr;
+    }
+    return image;
+}
+
+/** Keeps it, then reads it back: only an image found whole in flash is ready. */
+esp_err_t keep_and_check(const std::uint8_t *image, std::size_t size, std::uint32_t crc)
+{
+    ESP_RETURN_ON_ERROR(keep_companion(image, size, crc), TAG, "keep");
+    Stored         header{};
+    std::uint8_t  *kept = load_companion(header);
+    if (kept == nullptr) {
+        forget_companion();
+        ESP_LOGE(TAG, "the kept companion image did not read back whole");
+        return ESP_ERR_INVALID_CRC;
+    }
+    heap_caps_free(kept);
+    return ESP_OK;
 }
 
 esp_err_t answer(httpd_req_t *req, const char *status, const char *text)
@@ -89,14 +249,23 @@ bool allowed(httpd_req_t *req)
            std::strcmp(key, OTA_KEY) == 0;
 }
 
+bool asked_now(httpd_req_t *req)
+{
+    char query[QUERY_MAX] = {};
+    char value[QUERY_MAX] = {};
+    return httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
+           httpd_query_key_value(query, INSTALL_KEY, value, sizeof(value)) == ESP_OK &&
+           std::strcmp(value, INSTALL_NOW) == 0;
+}
+
 /** The checks both updates start with; false when it has already answered. */
-bool may_update(httpd_req_t *req, std::size_t limit)
+bool may_update(httpd_req_t *req, std::size_t limit, bool now)
 {
     if (!allowed(req)) {
         answer(req, "403 Forbidden", "wrong or missing update key\n");
         return false;
     }
-    if (s_hooks.busy != nullptr && s_hooks.busy()) {
+    if (now && s_hooks.busy != nullptr && s_hooks.busy()) {
         answer(req, "409 Conflict", "the desk is moving\n");
         return false;
     }
@@ -123,48 +292,72 @@ bool same_project(const esp_app_desc_t &arrived, const char *expected)
     return std::strncmp(arrived.project_name, expected, sizeof(arrived.project_name)) == 0;
 }
 
-esp_err_t update_panel(httpd_req_t *req)
+/** The body into the spare app slot; answers and returns nullptr when it fails. */
+const esp_partition_t *receive_panel(httpd_req_t *req, esp_app_desc_t &arrived)
 {
-    const esp_partition_t *slot = esp_ota_get_next_update_partition(nullptr);
-    if (slot == nullptr || !may_update(req, slot->size)) {
-        return slot == nullptr ? answer(req, "500 Internal Server Error", "no update slot\n") : ESP_OK;
+    const esp_partition_t *slot   = esp_ota_get_next_update_partition(nullptr);
+    esp_ota_handle_t       handle = 0;
+    if (slot == nullptr || esp_ota_begin(slot, OTA_WITH_SEQUENTIAL_WRITES, &handle) != ESP_OK) {
+        answer(req, "500 Internal Server Error", "could not open the update slot\n");
+        return nullptr;
     }
-    esp_ota_handle_t handle = 0;
-    if (esp_ota_begin(slot, OTA_WITH_SEQUENTIAL_WRITES, &handle) != ESP_OK) {
-        return answer(req, "500 Internal Server Error", "could not open the update slot\n");
-    }
-    notice("Updating the panel");
-
-    std::size_t left = req->content_len;
-    while (left > 0) {
+    for (std::size_t left = req->content_len; left > 0;) {
         const int got = receive(req, s_chunk, std::min(left, CHUNK));
         if (got <= 0) {
             esp_ota_abort(handle);
-            notice("The panel update did not arrive whole");
-            return answer(req, "500 Internal Server Error", "the image did not arrive whole\n");
+            answer(req, "500 Internal Server Error", "the image did not arrive whole\n");
+            return nullptr;
         }
         // The first write checks that what arrives starts as a firmware does.
         if (esp_ota_write(handle, s_chunk, static_cast<std::size_t>(got)) != ESP_OK) {
             esp_ota_abort(handle);
-            notice("That was not a panel firmware");
-            return answer(req, "400 Bad Request", "not a valid panel firmware\n");
+            answer(req, "400 Bad Request", "not a valid panel firmware\n");
+            return nullptr;
         }
         left -= static_cast<std::size_t>(got);
+        advance(req->content_len - left, req->content_len);
     }
-
-    esp_app_desc_t arrived{};
     if (esp_ota_end(handle) != ESP_OK || esp_ota_get_partition_description(slot, &arrived) != ESP_OK ||
         !same_project(arrived, esp_app_get_description()->project_name)) {
-        notice("That was not a panel firmware");
-        return answer(req, "400 Bad Request", "not a valid panel firmware\n");
+        answer(req, "400 Bad Request", "not a valid panel firmware\n");
+        return nullptr;
+    }
+    return slot;
+}
+
+esp_err_t update_panel(httpd_req_t *req)
+{
+    const esp_partition_t *spare = esp_ota_get_next_update_partition(nullptr);
+    const bool             now   = asked_now(req);
+    if (spare == nullptr || !may_update(req, spare->size, now)) {
+        return spare == nullptr ? answer(req, "500 Internal Server Error", "no update slot\n") : ESP_OK;
+    }
+    // What was ready in the slot is overwritten from the first byte.
+    remember_panel_ready(false);
+    s_status.panel_ready = false;
+    set_busy(Target::Panel);
+    esp_app_desc_t         arrived{};
+    const esp_partition_t *slot = receive_panel(req, arrived);
+    if (slot == nullptr) {
+        set_busy(Target::None);
+        return ESP_OK;
+    }
+
+    char text[96];
+    if (!now) {
+        remember_panel_ready(true);
+        s_status.panel_ready = true;
+        set_busy(Target::None);
+        std::snprintf(text, sizeof(text), "panel firmware %s ready: Update now in Setup\n",
+                      arrived.version);
+        return answer(req, "200 OK", text);
     }
     if (esp_ota_set_boot_partition(slot) != ESP_OK) {
+        set_busy(Target::None);
         return answer(req, "500 Internal Server Error", "could not switch to it\n");
     }
-    char text[96];
     std::snprintf(text, sizeof(text), "panel firmware %s written, restarting\n", arrived.version);
     answer(req, "200 OK", text);
-    notice("Restarting into the new firmware");
     static esp_timer_handle_t reboot = nullptr;
     restart_in(RESTART_AFTER_US, &reboot, "ota-restart");
     return ESP_OK;
@@ -172,67 +365,92 @@ esp_err_t update_panel(httpd_req_t *req)
 
 void relay_progress(int percent)
 {
-    static int said = 0;
-    if (percent == 0) {
-        said = 0;
-    }
-    if (percent >= said + PROGRESS_STEP && percent < 100) {
-        said = percent - percent % PROGRESS_STEP;
-        char text[48];
-        std::snprintf(text, sizeof(text), "Updating the companion, %d%%", said);
-        notice(text);
-    }
+    advance(static_cast<std::size_t>(percent), PERCENT_ALL);
 }
 
-// The companion's image is taken whole before any of it goes over the link, so
-// a broken upload never reaches it, and checked for being a companion's.
-esp_err_t update_companion(httpd_req_t *req)
+esp_err_t relay(const std::uint8_t *image, std::size_t size, std::uint32_t crc)
 {
-    if (!may_update(req, COMPANION_MAX)) {
-        return ESP_OK;
-    }
     if (s_hooks.relay == nullptr) {
-        return answer(req, "501 Not Implemented", "no link to the companion\n");
+        return ESP_ERR_NOT_SUPPORTED;
     }
+    set_busy(Target::Companion, Phase::Installing);
+    const esp_err_t sent = s_hooks.relay(image, size, crc, relay_progress);
+    set_busy(Target::None);
+    return sent;
+}
+
+/** The whole body in PSRAM, checked for being a companion's; nullptr, answered,
+ *  when it is not. */
+std::uint8_t *receive_companion(httpd_req_t *req, esp_app_desc_t &arrived)
+{
     const std::size_t size  = req->content_len;
     auto             *image = static_cast<std::uint8_t *>(
         heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     if (image == nullptr) {
-        return answer(req, "500 Internal Server Error", "no room for the image\n");
+        answer(req, "500 Internal Server Error", "no room for the image\n");
+        return nullptr;
     }
-    std::size_t taken = 0;
-    while (taken < size) {
+    for (std::size_t taken = 0; taken < size;) {
         const int got = receive(req, image + taken, std::min(size - taken, CHUNK));
         if (got <= 0) {
             heap_caps_free(image);
-            return answer(req, "500 Internal Server Error", "the image did not arrive whole\n");
+            answer(req, "500 Internal Server Error", "the image did not arrive whole\n");
+            return nullptr;
         }
         taken += static_cast<std::size_t>(got);
+        advance(taken, size);
     }
-
-    esp_app_desc_t arrived{};
-    const bool     shaped = size > APP_DESC_AT + sizeof(arrived) && image[0] == ESP_IMAGE_HEADER_MAGIC;
+    const bool shaped = size > APP_DESC_AT + sizeof(arrived) && image[0] == ESP_IMAGE_HEADER_MAGIC;
     if (shaped) {
         std::memcpy(&arrived, image + APP_DESC_AT, sizeof(arrived));
     }
     if (!shaped || arrived.magic_word != ESP_APP_DESC_MAGIC_WORD ||
-        !same_project(arrived, COMPANION_PROJECT)) {
+        !same_project(arrived, COMPANION_PROJECT) || !whole(image, size)) {
         heap_caps_free(image);
-        return answer(req, "400 Bad Request", "not a companion firmware\n");
+        answer(req, "400 Bad Request", "not a companion firmware\n");
+        return nullptr;
     }
+    return image;
+}
 
-    notice("Updating the companion");
-    relay_progress(0);
-    const esp_err_t sent =
-        s_hooks.relay(image, size, deskproto::crc32(0, image, size), relay_progress);
+// The companion's image is taken whole before any of it goes anywhere, so a
+// broken upload never reaches it.
+esp_err_t update_companion(httpd_req_t *req)
+{
+    const bool now = asked_now(req);
+    if (!may_update(req, COMPANION_MAX, now)) {
+        return ESP_OK;
+    }
+    set_busy(Target::Companion);
+    esp_app_desc_t arrived{};
+    std::uint8_t  *image = receive_companion(req, arrived);
+    if (image == nullptr) {
+        set_busy(Target::None);
+        return ESP_OK;
+    }
+    const std::size_t   size = req->content_len;
+    const std::uint32_t crc  = deskproto::crc32(0, image, size);
+    char                text[96];
+
+    if (!now) {
+        const esp_err_t kept = keep_and_check(image, size, crc);
+        heap_caps_free(image);
+        s_status.companion_ready = kept == ESP_OK;
+        set_busy(Target::None);
+        if (kept != ESP_OK) {
+            return answer(req, "500 Internal Server Error", "could not keep the image\n");
+        }
+        std::snprintf(text, sizeof(text), "companion firmware %s ready: Update now in Setup\n",
+                      arrived.version);
+        return answer(req, "200 OK", text);
+    }
+    const esp_err_t sent = relay(image, size, crc);
     heap_caps_free(image);
     if (sent != ESP_OK) {
-        notice("The companion update did not go through");
         return answer(req, "502 Bad Gateway", esp_err_to_name(sent));
     }
-    notice("The companion is restarting into its new firmware");
-    char text[96];
-    std::snprintf(text, sizeof(text), "companion firmware %s sent, it is restarting\n", arrived.version);
+    std::snprintf(text, sizeof(text), "companion firmware %s sent, it is restarting\n",
+                  arrived.version);
     return answer(req, "200 OK", text);
 }
 
@@ -244,6 +462,60 @@ esp_err_t version(httpd_req_t *req)
     return answer(req, "200 OK", text);
 }
 
+esp_err_t install_companion()
+{
+    Stored        header{};
+    std::uint8_t *image = load_companion(header);
+    esp_err_t     err   = ESP_ERR_INVALID_CRC;
+    if (image != nullptr) {
+        err = relay(image, header.size, header.crc);
+        heap_caps_free(image);
+    }
+    if (err == ESP_OK || err == ESP_ERR_INVALID_CRC) {
+        forget_companion();  // installed, or not worth trying again
+        s_status.companion_ready = false;
+        publish();
+    }
+    return err;
+}
+
+// Waits for the desk to stand still, sends the companion its image and then,
+// when there is one, restarts the panel into its own.
+[[noreturn]] void install_task(void *)
+{
+    for (;;) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        while (s_hooks.busy != nullptr && s_hooks.busy()) {
+            vTaskDelay(STILL_CHECK);
+        }
+        if (s_status.companion_ready) {
+            const esp_err_t err = install_companion();
+            ESP_LOGI(TAG, "companion update: %s", esp_err_to_name(err));
+        }
+        const esp_partition_t *spare = esp_ota_get_next_update_partition(nullptr);
+        if (s_status.panel_ready && spare != nullptr && esp_ota_set_boot_partition(spare) == ESP_OK) {
+            remember_panel_ready(false);
+            ESP_LOGI(TAG, "restarting into the panel update");
+            restart_now(nullptr);
+        }
+    }
+}
+
+// What is waiting from before a restart: a panel image still in its slot, a
+// companion's still whole in storage.
+void find_ready()
+{
+    esp_app_desc_t         waiting{};
+    const esp_partition_t *spare = esp_ota_get_next_update_partition(nullptr);
+    s_status.panel_ready = remembered_panel_ready() && spare != nullptr &&
+                           esp_ota_get_partition_description(spare, &waiting) == ESP_OK &&
+                           same_project(waiting, esp_app_get_description()->project_name);
+    Stored        header{};
+    std::uint8_t *kept       = load_companion(header);
+    s_status.companion_ready = kept != nullptr;
+    heap_caps_free(kept);
+}
+
 }  // namespace
 
 esp_err_t start(const Hooks &hooks)
@@ -252,9 +524,14 @@ esp_err_t start(const Hooks &hooks)
     s_hooks = hooks;
     s_chunk = static_cast<std::uint8_t *>(heap_caps_malloc(CHUNK, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     ESP_RETURN_ON_FALSE(s_chunk != nullptr, ESP_ERR_NO_MEM, TAG, "chunk");
+    ESP_RETURN_ON_FALSE(xTaskCreate(install_task, "ota-install", INSTALL_STACK, nullptr,
+                                    INSTALL_PRIORITY, &s_installer) == pdPASS,
+                        ESP_ERR_NO_MEM, TAG, "install task");
+    find_ready();
+    publish();
 
-    httpd_config_t config   = HTTPD_DEFAULT_CONFIG();
-    config.stack_size       = SERVER_STACK;
+    httpd_config_t config    = HTTPD_DEFAULT_CONFIG();
+    config.stack_size        = SERVER_STACK;
     config.recv_wait_timeout = RECV_TIMEOUT_S;
     config.send_wait_timeout = RECV_TIMEOUT_S;
     ESP_RETURN_ON_ERROR(httpd_start(&s_server, &config), TAG, "server");
@@ -271,6 +548,13 @@ esp_err_t start(const Hooks &hooks)
         ESP_LOGW(TAG, "no OTA_KEY in ota_secrets.h: every update will be refused");
     }
     return ESP_OK;
+}
+
+void install()
+{
+    if (s_installer != nullptr) {
+        xTaskNotifyGive(s_installer);
+    }
 }
 
 void watch()

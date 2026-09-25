@@ -51,10 +51,17 @@ Once both boards have been flashed by cable with the two-slot partition tables,
 neither needs the cable again:
 
 ```sh
-tools/ota.sh panel       # the panel, over Wi-Fi
-tools/ota.sh companion   # the companion, passed on by the panel over Bluetooth
-tools/ota.sh both        # companion first
+tools/ota.sh panel            # the panel's, over Wi-Fi
+tools/ota.sh companion        # the companion's, which the panel passes on over Bluetooth
+tools/ota.sh both             # both, companion first
+tools/ota.sh panel --now      # install straight away rather than keep it ready
 ```
+
+An update is kept ready unless `--now` says otherwise: the rail shows it
+arriving, for the screen or the companion, a dot then sits on Setup, and the
+restart tile there reads Update now until it is tapped. The companion's waits
+in the panel's storage partition, the panel's in its spare app slot, so both
+survive a restart.
 
 The script builds, then posts the image to the panel, which the router knows as
 `smart-flexispot` (give an address as a second argument if yours does not). The

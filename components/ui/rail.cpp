@@ -6,6 +6,15 @@ constexpr std::int32_t RAIL_INNER_W = RAIL_CARD_W - 2 * PANEL_PAD;
 
 constexpr std::int32_t  STRIP_H           = 44;
 constexpr std::int32_t  PHONE_ICON_OFFSET = 44;
+constexpr std::int32_t  UPDATE_ICON_OFFSET = 2 * PHONE_ICON_OFFSET;
+constexpr std::int32_t  UPDATE_ICON_SIDE   = 28;
+constexpr std::int32_t  UPDATE_BAR_H       = 3;
+constexpr std::int32_t  UPDATE_BAR_GAP     = 2;
+constexpr std::int32_t  UPDATE_BAR_Y       = UPDATE_ICON_SIDE / 2 + UPDATE_BAR_GAP + UPDATE_BAR_H / 2;
+constexpr std::int32_t  PERCENT_ALL        = 100;
+
+lv_obj_t *s_update_icon = nullptr;  // while an update arrives, for whichever board
+lv_obj_t *s_update_bar  = nullptr;  // how far it is, under the icon
 constexpr std::uint32_t COLON_BLINK_MS    = 1000;
 
 // Above the heading and below the reading, setting the desk's height apart.
@@ -115,6 +124,10 @@ void place_strip()
     theme::align(s_wifi_icon, right ? LV_ALIGN_LEFT_MID : LV_ALIGN_RIGHT_MID, 0, 0);
     theme::align(s_phone_icon, right ? LV_ALIGN_LEFT_MID : LV_ALIGN_RIGHT_MID,
                  right ? PHONE_ICON_OFFSET : -PHONE_ICON_OFFSET, 0);
+    theme::align(s_update_icon, right ? LV_ALIGN_LEFT_MID : LV_ALIGN_RIGHT_MID,
+                 right ? UPDATE_ICON_OFFSET : -UPDATE_ICON_OFFSET, 0);
+    theme::align(s_update_bar, right ? LV_ALIGN_LEFT_MID : LV_ALIGN_RIGHT_MID,
+                 right ? UPDATE_ICON_OFFSET : -UPDATE_ICON_OFFSET, UPDATE_BAR_Y);
 }
 
 lv_obj_t *make_rail_button(lv_obj_t *parent, const char *text)
@@ -202,8 +215,17 @@ void build_status_strip(lv_obj_t *rail)
     lv_obj_set_scrollable(strip, false);
 
     build_clock(strip);
-    s_wifi_icon  = make_status_icon(strip, &icons::wifi_off_icon);
-    s_phone_icon = make_status_icon(strip, &icons::phone_off_icon);
+    s_wifi_icon   = make_status_icon(strip, &icons::wifi_off_icon);
+    s_phone_icon  = make_status_icon(strip, &icons::phone_off_icon);
+    s_update_icon = make_status_icon(strip, &icons::update_panel_icon);
+    lv_obj_set_hidden(s_update_icon, true);
+    s_update_bar = lv_bar_create(strip);
+    lv_obj_set_size(s_update_bar, UPDATE_ICON_SIDE, UPDATE_BAR_H);
+    lv_bar_set_range(s_update_bar, 0, PERCENT_ALL);
+    theme::style_panel(s_update_bar, theme::panel_light, UPDATE_BAR_H / 2);
+    theme::fill_accent(s_update_bar, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(s_update_bar, UPDATE_BAR_H / 2, LV_PART_INDICATOR);
+    lv_obj_set_hidden(s_update_bar, true);
     place_strip();
 }
 
@@ -418,6 +440,29 @@ void apply_rail_side(bool right)
     s_rail_right = right;
     place_for_side();
     paint_side_buttons();
+}
+
+const lv_image_dsc_t *update_icon(const UpdateState &state)
+{
+    if (state.busy == UpdateTarget::Panel) {
+        return &icons::update_panel_icon;
+    }
+    return state.phase == UpdatePhase::Installing ? &icons::install_companion_icon
+                                                  : &icons::update_companion_icon;
+}
+
+void paint_update_icon(const UpdateState &state)
+{
+    if (s_update_icon == nullptr) {
+        return;
+    }
+    const bool busy = state.busy != UpdateTarget::None;
+    lv_obj_set_hidden(s_update_icon, !busy);
+    lv_obj_set_hidden(s_update_bar, !busy);
+    if (busy) {
+        lv_image_set_src(s_update_icon, update_icon(state));
+        lv_bar_set_value(s_update_bar, state.percent, LV_ANIM_OFF);
+    }
 }
 
 }  // namespace ui::detail

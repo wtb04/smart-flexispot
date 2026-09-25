@@ -39,7 +39,6 @@ namespace {
 constexpr char TAG[] = "panel";
 
 constexpr int         FOCUS_NOTICE_MS    = 5000;
-constexpr int         UPDATE_NOTICE_MS   = 4000;
 constexpr std::size_t FOCUS_MESSAGE_SIZE = 64;
 
 // The notice stays up until the restart takes the screen down.
@@ -291,9 +290,17 @@ bool desk_moving()
     return std::strcmp(desk::motion(), "idle") != 0;
 }
 
-void update_notice(const char *message)
+void show_update(const ota::Status &status)
 {
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::notify("", message, ui::Level::Neutral, UPDATE_NOTICE_MS));
+    const ui::UpdateTarget busy = status.busy == ota::Target::Panel       ? ui::UpdateTarget::Panel
+                                  : status.busy == ota::Target::Companion ? ui::UpdateTarget::Companion
+                                                                          : ui::UpdateTarget::None;
+    const ui::UpdatePhase phase = status.phase == ota::Phase::Installing ? ui::UpdatePhase::Installing
+                                                                         : ui::UpdatePhase::Receiving;
+    ESP_ERROR_CHECK_WITHOUT_ABORT(
+        ui::set_update({.busy = busy, .phase = phase, .percent = status.percent,
+                        .seconds_left = status.seconds_left, .panel_ready = status.panel_ready,
+                        .companion_ready = status.companion_ready}));
 }
 
 void before_update_restart()
@@ -343,6 +350,7 @@ extern "C" void app_main(void)
         .details     = on_details,
         .focus       = on_focus,
         .focus_plan  = on_focus_plan,
+        .update_now  = ota::install,
     };
     const int brightness = settings::get(settings::Key::Brightness);
     ui::set_cards(diagnostics::cards(), diagnostics::card_count());
@@ -387,7 +395,7 @@ extern "C" void app_main(void)
     ESP_ERROR_CHECK_WITHOUT_ABORT(wifi::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(ota::start({
         .busy    = desk_moving,
-        .notice  = update_notice,
+        .status  = show_update,
         .restart = before_update_restart,
         .relay   = ble::desk::send_update,
     }));
