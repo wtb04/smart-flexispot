@@ -247,6 +247,7 @@ struct MediaArgs {
     Text<24>  state;
     bool      playing;
     bool      controllable;
+    bool      art_coming;
 };
 struct ProgressArgs {
     int  position_s;
@@ -444,6 +445,56 @@ void apply_media(const char *source, const char *title, const char *artist, cons
     } else if (s_pause_timer == nullptr) {
         s_pause_timer = lv_timer_create(pause_settled, PAUSE_SETTLE_MS, nullptr);
     }
+}
+
+void apply_media_args(const MediaArgs &media)
+{
+    apply_media(media.source.get(), media.title.get(), media.artist.get(), media.state.get(),
+                media.playing, media.controllable);
+}
+
+// A new track's text waits here for its cover, or for this long when that is slow.
+constexpr std::uint32_t ART_WAIT_MS = 3 * units::kMsPerSecond;
+MediaArgs               s_held_media;
+bool                    s_media_held = false;
+lv_timer_t             *s_held_timer = nullptr;
+
+void drop_held_media()
+{
+    s_media_held = false;
+    if (s_held_timer != nullptr) {
+        lv_timer_delete(s_held_timer);
+        s_held_timer = nullptr;
+    }
+}
+
+void release_held_media()
+{
+    if (s_media_held) {
+        drop_held_media();
+        apply_media_args(s_held_media);
+    }
+}
+
+void held_too_long(lv_timer_t *)
+{
+    release_held_media();
+}
+
+bool same_track(const MediaArgs &a, const MediaArgs &b)
+{
+    return std::strcmp(a.title.text, b.title.text) == 0 &&
+           std::strcmp(a.artist.text, b.artist.text) == 0;
+}
+
+void hold_media(const MediaArgs &media)
+{
+    drop_held_media();
+    s_held_media = media;
+    s_media_held = true;
+    s_held_timer = lv_timer_create(held_too_long, ART_WAIT_MS, nullptr);
+    lv_timer_set_repeat_count(s_held_timer, 1);
+    lv_timer_set_auto_delete(s_held_timer, false);
 }
 
 void apply_media_progress(int position_s, int duration_s, bool playing)
@@ -774,11 +825,18 @@ void apply_media_updates()
 {
     static MediaArgs media;  // large for the LVGL task's stack
     if (take(p_media, media)) {
-        apply_media(media.source.get(), media.title.get(), media.artist.get(), media.state.get(),
-                    media.playing, media.controllable);
+        if (media.art_coming) {
+            hold_media(media);
+        } else if (s_media_held && same_track(media, s_held_media)) {
+            s_held_media = media;  // still waiting on its cover
+        } else {
+            drop_held_media();
+            apply_media_args(media);
+        }
     }
     if (ArtArgs art{}; take(p_art, art)) {
         apply_album_art(art.pixels, art.placeholder);
+        release_held_media();
     }
     if (ProgressArgs progress{}; take(p_progress, progress)) {
         apply_media_progress(progress.position_s, progress.duration_s, progress.playing);
@@ -933,7 +991,7 @@ esp_err_t set_desk_available(bool available)
 }
 
 esp_err_t set_media(const char *source, const char *title, const char *artist, const char *state,
-                    bool playing, bool controllable)
+                    bool playing, bool controllable, bool art_coming)
 {
     static MediaArgs args;  // too large to build on a caller's stack
     portENTER_CRITICAL(&s_pending_lock);
@@ -943,6 +1001,7 @@ esp_err_t set_media(const char *source, const char *title, const char *artist, c
     args.state.set(state);
     args.playing      = playing;
     args.controllable = controllable;
+    args.art_coming   = art_coming;
     p_media.value     = args;
     p_media.dirty = true;
     portEXIT_CRITICAL(&s_pending_lock);

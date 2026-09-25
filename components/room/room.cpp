@@ -313,7 +313,8 @@ std::string media_artist(const hass::ws::Entity &player)
 }
 
 void show_media_text(const std::string &source, const std::string &title,
-                     const std::string &artist, const std::string &state, bool playing)
+                     const std::string &artist, const std::string &state, bool playing,
+                     bool art_coming)
 {
     static std::string s_shown;
     const std::string  shown = source + '\n' + title + '\n' + artist + '\n' + state +
@@ -322,7 +323,7 @@ void show_media_text(const std::string &source, const std::string &title,
         s_shown = shown;
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media(source.c_str(), title.c_str(), artist.c_str(),
                                                     state.c_str(), playing,
-                                                    state != "OFF" && state != "--"));
+                                                    state != "OFF" && state != "--", art_coming));
     }
 }
 
@@ -355,9 +356,12 @@ void show_media_volume(const hass::ws::Entity &player)
     }
 }
 
-void ask_for_art(const hass::ws::Entity &player, const std::string &title)
+/** Asks for the track's cover once it changed; true when a different one is
+ *  now on its way, which the title waits for. */
+bool ask_for_art(const hass::ws::Entity &player, const std::string &title)
 {
     static std::string s_art_title;
+    static std::string s_art_path;
     static bool        s_art_asked = false;
     // Jellyfin's poster is only in entity_picture.
     std::string picture = attribute(player, "entity_picture_local");
@@ -369,10 +373,15 @@ void ask_for_art(const hass::ws::Entity &player, const std::string &title)
         s_art_title = title;
         s_art_asked = false;
     }
-    if (!s_art_asked && (!picture.empty() || title.empty())) {
-        s_art_asked = true;
-        media::set_art_path(title.empty() ? "" : picture.c_str());
+    if (s_art_asked || (picture.empty() && !title.empty())) {
+        return false;
     }
+    s_art_asked             = true;
+    const std::string path  = title.empty() ? "" : picture;
+    const bool        other = !path.empty() && path != s_art_path;
+    s_art_path              = path;
+    media::set_art_path(path.c_str());
+    return other;
 }
 
 void render_media(const hass::ws::EntityStore &store)
@@ -401,10 +410,11 @@ void render_media(const hass::ws::EntityStore &store)
 
     s_muted.store(attribute(*player, "is_volume_muted") == "true", std::memory_order_relaxed);
 
-    show_media_text(source, title, on ? media_artist(*player) : "", state, playing);
+    const bool art_coming = ask_for_art(*player, title);
+    show_media_text(source, title, on ? media_artist(*player) : "", state, playing,
+                    art_coming);
     show_media_position(*player, playing);
     show_media_volume(*player);
-    ask_for_art(*player, title);
 }
 
 void send_volume(void *)

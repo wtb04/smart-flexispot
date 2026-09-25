@@ -183,8 +183,10 @@ using LogHandler = int (*)(int card, bool warnings, LogLine *out, int max);
 /** An empty title means nothing is playing; the card then shows the state.
  *  `controllable` is whether holding the card has anything to act on. Strings
  *  are copied. */
+/** With art_coming the text waits for the cover asked for with it, so the two
+ *  change together, though never for long. */
 esp_err_t set_media(const char *source, const char *title, const char *artist, const char *state,
-                    bool playing, bool controllable);
+                    bool playing, bool controllable, bool art_coming = false);
 
 /** What holding the media card does: -1 opens the media panel, as for the
  *  speaker; a preset index sends the desk there instead, as for Jellyfin. */
