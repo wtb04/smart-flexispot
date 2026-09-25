@@ -27,6 +27,7 @@ struct Option {
     Leg          legs[kLegsMax];
     int          leg_count;
     bool         cancelled;
+    bool         late;  // gets there after the time asked for, offered beside the best
 };
 
 /** Reads the journeys out of the backend's answer. Times are unix seconds, so

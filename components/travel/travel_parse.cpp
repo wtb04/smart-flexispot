@@ -159,6 +159,7 @@ int parse(const char *body, std::size_t length, Option *out, int capacity)
         option         = Option{};
         field_number(at, option_end, "leaveAt", option.leave);
         field_number(at, option_end, "arriveAt", option.arrive);
+        option.late = field_flag(at, option_end, "late");
 
         const char *legs = find_key(at, option_end, "legs");
         if (legs != nullptr && *legs == '[') {

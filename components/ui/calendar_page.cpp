@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <utility>
@@ -111,13 +112,23 @@ lv_obj_t *s_side      = nullptr;
 lv_obj_t *s_next      = nullptr;
 lv_obj_t *s_numbers   = nullptr;
 lv_obj_t *s_spread    = nullptr;
-lv_obj_t *s_leave     = nullptr;
 lv_obj_t *s_journey   = nullptr;
+lv_obj_t *s_after     = nullptr;  // the rest of the week, where the route is when there is one
 lv_obj_t *s_route     = nullptr;
 Stop      s_stop[POINTS];
 Ride      s_ride[travel::kLegsMax];
 std::int32_t s_page_h  = 0;
 std::int32_t s_route_h = 0;
+
+struct Choice {  // one of the ways there, to pick between
+    lv_obj_t *root = nullptr;
+    lv_obj_t *time = nullptr;
+    lv_obj_t *via  = nullptr;
+};
+Choice       s_choice[travel::kOptionsMax];
+lv_obj_t    *s_choices    = nullptr;
+lv_obj_t    *s_route_name = nullptr;  // over the route when there is nothing to pick
+constexpr std::int32_t CHOICE_H = 64;
 
 constexpr int DAY_BLOCKS = 12;
 constexpr int DAY_TICKS  = 13;
@@ -312,7 +323,19 @@ void mode_of(const travel::Leg &leg, char *out, std::size_t size)
     if (walk || bike) {
         std::snprintf(out, size, "%s  \xc2\xb7  %d min", walk ? "Walk" : "Bike", mins);
     } else if (train && leg.line[0] != '\0') {
-        std::snprintf(out, size, "%s  \xc2\xb7  %d min", line_name(leg.line), mins);
+        // The backend writes a trip with changes as "SPR +1".
+        char        kind[travel::kLineMax];
+        const char *plus    = std::strstr(leg.line, " +");
+        const int   changes = plus != nullptr ? std::atoi(plus + 2) : 0;
+        std::snprintf(kind, sizeof(kind), "%.*s",
+                      static_cast<int>(plus != nullptr ? plus - leg.line : std::strlen(leg.line)),
+                      leg.line);
+        if (changes > 0) {
+            std::snprintf(out, size, "%s, %d change%s  \xc2\xb7  %d min", line_name(kind), changes,
+                          changes == 1 ? "" : "s", mins);
+        } else {
+            std::snprintf(out, size, "%s  \xc2\xb7  %d min", line_name(kind), mins);
+        }
     } else if (leg.line[0] != '\0') {
         std::snprintf(out, size, "Bus %s  \xc2\xb7  %d min", leg.line, mins);
     } else {
@@ -320,22 +343,69 @@ void mode_of(const travel::Leg &leg, char *out, std::size_t size)
     }
 }
 
+// The ways there still worth taking, latest first as the backend answers, and
+// the one on show: the best, which is the first that is not late, unless
+// another was picked by hand. A pick is held by when it leaves, so it stays
+// through refetches and falls away once gone. The choices run earliest first.
+travel::Option s_ways[travel::kOptionsMax];
+int            s_way_count   = 0;
+int            s_way_order[travel::kOptionsMax];
+std::int64_t   s_picked_leave = 0;
+
 void pick_journey(bool wanted, std::int64_t now)
 {
     static travel::Option options[travel::kOptionsMax];
     const int found = wanted ? travel::options(options, travel::kOptionsMax) : 0;
 
-    // Best first, as the backend answers. Hours off is nothing to act on yet.
-    constexpr std::int64_t SHOW_WITHIN = 3 * 3600;
-    s_going = nullptr;
-    for (int i = 0; i < found && s_going == nullptr; ++i) {
+    s_way_count = 0;
+    for (int i = 0; i < found; ++i) {
         if (options[i].leave >= now) {
-            s_going = &options[i];
+            s_ways[s_way_count++] = options[i];
         }
     }
-    if (s_going != nullptr && s_going->leave - now > SHOW_WITHIN) {
-        s_going = nullptr;
+    // Hours off is nothing to act on yet.
+    constexpr std::int64_t SHOW_WITHIN = 3 * 3600;
+    if (s_way_count > 0 && s_ways[0].leave - now > SHOW_WITHIN) {
+        s_way_count = 0;
     }
+
+    s_going = nullptr;
+    for (int i = 0; i < s_way_count && s_going == nullptr; ++i) {
+        if (s_ways[i].leave == s_picked_leave) {
+            s_going = &s_ways[i];
+        }
+    }
+    if (s_going == nullptr) {
+        s_picked_leave = 0;
+        for (int i = 0; i < s_way_count && s_going == nullptr; ++i) {
+            if (!s_ways[i].late) {
+                s_going = &s_ways[i];
+            }
+        }
+        if (s_going == nullptr && s_way_count > 0) {
+            s_going = &s_ways[0];
+        }
+    }
+
+    for (int i = 0; i < s_way_count; ++i) {
+        int at = i;
+        for (; at > 0 && s_ways[s_way_order[at - 1]].leave > s_ways[i].leave; --at) {
+            s_way_order[at] = s_way_order[at - 1];
+        }
+        s_way_order[at] = i;
+    }
+}
+
+// Where the train takes you, which is what tells one way from another: the
+// station a bus goes on from, or the one you walk from.
+const char *via_of(const travel::Option &way)
+{
+    for (int i = 0; i < way.leg_count; ++i) {
+        if (std::strcmp(way.legs[i].mode, "train") == 0) {
+            return way.legs[i].to;
+        }
+    }
+    return way.leg_count > 0 ? way.legs[0].to : "";
 }
 
 // Without a route the event card keeps the column, its lines centred rather than
@@ -444,13 +514,15 @@ void show_day(const ical::Event *next, std::int64_t now)
         lv_obj_set_width(block.time, w - 12);
         lv_obj_set_width(block.title, w - 12);
         lv_obj_set_width(block.place, w - 12);
-        const std::int32_t room = s_day_lane_h - 12 - theme::type_label()->line_height;
-        const bool         wide = w >= 40;
+        // A title in a sliver breaks every word apart; the time is enough there.
+        const std::int32_t room  = s_day_lane_h - 12 - theme::type_label()->line_height;
+        const bool         wide  = w >= 48;
+        const bool         words = w >= 96;
         lv_obj_set_hidden(block.time, !wide);
-        lv_obj_set_hidden(block.title, !wide || room < theme::type_label()->line_height);
+        lv_obj_set_hidden(block.title, !words || room < theme::type_label()->line_height);
         fit_lines(block.title, w - 12,
                   std::max<std::int32_t>(1, room / theme::type_label()->line_height - 1));
-        lv_obj_set_hidden(block.place, !wide || place_of(event)[0] == '\0' ||
+        lv_obj_set_hidden(block.place, !words || place_of(event)[0] == '\0' ||
                                            room < 2 * theme::type_label()->line_height);
         lv_obj_set_hidden(block.root, false);
     }
@@ -467,37 +539,74 @@ void show_day(const ical::Event *next, std::int64_t now)
     }
 }
 
+// The next event keeps the left, with the rest of its day under it when there
+// is one. The right is the way there while there is one to take, otherwise the
+// rest of the week.
 void place_left()
 {
     const bool route = s_going != nullptr;
-    const bool day   = !route && s_day_shown;
+    const bool day   = s_day_shown;
     lv_obj_set_hidden(s_journey, !route);
+    lv_obj_set_hidden(s_after, route);
     lv_obj_set_hidden(s_day, !day);
-    lv_obj_set_hidden(s_spread, route);  // with a route, there are no numbers to space off
-    lv_obj_set_flex_align(s_next, route || day ? LV_FLEX_ALIGN_START : LV_FLEX_ALIGN_CENTER,
+    lv_obj_set_flex_align(s_next, day ? LV_FLEX_ALIGN_START : LV_FLEX_ALIGN_CENTER,
                           LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_set_height(s_next, route || day ? LV_SIZE_CONTENT : s_page_h);
-    if (!route && !day) {
+    lv_obj_set_height(s_next, day ? LV_SIZE_CONTENT : s_page_h);
+    if (!day) {
         return;
     }
     lv_obj_update_layout(s_next);
     const std::int32_t top = lv_obj_get_height(s_next) + space::m;
-    if (day) {
-        lv_obj_set_y(s_day, top);
-        lv_obj_set_height(s_day, s_page_h - top);
-        const std::int32_t inner = s_page_h - top - 2 * space::l;
-        const std::int32_t head  = theme::type_label()->line_height + space::m;
-        const std::int32_t ticks = theme::type_label()->line_height + space::s;
-        const int          lanes = s_day_two ? 2 : 1;
-        s_day_lane_h = std::clamp<std::int32_t>(
-            (inner - head - ticks - (lanes - 1) * space::s) / lanes, DAY_LANE, 132);
-        lv_obj_set_y(s_day_track, head);
-        s_day_relayout = true;
-        return;
+    lv_obj_set_y(s_day, top);
+    lv_obj_set_height(s_day, s_page_h - top);
+    const std::int32_t inner = s_page_h - top - 2 * space::l;
+    const std::int32_t head  = theme::type_label()->line_height + space::m;
+    const std::int32_t ticks = theme::type_label()->line_height + space::s;
+    const int          lanes = s_day_two ? 2 : 1;
+    s_day_lane_h = std::clamp<std::int32_t>(
+        (inner - head - ticks - (lanes - 1) * space::s) / lanes, DAY_LANE, 132);
+    lv_obj_set_y(s_day_track, head);
+    s_day_relayout = true;
+}
+
+// The ways there, side by side, when there is more than one to choose from.
+void show_choices(std::int64_t starts)
+{
+    const bool pick = s_way_count > 1;
+    lv_obj_set_hidden(s_choices, !pick);
+    lv_obj_set_hidden(s_route_name, pick);
+    char text[16];
+    for (int i = 0; i < travel::kOptionsMax; ++i) {
+        const Choice &choice = s_choice[i];
+        const bool    real   = pick && i < s_way_count;
+        lv_obj_set_hidden(choice.root, !real);
+        if (!real) {
+            continue;
+        }
+        const travel::Option &way = s_ways[s_way_order[i]];
+        const bool            on  = &way == s_going;
+        lv_obj_set_state(choice.root, LV_STATE_CHECKED, on);
+        clock_of(way.leave, text, sizeof(text));
+        theme::set_text(choice.time, text);
+        theme::set_text_color(choice.time, way.cancelled ? theme::red : theme::text);
+        if (way.late && starts > 0) {
+            std::snprintf(text, sizeof(text), "%d min late",
+                          static_cast<int>((way.arrive - starts + 59) / 60));
+            theme::set_text(choice.via, text);
+        } else {
+            theme::set_text(choice.via, via_of(way));
+        }
+        theme::set_text_color(choice.via, on          ? theme::text
+                                          : way.late ? theme::amber
+                                                     : theme::secondary);
     }
-    lv_obj_set_y(s_journey, top);
-    lv_obj_set_height(s_journey, s_page_h - top);
-    s_route_h = s_page_h - top - 2 * space::l - lv_obj_get_y(s_route);
+
+    // The route takes what is left of the card, clear of the corner chip.
+    const std::int32_t head = pick ? CHOICE_H + space::l
+                                   : theme::type_label()->line_height + space::l;
+    const std::int32_t foot = theme::chip::size + theme::chip::inset - space::l + space::s;
+    lv_obj_set_y(s_route, head);
+    s_route_h = s_page_h - 2 * space::l - head - foot;
     lv_obj_set_height(s_route, s_route_h);
 }
 
@@ -507,17 +616,10 @@ void show_journey(std::int64_t now, std::int64_t starts)
         return;
     }
 
-    char text[64];
-    char span[32];
-    span_of(s_going->leave - now, span, sizeof(span));
-    if (s_going->cancelled) {
-        std::snprintf(text, sizeof(text), "Cancelled, leave %s", span);
-    } else {
-        std::snprintf(text, sizeof(text), "Leave %s", span);
-    }
-    theme::set_text(s_leave, text);
-    theme::set_text_color(s_leave, s_going->cancelled ? theme::red : theme::text);
+    (void)now;
+    show_choices(starts);
 
+    char               text[64];
     const int          legs  = s_going->leg_count;
     const std::int32_t line  = theme::type_body()->line_height;
     const std::int32_t pitch = std::min<std::int32_t>(
@@ -539,6 +641,7 @@ void show_journey(std::int64_t now, std::int64_t starts)
         const bool         leaves = i < legs;
         const bool         ends   = i == 0 || i == legs;
         const bool cancelled      = leaves && s_going->legs[i].cancelled;
+        bool       late           = false;
 
         lv_obj_set_pos(stop.node, rail_x - NODE / 2, y + (line - NODE) / 2);
         lv_obj_set_style_bg_color(stop.node, lv_color_hex(ends ? theme::secondary : theme::panel_light),
@@ -561,11 +664,17 @@ void show_journey(std::int64_t now, std::int64_t starts)
             std::snprintf(text, sizeof(text), "change, %d min", wait);
         } else if (!leaves && starts > 0) {
             const int spare = static_cast<int>((starts - s_going->legs[legs - 1].arrive) / 60);
-            std::snprintf(text, sizeof(text), "%d min before it starts", spare);
+            if (spare >= 0) {
+                std::snprintf(text, sizeof(text), "%d min before it starts", spare);
+            } else {
+                std::snprintf(text, sizeof(text), "%d min late", -spare);
+            }
+            late = spare < 0;
         } else {
             text[0] = '\0';
         }
         theme::set_text(stop.note, text);
+        theme::set_text_color(stop.note, late ? theme::amber : theme::secondary);
         lv_obj_set_pos(stop.note, text_x, y + line);
     }
 
@@ -655,7 +764,6 @@ void show_next(const ical::Event *first, std::int64_t now)
     // The big number is what to act on: leaving if there is a route, otherwise the
     // start, or while it runs, the end.
     char span[32];
-    lv_obj_set_hidden(s_numbers, s_going != nullptr && !ongoing);
     if (s_going != nullptr && !ongoing) {
         clock_of(s_going->leave, text, sizeof(text));
         span_of(s_going->leave - now, span, sizeof(span));
@@ -977,21 +1085,47 @@ void build_overview(lv_obj_t *parent, std::int32_t width, std::int32_t height)
     s_side_name = s_side;
     lv_obj_set_style_margin_bottom(side, 6, 0);  // onto the big number's baseline
 
-    const std::int32_t left_w = width - LIST_W - space::m;
-    s_journey                 = theme::make_card(s_overview);
-    lv_obj_set_pos(s_journey, 0, EVENT_H + space::m);
-    lv_obj_set_size(s_journey, left_w, height - EVENT_H - space::m);
+    const std::int32_t left_w  = width - LIST_W - space::m;
+    const std::int32_t route_w = LIST_W - 2 * space::l;
+    s_journey                  = theme::make_card(s_overview);
+    lv_obj_set_pos(s_journey, width - LIST_W, 0);
+    lv_obj_set_size(s_journey, LIST_W, height);
     lv_obj_set_hidden(s_journey, true);
     quiet(s_journey);
 
-    s_leave = line_label(s_journey, theme::text, theme::type_title());
-    lv_obj_set_width(s_leave, left_w - 2 * space::l);
+    s_route_name = theme::make_eyebrow(s_journey, "THE WAY THERE");
 
-    const std::int32_t route_y = theme::type_title()->line_height + space::l;
-    s_route_h = height - EVENT_H - space::m - 2 * space::l - route_y;
-    s_route   = bare(s_journey);
-    lv_obj_set_pos(s_route, 0, route_y);
-    lv_obj_set_size(s_route, left_w - 2 * space::l, s_route_h);
+    s_choices = row_of(s_journey, CHOICE_H, space::s);
+    for (int i = 0; i < travel::kOptionsMax; ++i) {
+        Choice &choice = s_choice[i];
+        choice.root    = lv_button_create(s_choices);
+        theme::style_button(choice.root, theme::panel);
+        theme::fill_accent(choice.root, LV_STATE_CHECKED);
+        lv_obj_set_height(choice.root, CHOICE_H);
+        lv_obj_set_flex_grow(choice.root, 1);
+        lv_obj_set_flex_flow(choice.root, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(choice.root, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                              LV_FLEX_ALIGN_CENTER);
+        choice.time = line_label(choice.root, theme::text, theme::type_value());
+        choice.via  = line_label(choice.root, theme::secondary, theme::type_label());
+        lv_obj_set_width(choice.via, (route_w - 2 * space::s) / travel::kOptionsMax - space::s);
+        lv_obj_set_style_text_align(choice.via, LV_TEXT_ALIGN_CENTER, 0);
+        lv_label_set_long_mode(choice.via, LV_LABEL_LONG_MODE_DOTS);
+        lv_obj_add_event_cb(
+            choice.root,
+            [](lv_event_t *e) {
+                const auto index =
+                    static_cast<int>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e)));
+                if (index < s_way_count) {
+                    s_picked_leave = s_ways[s_way_order[index]].leave;
+                    show_calendar();
+                }
+            },
+            LV_EVENT_CLICKED, reinterpret_cast<void *>(static_cast<std::intptr_t>(i)));
+    }
+
+    s_route = bare(s_journey);
+    lv_obj_set_size(s_route, route_w, height - 2 * space::l);
 
     s_day = theme::make_card(s_overview);
     lv_obj_set_pos(s_day, 0, EVENT_H + space::m);
@@ -1035,7 +1169,7 @@ void build_overview(lv_obj_t *parent, std::int32_t width, std::int32_t height)
         lv_obj_set_style_image_recolor_opa(ride.icon, LV_OPA_COVER, 0);
         quiet(ride.icon);
         ride.what = line_label(s_route, theme::secondary, theme::type_label());
-        lv_obj_set_width(ride.what, left_w - 2 * space::l - STOP_T_W - 80);
+        lv_obj_set_width(ride.what, route_w - STOP_T_W - 80);
     }
     for (Stop &stop : s_stop) {
         stop.node = bare(s_route);
@@ -1047,12 +1181,14 @@ void build_overview(lv_obj_t *parent, std::int32_t width, std::int32_t height)
         stop.when = line_label(s_route, theme::text, theme::type_body());
         lv_obj_set_width(stop.when, STOP_T_W);
         stop.name = line_label(s_route, theme::text, theme::type_body());
-        lv_obj_set_width(stop.name, left_w - 2 * space::l - STOP_T_W - 48);
+        lv_obj_set_width(stop.name, route_w - STOP_T_W - 48);
+        lv_label_set_long_mode(stop.name, LV_LABEL_LONG_MODE_DOTS);
         stop.note = line_label(s_route, theme::secondary, theme::type_label());
-        lv_obj_set_width(stop.note, left_w - 2 * space::l - STOP_T_W - 48);
+        lv_obj_set_width(stop.note, route_w - STOP_T_W - 48);
     }
 
     lv_obj_t *after = theme::make_card(s_overview);
+    s_after         = after;
     lv_obj_set_pos(after, width - LIST_W, 0);
     lv_obj_set_size(after, LIST_W, height);
     quiet(after);

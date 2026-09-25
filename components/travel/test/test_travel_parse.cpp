@@ -135,6 +135,17 @@ int main()
         check(std::strlen(options[0].legs[0].from) == travel::kPlaceMax - 1, "name truncated");
     }
 
+    {
+        const std::string text =
+            R"({"options":[{"leaveAt":9,"legs":[{"mode":"train","dep":9}],"late":true},)"
+            R"({"leaveAt":5,"legs":[{"mode":"train","dep":5}],"late":false},)"
+            R"({"leaveAt":3,"legs":[{"mode":"train","dep":3}]}]})";
+        const int n = run(text, options, travel::kOptionsMax);
+        check(n == 3, "three parsed");
+        check(options[0].late && !options[1].late && !options[2].late,
+              "late is read per option, and absent means in time");
+    }
+
     std::printf("%d checks, %d failures\n", checks, failures);
     if (failures == 0) {
         std::printf("ALL PASS\n");
