@@ -389,6 +389,29 @@ void apply_desk_available(bool available)
     }
 }
 
+// The card's frame holds the cover, a blank where one would not come, or,
+// while nothing plays, the speaker.
+bool        s_media_idle      = true;
+const void *s_art_pixels      = nullptr;
+bool        s_art_placeholder = false;
+
+void place_media_text(bool framed);
+
+void frame_media()
+{
+    if (s_media_art == nullptr) {
+        return;
+    }
+    const bool has_art = s_art_pixels != nullptr && !s_media_idle;
+    const bool framed  = has_art || s_art_placeholder || s_media_idle;
+    lv_obj_set_hidden(s_media_frame, !framed);
+    lv_obj_set_hidden(s_panel_frame, !framed);
+    lv_obj_set_hidden(s_media_art, !has_art);
+    lv_obj_set_hidden(s_panel_art, !has_art);
+    show_speaker_face(s_media_idle);
+    place_media_text(framed);
+}
+
 void apply_media(const char *source, const char *title, const char *artist, const char *state,
                  bool playing, bool controllable)
 {
@@ -405,6 +428,12 @@ void apply_media(const char *source, const char *title, const char *artist, cons
     theme::set_text(s_panel_title, has_track ? title : (state != nullptr ? state : "--"));
     theme::set_text(s_panel_artist, has_track && artist != nullptr ? artist : "");
     layout_media_text();
+    // The first time too: a card that starts idle never changes into it.
+    static bool s_framed = false;
+    if (!std::exchange(s_framed, true) || s_media_idle == has_track) {
+        s_media_idle = !has_track;
+        frame_media();
+    }
 
     s_has_track_shown = has_track;
     if (playing || !has_track) {
@@ -489,14 +518,10 @@ void apply_album_art(const void *pixels, bool placeholder)
     if (s_media_art == nullptr) {
         return;
     }
-    const bool has_art = pixels != nullptr;
-    const bool framed  = has_art || placeholder;
-    lv_obj_set_hidden(s_media_frame, !framed);
-    lv_obj_set_hidden(s_panel_frame, !framed);
-    lv_obj_set_hidden(s_media_art, !has_art);
-    lv_obj_set_hidden(s_panel_art, !has_art);
-    place_media_text(framed);
-    if (has_art) {
+    s_art_pixels      = pixels;
+    s_art_placeholder = placeholder;
+    frame_media();
+    if (pixels != nullptr) {
         show_art_pixels(pixels);
     }
 }

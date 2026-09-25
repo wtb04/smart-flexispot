@@ -781,6 +781,9 @@ void media_tapped()
     if (std::exchange(s_media_long, false) || std::exchange(s_media_swiped, false)) {
         return;
     }
+    if (!s_has_track_shown) {
+        return;  // nothing to pause or carry on with
+    }
     cancel_pause_settle();
     apply_playing(!s_playing_shown);
     if (s_handlers.media != nullptr) {
@@ -894,6 +897,18 @@ void build_media_panel(lv_obj_t *parent)
     s_media_panel->add_close_button();
 }
 
+// While nothing plays the cover's frame shows the speaker itself.
+lv_obj_t *s_speaker_face = nullptr;
+
+void build_speaker_face(lv_obj_t *frame, std::int32_t side)
+{
+    s_speaker_face = lv_image_create(frame);
+    lv_image_set_src(s_speaker_face, speaker_picture(side));
+    lv_obj_center(s_speaker_face);
+    lv_obj_set_clickable(s_speaker_face, false);
+    lv_obj_set_hidden(s_speaker_face, true);
+}
+
 void build_media_card(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int32_t w,
                       std::int32_t h)
 {
@@ -913,6 +928,7 @@ void build_media_card(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int
     s_media_frame          = rounded_frame(s_media_card, art, CARD_ART_RADIUS);
     lv_obj_align(s_media_frame, LV_ALIGN_LEFT_MID, 0, 0);
     s_media_art = make_cover(s_media_frame, art);
+    build_speaker_face(s_media_frame, art);
     lv_obj_set_hidden(s_media_frame, true);
 
     const std::int32_t inner_w = w - 2 * MEDIA_CARD_PAD;
@@ -931,11 +947,17 @@ void build_media_card(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int
 
     s_media_artist = theme::make_label(s_media_card, "", theme::secondary, fonts::size_16());
     one_line(s_media_artist, fonts::size_16(), text_w);
+
 }
 
 constexpr int LIGHTS_SHARE_NUM = 5;
 constexpr int LIGHTS_SHARE_DEN = 9;
 }  // namespace
+
+void show_speaker_face(bool shown)
+{
+    lv_obj_set_hidden(s_speaker_face, !shown);
+}
 
 void build_home_page(lv_obj_t *page)
 {

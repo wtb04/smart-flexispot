@@ -68,9 +68,11 @@ const char *toggle_label(const ToggleSpec &spec, bool on)
     return on ? spec.on_label : spec.off_label;
 }
 
-// Two players, one card: Jellyfin shows only while the speaker has nothing going.
+// Two players, one card: the speaker, then Jellyfin. Anything playing outranks
+// anything paused, so a paused speaker gives way to Jellyfin starting.
 constexpr char MEDIA_SPEAKER[]  = "media_player.office_speaker";
 constexpr char MEDIA_JELLYFIN[] = "media_player.macbook_pro";
+constexpr const char *MEDIA_PLAYERS[] = {MEDIA_SPEAKER, MEDIA_JELLYFIN};
 constexpr int  JELLYFIN_PRESET  = 1;  // holding the card for Jellyfin: Preset 2
 std::atomic<const char *> s_player{MEDIA_SPEAKER};
 
@@ -252,14 +254,27 @@ bool going(const hass::ws::Entity *player)
            (player->state == "playing" || player->state == "paused" || player->state == "buffering");
 }
 
-bool choose_laptop(const hass::ws::Entity *speaker, const hass::ws::Entity *jellyfin)
+/** The player the card shows and controls; the speaker while none has
+ *  anything going. */
+const char *choose_player(const hass::ws::EntityStore &store)
 {
-    const bool  laptop = !going(speaker) && going(jellyfin);
-    const char *chosen = laptop ? MEDIA_JELLYFIN : MEDIA_SPEAKER;
-    if (s_player.exchange(chosen) != chosen) {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_hold_preset(laptop ? JELLYFIN_PRESET : -1));
+    const char *chosen = nullptr;
+    for (const bool want_playing : {true, false}) {
+        for (const char *entity : MEDIA_PLAYERS) {
+            const hass::ws::Entity *player = store.find(entity);
+            if (chosen == nullptr && going(player) && (player->state == "paused") != want_playing) {
+                chosen = entity;
+            }
+        }
     }
-    return laptop;
+    if (chosen == nullptr) {
+        chosen = MEDIA_SPEAKER;
+    }
+    if (s_player.exchange(chosen) != chosen) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(
+            ui::set_media_hold_preset(chosen == MEDIA_JELLYFIN ? JELLYFIN_PRESET : -1));
+    }
+    return chosen;
 }
 
 /** A player that vanishes or loses its title for a moment is not shown as
@@ -362,10 +377,9 @@ void ask_for_art(const hass::ws::Entity &player, const std::string &title)
 
 void render_media(const hass::ws::EntityStore &store)
 {
-    const hass::ws::Entity *speaker  = store.find(MEDIA_SPEAKER);
-    const hass::ws::Entity *jellyfin = store.find(MEDIA_JELLYFIN);
-    const bool              laptop   = choose_laptop(speaker, jellyfin);
-    const hass::ws::Entity *player   = laptop ? jellyfin : speaker;
+    const char             *chosen = choose_player(store);
+    const bool              laptop = chosen == MEDIA_JELLYFIN;
+    const hass::ws::Entity *player = store.find(chosen);
 
     if (gone_only_briefly(player)) {
         return;
@@ -377,12 +391,17 @@ void render_media(const hass::ws::EntityStore &store)
     }
 
     const bool        playing = player->state == "playing";
-    const std::string title   = attribute(*player, "media_title");
-    const std::string source  = laptop ? "JELLYFIN" : upper(attribute(*player, "app_name"));
+    // What an idle player still names is what it last played: nothing is on.
+    const bool        on      = going(player);
+    const std::string title   = on ? attribute(*player, "media_title") : "";
+    const std::string app     = attribute(*player, "app_name");
+    const std::string source  = laptop ? "JELLYFIN" : upper(app.empty() ? player->name : app);
+    // An idle speaker has nothing on: to look at, it is off.
+    const std::string state   = player->state == "idle" ? "OFF" : upper(player->state);
 
     s_muted.store(attribute(*player, "is_volume_muted") == "true", std::memory_order_relaxed);
 
-    show_media_text(source, title, media_artist(*player), upper(player->state), playing);
+    show_media_text(source, title, on ? media_artist(*player) : "", state, playing);
     show_media_position(*player, playing);
     show_media_volume(*player);
     ask_for_art(*player, title);
