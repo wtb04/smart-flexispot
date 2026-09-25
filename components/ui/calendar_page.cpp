@@ -94,6 +94,7 @@ struct Block {  // one event in the week
     lv_obj_t *root  = nullptr;
     lv_obj_t *time  = nullptr;
     lv_obj_t *title = nullptr;
+    lv_obj_t *place = nullptr;
 };
 
 lv_obj_t *s_overview = nullptr;
@@ -219,12 +220,14 @@ lv_obj_t *line_label(lv_obj_t *parent, std::uint32_t colour, const lv_font_t *fo
 
 // Dots only shorten a label of fixed height, so a title allowed two lines is
 // measured and given one or two.
-void fit_lines(lv_obj_t *label, std::int32_t width, int lines)
+std::int32_t fit_lines(lv_obj_t *label, std::int32_t width, int lines)
 {
     const lv_font_t *font = lv_obj_get_style_text_font(label, LV_PART_MAIN);
     lv_point_t       size{};
     lv_text_get_size(&size, lv_label_get_text(label), font, 0, 0, width, LV_TEXT_FLAG_NONE);
-    lv_obj_set_height(label, std::min<std::int32_t>(size.y, lines * font->line_height));
+    const std::int32_t height = std::min<std::int32_t>(size.y, lines * font->line_height);
+    lv_obj_set_height(label, height);
+    return height;
 }
 
 lv_obj_t *dot_of(lv_obj_t *parent)
@@ -996,8 +999,8 @@ void show_week(std::int64_t now)
     for (int d = 0; d < WEEK_DAYS; ++d) {
         lv_obj_set_hidden(s_day_lane[d], d != today || d >= days);
         if (d == today && d < days) {
-            lv_obj_set_pos(s_day_lane[d], axis + d * col_w + 2, 0);
-            lv_obj_set_size(s_day_lane[d], col_w - 4, s_grid_h);
+            lv_obj_set_pos(s_day_lane[d], axis + d * col_w + 2, -space::xs);
+            lv_obj_set_size(s_day_lane[d], col_w - 4, s_grid_h + 2 * space::xs);
         }
     }
     for (int d = 0; d < WEEK_DAYS; ++d) {
@@ -1057,14 +1060,18 @@ void show_week(std::int64_t now)
         const ical::Event &event = week[i];
         s_week_event[i]          = event;
         const int          lanes = run_lanes[run_of[i]];
-        const std::int32_t lane_w = col_w / lanes;
+        // Inset from the day's edges, so today's band shows round every event.
+        constexpr std::int32_t INSET = 8;
+        constexpr std::int32_t APART = 4;  // between events side by side
+        const std::int32_t lane_w = (col_w - 2 * INSET + APART) / lanes;
         const float        top_h  = std::max(hour_of(event.start), first) - first;
         const float        end_h  = days_from(event.start, event.end) == 0 ? hour_of(event.end) : last;
         const auto         y      = static_cast<std::int32_t>(top_h * pph);
         const std::int32_t h =
             std::max<std::int32_t>(static_cast<std::int32_t>((end_h - first) * pph) - y - 2, line + 6);
-        lv_obj_set_pos(block.root, axis + day_of[i] * col_w + lane[i] * lane_w + 4, y + 1);
-        lv_obj_set_size(block.root, lane_w - 8, h);
+        const std::int32_t block_w = lane_w - APART;
+        lv_obj_set_pos(block.root, axis + day_of[i] * col_w + INSET + lane[i] * lane_w, y + 1);
+        lv_obj_set_size(block.root, block_w, h);
 
         // Faded by colour rather than by opacity, which would show the lines
         // behind through a past event.
@@ -1078,7 +1085,7 @@ void show_week(std::int64_t now)
 
         // The start, and the title where there is width for words: a sliver
         // shows only its colour, and a tap shows the rest.
-        const std::int32_t inner = lane_w - 8 - 12;
+        const std::int32_t inner = block_w - 12;
         const bool         timed = inner >= 40;
         const bool         words = inner >= 72 && h >= 2 * line + 4;
         clock_of(event.start, text, sizeof(text));
@@ -1087,10 +1094,20 @@ void show_week(std::int64_t now)
         lv_obj_set_hidden(block.time, !timed);
         theme::set_text(block.title, event.summary);
         theme::set_text_color(block.title, over ? theme::secondary : theme::text);
-        const std::int32_t lines = std::max<std::int32_t>(1, (h - 6 - line) / line);
+
+        // The room under the title, when a line is left over for it.
+        const char        *where  = place_of(event);
+        const std::int32_t spare  = std::max<std::int32_t>(1, (h - 8 - line) / line);
+        const bool         placed = words && where[0] != '\0' && spare >= 2;
+        const std::int32_t lines  = placed ? std::min<std::int32_t>(spare - 1, 2) : spare;
         lv_obj_set_pos(block.title, 0, line);
         lv_obj_set_size(block.title, inner, lines * line);
         lv_obj_set_hidden(block.title, !words);
+        const std::int32_t title_h = fit_lines(block.title, inner, lines);
+        theme::set_text(block.place, where);
+        lv_obj_set_width(block.place, inner);
+        lv_obj_set_pos(block.place, 0, line + title_h);
+        lv_obj_set_hidden(block.place, !placed);
         lv_obj_set_hidden(block.root, false);
     }
 
@@ -1334,6 +1351,7 @@ void build_week(lv_obj_t *parent, std::int32_t width, std::int32_t height)
 
     for (lv_obj_t *&head : s_day_head) {
         head = line_label(s_agenda, theme::secondary, theme::type_label());
+        lv_obj_set_height(head, theme::type_label()->line_height + 4);
         lv_obj_set_style_text_align(head, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_set_style_radius(head, theme::radius::pill, 0);
         lv_obj_set_style_pad_ver(head, 2, 0);
@@ -1344,6 +1362,7 @@ void build_week(lv_obj_t *parent, std::int32_t width, std::int32_t height)
     s_grid_w    = inner_w;
     s_grid_h    = inner_h - head_h - foot_h;
     lv_obj_set_pos(s_week_grid, 0, head_h);
+    lv_obj_add_flag(s_week_grid, LV_OBJ_FLAG_OVERFLOW_VISIBLE);  // today's band reaches past it
     lv_obj_set_size(s_week_grid, s_grid_w, s_grid_h);
 
     // Only today's column has a ground, so the week reads as its events rather
@@ -1377,6 +1396,8 @@ void build_week(lv_obj_t *parent, std::int32_t width, std::int32_t height)
         block.title = theme::make_label(block.root, "", theme::text, theme::type_label());
         lv_label_set_long_mode(block.title, LV_LABEL_LONG_MODE_DOTS);
         quiet(block.title);
+        block.place = line_label(block.root, theme::secondary, theme::type_label());
+        lv_label_set_long_mode(block.place, LV_LABEL_LONG_MODE_DOTS);
         tappable(block.root, s_week_event, static_cast<int>(&block - s_block));
     }
 
