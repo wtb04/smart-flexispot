@@ -251,7 +251,9 @@ void restart_for_desk(bool bluetooth)
         ui::Level::Neutral, DESK_RESTART_DELAY_MS));
     static esp_timer_handle_t timer = nullptr;
     if (timer == nullptr) {
-        const esp_timer_create_args_t args{.callback = restart_now, .name = "desk-restart"};
+        esp_timer_create_args_t args{};
+        args.callback = restart_now;
+        args.name     = "desk-restart";
         ESP_ERROR_CHECK_WITHOUT_ABORT(esp_timer_create(&args, &timer));
     }
     if (timer != nullptr) {

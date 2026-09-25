@@ -23,15 +23,7 @@ namespace space = theme::space;
 
 // The overview (next event, the way there, the rest of the week) and the week view.
 
-// ui does not require the units component, so the conversions it offers are named here.
-constexpr int           SECONDS_PER_MINUTE = 60;
-constexpr int           MINUTES_PER_HOUR   = 60;
-constexpr int           HOURS_PER_DAY      = 24;
-constexpr int           DAYS_PER_WEEK      = 7;
-constexpr int           SECONDS_PER_HOUR   = SECONDS_PER_MINUTE * MINUTES_PER_HOUR;
-constexpr int           SECONDS_PER_DAY    = SECONDS_PER_HOUR * HOURS_PER_DAY;
-constexpr int           SECONDS_PER_WEEK   = SECONDS_PER_DAY * DAYS_PER_WEEK;
-constexpr std::uint32_t MS_PER_SECOND      = 1000;
+constexpr int SECONDS_PER_WEEK = units::kSecondsPerDay * units::kDaysPerWeek;
 
 // Weekdays as std::tm counts them.
 constexpr int SUNDAY   = 0;
@@ -40,7 +32,7 @@ constexpr int SATURDAY = 6;
 // No change of clocks moves midday into another day.
 constexpr int NOON = 12;
 
-constexpr std::uint32_t REFRESH_MS = 30 * MS_PER_SECOND;
+constexpr std::uint32_t REFRESH_MS = 30 * units::kMsPerSecond;
 
 constexpr std::uint8_t FEED_LECTURES   = 0;
 constexpr std::uint8_t FEED_PRACTICALS = 1;
@@ -55,9 +47,9 @@ constexpr std::uint32_t INK_WORK       = 0xf0923c;
 constexpr int EVENTS_AHEAD    = 40;  // read per refresh
 constexpr int LIST_ITEMS      = 40;  // day names and events in the overview's list
 constexpr int WEEK_EVENTS     = 48;
-constexpr int WEEK_DAYS       = DAYS_PER_WEEK;
+constexpr int WEEK_DAYS       = units::kDaysPerWeek;
 constexpr int WORKDAYS        = 5;
-constexpr int HOURS_MAX       = HOURS_PER_DAY;
+constexpr int HOURS_MAX       = units::kHoursPerDay;
 constexpr int POINTS          = travel::kLegsMax + 1;
 constexpr int TITLE_LINES_MAX = 2;
 
@@ -68,7 +60,7 @@ constexpr float WORKDAY_LAST_HOUR  = 18.0f;
 constexpr int HOURLY_MARKS_MAX = 8;
 constexpr int SPARSE_MARK_STEP = 2;
 
-constexpr std::int64_t SHOW_WAYS_WITHIN = 3 * SECONDS_PER_HOUR;  // hours off is nothing to act on yet
+constexpr std::int64_t SHOW_WAYS_WITHIN = 3 * units::kSecondsPerHour;  // hours off is nothing to act on yet
 
 constexpr std::int32_t LIST_W        = 410;
 constexpr std::int32_t DOT           = 10;
@@ -334,12 +326,12 @@ void clock_of(std::int64_t at, char *out, std::size_t size)
 
 int whole_minutes(std::int64_t seconds)
 {
-    return static_cast<int>(seconds / SECONDS_PER_MINUTE);
+    return static_cast<int>(seconds / units::kSecondsPerMinute);
 }
 
 int minutes_rounded_up(std::int64_t seconds)
 {
-    return static_cast<int>((seconds + SECONDS_PER_MINUTE - 1) / SECONDS_PER_MINUTE);
+    return static_cast<int>((seconds + units::kSecondsPerMinute - 1) / units::kSecondsPerMinute);
 }
 
 void span_of(std::int64_t from_now, char *out, std::size_t size)
@@ -347,11 +339,11 @@ void span_of(std::int64_t from_now, char *out, std::size_t size)
     const int minutes = minutes_rounded_up(from_now);
     if (minutes <= 0) {
         std::snprintf(out, size, "now");
-    } else if (minutes < MINUTES_PER_HOUR) {
+    } else if (minutes < units::kMinutesPerHour) {
         std::snprintf(out, size, "in %d min", minutes);
     } else {
-        std::snprintf(out, size, "in %dh %02dm", minutes / MINUTES_PER_HOUR,
-                      minutes % MINUTES_PER_HOUR);
+        std::snprintf(out, size, "in %dh %02dm", minutes / units::kMinutesPerHour,
+                      minutes % units::kMinutesPerHour);
     }
 }
 
@@ -364,7 +356,7 @@ int days_from(std::int64_t now, std::int64_t at)
     today.tm_min = then.tm_min = today.tm_sec = then.tm_sec = 0;
     // Rounded: across a change of clocks the gap is an hour off a whole day.
     return static_cast<int>(std::lround(std::difftime(std::mktime(&then), std::mktime(&today)) /
-                                        static_cast<double>(SECONDS_PER_DAY)));
+                                        static_cast<double>(units::kSecondsPerDay)));
 }
 
 void day_name(std::int64_t now, std::int64_t at, char *out, std::size_t size)
@@ -380,7 +372,7 @@ void day_name(std::int64_t now, std::int64_t at, char *out, std::size_t size)
         std::snprintf(out, size, "Yesterday");
     } else {
         const std::tm when = local(at);
-        if (std::abs(away) < DAYS_PER_WEEK) {
+        if (std::abs(away) < units::kDaysPerWeek) {
             std::snprintf(out, size, "%s", WEEKDAYS[when.tm_wday]);
         } else {
             std::strftime(out, size, "%a %d %b", &when);
@@ -552,11 +544,11 @@ void when_of(const ical::Event &event, char *out, std::size_t size)
     clock_of(event.start, from, sizeof(from));
     clock_of(event.end, to, sizeof(to));
     const int mins  = whole_minutes(event.end - event.start);
-    const int hours = mins / MINUTES_PER_HOUR;
-    const int rest  = mins % MINUTES_PER_HOUR;
+    const int hours = mins / units::kMinutesPerHour;
+    const int rest  = mins % units::kMinutesPerHour;
     if (rest == 0) {
         std::snprintf(out, size, "%s \xe2\x80\x93 %s, %d h", from, to, hours);
-    } else if (mins > MINUTES_PER_HOUR) {
+    } else if (mins > units::kMinutesPerHour) {
         std::snprintf(out, size, "%s \xe2\x80\x93 %s, %d h %d min", from, to, hours, rest);
     } else {
         std::snprintf(out, size, "%s \xe2\x80\x93 %s, %d min", from, to, mins);
@@ -655,8 +647,8 @@ struct DayScale {
 
     float hour_at(std::int64_t at) const
     {
-        return static_cast<float>(std::clamp<std::int64_t>(at - from, 0, SECONDS_PER_DAY)) /
-               static_cast<float>(SECONDS_PER_HOUR);
+        return static_cast<float>(std::clamp<std::int64_t>(at - from, 0, units::kSecondsPerDay)) /
+               static_cast<float>(units::kSecondsPerHour);
     }
 
     std::int32_t x_of_hour(float hour) const
@@ -1158,11 +1150,11 @@ void show_list(const ical::Event *ahead, int count, std::int64_t now)
 std::int64_t week_start(std::int64_t now, int weeks)
 {
     std::tm day = local(now);
-    day.tm_mday -= (day.tm_wday - MONDAY + DAYS_PER_WEEK) % DAYS_PER_WEEK;
+    day.tm_mday -= (day.tm_wday - MONDAY + units::kDaysPerWeek) % units::kDaysPerWeek;
     if (day.tm_wday == SATURDAY || day.tm_wday == SUNDAY) {
-        day.tm_mday += DAYS_PER_WEEK;
+        day.tm_mday += units::kDaysPerWeek;
     }
-    day.tm_mday += DAYS_PER_WEEK * weeks;
+    day.tm_mday += units::kDaysPerWeek * weeks;
     day.tm_hour = day.tm_min = day.tm_sec = 0;
     day.tm_isdst = -1;
     return static_cast<std::int64_t>(std::mktime(&day));
@@ -1170,14 +1162,14 @@ std::int64_t week_start(std::int64_t now, int weeks)
 
 std::tm noon_on(std::int64_t monday, int day)
 {
-    return local(monday + day * SECONDS_PER_DAY + NOON * SECONDS_PER_HOUR);
+    return local(monday + day * units::kSecondsPerDay + NOON * units::kSecondsPerHour);
 }
 
 float hour_of(std::int64_t at)
 {
     const std::tm when = local(at);
     return static_cast<float>(when.tm_hour) +
-           static_cast<float>(when.tm_min) / static_cast<float>(MINUTES_PER_HOUR);
+           static_cast<float>(when.tm_min) / static_cast<float>(units::kMinutesPerHour);
 }
 
 struct WeekGrid {
@@ -1205,7 +1197,7 @@ WeekGrid grid_for(std::int64_t from, std::int64_t now, const ical::Event *week, 
         grid.first = std::min(grid.first, std::floor(hour_of(week[i].start)));
         const bool same_day = days_from(week[i].start, week[i].end) == 0;
         grid.last = std::max(grid.last, same_day ? std::ceil(hour_of(week[i].end))
-                                                 : static_cast<float>(HOURS_PER_DAY));
+                                                 : static_cast<float>(units::kHoursPerDay));
     }
     grid.hours       = static_cast<int>(grid.last - grid.first);
     grid.px_per_hour = static_cast<float>(s_grid_h) / static_cast<float>(grid.hours);
@@ -1417,7 +1409,7 @@ void show_week(std::int64_t now)
     static ical::Event week[WEEK_EVENTS];
     const std::int64_t from = week_start(now, s_week_shift);
     // An hour over, for the week summer time ends.
-    const int count = ical::between(from, from + SECONDS_PER_WEEK + SECONDS_PER_HOUR, week, WEEK_EVENTS);
+    const int count = ical::between(from, from + SECONDS_PER_WEEK + units::kSecondsPerHour, week, WEEK_EVENTS);
 
     int            day_of[WEEK_EVENTS];
     const WeekGrid grid = grid_for(from, now, week, count, day_of);
@@ -1643,7 +1635,7 @@ void build_coming_up(std::int32_t x)
     s_list = column_of(s_after, space::s);
     lv_obj_set_y(s_list, list_y);
     lv_obj_set_height(s_list, s_page_h - 2 * space::l - list_y - theme::chip::size);
-    lv_obj_add_flag(s_list, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_clickable(s_list, true);
     lv_obj_set_scrollable(s_list, true);
     lv_obj_set_scroll_dir(s_list, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(s_list, LV_SCROLLBAR_MODE_ACTIVE);
@@ -1690,7 +1682,7 @@ void build_week_grid(std::int32_t top)
 {
     lv_obj_t *grid = bare(s_agenda);
     lv_obj_set_pos(grid, 0, top);
-    lv_obj_add_flag(grid, LV_OBJ_FLAG_OVERFLOW_VISIBLE);  // today's band reaches past it
+    lv_obj_set_overflow_visible(grid, true);  // today's band reaches past it
     lv_obj_set_size(grid, s_grid_w, s_grid_h);
 
     // Only today's column has a ground, so the week reads as its events rather

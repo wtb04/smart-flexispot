@@ -218,6 +218,7 @@ const lv_image_dsc_t {name.lower()}_icon = {{
     .data_size = sizeof({name.upper()}_PIXELS),
     .data = {name.upper()}_PIXELS,
     .reserved = nullptr,
+    .reserved_2 = nullptr,
 }};
 """
 

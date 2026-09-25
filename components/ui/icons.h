@@ -54,6 +54,7 @@ const lv_image_dsc_t train_icon = {
     .data_size = sizeof(TRAIN_PIXELS),
     .data = TRAIN_PIXELS,
     .reserved = nullptr,
+    .reserved_2 = nullptr,
 };
 
 const std::uint8_t BUS_PIXELS[] = {
@@ -101,6 +102,7 @@ const lv_image_dsc_t bus_icon = {
     .data_size = sizeof(BUS_PIXELS),
     .data = BUS_PIXELS,
     .reserved = nullptr,
+    .reserved_2 = nullptr,
 };
 
 const std::uint8_t WALK_PIXELS[] = {
@@ -148,6 +150,7 @@ const lv_image_dsc_t walk_icon = {
     .data_size = sizeof(WALK_PIXELS),
     .data = WALK_PIXELS,
     .reserved = nullptr,
+    .reserved_2 = nullptr,
 };
 
 const std::uint8_t BIKE_PIXELS[] = {
@@ -195,6 +198,7 @@ const lv_image_dsc_t bike_icon = {
     .data_size = sizeof(BIKE_PIXELS),
     .data = BIKE_PIXELS,
     .reserved = nullptr,
+    .reserved_2 = nullptr,
 };
 
 const std::uint8_t NO_PHOTO_PIXELS[] = {
@@ -311,6 +315,7 @@ const lv_image_dsc_t no_photo_icon = {
     .data_size = sizeof(NO_PHOTO_PIXELS),
     .data = NO_PHOTO_PIXELS,
     .reserved = nullptr,
+    .reserved_2 = nullptr,
 };
 
 const std::uint8_t WIFI_PIXELS[] = {
@@ -376,6 +381,7 @@ const lv_image_dsc_t wifi_icon = {
     .data_size = sizeof(WIFI_PIXELS),
     .data = WIFI_PIXELS,
     .reserved = nullptr,
+    .reserved_2 = nullptr,
 };
 
 const std::uint8_t WIFI_OFF_PIXELS[] = {
@@ -441,6 +447,7 @@ const lv_image_dsc_t wifi_off_icon = {
     .data_size = sizeof(WIFI_OFF_PIXELS),
     .data = WIFI_OFF_PIXELS,
     .reserved = nullptr,
+    .reserved_2 = nullptr,
 };
 
 const std::uint8_t PHONE_PIXELS[] = {
@@ -506,6 +513,7 @@ const lv_image_dsc_t phone_icon = {
     .data_size = sizeof(PHONE_PIXELS),
     .data = PHONE_PIXELS,
     .reserved = nullptr,
+    .reserved_2 = nullptr,
 };
 
 const std::uint8_t PHONE_OFF_PIXELS[] = {
@@ -571,6 +579,7 @@ const lv_image_dsc_t phone_off_icon = {
     .data_size = sizeof(PHONE_OFF_PIXELS),
     .data = PHONE_OFF_PIXELS,
     .reserved = nullptr,
+    .reserved_2 = nullptr,
 };
 
 const std::uint8_t PLANE_PIXELS[] = {
@@ -636,6 +645,7 @@ const lv_image_dsc_t plane_icon = {
     .data_size = sizeof(PLANE_PIXELS),
     .data = PLANE_PIXELS,
     .reserved = nullptr,
+    .reserved_2 = nullptr,
 };
 
 const std::uint8_t CALENDAR_PIXELS[] = {
@@ -701,6 +711,7 @@ const lv_image_dsc_t calendar_icon = {
     .data_size = sizeof(CALENDAR_PIXELS),
     .data = CALENDAR_PIXELS,
     .reserved = nullptr,
+    .reserved_2 = nullptr,
 };
 
 const std::uint8_t DESK_PIXELS[] = {
@@ -766,6 +777,7 @@ const lv_image_dsc_t desk_icon = {
     .data_size = sizeof(DESK_PIXELS),
     .data = DESK_PIXELS,
     .reserved = nullptr,
+    .reserved_2 = nullptr,
 };
 
 const std::uint8_t TIMER_PIXELS[] = {
@@ -831,6 +843,7 @@ const lv_image_dsc_t timer_icon = {
     .data_size = sizeof(TIMER_PIXELS),
     .data = TIMER_PIXELS,
     .reserved = nullptr,
+    .reserved_2 = nullptr,
 };
 
 const std::uint8_t PLUS_PIXELS[] = {
@@ -863,6 +876,7 @@ const lv_image_dsc_t plus_icon = {
     .data_size = sizeof(PLUS_PIXELS),
     .data = PLUS_PIXELS,
     .reserved = nullptr,
+    .reserved_2 = nullptr,
 };
 
 const std::uint8_t MINUS_PIXELS[] = {
@@ -895,6 +909,7 @@ const lv_image_dsc_t minus_icon = {
     .data_size = sizeof(MINUS_PIXELS),
     .data = MINUS_PIXELS,
     .reserved = nullptr,
+    .reserved_2 = nullptr,
 };
 
 const std::uint8_t TIMES_PIXELS[] = {
@@ -927,6 +942,7 @@ const lv_image_dsc_t times_icon = {
     .data_size = sizeof(TIMES_PIXELS),
     .data = TIMES_PIXELS,
     .reserved = nullptr,
+    .reserved_2 = nullptr,
 };
 
 }  // namespace icons
