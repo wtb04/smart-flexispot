@@ -175,14 +175,16 @@ void on_focus_change(const focus::State &state, bool finished)
     char              message[FOCUS_MESSAGE_SIZE];
     switch (state.phase) {
         case focus::Phase::Break:
-            std::snprintf(message, sizeof(message), "Break, %d min", plan.break_min);
+            std::snprintf(message, sizeof(message), "Round %d done, %d min break is ready", state.round,
+                          plan.break_min);
             break;
         case focus::Phase::LongBreak:
-            std::snprintf(message, sizeof(message), "All %d rounds done, %d min break", plan.rounds,
-                          plan.long_break_min);
+            std::snprintf(message, sizeof(message), "All %d rounds done, %d min break is ready",
+                          plan.rounds, plan.long_break_min);
             break;
         case focus::Phase::Work:
-            std::snprintf(message, sizeof(message), "Focus, round %d of %d", state.round, plan.rounds);
+            std::snprintf(message, sizeof(message), "Break over, round %d of %d is ready", state.round,
+                          plan.rounds);
             break;
         case focus::Phase::Idle:
             return;

@@ -112,6 +112,13 @@ bool resting()
     return s_focus.phase == FocusPhase::Break || s_focus.phase == FocusPhase::LongBreak;
 }
 
+// Set up and not yet started: the next round, waiting for the button.
+bool waiting()
+{
+    return s_focus.phase != FocusPhase::Idle && !s_focus.running &&
+           s_focus.left_ms == s_focus.length_ms;
+}
+
 std::uint32_t ink_of(bool rest)
 {
     return rest ? theme::green : theme::primary;
@@ -630,7 +637,8 @@ void show_focus(const Focus &focus)
     }
 
     char text[48];
-    std::snprintf(text, sizeof(text), "%s%s", phase_name(focus.phase), paused ? ", PAUSED" : "");
+    std::snprintf(text, sizeof(text), "%s%s", phase_name(focus.phase),
+                  waiting() ? ", READY" : paused ? ", PAUSED" : "");
     theme::set_text(s_phase, text);
     lv_obj_set_state(s_go, LV_STATE_CHECKED, focus.running);
     lv_obj_t *glyph = lv_obj_get_child(s_go, 0);

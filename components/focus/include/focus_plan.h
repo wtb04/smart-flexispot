@@ -66,8 +66,8 @@ inline State part(Phase phase, int round, const Plan &plan, std::int64_t now)
     return state;
 }
 
-/** What follows a part that ran out or was skipped. After the long break the
- *  next set starts on its own, until the timer is reset. */
+/** What follows a part that was skipped, started at once. After the long
+ *  break the next set begins, until the timer is reset. */
 inline State after(const State &state, const Plan &plan, std::int64_t now)
 {
     switch (state.phase) {
@@ -82,6 +82,26 @@ inline State after(const State &state, const Plan &plan, std::int64_t now)
             break;
     }
     return State{};
+}
+
+/** A part set up and waiting for the button, its whole length to go. */
+inline State ready(State state)
+{
+    state.running = false;
+    state.left    = state.length;
+    return state;
+}
+
+inline bool waiting(const State &state)
+{
+    return state.phase != Phase::Idle && !state.running && state.left == state.length;
+}
+
+/** What follows a part that ran out on its own, waiting for the button:
+ *  nothing starts by itself. */
+inline State finished(const State &state, const Plan &plan, std::int64_t now)
+{
+    return ready(after(state, plan, now));
 }
 
 /** The one button: start a set, pause, or carry on. */

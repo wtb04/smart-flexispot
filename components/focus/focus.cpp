@@ -54,7 +54,7 @@ void settle(const State &next, bool finished)
 
 void ran_out(void *)
 {
-    settle(after(state(), plan(), now_ms()), true);
+    settle(finished(state(), plan(), now_ms()), true);
 }
 
 }  // namespace

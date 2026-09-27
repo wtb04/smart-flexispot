@@ -46,6 +46,19 @@ int main()
     check(again.phase == Phase::Work && again.round == 1 && again.running,
           "after the long break the next set starts at round one");
 
+    const State rest = finished(s, plan, 0);
+    check(rest.phase == Phase::Break && waiting(rest) && rest.left == 5 * min,
+          "a break waits for the button once focus runs out");
+    const State next = finished(rest, plan, 7000);
+    check(next.phase == Phase::Work && next.round == 2 && !next.running && waiting(next) &&
+              next.left == 25 * min,
+          "the next round waits for the button once a break runs out");
+    const State go = toggled(next, plan, 9000);
+    check(go.running && go.ends_at == 9000 + 25 * min, "the button starts the waiting round");
+    check(finished(longer, plan, 0).round == 1 && waiting(finished(longer, plan, 0)),
+          "after the long break the next set waits too");
+    check(!waiting(paused), "a round paused part way is not waiting");
+
     check(left_of(s, s.ends_at + 5000) == 0, "left never goes below zero");
     check(left_of(State{}, 12345) == 0, "nothing is left when idle");
 
