@@ -922,7 +922,6 @@ void media_action_cb(lv_event_t *e)
 // Jellyfin starts once this one runs out.
 constexpr int           SEEK_STEP_S    = 10;
 constexpr int           NEXT_UP_TAIL_S = 30;  // with no credits marked, the end is near
-constexpr int           END_MARGIN_S   = 1;   // where going on seeks to, just short of it
 constexpr std::uint32_t SKIP_CHECK_MS  = 500;
 constexpr std::int32_t  SKIP_H         = 40;
 constexpr std::int32_t  SKIP_PAD       = 16;
@@ -933,7 +932,8 @@ int          s_segment_count = 0;
 bool         s_media_seeks   = false;
 lv_obj_t    *s_skip          = nullptr;
 lv_obj_t    *s_expand        = nullptr;  // into the cinema view, for a video
-int          s_skip_to       = -1;
+int          s_skip_to       = -1;    // where skipping the intro seeks to
+bool         s_skip_next     = false; // skipping starts the next episode instead
 const char  *s_skip_text     = nullptr;
 
 /** Seconds into what plays, carried forward while it plays. */
@@ -960,6 +960,7 @@ void skip_check(lv_timer_t *)
 {
     const char *text = nullptr;
     int         to   = -1;
+    bool        next = false;
     if (s_media_seeks && s_has_track_shown && s_duration_s > 0) {
         const int at            = position_now();
         bool      credits_known = false;
@@ -968,17 +969,25 @@ void skip_check(lv_timer_t *)
             const bool          intro   = segment.kind == MediaSegment::Kind::Intro;
             credits_known               = credits_known || !intro;
             if (at >= segment.start_s && at < segment.end_s) {
-                text = intro ? "Skip intro" : "Next episode";
-                to   = intro ? segment.end_s : s_duration_s - END_MARGIN_S;
+                if (intro) {
+                    text = "Skip intro";
+                    to   = segment.end_s;
+                } else {
+                    next = true;
+                }
             }
         }
-        if (text == nullptr && !credits_known && s_duration_s > NEXT_UP_TAIL_S &&
-            at >= s_duration_s - NEXT_UP_TAIL_S) {
+        next = next || (!credits_known && s_duration_s > NEXT_UP_TAIL_S &&
+                        at >= s_duration_s - NEXT_UP_TAIL_S);
+        // Seeking to the end only stops the player there; the episode after
+        // is started instead, and without one there is nothing to go on to.
+        next = next && cinema_has_next();
+        if (next) {
             text = "Next episode";
-            to   = s_duration_s - END_MARGIN_S;
         }
     }
     s_skip_to   = to;
+    s_skip_next = next;
     s_skip_text = text;
     lv_obj_set_hidden(s_skip, text == nullptr);
     lv_obj_set_hidden(s_expand, !(s_media_seeks && s_has_track_shown));
@@ -989,8 +998,8 @@ void skip_check(lv_timer_t *)
 
 void skip_clicked_cb(lv_event_t *)
 {
-    if (s_skip_to >= 0) {
-        seek_to(s_skip_to);
+    if (s_skip_to >= 0 || s_skip_next) {
+        media_skip();
         lv_obj_set_hidden(s_skip, true);
     }
 }
@@ -1018,10 +1027,15 @@ void build_skip_button(lv_obj_t *card)
 
 void media_swiped(lv_dir_t direction)
 {
-    if (direction != LV_DIR_LEFT && direction != LV_DIR_RIGHT) {
+    s_media_swiped = true;
+    // Up louder, down quieter, whatever plays.
+    if (direction == LV_DIR_TOP || direction == LV_DIR_BOTTOM) {
+        if (s_handlers.media != nullptr) {
+            s_handlers.media(direction == LV_DIR_TOP ? MediaAction::VolumeUp
+                                                     : MediaAction::VolumeDown);
+        }
         return;
     }
-    s_media_swiped = true;
     // A video goes ten seconds on or back, as its own player does.
     if (s_media_seeks) {
         seek_to(position_now() + (direction == LV_DIR_LEFT ? SEEK_STEP_S : -SEEK_STEP_S));
@@ -1251,6 +1265,8 @@ void show_speaker_face(bool shown)
     lv_obj_set_hidden(s_speaker_face, !shown);
 }
 
+int s_media_volume = -1;
+
 int media_position_now()
 {
     return position_now();
@@ -1277,7 +1293,11 @@ const char *media_skip_text()
 
 void media_skip()
 {
-    if (s_skip_to >= 0) {
+    if (s_skip_next) {
+        if (s_handlers.media != nullptr) {
+            s_handlers.media(MediaAction::Next);
+        }
+    } else if (s_skip_to >= 0) {
         seek_to(s_skip_to);
     }
 }

@@ -18,7 +18,9 @@
 #include "units.h"
 
 
+#include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <atomic>
 #include <ctime>
 #include <cctype>
@@ -189,14 +191,18 @@ std::atomic<bool> s_toggle_on[TOGGLE_COUNT];
 std::atomic<bool> s_muted{false};
 std::atomic<int>  s_volume_pct{-1};  // negative until the speaker reports one
 
-constexpr std::int64_t VOLUME_SETTLE_US  = 1500 * units::kUsPerMs;
+// What was set stands until the player reports it, or this long: a player
+// reports slowly and late, and a drag's earlier levels came back after it.
+constexpr std::int64_t VOLUME_HOLD_US    = 10 * units::kUsPerSecond;
+constexpr int          VOLUME_AGREES     = 1;  // percent either way, for rounding
 constexpr std::int64_t MEDIA_GONE_US     = 3 * units::kUsPerSecond;
 constexpr std::int64_t VOLUME_MIN_GAP_US = 250 * units::kUsPerMs;
 
 std::atomic<int>          s_volume_pending{-1};
 std::atomic<std::int64_t> s_volume_sent_us{0};
 esp_timer_handle_t        s_volume_timer = nullptr;
-std::atomic<std::int64_t> s_volume_set_us{0};
+std::atomic<std::int64_t> s_volume_set_us{0};  // 0 once the player agreed
+std::atomic<int>          s_volume_set{-1};
 std::atomic<int>          s_entity_count{0};
 
 int percent_of(float fraction)
@@ -322,6 +328,7 @@ struct PlayerView {
     float       volume     = NO_NUMBER;
     bool        muted      = false;
     std::string episode;       // a Jellyfin episode, whose segments are asked for
+    std::string series;        // its series, whose episodes are its neighbours
     std::string still;         // a video's own picture, for the cinema view
 };
 
@@ -378,7 +385,9 @@ PlayerView jellyfin_view(const jellyfin::NowPlaying &now)
     view.position_s   = now.position_s;
     view.duration_s   = now.duration_s;
     view.position_key = now.item + ':' + std::to_string(now.position_s) + (now.paused ? "p" : "");
+    view.volume       = now.volume >= 0 ? static_cast<float>(now.volume) / PERCENT_PER_WHOLE : NO_NUMBER;
     view.episode      = now.kind == "Episode" ? now.item : "";
+    view.series       = now.series_id;
     return view;
 }
 
@@ -457,13 +466,20 @@ void show_media_position(const PlayerView &view, bool playing)
 
 void show_media_volume(const PlayerView &view)
 {
-    const bool settled = esp_timer_get_time() -
-                             s_volume_set_us.load(std::memory_order_relaxed) > VOLUME_SETTLE_US;
-    if (view.volume >= 0.0f && settled) {
-        const int percent = percent_of(view.volume);
-        s_volume_pct.store(percent, std::memory_order_relaxed);
-        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_volume(percent));
+    if (view.volume < 0.0f) {
+        return;
     }
+    const int          percent = percent_of(view.volume);
+    const std::int64_t set_at  = s_volume_set_us.load(std::memory_order_relaxed);
+    if (set_at != 0) {
+        const bool agrees = std::abs(percent - s_volume_set.load(std::memory_order_relaxed)) <= VOLUME_AGREES;
+        if (!agrees && esp_timer_get_time() - set_at < VOLUME_HOLD_US) {
+            return;
+        }
+        s_volume_set_us.store(0, std::memory_order_relaxed);
+    }
+    s_volume_pct.store(percent, std::memory_order_relaxed);
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_volume(percent));
 }
 
 /** Asks for the track's cover once it changed; true when a different one is
@@ -488,13 +504,13 @@ bool ask_for_art(const std::string &picture, const std::string &title)
     return other;
 }
 
-void want_segments(const std::string &episode, bool video);
+void want_segments(const std::string &episode, const std::string &series, bool video);
 
 /** With s_media_lock held. */
 void show_media()
 {
     const PlayerView &view = choose_view();
-    want_segments(view.jellyfin ? view.episode : "", view.jellyfin);
+    want_segments(view.jellyfin ? view.episode : "", view.series, view.jellyfin);
     media::set_still_url(view.jellyfin ? view.still.c_str() : "");
     if (gone_only_briefly(view)) {
         return;
@@ -516,9 +532,7 @@ void show_media()
     const bool art_coming = ask_for_art(view.picture, title);
     show_media_text(view.source, title, on ? view.artist : "", state, playing, art_coming);
     show_media_position(view, playing);
-    if (!view.jellyfin) {
-        show_media_volume(view);
-    }
+    show_media_volume(view);
 }
 
 void render_media(const hass::ws::EntityStore &store)
@@ -575,6 +589,8 @@ bool fetch_text(const std::string &url, std::string &out)
 // hold up the socket the page is drawn from.
 std::mutex   s_segments_lock;
 std::string  s_segments_item;  // the episode wanted, empty for none
+std::string  s_segments_series;
+jellyfin::Neighbours s_neighbours;  // the episodes either side, once looked up
 TaskHandle_t s_segments_task = nullptr;
 
 void show_segments(const std::vector<segments::Segment> &found)
@@ -596,11 +612,24 @@ void show_segments(const std::vector<segments::Segment> &found)
     for (;;) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         std::string item;
+        std::string series;
         {
             std::lock_guard<std::mutex> hold(s_segments_lock);
-            item = s_segments_item;
+            item   = s_segments_item;
+            series = s_segments_series;
         }
-        std::string answer;
+        jellyfin::Neighbours around;
+        std::string          answer;
+        if (!item.empty() && !series.empty() &&
+            jellyfin::fetch(jellyfin::neighbours_path(series, item), answer)) {
+            around = jellyfin::neighbours(answer, item);
+        }
+        {
+            std::lock_guard<std::mutex> hold(s_segments_lock);
+            s_neighbours = around;
+        }
+        ESP_ERROR_CHECK_WITHOUT_ABORT(
+            ui::set_media_neighbours(!around.previous.empty(), !around.next.empty()));
         if (item.empty() || !jellyfin::fetch(segments::path_for(item), answer)) {
             show_segments({});
             continue;
@@ -612,7 +641,7 @@ void show_segments(const std::vector<segments::Segment> &found)
 }
 
 /** Asks for a new episode's segments, or drops them when no episode shows. */
-void want_segments(const std::string &episode, bool video)
+void want_segments(const std::string &episode, const std::string &series, bool video)
 {
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_seeks(video));
     {
@@ -620,7 +649,8 @@ void want_segments(const std::string &episode, bool video)
         if (episode == s_segments_item) {
             return;
         }
-        s_segments_item = episode;
+        s_segments_item   = episode;
+        s_segments_series = series;
     }
     if (s_segments_task == nullptr) {
         static StaticTask_t task_ctrl;
@@ -698,6 +728,10 @@ void send_volume(void *)
         return;
     }
     s_volume_sent_us.store(esp_timer_get_time(), std::memory_order_relaxed);
+    if (s_on_jellyfin.load(std::memory_order_relaxed)) {
+        jellyfin::set_volume(percent);
+        return;
+    }
     char value[SERVICE_VALUE_SIZE];
     std::snprintf(value, sizeof(value), "%.2f",
                   static_cast<double>(percent) / static_cast<double>(PERCENT_PER_WHOLE));
@@ -707,19 +741,13 @@ void send_volume(void *)
 
 }  // namespace
 
-void nudge_volume(float delta)
+void on_media_volume(int percent)
 {
-    const int reported = s_volume_pct.load(std::memory_order_relaxed);
-    if (reported < 0) {
-        return;  // a blind guess would jump the volume
-    }
-    float wanted = static_cast<float>(reported) / PERCENT_PER_WHOLE + delta;
-    wanted       = wanted < 0.0f ? 0.0f : (wanted > 1.0f ? 1.0f : wanted);
-
-    const int percent = percent_of(wanted);
+    percent = std::clamp(percent, 0, static_cast<int>(PERCENT_PER_WHOLE));
     ESP_LOGI(TAG, "volume %d%%", percent);
 
     s_volume_pct.store(percent, std::memory_order_relaxed);
+    s_volume_set.store(percent, std::memory_order_relaxed);
     s_volume_set_us.store(esp_timer_get_time(), std::memory_order_relaxed);
 
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_volume(percent));
@@ -739,10 +767,33 @@ void nudge_volume(float delta)
     }
 }
 
+void nudge_volume(float delta)
+{
+    const int reported = s_volume_pct.load(std::memory_order_relaxed);
+    if (reported < 0) {
+        return;  // a blind guess would jump the volume
+    }
+    float wanted = static_cast<float>(reported) / PERCENT_PER_WHOLE + delta;
+    wanted       = wanted < 0.0f ? 0.0f : (wanted > 1.0f ? 1.0f : wanted);
+    on_media_volume(percent_of(wanted));
+}
+
+void play_neighbour(bool next)
+{
+    std::string item;
+    {
+        std::lock_guard<std::mutex> hold(s_segments_lock);
+        item = next ? s_neighbours.next : s_neighbours.previous;
+    }
+    jellyfin::play_now(item);
+}
+
 void on_jellyfin(const jellyfin::NowPlaying &now)
 {
     std::lock_guard<std::mutex> hold(s_media_lock);
     s_jellyfin_view = jellyfin_view(now);
+    ESP_ERROR_CHECK_WITHOUT_ABORT(
+        ui::set_media_subtitles(now.active && now.subtitle_track >= 0, now.active && now.subtitle >= 0));
     show_media();
 }
 
@@ -783,10 +834,15 @@ void on_media(ui::MediaAction action)
             }
             break;
         case ui::MediaAction::Previous:
-            hass::ws::call_service("media_player", "media_previous_track", MEDIA_SPEAKER);
-            break;
         case ui::MediaAction::Next:
-            hass::ws::call_service("media_player", "media_next_track", MEDIA_SPEAKER);
+            if (s_on_jellyfin.load(std::memory_order_relaxed)) {
+                play_neighbour(action == ui::MediaAction::Next);
+            } else {
+                hass::ws::call_service("media_player",
+                                       action == ui::MediaAction::Next ? "media_next_track"
+                                                                       : "media_previous_track",
+                                       MEDIA_SPEAKER);
+            }
             break;
         case ui::MediaAction::VolumeDown:
             nudge_volume(-VOLUME_STEP);
@@ -801,6 +857,11 @@ void on_media(ui::MediaAction action)
                                             "is_volume_muted", muted ? "false" : "true"));
             break;
         }
+        case ui::MediaAction::Subtitles:
+            if (s_on_jellyfin.load(std::memory_order_relaxed)) {
+                jellyfin::toggle_subtitles();
+            }
+            break;
     }
 }
 

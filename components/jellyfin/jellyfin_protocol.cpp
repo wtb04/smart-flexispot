@@ -60,6 +60,24 @@ NowPlaying read_session(const cJSON *session)
     out.episode    = int_of(item, "IndexNumber");
     out.position_s = seconds_of(state, "PositionTicks");
     out.duration_s = seconds_of(item, "RunTimeTicks");
+    const cJSON *volume = cJSON_GetObjectItemCaseSensitive(state, "VolumeLevel");
+    out.volume          = cJSON_IsNumber(volume) ? volume->valueint : -1;
+    const cJSON *shown  = cJSON_GetObjectItemCaseSensitive(state, "SubtitleStreamIndex");
+    out.subtitle        = cJSON_IsNumber(shown) ? shown->valueint : -1;
+    const cJSON *stream = nullptr;
+    cJSON_ArrayForEach(stream, cJSON_GetObjectItemCaseSensitive(item, "MediaStreams"))
+    {
+        if (text_of(stream, "Type") != "Subtitle") {
+            continue;
+        }
+        const bool is_default = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(stream, "IsDefault"));
+        if (out.subtitle_track < 0 || is_default) {
+            out.subtitle_track = int_of(stream, "Index");
+        }
+        if (is_default) {
+            break;
+        }
+    }
     return out;
 }
 }  // namespace
@@ -188,6 +206,66 @@ std::string seek_path(const std::string &session, int position_s)
 {
     return "/Sessions/" + session + "/Playing/Seek?SeekPositionTicks=" +
            std::to_string(static_cast<std::int64_t>(position_s) * TICKS_PER_S);
+}
+
+std::string command_path(const std::string &session)
+{
+    return "/Sessions/" + session + "/Command";
+}
+
+std::string set_volume_body(int percent)
+{
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "Name", "SetVolume");
+    cJSON *args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "Volume", std::to_string(percent).c_str());
+    cJSON_AddItemToObject(root, "Arguments", args);
+    return print_and_free(root);
+}
+
+std::string set_subtitle_body(int stream)
+{
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "Name", "SetSubtitleStreamIndex");
+    cJSON *args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "Index", std::to_string(stream).c_str());
+    cJSON_AddItemToObject(root, "Arguments", args);
+    return print_and_free(root);
+}
+
+std::string neighbours_path(const std::string &series, const std::string &episode)
+{
+    return "/Shows/" + series + "/Episodes?adjacentTo=" + episode;
+}
+
+Neighbours neighbours(const std::string &answer, const std::string &episode)
+{
+    Neighbours   out;
+    cJSON       *root  = cJSON_ParseWithLength(answer.data(), answer.size());
+    const cJSON *items = cJSON_GetObjectItemCaseSensitive(root, "Items");
+    const cJSON *item  = nullptr;
+    bool         past  = false;  // the episode itself has gone by
+    cJSON_ArrayForEach(item, items)
+    {
+        const std::string id = text_of(item, "Id");
+        if (id == episode) {
+            past = true;
+        } else if (!past) {
+            out.previous = id;
+        } else if (out.next.empty()) {
+            out.next = id;
+        }
+    }
+    cJSON_Delete(root);
+    if (!past) {
+        return {};  // an answer about another episode says nothing of this one
+    }
+    return out;
+}
+
+std::string play_now_path(const std::string &session, const std::string &item)
+{
+    return "/Sessions/" + session + "/Playing?playCommand=PlayNow&itemIds=" + item;
 }
 
 std::string cover_path(const std::string &item, int height)

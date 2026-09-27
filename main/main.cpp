@@ -392,6 +392,7 @@ extern "C" void app_main(void)
         .update_now  = ota::install,
         .pick        = room::on_pick,
         .seek        = room::on_seek,
+        .media_volume = room::on_media_volume,
     };
     const int brightness = settings::get(settings::Key::Brightness);
     ui::set_cards(diagnostics::cards(), diagnostics::card_count());

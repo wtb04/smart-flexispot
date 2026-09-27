@@ -330,7 +330,9 @@ Slot<PickArgs>       p_pick[media::kPickCount];
 Slot<const void *>   p_pick_art[media::kPickCount];
 Slot<SegmentsArgs>   p_segments;
 Slot<bool>           p_media_seeks;
+Slot<std::uint8_t>   p_subtitles;  // 1 for some to show, 2 for shown
 Slot<const void *>   p_still;
+Slot<std::uint8_t>   p_neighbours;  // bit 0 an episode before, bit 1 one after
 Slot<PillArgs>       p_pill[kPillCount];
 Slot<LightsArgs>     p_lights;
 Slot<LightArgs>      p_light[kLightCount];
@@ -541,6 +543,7 @@ void apply_media_volume(int percent)
         return;
     }
     write_percent(s_panel_volume_pct, percent);
+    s_media_volume = percent;
 }
 
 void place_media_text(bool framed)
@@ -863,8 +866,14 @@ void apply_media_updates()
     if (bool seeks = false; take(p_media_seeks, seeks)) {
         apply_media_seeks(seeks);
     }
+    if (std::uint8_t subtitles = 0; take(p_subtitles, subtitles)) {
+        apply_media_subtitles((subtitles & 1) != 0, (subtitles & 2) != 0);
+    }
     if (const void *still = nullptr; take(p_still, still)) {
         apply_cinema_still(still);
+    }
+    if (std::uint8_t around = 0; take(p_neighbours, around)) {
+        apply_media_neighbours((around & 1) != 0, (around & 2) != 0);
     }
     for (int i = 0; i < media::kPickCount; ++i) {
         if (PickArgs pick{}; take(p_pick[i], pick)) {
@@ -1084,6 +1093,12 @@ esp_err_t set_media_segments(const MediaSegment *segments, int count)
     return ESP_OK;
 }
 
+esp_err_t set_media_neighbours(bool previous, bool next)
+{
+    put(p_neighbours, static_cast<std::uint8_t>((previous ? 1 : 0) | (next ? 2 : 0)));
+    return ESP_OK;
+}
+
 esp_err_t set_cinema_still(const void *pixels)
 {
     put(p_still, pixels);
@@ -1093,6 +1108,12 @@ esp_err_t set_cinema_still(const void *pixels)
 esp_err_t set_media_seeks(bool seeks)
 {
     put(p_media_seeks, seeks);
+    return ESP_OK;
+}
+
+esp_err_t set_media_subtitles(bool available, bool shown)
+{
+    put(p_subtitles, static_cast<std::uint8_t>((available ? 1 : 0) | (shown ? 2 : 0)));
     return ESP_OK;
 }
 

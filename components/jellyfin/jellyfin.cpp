@@ -12,6 +12,7 @@
 #include "freertos/task.h"
 #include "units.h"
 
+#include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <mutex>
@@ -60,10 +61,13 @@ constexpr UBaseType_t   COMMAND_QUEUE   = 4;
 constexpr char HTTPS[] = "https://";
 constexpr char WSS[]   = "wss://";
 
-enum class Op : std::uint8_t { PlayPause, Seek };
+constexpr std::size_t ITEM_SIZE = 40;  // an id, 32 hex digits
+
+enum class Op : std::uint8_t { PlayPause, Seek, SetVolume, PlayNow, Subtitles };
 struct Command {
-    Op  op;
-    int position_s;
+    Op   op;
+    int  value;            // the position jumped to, or the volume set
+    char item[ITEM_SIZE];  // what is started now
 };
 
 esp_websocket_client_handle_t s_client   = nullptr;
@@ -76,11 +80,24 @@ std::int64_t                  s_rx_began_us = 0;  // when the message's first by
 std::mutex s_now_lock;
 NowPlaying s_now;  // what was last handed on
 
+// The player reports subtitles with its progress, every ten seconds, so what
+// was asked for stands until then: a second tap toggles back rather than asks
+// again, and the button does not fall back meanwhile.
+constexpr std::int64_t SUBTITLE_HOLD_US = 15 * units::kUsPerSecond;
+int                    s_subtitle_asked    = -1;
+
+// Each command waits on the one before, a round trip through the server to
+// the player, so a slider dragged along queued up a trail of levels: only the
+// latest is sent, once the one before has gone.
+std::atomic<int> s_volume_wanted{-1};
+std::int64_t           s_subtitle_asked_at = 0;  // 0 when nothing waits
+
 bool same(const NowPlaying &a, const NowPlaying &b)
 {
     return a.active == b.active && a.paused == b.paused && a.session == b.session &&
            a.item == b.item && a.position_s == b.position_s && a.duration_s == b.duration_s &&
-           a.title == b.title;
+           a.title == b.title && a.volume == b.volume && a.subtitle == b.subtitle &&
+           a.subtitle_track == b.subtitle_track;
 }
 
 void take_sessions(const std::string &message)
@@ -93,6 +110,14 @@ void take_sessions(const std::string &message)
     }
     {
         std::lock_guard<std::mutex> hold(s_now_lock);
+        if (s_subtitle_asked_at != 0) {
+            if (now.subtitle == s_subtitle_asked || now.item != s_now.item ||
+                esp_timer_get_time() - s_subtitle_asked_at > SUBTITLE_HOLD_US) {
+                s_subtitle_asked_at = 0;
+            } else {
+                now.subtitle = s_subtitle_asked;
+            }
+        }
         if (same(now, s_now)) {
             return;
         }
@@ -101,6 +126,27 @@ void take_sessions(const std::string &message)
     if (s_on_change != nullptr) {
         s_on_change(now);
     }
+}
+
+// Subtitles off, or on with the default track, from what was last asked for
+// if the player has not said yet; handed on at once as though it had.
+int toggle_subtitle_locally()
+{
+    NowPlaying now;
+    {
+        std::lock_guard<std::mutex> hold(s_now_lock);
+        if (!s_now.active || s_now.subtitle_track < 0) {
+            return -2;
+        }
+        s_now.subtitle      = s_now.subtitle >= 0 ? -1 : s_now.subtitle_track;
+        s_subtitle_asked    = s_now.subtitle;
+        s_subtitle_asked_at = esp_timer_get_time();
+        now                 = s_now;
+    }
+    if (s_on_change != nullptr) {
+        s_on_change(now);
+    }
+    return now.subtitle;
 }
 
 bool send_text(const std::string &text)
@@ -179,7 +225,7 @@ esp_http_client_handle_t open_client(const std::string &url, esp_http_client_met
 // cost a TLS handshake each, which a run of volume presses waits through.
 esp_http_client_handle_t s_commander = nullptr;
 
-void post(const std::string &path)
+void post(const std::string &path, const std::string &body = "")
 {
     const std::string url = JELLYFIN_URL + path;
     if (s_commander == nullptr) {
@@ -190,6 +236,14 @@ void post(const std::string &path)
     } else {
         esp_http_client_set_url(s_commander, url.c_str());
         esp_http_client_set_method(s_commander, HTTP_METHOD_POST);
+    }
+    // No body is null, not empty: the client gives an empty one a form's type,
+    // and takes the type away again only for null.
+    if (body.empty()) {
+        esp_http_client_set_post_field(s_commander, nullptr, 0);
+    } else {
+        esp_http_client_set_header(s_commander, "Content-Type", "application/json");
+        esp_http_client_set_post_field(s_commander, body.data(), static_cast<int>(body.size()));
     }
     const esp_err_t err    = esp_http_client_perform(s_commander);
     const int       status = esp_http_client_get_status_code(s_commander);
@@ -221,14 +275,26 @@ void post(const std::string &path)
         if (session.empty()) {
             continue;
         }
-        post(command.op == Op::PlayPause ? play_pause_path(session)
-                                         : seek_path(session, command.position_s));
+        switch (command.op) {
+            case Op::PlayPause: post(play_pause_path(session)); break;
+            case Op::Seek:      post(seek_path(session, command.value)); break;
+            case Op::SetVolume: {
+                const int percent = s_volume_wanted.exchange(-1);
+                if (percent >= 0) {
+                    post(command_path(session), set_volume_body(percent));
+                }
+                break;
+            }
+            case Op::PlayNow:   post(play_now_path(session, command.item)); break;
+            case Op::Subtitles: post(command_path(session), set_subtitle_body(command.value)); break;
+        }
     }
 }
 
-void queue(Op op, int position_s = 0)
+void queue(Op op, int value = 0, const std::string &item = "")
 {
-    const Command command{op, position_s};
+    Command command{op, value, {}};
+    std::snprintf(command.item, sizeof(command.item), "%s", item.c_str());
     if (s_commands != nullptr && xQueueSend(s_commands, &command, 0) != pdTRUE) {
         ESP_LOGW(TAG, "too many commands at once");
     }
@@ -312,6 +378,28 @@ void play_pause()
 void seek(int position_s)
 {
     queue(Op::Seek, position_s);
+}
+
+void set_volume(int percent)
+{
+    if (s_volume_wanted.exchange(percent) < 0) {
+        queue(Op::SetVolume);
+    }
+}
+
+void toggle_subtitles()
+{
+    const int stream = toggle_subtitle_locally();
+    if (stream >= -1) {
+        queue(Op::Subtitles, stream);
+    }
+}
+
+void play_now(const std::string &item)
+{
+    if (!item.empty()) {
+        queue(Op::PlayNow, 0, item);
+    }
 }
 
 std::string cover_url(const std::string &item, int height)

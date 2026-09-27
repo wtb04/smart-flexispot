@@ -41,6 +41,7 @@ enum class MediaAction : std::uint8_t {
     VolumeDown,
     VolumeUp,
     Mute,
+    Subtitles,  // on or off
 };
 
 using MediaHandler = void (*)(MediaAction action);
@@ -149,6 +150,9 @@ using PickHandler = void (*)(int index);
 /** Jumps the playing video to a position, in seconds. */
 using SeekHandler = void (*)(int position_s);
 
+/** The media's volume set outright, as a slider does, in percent. */
+using MediaVolumeHandler = void (*)(int percent);
+
 /** Minutes of focus, break and long break, and rounds before the long one. */
 using FocusPlanHandler = void (*)(int work_min, int break_min, int long_break_min, int rounds);
 
@@ -219,6 +223,13 @@ esp_err_t set_media_segments(const MediaSegment *segments, int count);
  *  rather than to the next or last track. */
 esp_err_t set_media_seeks(bool seeks);
 
+/** Whether a video has an episode before it, and after, for the cinema view to
+ *  offer; its Previous and Next actions start them. */
+esp_err_t set_media_neighbours(bool previous, bool next);
+
+/** Whether a video has subtitles to show, and whether they show. */
+esp_err_t set_media_subtitles(bool available, bool shown);
+
 /** A video's own still for the cinema view, media::kStillW by kStillH of
  *  RGB565, or null for none. The buffer must live until it is replaced. */
 esp_err_t set_cinema_still(const void *pixels);
@@ -278,6 +289,7 @@ struct Handlers {
     UpdateHandler      update_now;
     PickHandler        pick;
     SeekHandler        seek;
+    MediaVolumeHandler media_volume;
 };
 
 /** Requires the LVGL port to be running. A zero accent keeps the built-in

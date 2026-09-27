@@ -23,6 +23,9 @@ struct NowPlaying {
     int         episode    = 0;
     int         position_s = 0;
     int         duration_s = 0;
+    int         volume     = -1;  // percent, when the player says
+    int         subtitle   = -1;  // the subtitle stream shown, -1 for none
+    int         subtitle_track = -1;  // the one to show: the default, else the first
 };
 
 /** Keeps a Sessions message small as it arrives: the queue's full items run to
@@ -60,6 +63,24 @@ NowPlaying now_playing(const std::string &message, const std::string &own_device
 /** Where to post to toggle pause, or to jump, in `session`. */
 std::string play_pause_path(const std::string &session);
 std::string seek_path(const std::string &session, int position_s);
+
+/** Where to post a general command, and the one that sets the volume. */
+std::string command_path(const std::string &session);
+std::string set_volume_body(int percent);
+std::string set_subtitle_body(int stream);  // -1 for none
+
+/** Where the episodes either side of `episode` in `series` are listed. */
+std::string neighbours_path(const std::string &series, const std::string &episode);
+
+/** The episodes before and after `episode` in that answer; empty for none. */
+struct Neighbours {
+    std::string previous;
+    std::string next;
+};
+Neighbours neighbours(const std::string &answer, const std::string &episode);
+
+/** Where to post to start `item` now in `session`, in place of what plays. */
+std::string play_now_path(const std::string &session, const std::string &item);
 
 /** Where `item`'s cover is, `height` pixels tall, as a JPEG. */
 std::string cover_path(const std::string &item, int height);

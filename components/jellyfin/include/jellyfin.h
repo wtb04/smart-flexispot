@@ -19,6 +19,9 @@ esp_err_t start(Handler on_change);
 /** For the session being followed; from any task, returning at once. */
 void play_pause();
 void seek(int position_s);
+void set_volume(int percent);
+void toggle_subtitles();  // off, or on with the default track
+void play_now(const std::string &item);
 
 /** Reads `path` on the server with the key, blocking; false when it fails. */
 bool fetch(const std::string &path, std::string &out);

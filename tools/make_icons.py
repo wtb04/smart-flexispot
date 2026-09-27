@@ -82,6 +82,11 @@ def paint(layers, side=SIDE, height=None):
     return bytes(out)
 
 
+def scaled(layers, factor):
+    """The same layers drawn `factor` times larger."""
+    return [(lambda x, y, shape=shape: shape(x / factor, y / factor), ink) for shape, ink in layers]
+
+
 def render(solid, holes):
     return paint([(s, True) for s in solid] + [(h, False) for h in holes])
 
@@ -323,6 +328,27 @@ SEEK_BACK = paint(seek_layers(False), SEEK_SIDE)
 SEEK_ON = paint(seek_layers(True), SEEK_SIDE)
 
 
+# The screen turning itself off after a while: a screen on its stand, and a
+# clock at its corner, cut clear of it.
+CINEMA_SIDE = 40  # the cinema view's square buttons, drawn on the status grid
+SCREEN_TIMER = paint(scaled([(rounded(2, 4, 22, 18, 2.2), True),
+                      (rounded(4, 6, 20, 16, 1), False),
+                      (rounded(9, 20, 15, 22.5, 1), True),
+                      (disc(21, 20, 7.5), False),
+                      (disc(21, 20, 6), True), (disc(21, 20, 4.3), False),
+                      (stroke(21, 20, 21, 17, 1.6), True), (stroke(21, 20, 23, 21, 1.6), True)],
+                            CINEMA_SIDE / STATUS_SIDE),
+                     CINEMA_SIDE)
+
+
+# A screen with two lines of text along its foot.
+SUBTITLES = paint(scaled([(rounded(2, 5, 26, 23, 3), True), (rounded(4.2, 7.2, 23.8, 20.8, 1.4), False)] +
+                         [(stroke(x0, y, x1, y, 2), True) for x0, x1, y in (
+                             (8, 13, 14), (16, 20, 14), (8, 16, 18), (19, 20, 18))],
+                         CINEMA_SIDE / STATUS_SIDE),
+                  CINEMA_SIDE)
+
+
 # The four corners pulled in again, as a picture leaving fullscreen.
 COLLAPSE = paint([(stroke(x0, y0, x1, y1, 2.6), True) for x0, y0, x1, y1 in (
     (4, 11, 11, 11), (11, 4, 11, 11), (24, 11, 17, 11), (17, 4, 17, 11),
@@ -372,7 +398,7 @@ out.write_text(f"""#pragma once
 
 namespace ui {{
 namespace icons {{
-{emit("train", TRAIN)}{emit("bus", BUS)}{emit("walk", WALK)}{emit("bike", BIKE)}{emit("no_photo", NO_PHOTO, NO_PHOTO_SIDE)}{emit("wifi", WIFI, STATUS_SIDE)}{emit("wifi_off", WIFI_OFF, STATUS_SIDE)}{emit("phone", PHONE, STATUS_SIDE)}{emit("phone_off", PHONE_OFF, STATUS_SIDE)}{emit("plane", PLANE, PLANE_SIDE)}{emit("plane_large", PLANE_LARGE, PLANE_LARGE_SIDE)}{emit("calendar", CALENDAR, 28)}{emit("desk", DESK, STATUS_SIDE)}{emit("timer", TIMER, 28)}{emit("update_panel", UPDATE_PANEL, STATUS_SIDE)}{emit("update_companion", UPDATE_COMPANION, STATUS_SIDE)}{emit("install_companion", INSTALL_COMPANION, STATUS_SIDE)}{emit("bulb_glass", BULB_GLASS, BULB_W, BULB_H)}{emit("bulb_base", BULB_BASE, BULB_W, BULB_H)}{emit("desk_up", DESK_UP, DESK_W, DESK_H)}{emit("desk_down", DESK_DOWN, DESK_W, DESK_H)}{emit("expand", EXPAND, STATUS_SIDE)}{emit("collapse", COLLAPSE, STATUS_SIDE)}{emit("seek_back", SEEK_BACK, SEEK_SIDE)}{emit("seek_on", SEEK_ON, SEEK_SIDE)}{emit("plus", PLUS, MARK_SIDE)}{emit("minus", MINUS, MARK_SIDE)}{emit("times", TIMES, MARK_SIDE)}
+{emit("train", TRAIN)}{emit("bus", BUS)}{emit("walk", WALK)}{emit("bike", BIKE)}{emit("no_photo", NO_PHOTO, NO_PHOTO_SIDE)}{emit("wifi", WIFI, STATUS_SIDE)}{emit("wifi_off", WIFI_OFF, STATUS_SIDE)}{emit("phone", PHONE, STATUS_SIDE)}{emit("phone_off", PHONE_OFF, STATUS_SIDE)}{emit("plane", PLANE, PLANE_SIDE)}{emit("plane_large", PLANE_LARGE, PLANE_LARGE_SIDE)}{emit("calendar", CALENDAR, 28)}{emit("desk", DESK, STATUS_SIDE)}{emit("timer", TIMER, 28)}{emit("update_panel", UPDATE_PANEL, STATUS_SIDE)}{emit("update_companion", UPDATE_COMPANION, STATUS_SIDE)}{emit("install_companion", INSTALL_COMPANION, STATUS_SIDE)}{emit("bulb_glass", BULB_GLASS, BULB_W, BULB_H)}{emit("bulb_base", BULB_BASE, BULB_W, BULB_H)}{emit("desk_up", DESK_UP, DESK_W, DESK_H)}{emit("desk_down", DESK_DOWN, DESK_W, DESK_H)}{emit("expand", EXPAND, STATUS_SIDE)}{emit("collapse", COLLAPSE, STATUS_SIDE)}{emit("screen_timer", SCREEN_TIMER, CINEMA_SIDE)}{emit("subtitles", SUBTITLES, CINEMA_SIDE)}{emit("seek_back", SEEK_BACK, SEEK_SIDE)}{emit("seek_on", SEEK_ON, SEEK_SIDE)}{emit("plus", PLUS, MARK_SIDE)}{emit("minus", MINUS, MARK_SIDE)}{emit("times", TIMES, MARK_SIDE)}
 }}  // namespace icons
 }}  // namespace ui
 """)

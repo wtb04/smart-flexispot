@@ -272,6 +272,7 @@ void apply_pick(int index, const char *name);
 void apply_pick_art(int index, const void *pixels);
 void apply_media_segments(const MediaSegment *segments, int count);
 void apply_media_seeks(bool seeks);
+void apply_media_subtitles(bool available, bool shown);
 void write_clock(lv_obj_t *label, int seconds);
 void apply_playing(bool playing);
 void cancel_pause_settle();
@@ -290,11 +291,14 @@ void        media_toggle_play();
 const char *media_skip_text();     // what the skip button offers, null for nothing
 void        media_skip();
 bool        media_is_video();
+extern int  s_media_volume;  // percent, as last reported or set, -1 before either
 
 // Jellyfin fullscreen: the film, its controls, the desk and the lights.
 void build_cinema(lv_obj_t *screen);
 void open_cinema();
 void apply_cinema_still(const void *pixels);
+void apply_media_neighbours(bool previous, bool next);
+bool cinema_has_next();  // an episode after this one to go on to
 void show_guest_presets();
 void select_page(int index);
 /** The Focus tab's caption in place of its name, and its icon in `ink`, faded

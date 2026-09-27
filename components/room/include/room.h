@@ -32,6 +32,7 @@ void on_jellyfin(const jellyfin::NowPlaying &now);
 
 /** Jumps the playing video to `position_s`. */
 void on_seek(int position_s);
+void on_media_volume(int percent);  // as the cinema's slider sets it
 
 /** Plays one of the favourites the media card offers. */
 void on_pick(int index);
