@@ -21,7 +21,7 @@ constexpr int PARTS_PER_ROUND = 2;  // a focus, then a break
 constexpr int TICKS_MAX       = detail::FOCUS_WORK_MIN_MAX;  // no part runs longer
 constexpr int ROUNDS_MAX      = detail::FOCUS_ROUNDS_MAX;
 constexpr int PARTS_MAX       = PARTS_PER_ROUND * ROUNDS_MAX;
-constexpr int STOPS_MAX       = PARTS_MAX + 1;  // and one for the set's end
+constexpr int STOPS_MAX       = PARTS_MAX;
 
 constexpr std::uint32_t TIMER_PERIOD_MS = 250;
 
@@ -76,7 +76,7 @@ lv_obj_t *s_go         = nullptr;
 lv_obj_t *s_skip       = nullptr;
 lv_obj_t *s_reset      = nullptr;
 
-struct Stop {  // a part of the set, or with the last, its end
+struct Stop {  // a part of the set
     lv_obj_t *when  = nullptr;
     lv_obj_t *blank = nullptr;  // where the time goes, until there is one
     lv_obj_t *node  = nullptr;
@@ -228,7 +228,7 @@ void show_progress(std::int32_t elapsed, std::int32_t length)
             lv_obj_set_y(s_runner, lv_obj_get_y(stop.rail) + filled - RUNNER / 2);
         }
     }
-    lv_obj_set_hidden(s_runner, at < 0 || length <= 0);
+    lv_obj_set_hidden(s_runner, at < 0 || length <= 0 || at >= parts() - 1);  // the last has no rail on
 }
 
 // Once a second: the leaves, the colon beating, and the minute under way
@@ -513,13 +513,13 @@ void build_set(lv_obj_t *parent, std::int32_t x, std::int32_t w, std::int32_t h)
     lv_obj_set_hidden(s_runner, true);
 }
 
-// As many stops as the set has parts and one for its end, spread down the card.
+// As many stops as the set has parts, spread down the card.
 void lay_out_stops(int count, std::int32_t pitch)
 {
     const std::int32_t line = theme::type_body()->line_height;
     for (int i = 0; i < STOPS_MAX; ++i) {
         Stop      &stop = s_stop[i];
-        const bool real = i <= count;
+        const bool real = i < count;
         for (lv_obj_t *obj : {stop.when, stop.blank, stop.node, stop.name, stop.rail}) {
             lv_obj_set_hidden(obj, !real);
         }
@@ -533,7 +533,7 @@ void lay_out_stops(int count, std::int32_t pitch)
         lv_obj_set_y(stop.name, y);
         lv_obj_set_y(stop.rail, y + line / 2);
         lv_obj_set_height(stop.rail, pitch);
-        lv_obj_set_hidden(stop.rail, i == count);
+        lv_obj_set_hidden(stop.rail, i == count - 1);
     }
 }
 
@@ -545,14 +545,14 @@ void show_start_times(int count, int at)
     const bool   running   = s_focus.running && at >= 0;
     std::int64_t starts_in = running ? s_focus.ends_at_ms - now_ms() - s_focus.length_ms : 0;
     char         text[24];
-    for (int i = 0; i <= count; ++i) {
+    for (int i = 0; i < count; ++i) {
         Stop      &stop  = s_stop[i];
         const bool done  = at >= 0 && i < at;
         const bool timed = running && i >= at;
         if (timed) {
             clock_text(starts_in, text, sizeof(text));
             theme::set_text(stop.when, text);
-            if (i != count) {
+            if (i + 1 < count) {
                 starts_in += i == at ? s_focus.length_ms
                                      : static_cast<std::int64_t>(part_minutes(i)) *
                                            units::kMsPerMinute;
@@ -566,14 +566,13 @@ void show_start_times(int count, int at)
 
 void paint_stops(int count, int at)
 {
-    for (int i = 0; i <= count; ++i) {
+    for (int i = 0; i < count; ++i) {
         Stop      &stop = s_stop[i];
-        const bool end  = i == count;
         const bool done = at >= 0 && i < at;
         const bool now  = i == at;
-        const auto ink  = ink_of(end || is_rest(i));
+        const auto ink  = ink_of(is_rest(i));
 
-        theme::set_text(stop.name, end ? "Set done" : part_name(i));
+        theme::set_text(stop.name, part_name(i));
         theme::set_text_color(stop.name, now ? ink : theme::text);
 
         lv_obj_set_style_bg_color(stop.node, lv_color_hex(done || now ? ink : theme::panel_light),
@@ -594,7 +593,7 @@ void paint_stops(int count, int at)
 void show_set()
 {
     const int          count = parts();
-    const std::int32_t pitch = (s_set_h - theme::type_body()->line_height) / count;
+    const std::int32_t pitch = (s_set_h - theme::type_body()->line_height) / std::max(1, count - 1);
     s_pitch                  = pitch;
     if (s_laid_out != count) {
         s_laid_out = count;
