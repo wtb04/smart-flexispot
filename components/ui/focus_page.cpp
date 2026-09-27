@@ -11,7 +11,8 @@
 
 // A dial of ticks, one for every minute of the part, round a flip clock's two
 // leaves, its controls in the corners as the radar has its zoom. Beside it the
-// set, laid out as the calendar lays out a journey: a stop for every part.
+// set, laid out as the calendar lays out a journey: a stop for every part. And
+// the same timer fullscreen, with nothing but the time and how far it has got.
 namespace ui {
 namespace {
 using detail::BUTTON_GAP;
@@ -51,6 +52,11 @@ constexpr std::int32_t RUNNER         = 12;
 constexpr std::int32_t LENGTH_DOT     = 10;
 constexpr std::uint8_t RAIL_AHEAD_INK = 70;  // parts of the ink in 255, the rest the card's
 
+constexpr std::int32_t FULL_PAD          = 40;  // the ring from the screen's top and bottom
+constexpr std::int32_t FULL_DOT          = 10;
+constexpr std::int32_t FULL_DOT_GAP      = 12;
+constexpr std::int32_t FULL_ROUNDS_BELOW = 44;  // the rounds under the line under the leaves
+
 // As last told; until then, the plan as it stands at boot.
 Focus s_focus{
     .phase          = FocusPhase::Idle,
@@ -65,12 +71,18 @@ Focus s_focus{
     .long_break_min = detail::FOCUS_LONG_BREAK_MIN_DEFAULT,
 };
 
-lv_obj_t *s_tick[TICKS_MAX];
-int       s_tick_count = 0;
-lv_obj_t *s_leaves     = nullptr;  // the two leaves and the colon between them
-lv_obj_t *s_minutes    = nullptr;
-lv_obj_t *s_seconds    = nullptr;
-lv_obj_t *s_colon[2]   = {};
+// A clock face: a tick for every minute round two leaves, and the colon that
+// beats between them. The dial has one, and the fullscreen view the same.
+struct Face {
+    lv_obj_t *tick[TICKS_MAX] = {};
+    lv_obj_t *leaves          = nullptr;
+    lv_obj_t *minutes         = nullptr;
+    lv_obj_t *seconds         = nullptr;
+    lv_obj_t *colon[2]        = {};
+};
+Face s_dial;
+Face s_full_face;
+int  s_tick_count = 0;
 lv_obj_t *s_phase      = nullptr;
 lv_obj_t *s_go         = nullptr;
 lv_obj_t *s_skip       = nullptr;
@@ -95,6 +107,12 @@ std::int32_t s_pitch    = 0;
 int          s_laid_out = -1;  // how many parts the stops are laid out for
 
 int s_shown_s = -1;
+
+lv_obj_t *s_full          = nullptr;  // the timer fullscreen
+lv_obj_t *s_full_phase    = nullptr;
+lv_obj_t *s_full_under    = nullptr;  // until when, or what a tap does
+lv_obj_t *s_full_round[ROUNDS_MAX] = {};
+int       s_full_shown_s  = -1;
 
 std::int64_t now_ms()
 {
@@ -182,28 +200,28 @@ void clock_text(std::int64_t in_ms, char *out, std::size_t size)
     std::snprintf(out, size, "%02d:%02d", local.tm_hour, local.tm_min);
 }
 
-void show_leaves(int seconds, bool paused, bool beat)
+void show_leaves(const Face &face, int seconds, bool paused, bool beat)
 {
     char text[8];
     std::snprintf(text, sizeof(text), "%02d", seconds / units::kSecondsPerMinute);
-    theme::set_text(s_minutes, text);
+    theme::set_text(face.minutes, text);
     std::snprintf(text, sizeof(text), "%02d", seconds % units::kSecondsPerMinute);
-    theme::set_text(s_seconds, text);
-    for (lv_obj_t *dot : s_colon) {
+    theme::set_text(face.seconds, text);
+    for (lv_obj_t *dot : face.colon) {
         lv_obj_set_style_bg_opa(dot, !s_focus.running || beat ? LV_OPA_COVER : LV_OPA_20, 0);
     }
-    lv_obj_set_style_opa(s_leaves, paused && !beat ? LV_OPA_40 : LV_OPA_COVER, 0);
+    lv_obj_set_style_opa(face.leaves, paused && !beat ? LV_OPA_40 : LV_OPA_COVER, 0);
 }
 
-void show_ticks(int done, bool idle, bool beat)
+void show_ticks(const Face &face, int done, bool idle, bool beat)
 {
     const lv_color_t ink = lv_color_hex(ink_of(resting()));
     for (int i = 0; i < s_tick_count; ++i) {
         const bool lit     = i < done;
         const bool current = !idle && i == done;
-        lv_obj_set_style_arc_color(s_tick[i], lit || current ? ink : lv_color_hex(theme::panel),
+        lv_obj_set_style_arc_color(face.tick[i], lit || current ? ink : lv_color_hex(theme::panel),
                                    LV_PART_MAIN);
-        lv_obj_set_style_arc_opa(s_tick[i],
+        lv_obj_set_style_arc_opa(face.tick[i],
                                  current ? (s_focus.running && !beat ? LV_OPA_20 : LV_OPA_50)
                                          : LV_OPA_COVER,
                                  LV_PART_MAIN);
@@ -245,19 +263,24 @@ void show_second(bool force)
     const bool idle   = s_focus.phase == FocusPhase::Idle;
     const bool paused = !idle && !s_focus.running;
     const bool beat   = seconds % 2 == 0;
-    show_leaves(seconds, paused, beat);
+    show_leaves(s_dial, seconds, paused, beat);
 
     const std::int32_t length  = idle ? 0 : s_focus.length_ms;
     const std::int32_t elapsed = length > 0 ? length - left : 0;
     const int          done    = length > 0 ? static_cast<int>(elapsed / units::kMsPerMinute) : 0;
     show_progress(elapsed, length);
-    show_ticks(done, idle, beat);
+    show_ticks(s_dial, done, idle, beat);
 }
+
+void show_full_second(bool force);
 
 void timer_tick(lv_timer_t *)
 {
-    if (detail::s_page == detail::FOCUS_PAGE && s_leaves != nullptr) {
+    if (detail::s_page == detail::FOCUS_PAGE && s_dial.leaves != nullptr) {
         show_second(false);
+    }
+    if (s_full != nullptr && !lv_obj_is_hidden(s_full)) {
+        show_full_second(false);
     }
 }
 
@@ -324,17 +347,23 @@ void lay_ticks(int count)
     s_tick_count     = count;
     const float step = static_cast<float>(DEGREES_PER_TURN) / static_cast<float>(count);
     const float gap  = tick_gap_degrees(count);
-    for (int i = 0; i < TICKS_MAX; ++i) {
-        lv_obj_set_hidden(s_tick[i], i >= count);
-        if (i >= count) {
+    for (Face *face : {&s_dial, &s_full_face}) {
+        if (face->tick[0] == nullptr) {
             continue;
         }
-        const auto from =
-            static_cast<int>(DIAL_TOP_DEGREES + step * static_cast<float>(i) + gap / 2.0f);
-        const auto to =
-            static_cast<int>(DIAL_TOP_DEGREES + step * static_cast<float>(i + 1) - gap / 2.0f);
-        lv_arc_set_bg_angles(s_tick[i], static_cast<lv_value_precise_t>(from % DEGREES_PER_TURN),
-                             static_cast<lv_value_precise_t>(to % DEGREES_PER_TURN));
+        for (int i = 0; i < TICKS_MAX; ++i) {
+            lv_obj_set_hidden(face->tick[i], i >= count);
+            if (i >= count) {
+                continue;
+            }
+            const auto from =
+                static_cast<int>(DIAL_TOP_DEGREES + step * static_cast<float>(i) + gap / 2.0f);
+            const auto to =
+                static_cast<int>(DIAL_TOP_DEGREES + step * static_cast<float>(i + 1) - gap / 2.0f);
+            lv_arc_set_bg_angles(face->tick[i],
+                                 static_cast<lv_value_precise_t>(from % DEGREES_PER_TURN),
+                                 static_cast<lv_value_precise_t>(to % DEGREES_PER_TURN));
+        }
     }
 }
 
@@ -355,9 +384,9 @@ lv_obj_t *leaf(lv_obj_t *parent)
     return digits;
 }
 
-void build_ticks(lv_obj_t *card, std::int32_t ring)
+void build_ticks(Face &face, lv_obj_t *card, std::int32_t ring)
 {
-    for (lv_obj_t *&tick : s_tick) {
+    for (lv_obj_t *&tick : face.tick) {
         tick = lv_arc_create(card);
         lv_obj_set_size(tick, ring, ring);
         lv_obj_center(tick);
@@ -375,28 +404,30 @@ void build_ticks(lv_obj_t *card, std::int32_t ring)
 // Minutes and seconds each on a leaf, cut across where a flip clock's leaves
 // fold, with a colon that beats the seconds between them. The clock is a button
 // too: the biggest thing on the page is the obvious one to tap.
-void build_leaves(lv_obj_t *card)
+void build_leaves(Face &face, lv_obj_t *card)
 {
-    s_leaves = clear_box(card);
-    lv_obj_set_size(s_leaves, LV_SIZE_CONTENT, LEAF_H);
-    lv_obj_set_flex_flow(s_leaves, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(s_leaves, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(s_leaves, LEAF_GAP, 0);
-    lv_obj_center(s_leaves);
-    lv_obj_set_clickable(s_leaves, true);
-    on_click(s_leaves, FocusAction::Toggle);
-    s_minutes       = leaf(s_leaves);
-    lv_obj_t *colon = clear_box(s_leaves);
+    face.leaves = clear_box(card);
+    lv_obj_set_size(face.leaves, LV_SIZE_CONTENT, LEAF_H);
+    lv_obj_set_flex_flow(face.leaves, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(face.leaves, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(face.leaves, LEAF_GAP, 0);
+    lv_obj_center(face.leaves);
+    lv_obj_set_clickable(face.leaves, true);
+    on_click(face.leaves, FocusAction::Toggle);
+    face.minutes    = leaf(face.leaves);
+    lv_obj_t *colon = clear_box(face.leaves);
     lv_obj_set_size(colon, COLON_DOT, COLON_H);
     const lv_align_t places[] = {LV_ALIGN_TOP_MID, LV_ALIGN_BOTTOM_MID};
-    for (std::size_t i = 0; i < std::size(s_colon); ++i) {
-        s_colon[i] = make_dot(colon, theme::secondary, COLON_DOT);
-        lv_obj_align(s_colon[i], places[i], 0, 0);
+    for (std::size_t i = 0; i < std::size(face.colon); ++i) {
+        face.colon[i] = make_dot(colon, theme::secondary, COLON_DOT);
+        lv_obj_align(face.colon[i], places[i], 0, 0);
     }
-    s_seconds = leaf(s_leaves);
+    face.seconds = leaf(face.leaves);
 }
 
-// The corners, as the radar's: what to do in three, a screw in the fourth.
+void open_full();
+
+// The corners, as the radar's: what to do in three, and the fourth fullscreen.
 void build_corners(lv_obj_t *card, std::int32_t inner, std::int32_t inner_h)
 {
     s_reset = theme::make_chip(card, LV_SYMBOL_REFRESH);
@@ -405,12 +436,15 @@ void build_corners(lv_obj_t *card, std::int32_t inner, std::int32_t inner_h)
     s_skip = theme::make_chip(card, LV_SYMBOL_NEXT);
     lv_obj_set_pos(s_skip, inner - CHIP, 0);
     on_click(s_skip, FocusAction::Skip);
-    lv_obj_set_pos(theme::make_screw(card, CHIP), 0, inner_h - CHIP);
+    lv_obj_t *full = theme::make_chip(card, "");
+    theme::make_mark(full, &icons::expand_icon);
+    lv_obj_set_pos(full, 0, inner_h - CHIP);
+    lv_obj_add_event_cb(full, [](lv_event_t *) { open_full(); }, LV_EVENT_CLICKED, nullptr);
     s_go = theme::make_chip(card, LV_SYMBOL_PLAY);
     theme::fill_accent(s_go, LV_STATE_CHECKED);
     lv_obj_set_pos(s_go, inner - CHIP, inner_h - CHIP);
     on_click(s_go, FocusAction::Toggle);
-    for (lv_obj_t *chip : {s_reset, s_skip, s_go}) {
+    for (lv_obj_t *chip : {s_reset, s_skip, s_go, full}) {
         lv_obj_set_ext_click_area(chip, theme::space::s);
     }
 }
@@ -422,8 +456,8 @@ void build_dial(lv_obj_t *parent, std::int32_t w, std::int32_t h)
     const std::int32_t inner   = w - 2 * PANEL_PAD;
     const std::int32_t inner_h = h - 2 * PANEL_PAD;
 
-    build_ticks(card, std::min(inner, inner_h) - RING_CLEARANCE);
-    build_leaves(card);
+    build_ticks(s_dial, card, std::min(inner, inner_h) - RING_CLEARANCE);
+    build_leaves(s_dial, card);
 
     s_phase = theme::make_eyebrow(card, "READY");
     lv_obj_align(s_phase, LV_ALIGN_CENTER, 0, -LEAF_H / 2 - PHASE_ABOVE_LEAVES);
@@ -616,6 +650,120 @@ const char *phase_name(FocusPhase phase)
     return "READY";
 }
 
+// Once a second while it is up, as the dial: the leaves, the colon, the ticks,
+// and under them until when, or what a tap does.
+void show_full_second(bool force)
+{
+    const std::int32_t left    = left_ms();
+    const int          seconds = static_cast<int>(whole_seconds_up(left));
+    if (seconds == s_full_shown_s && !force) {
+        return;
+    }
+    s_full_shown_s = seconds;
+
+    const bool         idle    = s_focus.phase == FocusPhase::Idle;
+    const bool         paused  = !idle && !s_focus.running;
+    const bool         beat    = seconds % 2 == 0;
+    const std::int32_t length  = idle ? 0 : s_focus.length_ms;
+    const std::int32_t elapsed = length > 0 ? length - left : 0;
+    show_leaves(s_full_face, seconds, paused, beat);
+    show_ticks(s_full_face, length > 0 ? static_cast<int>(elapsed / units::kMsPerMinute) : 0, idle,
+               beat);
+
+    char text[64];
+    if (idle || waiting()) {
+        if (s_focus.phase == FocusPhase::Work || idle) {
+            std::snprintf(text, sizeof(text), "Tap the time to start round %d",
+                          idle ? 1 : s_focus.round);
+        } else {
+            std::snprintf(text, sizeof(text), "Tap the time to start the break");
+        }
+    } else if (paused) {
+        std::snprintf(text, sizeof(text), "Paused, %d min left",
+                      static_cast<int>((seconds + units::kSecondsPerMinute - 1) / units::kSecondsPerMinute));
+    } else {
+        char until[8];
+        clock_text(left, until, sizeof(until));
+        std::snprintf(text, sizeof(text), "Until %s", until);
+    }
+    theme::set_text(s_full_under, text);
+}
+
+// What the part is, in its colour, and the set's rounds as dots.
+void show_full_part()
+{
+    if (s_full == nullptr) {
+        return;
+    }
+    const bool          idle = s_focus.phase == FocusPhase::Idle;
+    const std::uint32_t ink  = ink_of(resting());
+    char                text[48];
+    std::snprintf(text, sizeof(text), "%s%s", phase_name(s_focus.phase),
+                  waiting() ? ", READY" : !idle && !s_focus.running ? ", PAUSED" : "");
+    theme::set_text(s_full_phase, text);
+    theme::set_text_color(s_full_phase, idle ? theme::secondary : ink);
+
+    const int rounds = std::clamp(s_focus.rounds, 1, ROUNDS_MAX);
+    const int done   = idle ? 0 : s_focus.phase == FocusPhase::Work ? s_focus.round - 1 : s_focus.round;
+    for (int i = 0; i < ROUNDS_MAX; ++i) {
+        lv_obj_set_hidden(s_full_round[i], i >= rounds);
+        const bool now = !idle && s_focus.phase == FocusPhase::Work && i == s_focus.round - 1;
+        lv_obj_set_style_bg_color(s_full_round[i],
+                                  lv_color_hex(i < done || now ? theme::primary : theme::panel_light), 0);
+        lv_obj_set_style_bg_opa(s_full_round[i], now && !s_focus.running ? LV_OPA_50 : LV_OPA_COVER, 0);
+    }
+    show_full_second(true);
+}
+
+void open_full()
+{
+    if (s_full == nullptr) {
+        return;
+    }
+    lv_obj_set_hidden(s_full, false);
+    lv_obj_move_foreground(s_full);
+    show_full_part();
+}
+
+// The dial without its card, larger and on the background: the same ticks and
+// leaves, the part over them, and under them until when and the set's rounds.
+// The leaves pause and carry on, as on the page; the corner chip goes back.
+void build_full(lv_obj_t *screen)
+{
+    const detail::Layout l = detail::layout();
+    s_full = lv_obj_create(screen);
+    lv_obj_set_size(s_full, l.screen_w, l.screen_h);
+    lv_obj_set_pos(s_full, 0, 0);
+    theme::style_panel(s_full, theme::background, 0);
+    lv_obj_set_scrollable(s_full, false);
+
+    build_ticks(s_full_face, s_full, l.screen_h - 2 * FULL_PAD);
+    build_leaves(s_full_face, s_full);
+
+    lv_obj_t *back = theme::make_chip(s_full, "");
+    theme::make_mark(back, &icons::collapse_icon);
+    lv_obj_align(back, LV_ALIGN_TOP_RIGHT, -FULL_PAD, FULL_PAD);
+    lv_obj_set_ext_click_area(back, theme::space::s);
+    lv_obj_add_event_cb(back, [](lv_event_t *) { lv_obj_set_hidden(s_full, true); }, LV_EVENT_CLICKED,
+                        nullptr);
+
+    s_full_phase = theme::make_eyebrow(s_full, "READY");
+    lv_obj_align(s_full_phase, LV_ALIGN_CENTER, 0, -LEAF_H / 2 - PHASE_ABOVE_LEAVES);
+
+    s_full_under = theme::make_label(s_full, "", theme::secondary, theme::type_body());
+    lv_obj_align(s_full_under, LV_ALIGN_CENTER, 0, LEAF_H / 2 + PHASE_ABOVE_LEAVES);
+
+    lv_obj_t *rounds = clear_box(s_full);
+    lv_obj_set_size(rounds, LV_SIZE_CONTENT, FULL_DOT);
+    lv_obj_set_flex_flow(rounds, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(rounds, FULL_DOT_GAP, 0);
+    lv_obj_align(rounds, LV_ALIGN_CENTER, 0, LEAF_H / 2 + PHASE_ABOVE_LEAVES + FULL_ROUNDS_BELOW);
+    for (lv_obj_t *&dot : s_full_round) {
+        dot = make_dot(rounds, theme::panel_light, FULL_DOT);
+    }
+    lv_obj_set_hidden(s_full, true);
+}
+
 }  // namespace
 
 void show_focus(const Focus &focus)
@@ -625,7 +773,7 @@ void show_focus(const Focus &focus)
                           focus.work_min != s_focus.work_min || s_tick_count == 0;
     s_focus = focus;
     detail::paint_focus_plan(focus);
-    if (s_leaves == nullptr) {
+    if (s_dial.leaves == nullptr) {
         return;
     }
     const bool idle   = focus.phase == FocusPhase::Idle;
@@ -639,6 +787,7 @@ void show_focus(const Focus &focus)
     std::snprintf(text, sizeof(text), "%s%s", phase_name(focus.phase),
                   waiting() ? ", READY" : paused ? ", PAUSED" : "");
     theme::set_text(s_phase, text);
+    show_full_part();
     lv_obj_set_state(s_go, LV_STATE_CHECKED, focus.running);
     lv_obj_t *glyph = lv_obj_get_child(s_go, 0);
     theme::set_text(glyph, focus.running ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
@@ -649,6 +798,13 @@ void show_focus(const Focus &focus)
 
     show_set();
     show_second(true);
+}
+
+void build_focus_full(lv_obj_t *screen)
+{
+    build_full(screen);
+    lay_ticks(s_tick_count > 0 ? s_tick_count : s_focus.work_min);
+    show_full_part();
 }
 
 void build_focus_page(lv_obj_t *page, std::int32_t width, std::int32_t height)

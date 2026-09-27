@@ -1,4 +1,5 @@
 #include "ui_internal.h"
+#include "focus_page.h"
 
 #ifndef SHOT_DRAWER
 #define SHOT_DRAWER 0
@@ -161,6 +162,7 @@ void build_screen()
     }
     create_drawer(scr);  // after the content, so it overlays it when open
     build_cinema(scr);
+    build_focus_full(scr);
     lv_obj_move_foreground(s_rail);  // and under the rail, which it slides out from
     create_notice_card();
     build_splash();  // last, so it covers everything until startup finishes
