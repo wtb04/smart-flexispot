@@ -175,18 +175,33 @@ esp_http_client_handle_t open_client(const std::string &url, esp_http_client_met
     return client;
 }
 
+// One connection kept for the commands, on the worker's task: a new one would
+// cost a TLS handshake each, which a run of volume presses waits through.
+esp_http_client_handle_t s_commander = nullptr;
+
 void post(const std::string &path)
 {
-    esp_http_client_handle_t client = open_client(JELLYFIN_URL + path, HTTP_METHOD_POST);
-    if (client == nullptr) {
-        return;
+    const std::string url = JELLYFIN_URL + path;
+    if (s_commander == nullptr) {
+        s_commander = open_client(url, HTTP_METHOD_POST);
+        if (s_commander == nullptr) {
+            return;
+        }
+    } else {
+        esp_http_client_set_url(s_commander, url.c_str());
+        esp_http_client_set_method(s_commander, HTTP_METHOD_POST);
     }
-    const esp_err_t err    = esp_http_client_perform(client);
-    const int       status = esp_http_client_get_status_code(client);
+    const esp_err_t err    = esp_http_client_perform(s_commander);
+    const int       status = esp_http_client_get_status_code(s_commander);
     if (err != ESP_OK || status >= 300) {
         ESP_LOGW(TAG, "command refused (%s, %d)", esp_err_to_name(err), status);
+    } else {
+        ESP_LOGI(TAG, "sent %s", path.c_str());
     }
-    esp_http_client_cleanup(client);
+    if (err != ESP_OK) {
+        esp_http_client_cleanup(s_commander);  // opened afresh for the next
+        s_commander = nullptr;
+    }
 }
 
 // Sends commands as they come, and keeps the socket alive between them.
