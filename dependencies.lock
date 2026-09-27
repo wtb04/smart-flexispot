@@ -83,14 +83,12 @@ dependencies:
       type: service
     version: 1.0.4
   espressif/esp_hosted:
-    component_hash: ef6bc803451fab3c3f9a679bbc1c48fba0ceeeabc5af4178dd7d2300fafa423e
     dependencies:
     - name: idf
-      require: private
       version: '>=5.3'
     source:
-      registry_url: https://components.espressif.com/
-      type: service
+      path: /Users/wtb/dev/tab5-hello/components/esp_hosted
+      type: local
     version: 1.4.0
   espressif/esp_io_expander:
     component_hash: 7b7f91270172e46ca4597e3874f48d8412e280e8c295559f5922ec38656e3e5f
@@ -489,6 +487,6 @@ direct_dependencies:
 - espressif/libjpeg-turbo
 - espressif/m5stack_tab5
 - idf
-manifest_hash: 02ea4fff9509765751392820c2c24df580eb2b4a235fb8b457ecbb974944d672
+manifest_hash: 81c1dd59ed20a5072322a9c9c82eb97953ba9c77f0f2fb19d02030efce46c286
 target: esp32p4
 version: 2.0.0

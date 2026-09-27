@@ -4,3 +4,8 @@ dependencies:
   # The part's jpeg engine is baseline only and every aircraft photograph
   # planespotters serves is progressive, so those are decoded in software.
   espressif/libjpeg-turbo: "^3.1.0"
+  # A copy with one change to how the SDIO link takes its receive buffers; see
+  # components/esp_hosted/README.md.
+  espressif/esp_hosted:
+    version: "1.4.0"
+    override_path: "../components/esp_hosted"

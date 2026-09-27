@@ -156,6 +156,9 @@ CONFIG_BT_NIMBLE_LOG_LEVEL_NONE=y
 # Raised when this task was feeding the log ring on every packet it narrated.
 # It narrates nothing now and measures 2.4 KB used.
 CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=6144
+# Its buffer pools, some 30 KB, need no DMA: the link to the C6 copies each
+# frame into its own. In internal RAM they crowded out what does.
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
 
 # The Bluetooth transport to the other chip allocates DMA-capable memory to
 # send, and so does the AES that TLS runs on. What failed was not a Bluetooth
@@ -238,3 +241,14 @@ CONFIG_BSP_LCD_DPI_BUFFER_NUMS=2
 # A firmware booted from an update that does not reach the network in time
 # restarts, and the bootloader returns to the one before. See components/ota.
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# A TCP window of a few packets caps a download at what one round trip over
+# Wi-Fi lets through, some 200 KB/s here: a Jellyfin session with its queue
+# took seconds to come in, and every pause with it. 32 KB takes it in a
+# fraction of that. Data waiting to be read would sit in the link's DMA
+# buffers in internal RAM until the link could get none and asserted, so each
+# packet is copied out into PSRAM as it arrives.
+CONFIG_LWIP_TCP_WND_DEFAULT=32768
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=32
+CONFIG_LWIP_L2_TO_L3_COPY=y
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
