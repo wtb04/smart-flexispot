@@ -5,6 +5,7 @@
 #include "esp_heap_caps.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "esp_websocket_client.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -29,12 +30,17 @@ constexpr char TAG[] = "jellyfin";
 
 constexpr char DEVICE_ID[] = "smart-flexispot";  // so its own session is known and skipped
 
-constexpr int SESSIONS_INTERVAL_MS = 1000;
+// The server pushes whenever a player reports, a pause at once and progress
+// every ten seconds, besides each interval. With the queue's items a session
+// runs to more than half a megabyte, which pushed every second the panel could
+// not take in fast enough, falling ever further behind; so the interval is
+// left long and the reports carry it.
+constexpr int SESSIONS_INTERVAL_MS = 60 * units::kMsPerSecond;
 // The server drops a socket it has not heard from in its keep-alive time, 60 s
 // as it says; half that is what its own clients send at.
 constexpr TickType_t KEEP_ALIVE = pdMS_TO_TICKS(30 * units::kMsPerSecond);
 
-constexpr int         BUFFER_SIZE        = 4 * units::kBytesPerKiB;
+constexpr int         BUFFER_SIZE        = 16 * units::kBytesPerKiB;  // fewer reads for the big ones
 constexpr int         SOCKET_STACK       = 6144;
 constexpr int         NETWORK_TIMEOUT_MS = 10 * units::kMsPerSecond;
 constexpr int         RECONNECT_MS       = 5 * units::kMsPerSecond;
@@ -65,6 +71,7 @@ Handler                       s_on_change = nullptr;
 QueueHandle_t                 s_commands  = nullptr;
 std::string                   s_rx;
 Trimmer                       s_trim;
+std::int64_t                  s_rx_began_us = 0;  // when the message's first bytes came
 
 std::mutex s_now_lock;
 NowPlaying s_now;  // what was last handed on
@@ -78,7 +85,12 @@ bool same(const NowPlaying &a, const NowPlaying &b)
 
 void take_sessions(const std::string &message)
 {
-    const NowPlaying now = now_playing(message, DEVICE_ID);
+    NowPlaying now = now_playing(message, DEVICE_ID);
+    // Its position was true when it began to arrive; a session with its queue
+    // takes seconds to come in whole, and playing on goes on meanwhile.
+    if (now.active && !now.paused && s_rx_began_us != 0) {
+        now.position_s += static_cast<int>((esp_timer_get_time() - s_rx_began_us) / units::kUsPerSecond);
+    }
     {
         std::lock_guard<std::mutex> hold(s_now_lock);
         if (same(now, s_now)) {
@@ -104,6 +116,7 @@ void handle_data(const esp_websocket_event_data_t *event)
         if (event->payload_offset == 0) {
             s_rx.clear();
             s_trim.reset();
+            s_rx_began_us = esp_timer_get_time();
         }
     } else if (event->op_code != WS_OPCODE_CONTINUATION || s_rx.empty()) {
         return;  // binary, ping, pong, close: not ours
@@ -134,6 +147,7 @@ void on_event(void *, esp_event_base_t, std::int32_t id, void *data)
         case WEBSOCKET_EVENT_DISCONNECTED:
         case WEBSOCKET_EVENT_CLOSED:
             s_rx.clear();
+            s_rx_began_us = 0;
             take_sessions("");  // nothing known to be playing while away
             break;
         case WEBSOCKET_EVENT_DATA:
