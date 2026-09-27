@@ -274,8 +274,27 @@ void show_second(bool force)
 
 void show_full_second(bool force);
 
+// The tab shows it from every page: how long is left, or that it waits.
+void show_tab()
+{
+    if (s_focus.phase == FocusPhase::Idle) {
+        detail::show_focus_tab(nullptr, 0, false);
+        return;
+    }
+    char      text[16];
+    const int seconds = static_cast<int>(whole_seconds_up(left_ms()));
+    if (waiting()) {
+        std::snprintf(text, sizeof(text), "Ready");
+    } else {
+        std::snprintf(text, sizeof(text), "%02d:%02d", seconds / units::kSecondsPerMinute,
+                      seconds % units::kSecondsPerMinute);
+    }
+    detail::show_focus_tab(text, ink_of(resting()), !s_focus.running);
+}
+
 void timer_tick(lv_timer_t *)
 {
+    show_tab();
     if (detail::s_page == detail::FOCUS_PAGE && s_dial.leaves != nullptr) {
         show_second(false);
     }
@@ -798,6 +817,7 @@ void show_focus(const Focus &focus)
 
     show_set();
     show_second(true);
+    show_tab();
 }
 
 void build_focus_full(lv_obj_t *screen)

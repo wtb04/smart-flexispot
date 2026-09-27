@@ -297,6 +297,9 @@ void open_cinema();
 void apply_cinema_still(const void *pixels);
 void show_guest_presets();
 void select_page(int index);
+/** The Focus tab's caption in place of its name, and its icon in `ink`, faded
+ *  while paused; a null caption puts it back. */
+void show_focus_tab(const char *caption, std::uint32_t ink, bool paused);
 void brightness_event_cb(lv_event_t *e);
 std::uint32_t info_ink(Level level);
 void refresh_diag_summary();

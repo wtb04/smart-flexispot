@@ -6,6 +6,13 @@ lv_obj_t *s_pages[PAGE_COUNT]    = {};
 lv_obj_t *s_nav_tabs[PAGE_COUNT] = {};
 lv_obj_t *s_setup_dot            = nullptr;  // an update is waiting in Setup
 
+// While the timer is on, the Focus tab shows how long is left in its caption
+// and the part's colour on its icon, so it can be seen from any page.
+constexpr std::size_t FOCUS_CAPTION_SIZE = 16;
+char                  s_focus_caption[FOCUS_CAPTION_SIZE] = {};  // empty when idle
+std::uint32_t         s_focus_ink    = 0;
+bool                  s_focus_paused = false;
+
 constexpr std::int32_t SETUP_DOT        = 12;
 constexpr std::int32_t SETUP_DOT_INSET  = 10;
 
@@ -76,14 +83,21 @@ void paint_tab(int index, bool active)
 {
     lv_obj_t *tab = s_nav_tabs[index];
     lv_obj_set_state(tab, LV_STATE_CHECKED, active);
-    const std::uint32_t ink  = active ? theme::text : theme::secondary;
-    lv_obj_t           *icon = lv_obj_get_child(tab, 0);
+    const std::uint32_t ink   = active ? theme::text : theme::secondary;
+    const bool          timer = index == FOCUS_PAGE && s_focus_caption[0] != '\0';
+    const std::uint32_t mark  = timer && !active ? s_focus_ink : ink;
+    lv_obj_t           *icon  = lv_obj_get_child(tab, 0);
     if (NAV_ITEMS[index].image != nullptr) {
-        lv_obj_set_style_image_recolor(icon, lv_color_hex(ink), 0);
+        lv_obj_set_style_image_recolor(icon, lv_color_hex(mark), 0);
+        lv_obj_set_style_image_opa(icon, timer && s_focus_paused ? LV_OPA_50 : LV_OPA_COVER, 0);
     } else {
-        theme::set_text_color(icon, ink);
+        theme::set_text_color(icon, mark);
     }
-    theme::set_text_color(lv_obj_get_child(tab, 1), ink);
+    lv_obj_t *caption = lv_obj_get_child(tab, 1);
+    if (index == FOCUS_PAGE) {
+        theme::set_text(caption, timer ? s_focus_caption : NAV_ITEMS[index].caption);
+    }
+    theme::set_text_color(caption, ink);
 }
 
 void tell_page_opened(int index)
@@ -102,6 +116,20 @@ void tell_page_opened(int index)
     }
 }
 }  // namespace
+
+void show_focus_tab(const char *caption, std::uint32_t ink, bool paused)
+{
+    const char *text = caption != nullptr ? caption : "";
+    if (std::strcmp(text, s_focus_caption) == 0 && ink == s_focus_ink && paused == s_focus_paused) {
+        return;
+    }
+    std::snprintf(s_focus_caption, sizeof(s_focus_caption), "%s", text);
+    s_focus_ink    = ink;
+    s_focus_paused = paused;
+    if (s_nav_tabs[FOCUS_PAGE] != nullptr) {
+        paint_tab(FOCUS_PAGE, s_page == FOCUS_PAGE);
+    }
+}
 
 void select_page(int index)
 {
