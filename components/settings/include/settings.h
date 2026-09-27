@@ -20,6 +20,12 @@ enum class Key : std::uint8_t {
     FocusBreak,
     FocusLong,
     FocusRounds,
+    FocusPhase,    // the timer as it stood, kept across a restart: see focus::Saved
+    FocusRound,
+    FocusRunning,
+    FocusLeft,     // milliseconds
+    FocusLength,
+    FocusEnds,     // seconds since the epoch, 0 when not running or not known
     Count,
 };
 

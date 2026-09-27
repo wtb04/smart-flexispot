@@ -10,13 +10,16 @@
 #include <algorithm>
 #include <atomic>
 #include <iterator>
+#include <limits>
 
 namespace settings {
 namespace {
 constexpr char TAG[]       = "settings";
 constexpr char NAMESPACE[] = "panel";
 
-constexpr int MAX_RGB = 0xffffff;
+constexpr int MAX_RGB     = 0xffffff;
+constexpr int MAX_PART_MS = 90 * 60 * 1000;  // focus_work's high, the longest part
+constexpr int MAX_EPOCH_S = std::numeric_limits<std::int32_t>::max();
 
 struct Spec {
     const char *name;  // NVS keys are limited to 15 characters
@@ -43,6 +46,12 @@ constexpr Spec SPECS[] = {
     {"focus_break", 5, 1, 30},
     {"focus_long", 20, 5, 60},
     {"focus_rounds", 4, 1, 8},
+    {"focus_phase", 0, 0, 3},
+    {"focus_round", 0, 0, 8},
+    {"focus_running", 0, 0, 1},
+    {"focus_left", 0, 0, MAX_PART_MS},
+    {"focus_length", 0, 0, MAX_PART_MS},
+    {"focus_ends", 0, 0, MAX_EPOCH_S},
 };
 constexpr int COUNT = static_cast<int>(Key::Count);
 static_assert(std::size(SPECS) == COUNT, "every key needs a spec");

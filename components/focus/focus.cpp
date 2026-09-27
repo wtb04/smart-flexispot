@@ -84,6 +84,13 @@ void act(Action action)
     }
 }
 
+void restore(const State &state)
+{
+    if (s_timer != nullptr) {
+        settle(state, false);
+    }
+}
+
 State state()
 {
     portENTER_CRITICAL(&s_lock);

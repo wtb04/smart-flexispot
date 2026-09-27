@@ -104,6 +104,61 @@ inline State finished(const State &state, const Plan &plan, std::int64_t now)
     return ready(after(state, plan, now));
 }
 
+/** The timer as kept across a restart. The clock State runs on starts again
+ *  at zero, so a running part keeps when it ends by the wall clock instead;
+ *  ends_s is 0 when that clock was not set. */
+struct Saved {
+    Phase        phase   = Phase::Idle;
+    int          round   = 0;
+    bool         running = false;
+    std::int32_t left    = 0;
+    std::int32_t length  = 0;
+    std::int64_t ends_s  = 0;
+};
+
+inline Saved saved(const State &state, std::int64_t now, std::int64_t wall_s)
+{
+    Saved out;
+    out.phase   = state.phase;
+    out.round   = state.round;
+    out.running = state.running;
+    out.left    = left_of(state, now);
+    out.length  = state.length;
+    if (state.running && wall_s > 0) {
+        out.ends_s = wall_s + (out.left + units::kMsPerSecond - 1) / units::kMsPerSecond;
+    }
+    return out;
+}
+
+/** The timer again after a restart, at `now` on the new clock and `wall_s` on
+ *  the wall clock, 0 when that is not set. A part that ran out meanwhile gives
+ *  way to the next, waiting: nothing runs on its own across a restart. */
+inline State restored(const Saved &saved, const Plan &plan, std::int64_t now, std::int64_t wall_s)
+{
+    if (saved.phase == Phase::Idle || saved.length <= 0) {
+        return State{};
+    }
+    State state;
+    state.phase  = saved.phase;
+    state.round  = saved.round;
+    state.length = saved.length;
+    state.left   = saved.left;
+    if (!saved.running) {
+        return state;
+    }
+    if (saved.ends_s <= 0 || wall_s <= 0) {
+        return state;  // how long it was off is not known: held where it was
+    }
+    const std::int64_t left_ms = (saved.ends_s - wall_s) * units::kMsPerSecond;
+    if (left_ms <= 0) {
+        return ready(after(state, plan, now));
+    }
+    state.running = true;
+    state.left    = static_cast<std::int32_t>(left_ms);
+    state.ends_at = now + left_ms;
+    return state;
+}
+
 /** The one button: start a set, pause, or carry on. */
 inline State toggled(const State &state, const Plan &plan, std::int64_t now)
 {

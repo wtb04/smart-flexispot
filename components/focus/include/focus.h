@@ -16,6 +16,9 @@ esp_err_t start(ChangeHandler on_change);
 /** From any task. */
 void act(Action action);
 
+/** Puts back the timer as it was before a restart; after start() and set_plan(). */
+void restore(const State &state);
+
 State state();
 Plan  plan();
 

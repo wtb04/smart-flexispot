@@ -34,12 +34,14 @@
 
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 
 namespace {
 constexpr char TAG[] = "panel";
 
 constexpr int         FOCUS_NOTICE_MS    = 5000;
 constexpr std::size_t FOCUS_MESSAGE_SIZE = 64;
+constexpr std::time_t WALL_CLOCK_SET     = 1'700'000'000;  // any earlier and the clock is not set yet
 
 // The notice stays up until the restart takes the screen down.
 constexpr int DESK_RESTART_DELAY_MS = 1500;
@@ -164,10 +166,43 @@ ui::Focus focus_view(const focus::State &state)
     };
 }
 
+focus::Plan stored_plan();
+
+// The wall clock in seconds, or 0 before it is set.
+std::int64_t wall_seconds()
+{
+    const std::time_t now = std::time(nullptr);
+    return now >= WALL_CLOCK_SET ? static_cast<std::int64_t>(now) : 0;
+}
+
+void save_focus(const focus::State &state)
+{
+    const focus::Saved kept = focus::saved(state, focus::now_ms(), wall_seconds());
+    settings::set(settings::Key::FocusPhase, static_cast<int>(kept.phase));
+    settings::set(settings::Key::FocusRound, kept.round);
+    settings::set(settings::Key::FocusRunning, kept.running ? 1 : 0);
+    settings::set(settings::Key::FocusLeft, kept.left);
+    settings::set(settings::Key::FocusLength, kept.length);
+    settings::set(settings::Key::FocusEnds, static_cast<int>(kept.ends_s));
+}
+
+focus::State stored_focus()
+{
+    focus::Saved kept;
+    kept.phase   = static_cast<focus::Phase>(settings::get(settings::Key::FocusPhase));
+    kept.round   = settings::get(settings::Key::FocusRound);
+    kept.running = settings::enabled(settings::Key::FocusRunning);
+    kept.left    = settings::get(settings::Key::FocusLeft);
+    kept.length  = settings::get(settings::Key::FocusLength);
+    kept.ends_s  = settings::get(settings::Key::FocusEnds);
+    return focus::restored(kept, stored_plan(), focus::now_ms(), wall_seconds());
+}
+
 // A part running out chimes and says what comes next, on whatever page is up.
 void on_focus_change(const focus::State &state, bool finished)
 {
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_focus(focus_view(state)));
+    save_focus(state);
     if (!finished) {
         return;
     }
@@ -394,8 +429,11 @@ extern "C" void app_main(void)
 
     ESP_ERROR_CHECK_WITHOUT_ABORT(battery::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(sound::init());
+    // Read before anything changes the timer, which saves over what is stored.
+    const focus::State kept_focus = stored_focus();
     ESP_ERROR_CHECK_WITHOUT_ABORT(focus::start(on_focus_change));
     focus::set_plan(stored_plan());  // which shows it too
+    focus::restore(kept_focus);
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("desk"));
     ESP_ERROR_CHECK_WITHOUT_ABORT(wifi::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(ota::start({

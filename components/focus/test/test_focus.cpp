@@ -59,6 +59,21 @@ int main()
           "after the long break the next set waits too");
     check(!waiting(paused), "a round paused part way is not waiting");
 
+    // Kept across a restart: 10 minutes into round one, by the wall clock.
+    const Saved kept = saved(s, 1000 + 10 * min, 5'000'000);
+    check(kept.running && kept.ends_s == 5'000'000 + 15 * 60, "a running part keeps its end by the wall clock");
+    const State back = restored(kept, plan, 200, 5'000'000 + 60);
+    check(back.phase == Phase::Work && back.round == 1 && back.running &&
+              back.ends_at == 200 + 14 * min && back.length == 25 * min,
+          "back after a minute off, a minute less is left");
+    const State over = restored(kept, plan, 200, 5'000'000 + 20 * 60);
+    check(over.phase == Phase::Break && waiting(over), "a part that ran out while off gives way to the next, waiting");
+    const State held = restored(saved(paused, 0, 5'000'000), plan, 200, 5'000'000 + 3600);
+    check(held.phase == Phase::Work && !held.running && held.left == 15 * min, "a paused part comes back paused");
+    const State unset = restored(saved(s, 1000 + 10 * min, 0), plan, 200, 5'000'000);
+    check(!unset.running && unset.left == 15 * min, "without the wall clock a running part is held where it was");
+    check(restored(saved(State{}, 0, 5'000'000), plan, 0, 5'000'000).phase == Phase::Idle, "idle stays idle");
+
     check(left_of(s, s.ends_at + 5000) == 0, "left never goes below zero");
     check(left_of(State{}, 12345) == 0, "nothing is left when idle");
 
