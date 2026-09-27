@@ -266,6 +266,56 @@ bool read_aircraft(Scanner &in, Aircraft &out, bool &usable)
     return true;
 }
 
+/** An airport of the route: its code and town, and where it is. */
+struct Place {
+    char       *code;
+    std::size_t code_size;
+    char       *city;
+    std::size_t city_size;
+    float      &lat;
+    float      &lon;
+    bool       &has_at;
+};
+
+bool read_place(Scanner &in, const Place &place)
+{
+    if (in.take('}')) {
+        return true;
+    }
+    bool has_lat = false;
+    bool has_lon = false;
+    for (;;) {
+        const char *key     = nullptr;
+        std::size_t key_len = 0;
+        if (!in.key(key, key_len)) {
+            return false;
+        }
+        double value = 0.0;
+        bool   read  = true;
+        if (key_is(key, key_len, "iata_code") && in.peek('"')) {
+            read = read_text(in, place.code, place.code_size);
+        } else if (key_is(key, key_len, "municipality") && in.peek('"')) {
+            read = read_text(in, place.city, place.city_size);
+        } else if (key_is(key, key_len, "latitude") && in.number(value)) {
+            place.lat = static_cast<float>(value);
+            has_lat   = true;
+        } else if (key_is(key, key_len, "longitude") && in.number(value)) {
+            place.lon = static_cast<float>(value);
+            has_lon   = true;
+        } else {
+            read = in.skip_value();
+        }
+        if (!read) {
+            return false;
+        }
+        if (in.take(',')) {
+            continue;
+        }
+        place.has_at = has_lat && has_lon;
+        return in.take('}');
+    }
+}
+
 template <std::size_t N>
 bool read_fields(Scanner &in, const Field (&fields)[N])
 {
@@ -378,14 +428,14 @@ bool parse_route(const char *json, std::size_t length, Details &out)
                 const Field fields[] = {{"name", out.airline, sizeof(out.airline)}};
                 handled              = in.take('{') && read_fields(in, fields);
             } else if (key_is(key, key_len, "origin")) {
-                const Field fields[] = {
-                    {"iata_code", out.origin_code, sizeof(out.origin_code)},
-                    {"municipality", out.origin_city, sizeof(out.origin_city)}};
-                handled = in.take('{') && read_fields(in, fields);
+                const Place place{out.origin_code, sizeof(out.origin_code), out.origin_city,
+                                  sizeof(out.origin_city), out.origin_lat, out.origin_lon,
+                                  out.has_origin_at};
+                handled = in.take('{') && read_place(in, place);
             } else if (key_is(key, key_len, "destination")) {
-                const Field fields[] = {{"iata_code", out.dest_code, sizeof(out.dest_code)},
-                                        {"municipality", out.dest_city, sizeof(out.dest_city)}};
-                handled = in.take('{') && read_fields(in, fields);
+                const Place place{out.dest_code, sizeof(out.dest_code), out.dest_city,
+                                  sizeof(out.dest_city), out.dest_lat, out.dest_lon, out.has_dest_at};
+                handled = in.take('{') && read_place(in, place);
             }
         }
         if (!handled && !in.skip_value()) {

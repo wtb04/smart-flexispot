@@ -1652,6 +1652,135 @@ void ink_marker()
     }
 }
 
+// The chosen aircraft's way: where the feed has seen it, fading as it goes
+// back, and a faint dashed line on from it to where it is going and back from
+// where its trail begins to where it came from, each to the scope's edge.
+constexpr lv_opa_t     TRAIL_OLD_OPA  = LV_OPA_20;
+constexpr lv_opa_t     TRAIL_NEW_OPA  = LV_OPA_90;
+constexpr lv_opa_t     ROUTE_OPA      = LV_OPA_40;
+constexpr std::int32_t ROUTE_DASH     = 6;   // pixels drawn, then as many left
+constexpr std::int32_t TRAIL_WIDTH    = 2;
+
+void air_blend(std::int32_t x, std::int32_t y, std::uint16_t ink, lv_opa_t opa)
+{
+    for (std::int32_t dy = 0; dy < TRAIL_WIDTH; ++dy) {
+        for (std::int32_t dx = 0; dx < TRAIL_WIDTH; ++dx) {
+            if (!within_scope(x + dx, y + dy)) {
+                continue;
+            }
+            const std::size_t at    = static_cast<std::size_t>(y + dy) * s_ground_side + x + dx;
+            std::uint8_t     &alpha = air_alpha_plane()[at];
+            if (opa > alpha) {
+                reinterpret_cast<std::uint16_t *>(s_air_mask)[at] = ink;
+                alpha                                             = opa;
+            }
+        }
+    }
+}
+
+void trail_line(lv_point_t from, lv_point_t to, std::uint16_t ink, lv_opa_t opa)
+{
+    const std::int32_t dx     = std::abs(to.x - from.x);
+    const std::int32_t dy     = -std::abs(to.y - from.y);
+    const std::int32_t step_x = from.x < to.x ? 1 : -1;
+    const std::int32_t step_y = from.y < to.y ? 1 : -1;
+    std::int32_t       error  = dx + dy;
+    for (;;) {
+        air_blend(from.x, from.y, ink, opa);
+        if (from.x == to.x && from.y == to.y) {
+            return;
+        }
+        const std::int32_t twice = 2 * error;
+        if (twice >= dy) {
+            error += dy;
+            from.x += step_x;
+        }
+        if (twice <= dx) {
+            error += dx;
+            from.y += step_y;
+        }
+    }
+}
+
+// From `from` toward the point `towards`, stopping there or where the scope ends.
+void route_line(lv_point_t from, float towards_x, float towards_y, std::uint16_t ink)
+{
+    const float dx     = towards_x - static_cast<float>(from.x);
+    const float dy     = towards_y - static_cast<float>(from.y);
+    const float length = std::sqrt(dx * dx + dy * dy);
+    if (length < 1.0f) {
+        return;
+    }
+    const float reach = std::min(length, static_cast<float>(2 * s_radius));
+    for (std::int32_t step = 0; step < static_cast<std::int32_t>(reach); ++step) {
+        const auto x = static_cast<std::int32_t>(std::lround(from.x + dx * static_cast<float>(step) / length));
+        const auto y = static_cast<std::int32_t>(std::lround(from.y + dy * static_cast<float>(step) / length));
+        if (!within_scope(x, y)) {
+            return;
+        }
+        if ((step / ROUTE_DASH) % 2 == 0) {
+            air_blend(x, y, ink, ROUTE_OPA);
+        }
+    }
+}
+
+struct Placed {
+    float x;
+    float y;
+};
+
+Placed place_at(float lat, float lon, float range_km)
+{
+    const float scale = static_cast<float>(s_radius) / range_km;
+    const float east  = (lon - s_last->home_lon) * KM_PER_LON * std::cos(s_last->home_lat * DEG);
+    const float north = (lat - s_last->home_lat) * KM_PER_LAT;
+    return {static_cast<float>(s_centre) + east * scale, static_cast<float>(s_centre) - north * scale};
+}
+
+lv_point_t pixel_of(const Placed &at)
+{
+    return {static_cast<std::int32_t>(std::lround(at.x)), static_cast<std::int32_t>(std::lround(at.y))};
+}
+
+void draw_way(const Plot &plot)
+{
+    if (s_air_mask == nullptr) {
+        return;
+    }
+    const float         range_km = shown_range_km();
+    const std::uint16_t ink      = lv_color_to_u16(lv_color_hex(altitude_ink(plot.aircraft->altitude_ft)));
+    const std::uint16_t faint    = lv_color_to_u16(lv_color_hex(theme::secondary));
+    const lv_point_t    here{plot.x, plot.y};
+
+    radar::TrailPoint points[radar::kTrailPoints];
+    const int         count = radar::trail(plot.aircraft->hex, points, radar::kTrailPoints);
+    lv_point_t        start = here;  // where the trail begins, oldest
+    if (count > 0) {
+        start = pixel_of(place_at(points[0].lat, points[0].lon, range_km));
+        // The last leg ends on the blip itself, which is placed a little
+        // differently, by bearing and distance.
+        for (int i = 0; i < count; ++i) {
+            const lv_point_t from = pixel_of(place_at(points[i].lat, points[i].lon, range_km));
+            const lv_point_t to   = i + 1 < count
+                                        ? pixel_of(place_at(points[i + 1].lat, points[i + 1].lon, range_km))
+                                        : here;
+            const auto opa = static_cast<lv_opa_t>(
+                TRAIL_OLD_OPA + (TRAIL_NEW_OPA - TRAIL_OLD_OPA) * (i + 1) / count);
+            trail_line(from, to, ink, opa);
+        }
+    }
+
+    const bool route_known = std::strcmp(s_details_hex, plot.aircraft->hex) == 0;
+    if (route_known && s_details.has_dest_at) {
+        const Placed dest = place_at(s_details.dest_lat, s_details.dest_lon, range_km);
+        route_line(here, dest.x, dest.y, faint);
+    }
+    if (route_known && s_details.has_origin_at) {
+        const Placed origin = place_at(s_details.origin_lat, s_details.origin_lon, range_km);
+        route_line(start, origin.x, origin.y, faint);
+    }
+}
+
 void clear_traffic()
 {
     if (s_air_mask != nullptr) {
@@ -1667,6 +1796,9 @@ const radar::Aircraft *draw_traffic(const bool *named)
 {
     const radar::Aircraft *chosen   = nullptr;
     int                    labelled = 0;
+    if (const int at = s_chosen[0] != '\0' ? plot_of(s_chosen) : -1; at >= 0) {
+        draw_way(s_plots[at]);  // under every blip
+    }
     for (int i = 0; i < s_shown; ++i) {
         raster_blip(s_plots[i]);
 

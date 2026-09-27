@@ -1,4 +1,5 @@
 #include "radar_parse.h"
+#include "radar_trail.h"
 
 #include <cmath>
 #include <cstdio>
@@ -174,6 +175,12 @@ void test_route(const std::string &json)
     check(std::strcmp(details.origin_city, "Newcastle") == 0, "origin city");
     check(std::strcmp(details.dest_code, "AMS") == 0, "destination code");
     check(std::strcmp(details.dest_city, "Amsterdam") == 0, "destination city");
+    check(details.has_origin_at && std::fabs(details.origin_lat - 55.0375f) < 0.001f &&
+              std::fabs(details.origin_lon + 1.69167f) < 0.001f,
+          "where the origin is");
+    check(details.has_dest_at && std::fabs(details.dest_lat - 52.3086f) < 0.001f &&
+              std::fabs(details.dest_lon - 4.76389f) < 0.001f,
+          "where the destination is");
     check(std::strcmp(details.airline, "Newcastle Airport") != 0,
           "a nested name does not overwrite the airline");
 }
@@ -228,6 +235,29 @@ void test_photo(const std::string &json, const std::string &none)
 
 }  // namespace
 
+void test_trail()
+{
+    Trail trail{};
+    note(trail, 52.0f, 5.0f, 1.0f);
+    note(trail, 52.001f, 5.0f, 1.0f);  // some 100 m on: not yet
+    note(trail, 52.02f, 5.0f, 1.0f);   // some 2 km
+    TrailPoint points[kTrailPoints];
+    int        count = oldest_first(trail, points, kTrailPoints);
+    check(count == 2 && points[0].lat == 52.0f && points[1].lat == 52.02f,
+          "a point is kept once it has moved far enough");
+
+    for (int i = 0; i < kTrailPoints + 10; ++i) {
+        note(trail, 53.0f + 0.1f * static_cast<float>(i), 5.0f, 1.0f);
+    }
+    count = oldest_first(trail, points, kTrailPoints);
+    check(count == kTrailPoints && std::fabs(points[0].lat - 54.0f) < 0.001f &&
+              std::fabs(points[kTrailPoints - 1].lat - (53.0f + 0.1f * (kTrailPoints + 9))) < 0.001f,
+          "the oldest go once it is full, and the order holds");
+    count = oldest_first(trail, points, 3);
+    check(count == 3 && std::fabs(points[2].lat - (53.0f + 0.1f * (kTrailPoints + 9))) < 0.001f,
+          "asked for fewer, the newest are the ones given");
+}
+
 int main(int argc, char **argv)
 {
     const std::string json = read_file(argc > 1 ? argv[1] : "adsb_sample.json");
@@ -247,6 +277,7 @@ int main(int argc, char **argv)
         test_aircraft(aircraft);
     }
     test_lookup_rejects();
+    test_trail();
 
     const std::string photo = read_file(argc > 4 ? argv[4] : "planespotters_photo.json");
     const std::string none  = read_file(argc > 5 ? argv[5] : "planespotters_none.json");

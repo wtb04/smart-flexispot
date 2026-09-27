@@ -55,6 +55,12 @@ constexpr std::int64_t FIRST_FETCH_DELAY_US = 6 * units::kUsPerSecond;
 constexpr TickType_t   HOME_SETTLE_CHECK    = pdMS_TO_TICKS(units::kMsPerSecond);
 
 // Measured: three seconds runs into the feed's rate limit and gets 429s.
+// Enough for everything the feed has at its busiest, and some that have just
+// left; one not heard of this long is forgotten, and its trail with it.
+constexpr int          TRAIL_SLOTS    = 512;
+constexpr float        TRAIL_STEP_KM  = 1.5f;
+constexpr std::int64_t TRAIL_FORGET_US = 15 * units::kUsPerMinute;
+
 constexpr std::int64_t POLL_ACTIVE_US = 5 * units::kUsPerSecond;
 constexpr std::int64_t POLL_IDLE_US   = units::kUsPerMinute;
 
@@ -258,6 +264,48 @@ void cache_put(const char *hex, const char *flight, const Details &details)
     slot->valid   = true;
 }
 
+Trail *s_trails = nullptr;
+
+Trail *trail_slot(const char *hex, std::int64_t now)
+{
+    Trail *free_slot = nullptr;
+    Trail *oldest    = nullptr;
+    for (int i = 0; i < TRAIL_SLOTS; ++i) {
+        Trail &slot = s_trails[i];
+        if (slot.hex[0] != '\0' && std::strcmp(slot.hex, hex) == 0) {
+            return &slot;
+        }
+        if (free_slot == nullptr && (slot.hex[0] == '\0' || now - slot.seen_us > TRAIL_FORGET_US)) {
+            free_slot = &slot;
+        }
+        if (oldest == nullptr || slot.seen_us < oldest->seen_us) {
+            oldest = &slot;
+        }
+    }
+    Trail *slot = free_slot != nullptr ? free_slot : oldest;
+    *slot       = Trail{};
+    std::snprintf(slot->hex, sizeof(slot->hex), "%s", hex);
+    return slot;
+}
+
+// Each reading adds to where those in it have been. Under s_lock.
+void record_trails(const Aircraft *list, int count)
+{
+    if (s_trails == nullptr) {
+        return;
+    }
+    const std::int64_t now = esp_timer_get_time();
+    for (int i = 0; i < count; ++i) {
+        const Aircraft &aircraft = list[i];
+        if (aircraft.on_ground || aircraft.hex[0] == '\0') {
+            continue;
+        }
+        Trail *trail   = trail_slot(aircraft.hex, now);
+        trail->seen_us = now;
+        note(*trail, aircraft.lat, aircraft.lon, TRAIL_STEP_KM);
+    }
+}
+
 bool s_feed_backoff = false;
 
 bool fetch(float lat, float lon)
@@ -279,6 +327,7 @@ bool fetch(float lat, float lon)
 
     xSemaphoreTake(s_lock, portMAX_DELAY);
     std::memcpy(s_list, s_scratch, sizeof(Aircraft) * static_cast<std::size_t>(count));
+    record_trails(s_list, count);
     s_count      = count;
     s_ok         = true;
     s_fetched_us = esp_timer_get_time();
@@ -643,6 +692,10 @@ esp_err_t start(UpdateHandler on_update, DetailsHandler on_details, PhotoHandler
                             s_wanted != nullptr,
                         ESP_ERR_NO_MEM, TAG, "aircraft buffers");
 
+    s_trails = static_cast<Trail *>(
+        heap_caps_calloc(TRAIL_SLOTS, sizeof(Trail), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    ESP_RETURN_ON_FALSE(s_trails != nullptr, ESP_ERR_NO_MEM, TAG, "trails");
+
     s_cache = static_cast<CacheEntry *>(
         heap_caps_calloc(CACHE_SIZE, sizeof(CacheEntry), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     ESP_RETURN_ON_FALSE(s_cache != nullptr, ESP_ERR_NO_MEM, TAG, "lookup cache");
@@ -728,6 +781,23 @@ void set_home(float lat, float lon)
             xTaskNotifyGive(s_task);
         }
     }
+}
+
+int trail(const char *hex, TrailPoint *out, int max)
+{
+    if (s_lock == nullptr || s_trails == nullptr || hex == nullptr || hex[0] == '\0') {
+        return 0;
+    }
+    int count = 0;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    for (int i = 0; i < TRAIL_SLOTS; ++i) {
+        if (std::strcmp(s_trails[i].hex, hex) == 0) {
+            count = oldest_first(s_trails[i], out, max);
+            break;
+        }
+    }
+    xSemaphoreGive(s_lock);
+    return count;
 }
 
 void snapshot(Snapshot &out)

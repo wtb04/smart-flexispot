@@ -2,6 +2,7 @@
 
 #include "esp_err.h"
 #include "radar_parse.h"
+#include "radar_trail.h"
 
 #include <cstdint>
 
@@ -58,6 +59,10 @@ void set_enabled(bool enabled);
 /** Taken from Home Assistant's zone.home, so the panel is not told twice where
  *  it is. Safe from any task. */
 void set_home(float lat, float lon);
+
+/** Where `hex` has been while the feed has seen it, oldest first, up to `max`
+ *  points; how many there are. Thread-safe. */
+int trail(const char *hex, TrailPoint *out, int max);
 
 /** Thread-safe copy of the last good reading. */
 void snapshot(Snapshot &out);

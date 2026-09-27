@@ -43,6 +43,12 @@ struct Details {
     char origin_city[kCityLen];
     char dest_code[kAirportCodeLen];
     char dest_city[kCityLen];
+    float origin_lat;  // where the airports are, when the route says
+    float origin_lon;
+    float dest_lat;
+    float dest_lon;
+    bool  has_origin_at;
+    bool  has_dest_at;
     char owner[kOwnerLen];
     char manufacturer[kManufacturerLen];
     char model[kModelLen];
