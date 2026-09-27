@@ -223,6 +223,10 @@ esp_err_t set_media_seeks(bool seeks);
  *  RGB565, or null for none. The buffer must live until it is replaced. */
 esp_err_t set_cinema_still(const void *pixels);
 
+/** Whatever is on screen, whole, as RGB565 in PSRAM, for the caller to free
+ *  with heap_caps_free; null when it could not be had. Takes the screen's lock. */
+std::uint16_t *capture(int &width, int &height);
+
 /** A favourite offered by holding the media card while nothing plays, index
  *  below media::kPickCount. An empty name leaves it out. */
 esp_err_t set_pick(int index, const char *name);

@@ -8,6 +8,7 @@
 #include "ical.h"
 #include "imu.h"
 #include "orientation.h"
+#include "remote.h"
 #include "cJSON.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -442,6 +443,7 @@ extern "C" void app_main(void)
         .restart = before_update_restart,
         .relay   = ble::desk::send_update,
     }));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(remote::start());
     ESP_ERROR_CHECK(wallclock::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("network"));
     ESP_ERROR_CHECK_WITHOUT_ABORT(network::start());

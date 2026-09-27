@@ -139,6 +139,31 @@ lv_draw_buf_t *take_snapshot()
 
 }  // namespace
 
+std::uint16_t *capture(int &width, int &height)
+{
+    lv_draw_buf_t *shot = take_snapshot();
+    if (shot == nullptr) {
+        return nullptr;
+    }
+    width  = static_cast<int>(shot->header.w);
+    height = static_cast<int>(shot->header.h);
+    auto *out = static_cast<std::uint16_t *>(heap_caps_malloc(
+        static_cast<std::size_t>(width) * height * sizeof(std::uint16_t), MALLOC_CAP_SPIRAM));
+    if (out != nullptr) {
+        for (int y = 0; y < height; ++y) {
+            const auto *row = reinterpret_cast<const std::uint32_t *>(shot->data + y * shot->header.stride);
+            for (int x = 0; x < width; ++x) {
+                const std::uint32_t c = row[x];
+                out[y * width + x]    = static_cast<std::uint16_t>(
+                    (((c >> RED_SHIFT) & CHANNEL_MASK) >> 3) << 11 |
+                    (((c >> GREEN_SHIFT) & CHANNEL_MASK) >> 2) << 5 | ((c & CHANNEL_MASK) >> 3));
+            }
+        }
+    }
+    lv_draw_buf_destroy(shot);
+    return out;
+}
+
 void screenshot()
 {
     lv_draw_buf_t *shot = take_snapshot();

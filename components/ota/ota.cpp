@@ -551,6 +551,16 @@ esp_err_t start(const Hooks &hooks)
     return ESP_OK;
 }
 
+httpd_handle_t server()
+{
+    return s_server;
+}
+
+bool authorised(httpd_req_t *req)
+{
+    return allowed(req);
+}
+
 void install()
 {
     if (s_installer != nullptr) {

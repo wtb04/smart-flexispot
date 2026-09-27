@@ -1,6 +1,7 @@
 #pragma once
 
 #include "esp_err.h"
+#include "esp_http_server.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -36,6 +37,11 @@ struct Hooks {
 };
 
 esp_err_t start(const Hooks &hooks);
+
+/** The server the updates come in on, for other pages to be added to, once
+ *  started; and whether a request carries the update key, which they ask for too. */
+httpd_handle_t server();
+bool           authorised(httpd_req_t *req);
 
 /** Installs whatever is ready, the companion's first; returns at once. */
 void install();
