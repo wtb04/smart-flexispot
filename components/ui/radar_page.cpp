@@ -203,8 +203,12 @@ lv_obj_t          *s_rings[RINGS]               = {};
 lv_obj_t          *s_rim[RIM_DOTS]              = {};
 lv_obj_t          *s_legend[LEGEND_STEPS]       = {};
 lv_point_precise_t s_spokes[SPOKES][SPOKE_ENDS] = {};
-std::int32_t       s_centre                     = 0;
+// Home, where the rings are centred; on the page the middle of a disc, and
+// fullscreen the middle of the space beside the column, with the map past them.
+std::int32_t       s_cx                         = 0;
+std::int32_t       s_cy                         = 0;
 std::int32_t       s_radius                     = 0;
+bool               s_to_edges                   = false;  // the map and air run past the rings
 
 float     s_shown_range = 0.0f;
 int       s_zoom_from   = 0;
@@ -228,7 +232,8 @@ lv_obj_t     *s_water_canvas = nullptr;
 lv_obj_t     *s_land_canvas  = nullptr;
 std::uint8_t *s_water_mask   = nullptr;
 std::uint8_t *s_land_mask    = nullptr;
-std::int32_t  s_ground_side  = 0;
+std::int32_t  s_ground_w     = 0;  // the scope's canvases, map and air alike
+std::int32_t  s_ground_h     = 0;
 
 lv_point_precise_t *s_map_points = nullptr;
 float               s_map_lat    = 0.0f;
@@ -286,7 +291,7 @@ T *psram_array(std::size_t count)
 
 std::size_t ground_pixels()
 {
-    return static_cast<std::size_t>(s_ground_side) * s_ground_side;
+    return static_cast<std::size_t>(s_ground_w) * s_ground_h;
 }
 
 // The ADS-B emitter category: A1 light, A4 high vortex and A5 heavy, A7 rotorcraft.
@@ -382,11 +387,11 @@ void quiet(lv_obj_t *obj)
     lv_obj_set_scrollable(obj, false);
 }
 
-lv_obj_t *make_layer(lv_obj_t *parent, std::int32_t side)
+lv_obj_t *make_layer(lv_obj_t *parent, std::int32_t w, std::int32_t h)
 {
     lv_obj_t *layer = lv_obj_create(parent);
     lv_obj_set_pos(layer, 0, 0);
-    lv_obj_set_size(layer, side, side);
+    lv_obj_set_size(layer, w, h);
     lv_obj_set_style_bg_opa(layer, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(layer, 0, 0);
     lv_obj_set_style_pad_all(layer, 0, 0);
@@ -396,15 +401,15 @@ lv_obj_t *make_layer(lv_obj_t *parent, std::int32_t side)
 
 lv_point_t on_circle(float angle, float radius)
 {
-    return {static_cast<std::int32_t>(s_centre + std::sin(angle) * radius),
-            static_cast<std::int32_t>(s_centre - std::cos(angle) * radius)};
+    return {static_cast<std::int32_t>(s_cx + std::sin(angle) * radius),
+            static_cast<std::int32_t>(s_cy - std::cos(angle) * radius)};
 }
 
 void ring(lv_obj_t *parent, std::int32_t radius, lv_opa_t opa)
 {
     lv_obj_t *circle = lv_obj_create(parent);
     lv_obj_set_size(circle, radius * 2, radius * 2);
-    lv_obj_set_pos(circle, s_centre - radius, s_centre - radius);
+    lv_obj_set_pos(circle, s_cx - radius, s_cy - radius);
     lv_obj_set_style_radius(circle, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_opa(circle, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_color(circle, lv_color_hex(theme::secondary), 0);
@@ -423,10 +428,10 @@ void compass(lv_obj_t *parent, const char *text, char side)
 
     lv_obj_set_style_text_opa(label, LV_OPA_60, 0);
     switch (side) {
-        case 'N': lv_obj_set_pos(label, s_centre - w / 2, s_centre - edge - h); break;
-        case 'S': lv_obj_set_pos(label, s_centre - w / 2, s_centre + edge); break;
-        case 'E': lv_obj_set_pos(label, s_centre + edge, s_centre - h / 2); break;
-        default: lv_obj_set_pos(label, s_centre - edge - w, s_centre - h / 2); break;
+        case 'N': lv_obj_set_pos(label, s_cx - w / 2, s_cy - edge - h); break;
+        case 'S': lv_obj_set_pos(label, s_cx - w / 2, s_cy + edge); break;
+        case 'E': lv_obj_set_pos(label, s_cx + edge, s_cy - h / 2); break;
+        default: lv_obj_set_pos(label, s_cx - edge - w, s_cy - h / 2); break;
     }
     quiet(label);
 }
@@ -487,7 +492,7 @@ void build_rings(lv_obj_t *scope, int range_km)
 
 int plot_near(std::int32_t x, std::int32_t y)
 {
-    const std::int32_t reach   = lv_obj_get_width(s_scope) / TAP_REACH_DIVISOR;
+    const std::int32_t reach   = 2 * (s_radius + RIM_BAND) / TAP_REACH_DIVISOR;
     std::int32_t       nearest = reach * reach;
     int                best    = -1;
     for (int i = 0; i < s_shown; ++i) {
@@ -561,7 +566,7 @@ void build_key_scale(lv_obj_t *scope, std::int32_t mid)
     for (int i = 0; i < LEGEND_STEPS; ++i) {
         lv_obj_t *seg = lv_arc_create(scope);
         lv_obj_set_size(seg, 2 * outer, 2 * outer);
-        lv_obj_set_pos(seg, s_centre - outer, s_centre - outer);
+        lv_obj_set_pos(seg, s_cx - outer, s_cy - outer);
         lv_arc_set_bg_angles(
             seg, static_cast<lv_value_precise_t>(KEY_TO - (i + 1) * step - KEY_SEGMENT_OVERLAP_DEG),
             static_cast<lv_value_precise_t>(KEY_TO - i * step));
@@ -586,8 +591,8 @@ void build_key_end(lv_obj_t *scope, const char *text, float end_deg, float direc
     const float        rad   = angle * DEG;
     lv_obj_t *label = theme::make_label(scope, text, theme::secondary, marking_font());
     lv_obj_set_style_text_opa(label, LV_OPA_60, 0);
-    lv_obj_set_pos(label, s_centre + static_cast<std::int32_t>(std::cos(rad) * mid) - w / 2,
-                   s_centre + static_cast<std::int32_t>(std::sin(rad) * mid) - h / 2);
+    lv_obj_set_pos(label, s_cx + static_cast<std::int32_t>(std::cos(rad) * mid) - w / 2,
+                   s_cy + static_cast<std::int32_t>(std::sin(rad) * mid) - h / 2);
     lv_obj_set_style_transform_pivot_x(label, w / 2, 0);
     lv_obj_set_style_transform_pivot_y(label, h / 2, 0);
     lv_obj_set_style_transform_rotation(
@@ -611,11 +616,13 @@ void build_key(lv_obj_t *scope)
 
 bool within_scope(std::int32_t x, std::int32_t y)
 {
+    if (x < 0 || x >= s_ground_w || y < 0 || y >= s_ground_h) {
+        return false;
+    }
     const float limit = static_cast<float>(s_radius) * static_cast<float>(s_radius);
-    const float ox    = static_cast<float>(x - s_centre);
-    const float oy    = static_cast<float>(y - s_centre);
-    return ox * ox + oy * oy <= limit && x >= 0 && x < s_ground_side && y >= 0 &&
-           y < s_ground_side;
+    const float ox    = static_cast<float>(x - s_cx);
+    const float oy    = static_cast<float>(y - s_cy);
+    return s_to_edges || ox * ox + oy * oy <= limit;
 }
 
 void mask_line(std::uint8_t *mask, std::int32_t x0, std::int32_t y0, std::int32_t x1,
@@ -629,7 +636,7 @@ void mask_line(std::uint8_t *mask, std::int32_t x0, std::int32_t y0, std::int32_
 
     for (;;) {
         if (within_scope(x0, y0)) {
-            mask[static_cast<std::size_t>(y0) * s_ground_side + x0] = value;
+            mask[static_cast<std::size_t>(y0) * s_ground_w + x0] = value;
         }
         if (x0 == x1 && y0 == y1) {
             return;
@@ -681,15 +688,19 @@ int add_crossings(const lv_point_precise_t *polygon, int length, std::int32_t y,
 
 void fill_water_row(std::int32_t y, const std::int32_t *crossings, int found)
 {
-    const float limit = static_cast<float>(s_radius) * static_cast<float>(s_radius);
-    const float dy    = static_cast<float>(y - s_centre);
-    const float span  = limit - dy * dy;
-    if (span < 0.0f) {
-        return;
+    std::int32_t low  = 0;
+    std::int32_t high = s_ground_w - 1;
+    if (!s_to_edges) {
+        const float limit = static_cast<float>(s_radius) * static_cast<float>(s_radius);
+        const float dy    = static_cast<float>(y - s_cy);
+        const float span  = limit - dy * dy;
+        if (span < 0.0f) {
+            return;
+        }
+        const auto half = static_cast<std::int32_t>(std::sqrt(span));
+        low             = std::max<std::int32_t>(s_cx - half, 0);
+        high            = std::min<std::int32_t>(s_cx + half, s_ground_w - 1);
     }
-    const auto         half = static_cast<std::int32_t>(std::sqrt(span));
-    const std::int32_t low  = std::max<std::int32_t>(s_centre - half, 0);
-    const std::int32_t high = std::min<std::int32_t>(s_centre + half, s_ground_side - 1);
 
     for (int i = 0; i + 1 < found; i += 2) {
         const std::int32_t from = std::max(crossings[i], low);
@@ -697,7 +708,7 @@ void fill_water_row(std::int32_t y, const std::int32_t *crossings, int found)
         if (to < from) {
             continue;
         }
-        std::memset(s_water_mask + static_cast<std::size_t>(y) * s_ground_side + from,
+        std::memset(s_water_mask + static_cast<std::size_t>(y) * s_ground_w + from,
                     WATER_ALPHA, static_cast<std::size_t>(to - from + 1));
     }
 }
@@ -709,8 +720,8 @@ void fill_water(const lv_point_precise_t *points, const std::uint16_t *rings, in
         return;
     }
     const Rows rows = rows_spanned(points, count);
-    const std::int32_t top    = std::max<std::int32_t>(rows.top, s_centre - s_radius);
-    const std::int32_t bottom = std::min<std::int32_t>(rows.bottom, s_centre + s_radius);
+    const std::int32_t top    = std::max<std::int32_t>(rows.top, s_to_edges ? 0 : s_cy - s_radius);
+    const std::int32_t bottom = std::min<std::int32_t>(rows.bottom, s_to_edges ? s_ground_h - 1 : s_cy + s_radius);
 
     for (std::int32_t y = top; y <= bottom; ++y) {
         std::int32_t crossings[MASK_MAX_EDGES];
@@ -740,15 +751,16 @@ Projection projection_for(float home_lat, float home_lon, int range_km)
 
 lv_point_precise_t project(const std::int32_t *lat_lon, const Projection &projection)
 {
-    const auto  centre = static_cast<float>(s_centre);
-    const float reach  = static_cast<float>(s_radius) * MAP_REACH_RADII;
-    const float lat    = static_cast<float>(lat_lon[0]) / MICRODEGREES_PER_DEG;
-    const float lon    = static_cast<float>(lat_lon[1]) / MICRODEGREES_PER_DEG;
-    const float x      = centre + (lon - projection.home_lon) * projection.px_per_lon;
-    const float y      = centre - (lat - projection.home_lat) * projection.px_per_lat;
+    const auto  cx    = static_cast<float>(s_cx);
+    const auto  cy    = static_cast<float>(s_cy);
+    const float reach = static_cast<float>(std::max({s_radius, s_ground_w, s_ground_h})) * MAP_REACH_RADII;
+    const float lat   = static_cast<float>(lat_lon[0]) / MICRODEGREES_PER_DEG;
+    const float lon   = static_cast<float>(lat_lon[1]) / MICRODEGREES_PER_DEG;
+    const float x     = cx + (lon - projection.home_lon) * projection.px_per_lon;
+    const float y     = cy - (lat - projection.home_lat) * projection.px_per_lat;
 
-    const float clamped_x = std::clamp(x, centre - reach, centre + reach);
-    const float clamped_y = std::clamp(y, centre - reach, centre + reach);
+    const float clamped_x = std::clamp(x, cx - reach, cx + reach);
+    const float clamped_y = std::clamp(y, cy - reach, cy + reach);
     return {static_cast<std::int32_t>(std::lround(clamped_x)),
             static_cast<std::int32_t>(std::lround(clamped_y))};
 }
@@ -830,7 +842,7 @@ void scale_ground(float factor)
 {
     for (lv_obj_t *canvas : {s_water_canvas, s_land_canvas}) {
         if (canvas != nullptr) {
-            lv_image_set_pivot(canvas, s_centre, s_centre);
+            lv_image_set_pivot(canvas, s_cx, s_cy);
             lv_image_set_scale(canvas, image_scale(factor));
         }
     }
@@ -839,7 +851,7 @@ void scale_ground(float factor)
 void scale_traffic(float factor)
 {
     if (s_air_canvas != nullptr) {
-        lv_image_set_pivot(s_air_canvas, s_centre, s_centre);
+        lv_image_set_pivot(s_air_canvas, s_cx, s_cy);
         lv_image_set_scale(s_air_canvas, image_scale(factor));
     }
     for (int i = 0; i < LABEL_MAX; ++i) {
@@ -956,18 +968,19 @@ void place_corners(std::int32_t w, std::int32_t h)
 lv_obj_t *mask_canvas(lv_obj_t *parent, std::uint8_t *mask, std::uint32_t ink)
 {
     lv_obj_t *canvas = lv_canvas_create(parent);
-    lv_canvas_set_buffer(canvas, mask, s_ground_side, s_ground_side, LV_COLOR_FORMAT_A8);
+    lv_canvas_set_buffer(canvas, mask, s_ground_w, s_ground_h, LV_COLOR_FORMAT_A8);
     lv_obj_set_style_image_recolor(canvas, lv_color_hex(ink), 0);
     lv_obj_set_style_image_recolor_opa(canvas, LV_OPA_COVER, 0);
     quiet(canvas);
     return canvas;
 }
 
-void build_ground(lv_obj_t *scope, std::int32_t side)
+void build_ground(lv_obj_t *scope, std::int32_t w, std::int32_t h)
 {
-    lv_obj_t *ground = make_layer(scope, side);
+    lv_obj_t *ground = make_layer(scope, w, h);
 
-    s_ground_side = side;
+    s_ground_w = w;
+    s_ground_h = h;
     s_water_mask  = static_cast<std::uint8_t *>(
         heap_caps_calloc(ground_pixels(), ALPHA_BYTES_PER_PX, MALLOC_CAP_SPIRAM));
     s_land_mask   = static_cast<std::uint8_t *>(
@@ -985,7 +998,7 @@ void build_home(lv_obj_t *scope)
 {
     lv_obj_t *home = lv_obj_create(scope);
     lv_obj_set_size(home, HOME_SIZE, HOME_SIZE);
-    lv_obj_set_pos(home, s_centre - HOME_SIZE / 2, s_centre - HOME_SIZE / 2);
+    lv_obj_set_pos(home, s_cx - HOME_SIZE / 2, s_cy - HOME_SIZE / 2);
     theme::style_panel(home, theme::panel, HOME_SIZE / 2);
     theme::fill_accent(home);
     quiet(home);
@@ -1018,13 +1031,13 @@ void build_rim(lv_obj_t *scope)
     }
 }
 
-void build_air(lv_obj_t *scope, std::int32_t side)
+void build_air(lv_obj_t *scope, std::int32_t w, std::int32_t h)
 {
     s_air_mask = static_cast<std::uint8_t *>(
         heap_caps_calloc(ground_pixels(), AIR_BYTES_PER_PX, MALLOC_CAP_SPIRAM));
     if (s_air_mask != nullptr) {
         s_air_canvas = lv_canvas_create(scope);
-        lv_canvas_set_buffer(s_air_canvas, s_air_mask, side, side, LV_COLOR_FORMAT_RGB565A8);
+        lv_canvas_set_buffer(s_air_canvas, s_air_mask, w, h, LV_COLOR_FORMAT_RGB565A8);
         lv_obj_set_pos(s_air_canvas, 0, 0);
         quiet(s_air_canvas);
     }
@@ -1039,19 +1052,29 @@ void build_blip_labels(lv_obj_t *scope)
     }
 }
 
-void build_scope(lv_obj_t *parent, std::int32_t side, int range_km)
+// A disc `side` across on the page; fullscreen `w` by `h`, the rings round
+// cx, cy and the map and air past them to every edge.
+struct Frame {
+    std::int32_t w, h, cx, cy, radius;
+    bool         to_edges;
+};
+
+void build_scope(lv_obj_t *parent, const Frame &frame, int range_km)
 {
-    s_centre = side / 2;
-    s_radius = side / 2 - RIM_BAND;
+    s_cx       = frame.cx;
+    s_cy       = frame.cy;
+    s_radius   = frame.radius;
+    s_to_edges = frame.to_edges;
+    const std::int32_t side = frame.w;
 
     lv_obj_t *scope = lv_obj_create(parent);
     lv_obj_set_pos(scope, 0, 0);
-    lv_obj_set_size(scope, side, side);
-    theme::style_panel(scope, theme::background, side / 2);
+    lv_obj_set_size(scope, frame.w, frame.h);
+    theme::style_panel(scope, theme::background, frame.to_edges ? 0 : side / 2);
     lv_obj_set_scrollable(scope, false);
     lv_obj_add_event_cb(scope, scope_clicked, LV_EVENT_CLICKED, nullptr);
 
-    build_ground(scope, side);
+    build_ground(scope, frame.w, frame.h);
     build_spokes(scope);
     build_rings(scope, range_km);
     compass(scope, "N", 'N');
@@ -1061,7 +1084,7 @@ void build_scope(lv_obj_t *parent, std::int32_t side, int range_km)
     build_home(scope);
     build_marker(scope);
     build_rim(scope);
-    build_air(scope, side);
+    build_air(scope, frame.w, frame.h);
     build_blip_labels(scope);
 
     s_scope = scope;
@@ -1243,11 +1266,11 @@ void show_picture()
 void place_blip(Plot &plot, float range_km)
 {
     const float scale = static_cast<float>(s_radius) / range_km;
-    plot.x = static_cast<std::int32_t>(std::lround(s_centre + plot.east_km * scale));
-    plot.y = static_cast<std::int32_t>(std::lround(s_centre - plot.north_km * scale));
+    plot.x = static_cast<std::int32_t>(std::lround(s_cx + plot.east_km * scale));
+    plot.y = static_cast<std::int32_t>(std::lround(s_cy - plot.north_km * scale));
 
     const std::int32_t span = theme::text_width(blip_name(*plot.aircraft), marking_font());
-    plot.label_x = plot.x > s_centre ? plot.x - LABEL_SIDE_GAP - span : plot.x + LABEL_SIDE_GAP;
+    plot.label_x = plot.x > s_cx ? plot.x - LABEL_SIDE_GAP - span : plot.x + LABEL_SIDE_GAP;
     plot.label_w = span;
 }
 
@@ -1258,7 +1281,7 @@ std::uint8_t *air_alpha_plane()
 
 void air_pixels(std::int32_t y, std::int32_t from, std::int32_t to, std::uint16_t ink)
 {
-    const std::size_t row    = static_cast<std::size_t>(y) * s_ground_side;
+    const std::size_t row    = static_cast<std::size_t>(y) * s_ground_w;
     auto             *colour = reinterpret_cast<std::uint16_t *>(s_air_mask) + row;
     std::uint8_t     *alpha  = air_alpha_plane() + row;
     std::fill(colour + from, colour + to + 1, ink);
@@ -1286,7 +1309,7 @@ void fill_blip(const lv_point_precise_t *points, int count, std::uint16_t ink)
     }
     const Rows         rows   = rows_spanned(points, count);
     const std::int32_t top    = std::max<std::int32_t>(rows.top, 0);
-    const std::int32_t bottom = std::min<std::int32_t>(rows.bottom, s_ground_side - 1);
+    const std::int32_t bottom = std::min<std::int32_t>(rows.bottom, s_ground_h - 1);
 
     for (std::int32_t y = top; y <= bottom; ++y) {
         std::int32_t crossings[BLIP_MAX_CROSSINGS];
@@ -1294,7 +1317,7 @@ void fill_blip(const lv_point_precise_t *points, int count, std::uint16_t ink)
         sort_crossings(crossings, found);
         for (int i = 0; i + 1 < found; i += 2) {
             const std::int32_t from = std::max<std::int32_t>(crossings[i], 0);
-            const std::int32_t to   = std::min<std::int32_t>(crossings[i + 1], s_ground_side - 1);
+            const std::int32_t to   = std::min<std::int32_t>(crossings[i + 1], s_ground_w - 1);
             if (to < from) {
                 continue;
             }
@@ -1307,11 +1330,11 @@ void dot_blip(const Plot &plot, std::uint16_t ink)
 {
     for (std::int32_t dy = -DOT_SIZE / 2; dy <= DOT_SIZE / 2; ++dy) {
         const std::int32_t y = plot.y + dy;
-        if (y < 0 || y >= s_ground_side) {
+        if (y < 0 || y >= s_ground_h) {
             continue;
         }
         const std::int32_t from = std::max<std::int32_t>(plot.x - DOT_SIZE / 2, 0);
-        const std::int32_t to   = std::min<std::int32_t>(plot.x + DOT_SIZE / 2, s_ground_side - 1);
+        const std::int32_t to   = std::min<std::int32_t>(plot.x + DOT_SIZE / 2, s_ground_w - 1);
         if (to >= from) {
             air_pixels(y, from, to, ink);
         }
@@ -1362,8 +1385,8 @@ void draw_rim(lv_obj_t *dot, const radar::Aircraft &aircraft)
 {
     const float radians = aircraft.bearing_deg * DEG;
     const auto  reach   = static_cast<float>(s_radius);
-    const auto  x = static_cast<std::int32_t>(std::lround(s_centre + std::sin(radians) * reach));
-    const auto  y = static_cast<std::int32_t>(std::lround(s_centre - std::cos(radians) * reach));
+    const auto  x = static_cast<std::int32_t>(std::lround(s_cx + std::sin(radians) * reach));
+    const auto  y = static_cast<std::int32_t>(std::lround(s_cy - std::cos(radians) * reach));
 
     lv_obj_set_pos(dot, x - RIM_SIZE / 2, y - RIM_SIZE / 2);
     theme::set_bg_color(dot, altitude_ink(aircraft.altitude_ft));
@@ -1597,16 +1620,25 @@ void plot_traffic(float range_km)
         if (aircraft.on_ground) {
             continue;
         }
-        const float away_km = distance_km(aircraft);
-        if (away_km > range_km) {
+        const float away_km  = distance_km(aircraft);
+        const float east_km  = away_km * std::sin(aircraft.bearing_deg * DEG);
+        const float north_km = away_km * std::cos(aircraft.bearing_deg * DEG);
+        if (s_to_edges) {
+            const float scale = static_cast<float>(s_radius) / range_km;
+            const float x     = static_cast<float>(s_cx) + east_km * scale;
+            const float y     = static_cast<float>(s_cy) - north_km * scale;
+            if (x < 0.0f || x >= static_cast<float>(s_ground_w) || y < 0.0f || y >= static_cast<float>(s_ground_h)) {
+                continue;
+            }
+        } else if (away_km > range_km) {
             if (rim_used < RIM_DOTS) {
                 draw_rim(s_rim[rim_used++], aircraft);
             }
             continue;
         }
         s_plots[s_shown].aircraft = &s_last->list[i];
-        s_plots[s_shown].east_km  = away_km * std::sin(aircraft.bearing_deg * DEG);
-        s_plots[s_shown].north_km = away_km * std::cos(aircraft.bearing_deg * DEG);
+        s_plots[s_shown].east_km  = east_km;
+        s_plots[s_shown].north_km = north_km;
         ++s_shown;
     }
     for (int i = rim_used; i < RIM_DOTS; ++i) {
@@ -1704,7 +1736,7 @@ void air_blend(std::int32_t x, std::int32_t y, std::uint16_t ink, lv_opa_t opa)
             if (!within_scope(x + dx, y + dy)) {
                 continue;
             }
-            const std::size_t at    = static_cast<std::size_t>(y + dy) * s_ground_side + x + dx;
+            const std::size_t at    = static_cast<std::size_t>(y + dy) * s_ground_w + x + dx;
             std::uint8_t     &alpha = air_alpha_plane()[at];
             if (opa > alpha) {
                 reinterpret_cast<std::uint16_t *>(s_air_mask)[at] = ink;
@@ -1747,7 +1779,7 @@ void route_line(lv_point_t from, float towards_x, float towards_y, std::uint16_t
     if (length < 1.0f) {
         return;
     }
-    const float reach = std::min(length, static_cast<float>(2 * s_radius));
+    const float reach = std::min(length, static_cast<float>(2 * std::max({s_radius, s_ground_w, s_ground_h})));
     for (std::int32_t step = 0; step < static_cast<std::int32_t>(reach); ++step) {
         const auto x = static_cast<std::int32_t>(std::lround(from.x + dx * static_cast<float>(step) / length));
         const auto y = static_cast<std::int32_t>(std::lround(from.y + dy * static_cast<float>(step) / length));
@@ -1770,7 +1802,7 @@ Placed place_at(float lat, float lon, float range_km)
     const float scale = static_cast<float>(s_radius) / range_km;
     const float east  = (lon - s_last->home_lon) * KM_PER_LON * std::cos(s_last->home_lat * DEG);
     const float north = (lat - s_last->home_lat) * KM_PER_LAT;
-    return {static_cast<float>(s_centre) + east * scale, static_cast<float>(s_centre) - north * scale};
+    return {static_cast<float>(s_cx) + east * scale, static_cast<float>(s_cy) - north * scale};
 }
 
 lv_point_t pixel_of(const Placed &at)
@@ -1857,9 +1889,9 @@ const radar::Aircraft *draw_traffic(const bool *named)
     return chosen;
 }
 
-// Everything in the scope is laid out for one size of disc, so a view of
-// another size builds it again, and draws the map again to fit.
-void build_scope_for(std::int32_t disc, std::int32_t area_w, std::int32_t area_h)
+// Everything in the scope is laid out for one frame, so a view of another
+// size builds it again, and draws the map again to fit.
+void build_scope_in(const Frame &frame, std::int32_t x, std::int32_t y)
 {
     if (s_scope != nullptr) {
         lv_anim_delete(s_scope, nullptr);  // a zoom under way ends where it was going
@@ -1873,39 +1905,53 @@ void build_scope_for(std::int32_t disc, std::int32_t area_w, std::int32_t area_h
         s_water_canvas = s_land_canvas = s_air_canvas = nullptr;
     }
     s_shown_range = static_cast<float>(RANGES[s_range_step]);
-    build_scope(s_bezel, disc, RANGES[s_range_step]);
+    build_scope(s_bezel, frame, RANGES[s_range_step]);
     lv_obj_move_to_index(s_scope, 0);  // under the corners and the summary
-    lv_obj_set_pos(s_scope, (area_w - disc) / 2, (area_h - disc) / 2);
+    lv_obj_set_pos(s_scope, x, y);
     build_key(s_scope);
     if (map_located()) {
         draw_map(s_map_lat, s_map_lon, RANGES[s_range_step]);
     }
 }
 
+// Fullscreen the column floats over the map, on a darkened patch of it.
+constexpr lv_opa_t FLOATING_COLUMN_OPA = LV_OPA_80;
+
 // The scope's card and the column beside it in `parent`, at x, y. Fullscreen
-// there are no cards: the scope stands on the background at the screen's full
-// height, as the focus dial and cinema do, and the column beside it.
+// there are no cards: the map and the planes run to every edge of the screen,
+// the rings keep to its height beside the column, and the column floats over
+// the map, as the focus dial and cinema stand on the background.
 void lay_out(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int32_t width, std::int32_t height,
              bool full)
 {
     const std::int32_t area_w = width - COLUMN_W - COLUMN_GAP;
-    const lv_opa_t     cards  = full ? LV_OPA_TRANSP : LV_OPA_COVER;
     lv_obj_set_parent(s_bezel, parent);
-    lv_obj_set_pos(s_bezel, x, y);
-    lv_obj_set_size(s_bezel, area_w, height);
-    lv_obj_set_style_bg_opa(s_bezel, cards, 0);
-    build_scope_for(full ? height : std::min(area_w, height) - 2 * BEZEL, area_w, height);
+    lv_obj_set_style_bg_opa(s_bezel, full ? LV_OPA_TRANSP : LV_OPA_COVER, 0);
+    if (full) {
+        const detail::Layout l = detail::layout();
+        lv_obj_set_pos(s_bezel, 0, 0);
+        lv_obj_set_size(s_bezel, l.screen_w, l.screen_h);
+        build_scope_in({l.screen_w, l.screen_h, area_w / 2, height / 2, height / 2 - RIM_BAND, true}, 0, 0);
+    } else {
+        const std::int32_t disc = std::min(area_w, height) - 2 * BEZEL;
+        lv_obj_set_pos(s_bezel, x, y);
+        lv_obj_set_size(s_bezel, area_w, height);
+        build_scope_in({disc, disc, disc / 2, disc / 2, disc / 2 - RIM_BAND, false}, (area_w - disc) / 2,
+                       (height - disc) / 2);
+    }
     place_corners(area_w, height);
     lv_obj_set_hidden(s_screw, full);
-    lv_obj_align(s_summary, LV_ALIGN_BOTTOM_RIGHT, -(EDGE + ZOOM_D + theme::space::s),
-                 -(EDGE + (ZOOM_D - marking_font()->line_height) / 2));
+    const std::int32_t line = marking_font()->line_height;
+    lv_obj_set_pos(s_summary, area_w - EDGE - ZOOM_D - theme::space::s - SUMMARY_W,
+                   height - EDGE - (ZOOM_D - line) / 2 - line);
 
     const std::int32_t column_y = full ? detail::GAP : y;
     const std::int32_t column_h = full ? height - 2 * detail::GAP : height;
     lv_obj_set_parent(s_column, parent);
     lv_obj_set_pos(s_column, x + area_w + COLUMN_GAP, column_y);
     lv_obj_set_size(s_column, COLUMN_W, column_h);
-    lv_obj_set_style_bg_opa(s_column, cards, 0);
+    lv_obj_set_style_bg_color(s_column, lv_color_hex(full ? theme::background : theme::panel_light), 0);
+    lv_obj_set_style_bg_opa(s_column, full ? FLOATING_COLUMN_OPA : LV_OPA_COVER, 0);
     place_readings_at(column_h);
     show_radar(*s_last);
 }
