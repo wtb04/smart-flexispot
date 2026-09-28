@@ -116,6 +116,9 @@ constexpr std::int32_t SUMMARY_PAST_CORNER = 60;
 constexpr std::int32_t SUMMARY_W           = CORNER + SUMMARY_PAST_CORNER;
 
 constexpr std::uint32_t ZOOM_MS            = 260;
+// A fullscreen frame takes about 175 ms while zooming, so an eased 260 ms
+// showed one frame nearly at the end: longer and even, it shows three or four.
+constexpr std::uint32_t ZOOM_FULL_MS       = 600;
 constexpr std::int32_t  ZOOM_PROGRESS_FULL = 256;
 
 // Flat earth over eighty kilometres is off by less than the line width.
@@ -1142,6 +1145,9 @@ void draw_step(float range_km)
 
 void zoom_step(void *, std::int32_t value)
 {
+    if (value == 0) {
+        return;  // as it was already: a fullscreen frame of nothing moving
+    }
     const auto  from = static_cast<float>(s_zoom_from);
     const auto  to   = static_cast<float>(RANGES[s_range_step]);
     const float t    = static_cast<float>(value) / static_cast<float>(ZOOM_PROGRESS_FULL);
@@ -1149,19 +1155,20 @@ void zoom_step(void *, std::int32_t value)
     draw_step(s_shown_range);
 }
 
-void settle_zoom()
+void settle_zoom(bool map_drawn = false)
 {
     const int settled = RANGES[s_range_step];
     s_shown_range     = static_cast<float>(settled);
-    if (map_located()) {
+    if (map_located() && !map_drawn) {
         draw_map(s_map_lat, s_map_lon, static_cast<float>(settled));
     }
     show_radar(*s_last);
 }
 
+// The animation's last step drew the map at the range it ends on.
 void zoom_done(lv_anim_t *)
 {
-    settle_zoom();
+    settle_zoom(s_shown_range == static_cast<float>(RANGES[s_range_step]));
 }
 
 void start_zoom(int from_km)
@@ -1171,10 +1178,10 @@ void start_zoom(int from_km)
     lv_anim_init(&anim);
     lv_anim_set_var(&anim, s_scope);
     lv_anim_set_values(&anim, 0, ZOOM_PROGRESS_FULL);
-    lv_anim_set_duration(&anim, ZOOM_MS);
+    lv_anim_set_duration(&anim, s_to_edges ? ZOOM_FULL_MS : ZOOM_MS);
     lv_anim_set_exec_cb(&anim, zoom_step);
     lv_anim_set_completed_cb(&anim, zoom_done);
-    lv_anim_set_path_cb(&anim, lv_anim_path_ease_out);
+    lv_anim_set_path_cb(&anim, s_to_edges ? lv_anim_path_linear : lv_anim_path_ease_out);
     lv_anim_start(&anim);
 }
 
