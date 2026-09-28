@@ -54,6 +54,16 @@ int main()
     }
 
     {
+        const char body[] = R"({"options":[{"leaveAt":10,"arriveAt":90,"legs":[
+            {"mode":"train","line":"SPR","from":"A","to":"B","dep":10,"arr":40},
+            {"mode":"bus","line":"9","from":"B","to":"C","dep":45,"arr":75,"estimated":true}]}]})";
+        travel::Option options[1];
+        const int n = travel::parse(body, sizeof(body) - 1, options, 1);
+        check(n == 1 && !options[0].legs[0].estimated && options[0].legs[1].estimated,
+              "a leg allowed for rather than known says so");
+    }
+
+    {
         // A field that only exists in the next option must not leak backwards.
         const std::string text =
             R"({"options":[{"leaveAt":100,"legs":[]},{"leaveAt":200,"arriveAt":999,"legs":[]}]})";

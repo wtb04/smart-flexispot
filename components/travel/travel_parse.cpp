@@ -146,6 +146,7 @@ void read_leg(const char *leg, const char *leg_end, Leg &into)
     field_number(leg, leg_end, "dep", into.depart);
     field_number(leg, leg_end, "arr", into.arrive);
     into.cancelled = field_flag(leg, leg_end, "off");
+    into.estimated = field_flag(leg, leg_end, "estimated");
 }
 
 void read_legs(const char *legs, const char *option_end, Option &option)

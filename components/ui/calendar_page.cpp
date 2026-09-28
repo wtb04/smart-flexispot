@@ -437,8 +437,10 @@ void mode_of(const travel::Leg &leg, char *out, std::size_t size)
     const bool train = is_mode(leg.mode, "train");
     const bool walk  = is_mode(leg.mode, "walk");
     const int  mins  = minutes_rounded_up(leg.arrive - leg.depart);
+    // Not timed yet, only allowed for: said as about so long.
+    const char *about = leg.estimated ? "about " : "";
     if (is_walk_or_bike(leg.mode)) {
-        std::snprintf(out, size, "%s, %d min", walk ? "Walk" : "Bike", mins);
+        std::snprintf(out, size, "%s, %s%d min", walk ? "Walk" : "Bike", about, mins);
     } else if (train && leg.line[0] != '\0') {
         char        kind[travel::kLineMax];
         const char *plus    = std::strstr(leg.line, CHANGES_MARK);
@@ -453,9 +455,9 @@ void mode_of(const travel::Leg &leg, char *out, std::size_t size)
             std::snprintf(out, size, "%s, %d min", line_name(kind), mins);
         }
     } else if (leg.line[0] != '\0') {
-        std::snprintf(out, size, "Bus %s, %d min", leg.line, mins);
+        std::snprintf(out, size, "Bus %s, %s%d min", leg.line, about, mins);
     } else {
-        std::snprintf(out, size, "%s, %d min", train ? "Train" : "Bus", mins);
+        std::snprintf(out, size, "%s, %s%d min", train ? "Train" : "Bus", about, mins);
     }
 }
 
@@ -918,7 +920,9 @@ void show_stop(int i, const RouteLayout &layout, std::int64_t starts)
     clock_of(leaves ? s_going->legs[i].depart : s_going->legs[legs - 1].arrive, text,
              sizeof(text));
     theme::set_text(stop.when, text);
-    theme::set_text_color(stop.when, cancelled ? theme::red : theme::text);
+    // A time only allowed for, not known, is said more quietly.
+    const bool guessed = leaves ? s_going->legs[i].estimated : s_going->legs[legs - 1].estimated;
+    theme::set_text_color(stop.when, cancelled ? theme::red : guessed ? theme::secondary : theme::text);
     lv_obj_set_pos(stop.when, 0, y);
 
     theme::set_text(stop.name, leaves ? s_going->legs[i].from : s_going->legs[legs - 1].to);

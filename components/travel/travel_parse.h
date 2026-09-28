@@ -19,6 +19,7 @@ struct Leg {
     std::int64_t depart;            // unix seconds
     std::int64_t arrive;
     bool         cancelled;
+    bool         estimated;  // allowed for rather than known: a bus beyond the live feed's reach
 };
 
 struct Option {
