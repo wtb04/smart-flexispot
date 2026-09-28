@@ -7,10 +7,10 @@
 #include <cstdint>
 
 namespace radar {
-// Measured: about 165 airborne within the 160 km asked about on a weekday
-// afternoon, and the feed's busiest hours bring more. The answer for this many
-// is about 155 kB, which the 192 kB fetch buffer holds.
-inline constexpr int kMaxAircraft = 320;
+// Measured: about 165 airborne within 160 km on a weekday afternoon, and the
+// feed's busiest hours bring more; the 250 km now asked about is some 2.4
+// times the sky, which this holds with room over.
+inline constexpr int kMaxAircraft = 640;
 
 struct Snapshot {
     Aircraft list[kMaxAircraft];

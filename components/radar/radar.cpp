@@ -41,7 +41,9 @@ constexpr int HTTP_TOO_MANY_REQUESTS = 429;
 constexpr std::size_t URL_SIZE        = 128;
 constexpr std::size_t LOOKUP_URL_SIZE = 192;
 
-constexpr int   RANGE_KM  = 160;
+// Past the last ring, since the fullscreen view shows the sky to the screen's
+// edges, as far as 1.5 times the range from home at the widest.
+constexpr int   RANGE_KM  = 250;
 constexpr float NM_PER_KM = 0.539957f;
 
 // The home position is snapped to this grid before it reaches a url or the
@@ -57,7 +59,7 @@ constexpr TickType_t   HOME_SETTLE_CHECK    = pdMS_TO_TICKS(units::kMsPerSecond)
 // Measured: three seconds runs into the feed's rate limit and gets 429s.
 // Enough for everything the feed has at its busiest, and some that have just
 // left; one not heard of this long is forgotten, and its trail with it.
-constexpr int          TRAIL_SLOTS    = 512;
+constexpr int          TRAIL_SLOTS    = 768;
 constexpr float        TRAIL_STEP_KM  = 1.5f;
 constexpr std::int64_t TRAIL_FORGET_US = 15 * units::kUsPerMinute;
 
@@ -68,7 +70,7 @@ constexpr std::int64_t OVERDUE_REST_MS = units::kMsPerSecond;
 // Short enough to close idle lookup connections on time.
 constexpr std::int64_t LOOKUPS_OPEN_REST_MS = 2 * units::kMsPerSecond;
 
-constexpr std::size_t BODY_MAX = 192 * units::kBytesPerKiB;
+constexpr std::size_t BODY_MAX = 640 * units::kBytesPerKiB;  // about 940 bytes an aircraft
 
 constexpr std::uint32_t TASK_STACK    = 8192;  // measured: uses 3.1 KB; the TLS handshake runs on it
 constexpr UBaseType_t   TASK_PRIORITY = 2;
