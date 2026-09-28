@@ -8,6 +8,7 @@
 #include "freertos/task.h"
 #include "logbuf.h"
 #include "ota.h"
+#include "power.h"
 #include "ui.h"
 #include "units.h"
 
@@ -154,6 +155,50 @@ esp_err_t heap_page(httpd_req_t *req)
     return httpd_resp_send_chunk(req, nullptr, 0);
 }
 
+constexpr int        POWER_SECONDS_DEFAULT = 20;
+constexpr int        POWER_SECONDS_MAX     = 120;
+constexpr TickType_t POWER_SAMPLE          = pdMS_TO_TICKS(250);
+
+// The pack's current and voltage averaged over ?seconds=, sampled four times
+// a second: what one change costs, measured rather than guessed. On battery
+// only; on the cable the charger feeds the panel and the pack reads charging.
+esp_err_t power_page(httpd_req_t *req)
+{
+    if (!ota::authorised(req)) {
+        return refuse(req);
+    }
+    char query[QUERY_MAX] = {};
+    char value[QUERY_MAX] = {};
+    int  seconds          = POWER_SECONDS_DEFAULT;
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
+        httpd_query_key_value(query, "seconds", value, sizeof(value)) == ESP_OK) {
+        seconds = std::clamp(std::atoi(value), 1, POWER_SECONDS_MAX);
+    }
+    double amps = 0.0, volts = 0.0, peak = 0.0;
+    int    count = 0, percent = 0;
+    const TickType_t until = xTaskGetTickCount() + pdMS_TO_TICKS(seconds * units::kMsPerSecond);
+    while (xTaskGetTickCount() < until) {
+        power::State state{};
+        if (power::read(state) == ESP_OK) {
+            amps += state.current_amps;
+            volts += state.bus_volts;
+            peak    = std::max<double>(peak, state.current_amps);
+            percent = state.percent;
+            ++count;
+        }
+        vTaskDelay(POWER_SAMPLE);
+    }
+    char line[160];
+    const double mean_a = count > 0 ? amps / count : 0.0;
+    const double mean_v = count > 0 ? volts / count : 0.0;
+    const int    n      = std::snprintf(line, sizeof(line),
+                                        "%d s, %d samples: %.0f mA mean, %.0f mA peak, %.3f V, %.2f W, %d%%, %d mAh\n",
+                                        seconds, count, mean_a * 1000.0, peak * 1000.0, mean_v, mean_a * mean_v,
+                                        percent, power::charge_mah());
+    httpd_resp_set_type(req, "text/plain");
+    return httpd_resp_send(req, line, n);
+}
+
 // A line saying the size, then the pixels as RGB565, row by row.
 esp_err_t screen_page(httpd_req_t *req)
 {
@@ -192,6 +237,7 @@ esp_err_t start()
         {.uri = "/log", .method = HTTP_GET, .handler = log_page, .user_ctx = nullptr},
         {.uri = "/screen", .method = HTTP_GET, .handler = screen_page, .user_ctx = nullptr},
         {.uri = "/heap", .method = HTTP_GET, .handler = heap_page, .user_ctx = nullptr},
+        {.uri = "/power", .method = HTTP_GET, .handler = power_page, .user_ctx = nullptr},
     };
     for (const httpd_uri_t &page : pages) {
         ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &page), TAG, "page");

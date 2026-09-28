@@ -5,6 +5,7 @@ what holds its DMA-capable memory.
 Usage: tools/remote.py log [lines] [host]
        tools/remote.py screen [out.png] [host]
        tools/remote.py heap [host]
+       tools/remote.py power [seconds] [host]   the pack's draw, averaged, on battery
 
 Only a build made with -DREMOTE_ENABLED=1 answers:
     idf.py -B build_remote -DCMAKE_CXX_FLAGS="-DREMOTE_ENABLED=1" build
@@ -31,7 +32,7 @@ def key():
 
 def fetch(host, path):
     request = urllib.request.Request(f"http://{host}{path}", headers={"X-Update-Key": key()})
-    with urllib.request.urlopen(request, timeout=30) as answer:
+    with urllib.request.urlopen(request, timeout=150) as answer:
         return answer.read()
 
 
@@ -65,6 +66,10 @@ def main():
     elif what == "heap":
         host = sys.argv[2] if len(sys.argv) > 2 else "smart-flexispot"
         sys.stdout.write(fetch(host, "/heap").decode(errors="replace"))
+    elif what == "power":
+        seconds = sys.argv[2] if len(sys.argv) > 2 else "20"
+        host = sys.argv[3] if len(sys.argv) > 3 else "smart-flexispot"
+        sys.stdout.write(fetch(host, f"/power?seconds={seconds}").decode(errors="replace"))
     elif what == "screen":
         out = sys.argv[2] if len(sys.argv) > 2 else "screen.png"
         host = sys.argv[3] if len(sys.argv) > 3 else "smart-flexispot"
