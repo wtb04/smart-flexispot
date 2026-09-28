@@ -3,6 +3,7 @@
 #include "ui_internal.h"
 
 #include "esp_heap_caps.h"
+#include "esp_timer.h"
 #include "map_data.h"
 #include "theme.h"
 #include "icons.h"
@@ -13,8 +14,25 @@
 #include <cstring>
 #include <iterator>
 
+#ifndef REMOTE_ENABLED
+#define REMOTE_ENABLED 0
+#endif
+
 namespace ui {
 namespace {
+// A development build logs how long the scope's heavier work takes.
+struct Timed {
+    const char        *what;
+    const std::int64_t began = esp_timer_get_time();
+    ~Timed()
+    {
+        if (REMOTE_ENABLED) {
+            ESP_LOGI("radar_page", "%s %d ms", what,
+                     static_cast<int>((esp_timer_get_time() - began) / units::kUsPerMs));
+        }
+    }
+};
+
 constexpr float DEG                    = 3.14159265f / 180.0f;
 constexpr int   FULL_TURN_DEG          = 360;
 constexpr float QUARTER_TURN_DEG       = 90.0f;
@@ -36,7 +54,6 @@ constexpr int MIN_POLYGON_POINTS = 3;
 constexpr int RIM_BAND = 36;
 
 constexpr int          SPOKES            = 8;
-constexpr int          SPOKE_ENDS        = 2;
 constexpr int          RINGS             = 4;
 constexpr lv_opa_t     RING_OPA[RINGS]   = {LV_OPA_10, LV_OPA_20, LV_OPA_30, LV_OPA_40};
 constexpr std::int32_t RING_STROKE       = 2;
@@ -201,7 +218,6 @@ lv_obj_t          *s_marker                     = nullptr;
 lv_obj_t          *s_rings[RINGS]               = {};
 lv_obj_t          *s_rim[RIM_DOTS]              = {};
 lv_obj_t          *s_legend[LEGEND_STEPS]       = {};
-lv_point_precise_t s_spokes[SPOKES][SPOKE_ENDS] = {};
 // Home, where the rings are centred; on the page the middle of a disc, and
 // fullscreen the middle of the space beside the column, with the map past them.
 std::int32_t       s_cx                         = 0;
@@ -239,6 +255,16 @@ std::uint8_t  *s_air_opa   = nullptr;  // the strongest air drawn at each pixel 
 std::int32_t   s_ground_w  = 0;
 std::int32_t   s_ground_h  = 0;
 std::int32_t   s_corner    = 0;  // fullscreen, the picture's rounded corners
+
+// Where the map reaches along each row, worked out once for the picture;
+// to below from where it misses the row.
+std::int16_t *s_row_from = nullptr;
+std::int16_t *s_row_to   = nullptr;
+
+// The water's crossings, gathered edge by edge into the rows each edge spans:
+// testing every edge of the sea's outline on every row was most of a map.
+std::int32_t *s_crossings      = nullptr;  // MASK_MAX_EDGES a row
+std::uint8_t *s_crossing_count = nullptr;
 
 lv_point_precise_t *s_map_points = nullptr;
 float               s_map_lat    = 0.0f;
@@ -395,20 +421,6 @@ lv_point_t on_circle(float angle, float radius)
             static_cast<std::int32_t>(s_cy - std::cos(angle) * radius)};
 }
 
-void ring(lv_obj_t *parent, std::int32_t radius, lv_opa_t opa)
-{
-    lv_obj_t *circle = lv_obj_create(parent);
-    lv_obj_set_size(circle, radius * 2, radius * 2);
-    lv_obj_set_pos(circle, s_cx - radius, s_cy - radius);
-    lv_obj_set_style_radius(circle, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_opa(circle, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_color(circle, lv_color_hex(theme::secondary), 0);
-    lv_obj_set_style_border_opa(circle, opa, 0);
-    lv_obj_set_style_border_width(circle, RING_STROKE, 0);
-    lv_obj_set_style_pad_all(circle, 0, 0);
-    quiet(circle);
-}
-
 void compass(lv_obj_t *parent, const char *text, char side)
 {
     lv_obj_t          *label = theme::make_label(parent, text, theme::secondary, marking_font());
@@ -443,31 +455,9 @@ void show_ring_distance(lv_obj_t *label, int nth, int range_km)
     place_ring_label(label, s_radius * nth / RINGS);
 }
 
-void build_spokes(lv_obj_t *scope)
-{
-    const auto inner = static_cast<float>(s_radius) / RINGS;
-    const auto outer = static_cast<float>(s_radius);
-    for (int i = 0; i < SPOKES; ++i) {
-        const float      angle = static_cast<float>(i) * FULL_TURN_DEG / SPOKES * DEG;
-        const lv_point_t from  = on_circle(angle, inner);
-        const lv_point_t to    = on_circle(angle, outer);
-        s_spokes[i][0]         = {from.x, from.y};
-        s_spokes[i][1]         = {to.x, to.y};
-
-        lv_obj_t *spoke = lv_line_create(scope);
-        lv_line_set_points(spoke, s_spokes[i], SPOKE_ENDS);
-        lv_obj_set_pos(spoke, 0, 0);
-        lv_obj_set_style_line_width(spoke, 1, 0);
-        lv_obj_set_style_line_color(spoke, lv_color_hex(theme::secondary), 0);
-        lv_obj_set_style_line_opa(spoke, LV_OPA_10, 0);
-        quiet(spoke);
-    }
-}
-
 void build_rings(lv_obj_t *scope, int range_km)
 {
     for (int i = 1; i <= RINGS; ++i) {
-        ring(scope, s_radius * i / RINGS, RING_OPA[i - 1]);
 
         lv_obj_t *label = theme::make_label(scope, "", theme::secondary, marking_font());
         lv_obj_set_style_text_opa(label, LV_OPA_40, 0);
@@ -654,15 +644,35 @@ void rounded_span(std::int32_t y, std::int32_t &from, std::int32_t &to)
 
 // Where the map reaches along row y: inside the last ring on the page, and
 // fullscreen the whole picture but its corners.
-bool map_span(std::int32_t y, std::int32_t &from, std::int32_t &to)
+bool reach_of(std::int32_t y, std::int32_t &from, std::int32_t &to)
 {
-    if (y < 0 || y >= s_ground_h) {
-        return false;
-    }
     if (!s_to_edges) {
         return circle_span(y, s_cx, s_cy, static_cast<float>(s_radius), from, to);
     }
     rounded_span(y, from, to);
+    return from <= to;
+}
+
+void work_out_rows()
+{
+    for (std::int32_t y = 0; y < s_ground_h; ++y) {
+        std::int32_t from = 0, to = -1;
+        if (!reach_of(y, from, to)) {
+            from = 0;
+            to   = -1;
+        }
+        s_row_from[y] = static_cast<std::int16_t>(from);
+        s_row_to[y]   = static_cast<std::int16_t>(to);
+    }
+}
+
+bool map_span(std::int32_t y, std::int32_t &from, std::int32_t &to)
+{
+    if (y < 0 || y >= s_ground_h || s_row_from == nullptr) {
+        return false;
+    }
+    from = s_row_from[y];
+    to   = s_row_to[y];
     return from <= to;
 }
 
@@ -686,11 +696,44 @@ bool within_scope(std::int32_t x, std::int32_t y)
 
 // Each pixel of a line that is on the map, handed to `put`. A line wholly off
 // the picture to one side is passed over: the map reaches far past it.
+// Cut to the picture, Liang and Barsky's way; false when none of it is on it.
+bool clip_to_picture(std::int32_t &x0, std::int32_t &y0, std::int32_t &x1, std::int32_t &y1)
+{
+    const auto  dx   = static_cast<float>(x1 - x0);
+    const auto  dy   = static_cast<float>(y1 - y0);
+    const float p[4] = {-dx, dx, -dy, dy};
+    const float q[4] = {static_cast<float>(x0), static_cast<float>(s_ground_w - 1 - x0),
+                        static_cast<float>(y0), static_cast<float>(s_ground_h - 1 - y0)};
+    float       t0 = 0.0f, t1 = 1.0f;
+    for (int i = 0; i < 4; ++i) {
+        if (p[i] == 0.0f) {
+            if (q[i] < 0.0f) {
+                return false;
+            }
+            continue;
+        }
+        const float t = q[i] / p[i];
+        if (p[i] < 0.0f) {
+            t0 = std::max(t0, t);
+        } else {
+            t1 = std::min(t1, t);
+        }
+        if (t0 > t1) {
+            return false;
+        }
+    }
+    const auto ox = static_cast<float>(x0), oy = static_cast<float>(y0);
+    x0 = static_cast<std::int32_t>(std::lround(ox + t0 * dx));
+    y0 = static_cast<std::int32_t>(std::lround(oy + t0 * dy));
+    x1 = static_cast<std::int32_t>(std::lround(ox + t1 * dx));
+    y1 = static_cast<std::int32_t>(std::lround(oy + t1 * dy));
+    return true;
+}
+
 template <typename Put>
 void walk_line(std::int32_t x0, std::int32_t y0, std::int32_t x1, std::int32_t y1, const Put &put)
 {
-    if ((x0 < 0 && x1 < 0) || (y0 < 0 && y1 < 0) || (x0 >= s_ground_w && x1 >= s_ground_w) ||
-        (y0 >= s_ground_h && y1 >= s_ground_h)) {
+    if (!clip_to_picture(x0, y0, x1, y1)) {
         return;
     }
     const std::int32_t dx     = std::abs(x1 - x0);
@@ -772,23 +815,50 @@ void fill_water_row(std::int32_t y, const std::int32_t *crossings, int found, st
 void fill_water(const lv_point_precise_t *points, const std::uint16_t *rings, int ring_count,
                 int count, std::uint16_t water)
 {
-    if (count < MIN_POLYGON_POINTS) {
+    if (count < MIN_POLYGON_POINTS || s_crossings == nullptr) {
         return;
     }
     const Rows         rows   = rows_spanned(points, count);
     const std::int32_t top    = std::max<std::int32_t>(rows.top, 0);
     const std::int32_t bottom = std::min<std::int32_t>(rows.bottom, s_ground_h - 1);
+    if (top > bottom) {
+        return;
+    }
+    std::memset(s_crossing_count + top, 0, static_cast<std::size_t>(bottom - top + 1));
 
-    for (std::int32_t y = top; y <= bottom; ++y) {
-        std::int32_t crossings[MASK_MAX_EDGES];
-        int          found = 0;
-        int          base  = 0;
-        for (int r = 0; r < ring_count; ++r) {
-            found = add_crossings(points + base, rings[r], y, crossings, found, MASK_MAX_EDGES);
-            base += rings[r];
+    // An edge crosses row y when y lies in [its lower end, its upper end), as
+    // add_crossings counts it.
+    int base = 0;
+    for (int r = 0; r < ring_count; ++r) {
+        const int length = rings[r];
+        for (int i = 0, j = length - 1; i < length && base + i < count; j = i++) {
+            const lv_point_precise_t &a = points[base + i];
+            const lv_point_precise_t &b = points[base + j];
+            if (a.y == b.y) {
+                continue;
+            }
+            const std::int32_t lo    = std::max<std::int32_t>(std::min(a.y, b.y), top);
+            const std::int32_t hi    = std::min<std::int32_t>(std::max(a.y, b.y) - 1, bottom);
+            const float        slope = static_cast<float>(b.x - a.x) / static_cast<float>(b.y - a.y);
+            for (std::int32_t y = lo; y <= hi; ++y) {
+                std::uint8_t &found = s_crossing_count[y];
+                if (found < MASK_MAX_EDGES) {
+                    s_crossings[static_cast<std::size_t>(y) * MASK_MAX_EDGES + found++] =
+                        static_cast<std::int32_t>(std::lround(static_cast<float>(a.x) +
+                                                              static_cast<float>(y - a.y) * slope));
+                }
+            }
         }
-        std::sort(crossings, crossings + found);
-        fill_water_row(y, crossings, found, water);
+        base += length;
+    }
+    for (std::int32_t y = top; y <= bottom; ++y) {
+        const int found = s_crossing_count[y];
+        if (found < 2) {
+            continue;
+        }
+        std::int32_t *row = s_crossings + static_cast<std::size_t>(y) * MASK_MAX_EDGES;
+        std::sort(row, row + found);
+        fill_water_row(y, row, found, water);
     }
 }
 
@@ -878,8 +948,68 @@ void paint_base()
     }
 }
 
+// The range rings and the spokes, drawn into the picture over the map. As
+// LVGL objects each ring tested every pixel of its square on every frame,
+// most of a frame's time; here only the pixels near a ring are touched, once
+// a range.
+void draw_ring(float radius, lv_opa_t opa, std::uint16_t ink)
+{
+    const float  outer = radius;
+    const float  inner = radius - static_cast<float>(RING_STROKE);
+    const auto   cx    = static_cast<float>(s_cx);
+    const auto   cy    = static_cast<float>(s_cy);
+    const auto   top   = std::max<std::int32_t>(0, static_cast<std::int32_t>(cy - outer) - 1);
+    const auto   foot  = std::min<std::int32_t>(s_ground_h - 1, static_cast<std::int32_t>(cy + outer) + 1);
+    const auto   shade = [&](std::int32_t x, std::int32_t y, float dy) {
+        if (x < 0 || x >= s_ground_w) {
+            return;
+        }
+        const float dx       = static_cast<float>(x) + 0.5f - cx;
+        const float d        = std::sqrt(dx * dx + dy * dy);
+        const float coverage = std::clamp(std::min(d - inner, outer - d) + 0.5f, 0.0f, 1.0f);
+        if (coverage > 0.0f) {
+            std::uint16_t &pixel = s_ground[static_cast<std::size_t>(y) * s_ground_w + x];
+            pixel = blend565(pixel, ink, static_cast<std::uint8_t>(static_cast<float>(opa) * coverage));
+        }
+    };
+    for (std::int32_t y = top; y <= foot; ++y) {
+        const float dy   = static_cast<float>(y) + 0.5f - cy;
+        const float far  = (outer + 1.0f) * (outer + 1.0f) - dy * dy;
+        if (far < 0.0f) {
+            continue;
+        }
+        const float near  = (inner - 1.0f) * (inner - 1.0f) - dy * dy;
+        const auto  reach = static_cast<std::int32_t>(std::ceil(std::sqrt(far)));
+        const auto  hole  = near > 0.0f ? static_cast<std::int32_t>(std::floor(std::sqrt(near))) : -1;
+        for (std::int32_t x = s_cx - reach; x <= s_cx + reach; ++x) {
+            if (hole >= 0 && x > s_cx - hole && x < s_cx + hole) {
+                x = s_cx + hole;  // across the inside, to the far side
+            }
+            shade(x, y, dy);
+        }
+    }
+}
+
+void draw_rings_and_spokes()
+{
+    const std::uint16_t ink = rgb565(theme::secondary);
+    for (int i = 1; i <= RINGS; ++i) {
+        draw_ring(static_cast<float>(s_radius * i / RINGS), RING_OPA[i - 1], ink);
+    }
+    const auto inner = static_cast<float>(s_radius) / RINGS;
+    const auto outer = static_cast<float>(s_radius);
+    for (int i = 0; i < SPOKES; ++i) {
+        const float      angle = static_cast<float>(i) * FULL_TURN_DEG / SPOKES * DEG;
+        const lv_point_t from  = on_circle(angle, inner);
+        const lv_point_t to    = on_circle(angle, outer);
+        walk_line(from.x, from.y, to.x, to.y,
+                  [&](std::size_t at) { s_ground[at] = blend565(s_ground[at], ink, LV_OPA_10); });
+    }
+}
+
 void draw_map(float home_lat, float home_lon, float range_km)
 {
+    const Timed timed{"map"};
     if (s_ground == nullptr || s_land_mask == nullptr || s_map_points == nullptr) {
         return;
     }
@@ -907,6 +1037,7 @@ void draw_map(float home_lat, float home_lon, float range_km)
             s_ground[i] = blend565(s_ground[i], ink, s_land_mask[i]);
         }
     }
+    draw_rings_and_spokes();
 }
 
 bool map_located()
@@ -935,6 +1066,7 @@ void raster_blip(const Plot &plot);
 // spilled it past the scope's edge, and was slower to show.
 void draw_step(float range_km)
 {
+    const Timed timed{"zoom step"};
     if (map_located()) {
         draw_map(s_map_lat, s_map_lon, range_km);
     }
@@ -1074,12 +1206,20 @@ void build_picture(lv_obj_t *scope, std::int32_t w, std::int32_t h)
         heap_caps_aligned_alloc(PICTURE_ALIGN, n * RGB565_BYTES_PER_PX, MALLOC_CAP_SPIRAM));
     s_land_mask = static_cast<std::uint8_t *>(heap_caps_calloc(n, ALPHA_BYTES_PER_PX, MALLOC_CAP_SPIRAM));
     s_air_opa   = static_cast<std::uint8_t *>(heap_caps_calloc(n, ALPHA_BYTES_PER_PX, MALLOC_CAP_SPIRAM));
+    s_row_from  = static_cast<std::int16_t *>(heap_caps_malloc(h * sizeof(std::int16_t), MALLOC_CAP_SPIRAM));
+    s_row_to    = static_cast<std::int16_t *>(heap_caps_malloc(h * sizeof(std::int16_t), MALLOC_CAP_SPIRAM));
+    s_crossings = static_cast<std::int32_t *>(
+        heap_caps_malloc(static_cast<std::size_t>(h) * MASK_MAX_EDGES * sizeof(std::int32_t), MALLOC_CAP_SPIRAM));
+    s_crossing_count = static_cast<std::uint8_t *>(heap_caps_malloc(h, MALLOC_CAP_SPIRAM));
     s_map_points = static_cast<lv_point_precise_t *>(heap_caps_malloc(
         sizeof(lv_point_precise_t) * MAP_POINTS, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    if (s_ground == nullptr || s_frame == nullptr || s_land_mask == nullptr || s_air_opa == nullptr) {
+    if (s_ground == nullptr || s_frame == nullptr || s_land_mask == nullptr || s_air_opa == nullptr ||
+        s_row_from == nullptr || s_row_to == nullptr || s_crossings == nullptr || s_crossing_count == nullptr) {
         return;
     }
+    work_out_rows();
     paint_base();
+    draw_rings_and_spokes();  // there before any map is
     std::memcpy(s_frame, s_ground, n * RGB565_BYTES_PER_PX);
     s_canvas = lv_canvas_create(scope);
     lv_canvas_set_buffer(s_canvas, s_frame, w, h, LV_COLOR_FORMAT_RGB565);
@@ -1159,7 +1299,6 @@ void build_scope(lv_obj_t *parent, const Frame &frame, int range_km)
     lv_obj_add_event_cb(scope, scope_clicked, LV_EVENT_CLICKED, nullptr);
 
     build_picture(scope, frame.w, frame.h);
-    build_spokes(scope);
     build_rings(scope, range_km);
     compass(scope, "N", 'N');
     compass(scope, "S", 'S');
@@ -1977,16 +2116,21 @@ const radar::Aircraft *draw_traffic(const bool *named)
 // size builds it again, and draws the map again to fit.
 void build_scope_in(const Frame &frame, std::int32_t x, std::int32_t y)
 {
+    const Timed timed{"scope built"};
     if (s_scope != nullptr) {
         lv_anim_delete(s_scope, nullptr);  // a zoom under way ends where it was going
         lv_obj_delete(s_scope);
         for (void *buffer : {static_cast<void *>(s_ground), static_cast<void *>(s_frame),
                              static_cast<void *>(s_land_mask), static_cast<void *>(s_air_opa),
-                             static_cast<void *>(s_map_points)}) {
+                             static_cast<void *>(s_map_points), static_cast<void *>(s_row_from),
+                             static_cast<void *>(s_row_to), static_cast<void *>(s_crossings),
+                             static_cast<void *>(s_crossing_count)}) {
             heap_caps_free(buffer);
         }
         s_ground = s_frame = nullptr;
-        s_land_mask = s_air_opa = nullptr;
+        s_land_mask = s_air_opa = s_crossing_count = nullptr;
+        s_row_from = s_row_to = nullptr;
+        s_crossings = nullptr;
         s_map_points            = nullptr;
         s_canvas                = nullptr;
     }
