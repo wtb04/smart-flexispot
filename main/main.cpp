@@ -14,6 +14,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_system.h"
+#include "last_words.h"
 #include "logbuf.h"
 #include "ota.h"
 #include "nvs_flash.h"
@@ -362,6 +363,7 @@ extern "C" void app_main(void)
         ESP_ERROR_CHECK_WITHOUT_ABORT(nvs_flash_init());
     }
     ESP_ERROR_CHECK_WITHOUT_ABORT(logbuf::start(diagnostics::channels(), diagnostics::route));
+    last_words::start();
     ESP_ERROR_CHECK_WITHOUT_ABORT(settings::load());
 
     const bool flipped = settings::enabled(settings::Key::Flipped);
