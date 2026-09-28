@@ -7,6 +7,7 @@
 #include "freertos/task.h"
 #include "lvgl.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 
@@ -139,12 +140,46 @@ lv_draw_buf_t *take_snapshot()
 
 }  // namespace
 
+// What sits on the top layer, notices and popups, over what is under it.
+static void blend_top(lv_draw_buf_t *shot)
+{
+    if (!lvgl_port_lock(LOCK_TIMEOUT_MS)) {
+        return;
+    }
+    lv_draw_buf_t *top = lv_snapshot_take(lv_layer_top(), LV_COLOR_FORMAT_ARGB8888);
+    lvgl_port_unlock();
+    if (top == nullptr) {
+        return;
+    }
+    const std::uint32_t w = std::min(top->header.w, shot->header.w);
+    const std::uint32_t h = std::min(top->header.h, shot->header.h);
+    for (std::uint32_t y = 0; y < h; ++y) {
+        auto       *under = reinterpret_cast<std::uint32_t *>(shot->data + y * shot->header.stride);
+        const auto *over  = reinterpret_cast<const std::uint32_t *>(top->data + y * top->header.stride);
+        for (std::uint32_t x = 0; x < w; ++x) {
+            const std::uint32_t a = over[x] >> 24;
+            if (a == 0) {
+                continue;
+            }
+            std::uint32_t mixed = 0xff000000u;
+            for (int shift = 0; shift < 24; shift += 8) {
+                const std::uint32_t o = (over[x] >> shift) & CHANNEL_MASK;
+                const std::uint32_t u = (under[x] >> shift) & CHANNEL_MASK;
+                mixed |= ((o * a + u * (CHANNEL_MASK - a)) / CHANNEL_MASK) << shift;
+            }
+            under[x] = mixed;
+        }
+    }
+    lv_draw_buf_destroy(top);
+}
+
 std::uint16_t *capture(int &width, int &height)
 {
     lv_draw_buf_t *shot = take_snapshot();
     if (shot == nullptr) {
         return nullptr;
     }
+    blend_top(shot);
     width  = static_cast<int>(shot->header.w);
     height = static_cast<int>(shot->header.h);
     auto *out = static_cast<std::uint16_t *>(heap_caps_malloc(
