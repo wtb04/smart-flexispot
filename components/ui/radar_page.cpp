@@ -935,24 +935,33 @@ void paint_base()
     const std::uint16_t land   = land_colour();
     const std::uint16_t around = rgb565(s_to_edges ? theme::background : theme::panel_light);
     const std::uint16_t disc   = land;
+    // Each pixel written once: the whole picture twice over took 30 ms.
     for (std::int32_t y = 0; y < s_ground_h; ++y) {
-        std::uint16_t *row = s_ground + static_cast<std::size_t>(y) * s_ground_w;
-        std::fill(row, row + s_ground_w, around);
-        std::int32_t from = 0, to = 0;
+        std::uint16_t *row  = s_ground + static_cast<std::size_t>(y) * s_ground_w;
+        std::int32_t   from = 0, to = 0;
         if (s_to_edges) {
             rounded_span(y, from, to);
-            std::fill(row + from, row + to + 1, land);
-        } else if (circle_span(y, s_cx, s_cy, static_cast<float>(s_ground_w) / 2.0f, from, to)) {
-            std::fill(row + from, row + to + 1, disc);
+        } else if (!circle_span(y, s_cx, s_cy, static_cast<float>(s_ground_w) / 2.0f, from, to)) {
+            std::fill(row, row + s_ground_w, around);
+            continue;
         }
+        std::fill(row, row + from, around);
+        std::fill(row + from, row + to + 1, disc);
+        std::fill(row + to + 1, row + s_ground_w, around);
     }
 }
 
 // The range rings and the spokes, drawn into the picture over the map. As
 // LVGL objects each ring tested every pixel of its square on every frame,
-// most of a frame's time; here only the pixels near a ring are touched, once
-// a range.
-void draw_ring(float radius, lv_opa_t opa, std::uint16_t ink)
+// most of a frame's time; here only the pixels near a ring are touched, and
+// which and how strongly is worked out once a scope, as every map redrawn
+// during a zoom took 11 ms of it again.
+std::uint32_t *s_ring_at    = nullptr;
+std::uint8_t  *s_ring_opa   = nullptr;
+std::size_t    s_ring_count = 0;
+
+template <typename Put>
+void trace_ring(float radius, lv_opa_t opa, Put &put)
 {
     const float  outer = radius;
     const float  inner = radius - static_cast<float>(RING_STROKE);
@@ -968,8 +977,8 @@ void draw_ring(float radius, lv_opa_t opa, std::uint16_t ink)
         const float d        = std::sqrt(dx * dx + dy * dy);
         const float coverage = std::clamp(std::min(d - inner, outer - d) + 0.5f, 0.0f, 1.0f);
         if (coverage > 0.0f) {
-            std::uint16_t &pixel = s_ground[static_cast<std::size_t>(y) * s_ground_w + x];
-            pixel = blend565(pixel, ink, static_cast<std::uint8_t>(static_cast<float>(opa) * coverage));
+            put(static_cast<std::size_t>(y) * s_ground_w + x,
+                static_cast<std::uint8_t>(static_cast<float>(opa) * coverage));
         }
     };
     for (std::int32_t y = top; y <= foot; ++y) {
@@ -981,7 +990,7 @@ void draw_ring(float radius, lv_opa_t opa, std::uint16_t ink)
         const float near  = (inner - 1.0f) * (inner - 1.0f) - dy * dy;
         const auto  reach = static_cast<std::int32_t>(std::ceil(std::sqrt(far)));
         const auto  hole  = near > 0.0f ? static_cast<std::int32_t>(std::floor(std::sqrt(near))) : -1;
-        for (std::int32_t x = s_cx - reach; x <= s_cx + reach; ++x) {
+        for (std::int32_t x = std::max<std::int32_t>(s_cx - reach, 0); x <= std::min(s_cx + reach, s_ground_w - 1); ++x) {
             if (hole >= 0 && x > s_cx - hole && x < s_cx + hole) {
                 x = s_cx + hole;  // across the inside, to the far side
             }
@@ -990,11 +999,11 @@ void draw_ring(float radius, lv_opa_t opa, std::uint16_t ink)
     }
 }
 
-void draw_rings_and_spokes()
+template <typename Put>
+void trace_rings_and_spokes(Put &put)
 {
-    const std::uint16_t ink = rgb565(theme::secondary);
     for (int i = 1; i <= RINGS; ++i) {
-        draw_ring(static_cast<float>(s_radius * i / RINGS), RING_OPA[i - 1], ink);
+        trace_ring(static_cast<float>(s_radius * i / RINGS), RING_OPA[i - 1], put);
     }
     const auto inner = static_cast<float>(s_radius) / RINGS;
     const auto outer = static_cast<float>(s_radius);
@@ -1002,8 +1011,64 @@ void draw_rings_and_spokes()
         const float      angle = static_cast<float>(i) * FULL_TURN_DEG / SPOKES * DEG;
         const lv_point_t from  = on_circle(angle, inner);
         const lv_point_t to    = on_circle(angle, outer);
-        walk_line(from.x, from.y, to.x, to.y,
-                  [&](std::size_t at) { s_ground[at] = blend565(s_ground[at], ink, LV_OPA_10); });
+        walk_line(from.x, from.y, to.x, to.y, [&](std::size_t at) { put(at, LV_OPA_10); });
+    }
+}
+
+void work_out_rings()
+{
+    heap_caps_free(s_ring_at);
+    heap_caps_free(s_ring_opa);
+    s_ring_at    = nullptr;
+    s_ring_opa   = nullptr;
+    s_ring_count = 0;
+    std::size_t count = 0;
+    auto        tally = [&count](std::size_t, std::uint8_t) { ++count; };
+    trace_rings_and_spokes(tally);
+    s_ring_at  = static_cast<std::uint32_t *>(heap_caps_malloc(count * sizeof(std::uint32_t), MALLOC_CAP_SPIRAM));
+    s_ring_opa = static_cast<std::uint8_t *>(heap_caps_malloc(count, MALLOC_CAP_SPIRAM));
+    if (s_ring_at == nullptr || s_ring_opa == nullptr) {
+        return;
+    }
+    auto keep = [](std::size_t at, std::uint8_t opa) {
+        s_ring_at[s_ring_count]  = static_cast<std::uint32_t>(at);
+        s_ring_opa[s_ring_count] = opa;
+        ++s_ring_count;
+    };
+    trace_rings_and_spokes(keep);
+}
+
+void draw_rings_and_spokes()
+{
+    const std::uint16_t ink = rgb565(theme::secondary);
+    for (std::size_t i = 0; i < s_ring_count; ++i) {
+        std::uint16_t &pixel = s_ground[s_ring_at[i]];
+        pixel                = blend565(pixel, ink, s_ring_opa[i]);
+    }
+}
+
+// The borders' mask laid over the map, and cleared behind it for the next
+// map. Most of it is empty, so it is read four pixels at a time.
+void lay_mask(std::uint16_t ink)
+{
+    const std::size_t n     = ground_pixels();
+    const std::size_t words = n / sizeof(std::uint32_t);
+    auto             *mask  = reinterpret_cast<std::uint32_t *>(s_land_mask);
+    const auto        lay   = [ink](std::size_t i) {
+        if (s_land_mask[i] != 0) {
+            s_ground[i]    = blend565(s_ground[i], ink, s_land_mask[i]);
+            s_land_mask[i] = 0;
+        }
+    };
+    for (std::size_t w = 0; w < words; ++w) {
+        if (mask[w] != 0) {
+            for (std::size_t i = w * sizeof(std::uint32_t); i < (w + 1) * sizeof(std::uint32_t); ++i) {
+                lay(i);
+            }
+        }
+    }
+    for (std::size_t i = words * sizeof(std::uint32_t); i < n; ++i) {
+        lay(i);
     }
 }
 
@@ -1014,7 +1079,6 @@ void draw_map(float home_lat, float home_lon, float range_km)
         return;
     }
     paint_base();
-    std::memset(s_land_mask, 0, ground_pixels());
 
     const std::uint16_t land  = land_colour();
     const std::uint16_t water = blend565(land, rgb565(INK_WATER), WATER_ALPHA);
@@ -1030,13 +1094,7 @@ void draw_map(float home_lat, float home_lon, float range_km)
         }
     }
 
-    const std::uint16_t ink = rgb565(theme::secondary);
-    const std::size_t   n   = ground_pixels();
-    for (std::size_t i = 0; i < n; ++i) {
-        if (s_land_mask[i] != 0) {
-            s_ground[i] = blend565(s_ground[i], ink, s_land_mask[i]);
-        }
-    }
+    lay_mask(rgb565(theme::secondary));
     draw_rings_and_spokes();
 }
 
@@ -1218,6 +1276,7 @@ void build_picture(lv_obj_t *scope, std::int32_t w, std::int32_t h)
         return;
     }
     work_out_rows();
+    work_out_rings();
     paint_base();
     draw_rings_and_spokes();  // there before any map is
     std::memcpy(s_frame, s_ground, n * RGB565_BYTES_PER_PX);
