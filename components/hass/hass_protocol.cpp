@@ -175,6 +175,24 @@ void add_power_entities(cJSON *cmps, const std::string &device_id, const Topics 
     cJSON_AddStringToObject(battery_v, "stat_cla", "measurement");
     cJSON_AddStringToObject(battery_v, "ent_cat", "diagnostic");
 
+    // Positive while it runs from the pack, negative while charging.
+    cJSON *battery_ma =
+        add_state_entity(cmps, "battery_ma", "sensor", "Battery current", device_id, topics,
+                         "{{ value_json.battery_ma | default('unknown') }}");
+    cJSON_AddStringToObject(battery_ma, "unit_of_meas", "mA");
+    cJSON_AddStringToObject(battery_ma, "dev_cla", "current");
+    cJSON_AddStringToObject(battery_ma, "stat_cla", "measurement");
+    cJSON_AddStringToObject(battery_ma, "ent_cat", "diagnostic");
+
+    cJSON *battery_w = add_state_entity(
+        cmps, "battery_w", "sensor", "Battery power", device_id, topics,
+        "{{ (value_json.battery_v * value_json.battery_ma / 1000) | round(2) "
+        "if value_json.battery_ma is defined else 'unknown' }}");
+    cJSON_AddStringToObject(battery_w, "unit_of_meas", "W");
+    cJSON_AddStringToObject(battery_w, "dev_cla", "power");
+    cJSON_AddStringToObject(battery_w, "stat_cla", "measurement");
+    cJSON_AddStringToObject(battery_w, "ent_cat", "diagnostic");
+
     cJSON *charging = add_state_entity(cmps, "charging", "binary_sensor", "Charging", device_id,
                                        topics, "{{ value_json.charging | default('OFF') }}");
     add_on_off_payloads(charging);
