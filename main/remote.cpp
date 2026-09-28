@@ -18,6 +18,7 @@
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 #ifndef REMOTE_ENABLED
 #define REMOTE_ENABLED 0
@@ -239,14 +240,34 @@ std::atomic<std::int64_t> s_frame_began{0};
 std::atomic<std::int64_t> s_slowest_us{0};
 std::atomic<std::uint32_t> s_frames{0};
 
+// A frame from REFR_START to REFR_READY, and of that the drawing, from
+// RENDER_START to RENDER_READY; the rest is handing it to the panel.
+std::atomic<std::int64_t> s_render_began{0};
+std::atomic<std::int64_t> s_render_us{0};
+
 void frame_timed(lv_event_t *event)
 {
     const std::int64_t now = esp_timer_get_time();
-    if (lv_event_get_code(event) == LV_EVENT_REFR_START) {
-        s_frame_began = now;
-        return;
+    switch (lv_event_get_code(event)) {
+        case LV_EVENT_REFR_START:
+            s_frame_began = now;
+            s_render_us   = 0;
+            return;
+        case LV_EVENT_RENDER_START:
+            s_render_began = now;
+            return;
+        case LV_EVENT_RENDER_READY:
+            s_render_us += now - s_render_began.load();
+            return;
+        default:
+            break;
     }
     const std::int64_t took = now - s_frame_began.load();
+    constexpr std::int64_t SLOW_FRAME_US = 60 * units::kUsPerMs;
+    if (took > SLOW_FRAME_US) {
+        ESP_LOGI(TAG, "frame %d ms, drawing %d", static_cast<int>(took / units::kUsPerMs),
+                 static_cast<int>(s_render_us.load() / units::kUsPerMs));
+    }
     if (took > s_slowest_us.load()) {
         s_slowest_us = took;
     }
@@ -296,9 +317,30 @@ void start_stats()
         lv_display_t *display = lv_display_get_default();
         lv_display_add_event_cb(display, frame_timed, LV_EVENT_REFR_START, nullptr);
         lv_display_add_event_cb(display, frame_timed, LV_EVENT_REFR_READY, nullptr);
+        lv_display_add_event_cb(display, frame_timed, LV_EVENT_RENDER_START, nullptr);
+        lv_display_add_event_cb(display, frame_timed, LV_EVENT_RENDER_READY, nullptr);
         lvgl_port_unlock();
     }
     xTaskCreate(stats_task, "stats", STATS_STACK, nullptr, STATS_PRIORITY, nullptr);
+}
+// How long the radar takes to open fullscreen, draw, zoom and close. With
+// ?open it is only shown, so its feed can start before the bench.
+esp_err_t bench_page(httpd_req_t *req)
+{
+    if (!ota::authorised(req)) {
+        return refuse(req);
+    }
+    static char text[1024];
+    int         n = 0;
+    if (lvgl_port_lock(STATS_LOCK_MS)) {
+        char query[8] = "";
+        httpd_req_get_url_query_str(req, query, sizeof(query));
+        n = std::strcmp(query, "open") == 0 ? ui::bench_radar_open(text, sizeof(text))
+                                            : ui::bench_radar(text, sizeof(text));
+        lvgl_port_unlock();
+    }
+    httpd_resp_set_type(req, "text/plain");
+    return httpd_resp_send(req, text, n);
 }
 }  // namespace
 
@@ -315,6 +357,7 @@ esp_err_t start()
         {.uri = "/screen", .method = HTTP_GET, .handler = screen_page, .user_ctx = nullptr},
         {.uri = "/heap", .method = HTTP_GET, .handler = heap_page, .user_ctx = nullptr},
         {.uri = "/power", .method = HTTP_GET, .handler = power_page, .user_ctx = nullptr},
+        {.uri = "/bench", .method = HTTP_GET, .handler = bench_page, .user_ctx = nullptr},
     };
     for (const httpd_uri_t &page : pages) {
         ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &page), TAG, "page");

@@ -377,4 +377,12 @@ esp_err_t set_update(const UpdateState &state);
 esp_err_t notify(const char *source, const char *title, const char *message, Level level,
                  int timeout_ms);
 
+/** A development build's: how long the radar takes to open fullscreen, draw,
+ *  zoom and close, written to `out`. With the LVGL lock. */
+int bench_radar(char *out, std::size_t size);
+
+/** A development build's: the radar shown for bench_radar, with the phone away
+ *  too, and whether its feed has answered yet. With the LVGL lock. */
+int bench_radar_open(char *out, std::size_t size);
+
 }  // namespace ui

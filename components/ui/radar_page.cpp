@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <vector>
 #include <iterator>
 
 #ifndef REMOTE_ENABLED
@@ -1081,7 +1082,15 @@ void draw_map(float home_lat, float home_lon, float range_km)
     if (s_ground == nullptr || s_land_mask == nullptr || s_map_points == nullptr) {
         return;
     }
+    std::int64_t mark = esp_timer_get_time();
+    const auto   lap  = [&mark] {
+        const std::int64_t now = esp_timer_get_time();
+        const int          ms  = static_cast<int>((now - mark) / units::kUsPerMs);
+        mark                   = now;
+        return ms;
+    };
     paint_base();
+    const int painted = lap();
 
     const std::uint16_t land  = land_colour();
     const std::uint16_t water = blend565(land, rgb565(INK_WATER), WATER_ALPHA);
@@ -1097,8 +1106,14 @@ void draw_map(float home_lat, float home_lon, float range_km)
         }
     }
 
-    lay_mask(rgb565(theme::secondary));
+    const int drawn = lap();
+    const std::uint16_t ink = rgb565(theme::secondary);
+    lay_mask(ink);
+    const int laid = lap();
     draw_rings_and_spokes();
+    if (REMOTE_ENABLED) {
+        ESP_LOGI("radar_page", "map: painted %d, paths %d, borders laid %d, rings %d", painted, drawn, laid, lap());
+    }
 }
 
 bool map_located()
@@ -1143,10 +1158,18 @@ void draw_step(float range_km)
     }
 }
 
+// For the bench: how far along each frame of a zoom was drawn.
+constexpr int ZOOM_TRACE_MAX = 16;
+std::int32_t  s_zoom_trace[ZOOM_TRACE_MAX];
+int           s_zoom_traced = -1;  // not tracing
+
 void zoom_step(void *, std::int32_t value)
 {
     if (value == 0) {
         return;  // as it was already: a fullscreen frame of nothing moving
+    }
+    if (REMOTE_ENABLED && s_zoom_traced >= 0 && s_zoom_traced < ZOOM_TRACE_MAX) {
+        s_zoom_trace[s_zoom_traced++] = value;
     }
     const auto  from = static_cast<float>(s_zoom_from);
     const auto  to   = static_cast<float>(RANGES[s_range_step]);
@@ -2451,5 +2474,166 @@ void show_radar_details(const char *hex, const radar::Details &details)
                                                 : Picture::Missing;
     show_radar(*s_last);
 }
+
+#if REMOTE_ENABLED
+namespace {
+// One frame drawn and handed over now, in milliseconds.
+int timed_frame()
+{
+    const std::int64_t began = esp_timer_get_time();
+    lv_refr_now(nullptr);
+    return static_cast<int>((esp_timer_get_time() - began) / units::kUsPerMs);
+}
+
+int whole_frame_ms()
+{
+    constexpr int RUNS  = 4;
+    int           total = 0;
+    for (int i = 0; i < RUNS; ++i) {
+        lv_obj_invalidate(lv_screen_active());
+        total += timed_frame();
+    }
+    return total / RUNS;
+}
+
+int without_ms(const std::vector<lv_obj_t *> &parts)
+{
+    for (lv_obj_t *part : parts) {
+        lv_obj_add_flag(part, LV_OBJ_FLAG_HIDDEN);
+    }
+    const int ms = whole_frame_ms();
+    for (lv_obj_t *part : parts) {
+        lv_obj_remove_flag(part, LV_OBJ_FLAG_HIDDEN);
+    }
+    return ms;
+}
+
+// A zoom one step in or out as a tap starts it, run to its end: how many
+// frames it showed, how far along each, and how long it all took.
+void time_zoom(int step, const char *name, char *out, std::size_t size, int &n)
+{
+    constexpr std::int64_t GIVE_UP_US = 3 * units::kUsPerSecond;
+    const int              next       = std::clamp(s_range_step + step, 0, RANGE_COUNT - 1);
+    if (next == s_range_step) {
+        return;
+    }
+    const int from = static_cast<int>(std::lround(shown_range_km()));
+    s_range_step   = next;
+    s_zoom_traced  = 0;
+    const std::int64_t began = esp_timer_get_time();
+    apply_range(from);
+    while (lv_anim_get(s_scope, zoom_step) != nullptr && esp_timer_get_time() - began < GIVE_UP_US) {
+        lv_timer_handler();
+    }
+    lv_refr_now(nullptr);
+    const int took = static_cast<int>((esp_timer_get_time() - began) / units::kUsPerMs);
+    n += std::snprintf(out + n, size - n, "zoom %s to %d km: %d frames in %d ms, at", name, RANGES[s_range_step],
+                       s_zoom_traced, took);
+    for (int i = 0; i < s_zoom_traced; ++i) {
+        n += std::snprintf(out + n, size - n, " %d%%", static_cast<int>(s_zoom_trace[i] * 100 / ZOOM_PROGRESS_FULL));
+    }
+    n += std::snprintf(out + n, size - n, "\n");
+    s_zoom_traced = -1;
+}
+
+// What the bench found before it showed the radar, put back once it is done.
+struct BenchLeft {
+    bool held       = false;
+    bool gated      = true;
+    int  page       = 0;
+    int  range_step = 0;
+    bool full       = false;
+};
+BenchLeft s_bench_left;
+
+void bench_put_back()
+{
+    if (!s_bench_left.held) {
+        return;
+    }
+    if (s_range_step != s_bench_left.range_step) {
+        s_range_step = s_bench_left.range_step;
+        apply_range(0);
+    }
+    if (s_bench_left.full != full_open()) {
+        s_bench_left.full ? open_full() : close_full();
+    }
+    detail::s_presence_gate = s_bench_left.gated;
+    detail::select_page(s_bench_left.page);
+    s_bench_left.held = false;
+}
+
+// The radar page shown, even with the phone away, so its feed runs; ready once
+// the feed has answered and the map is drawn.
+bool bench_ready()
+{
+    if (!s_bench_left.held) {
+        s_bench_left = {true, detail::s_presence_gate, detail::s_page, s_range_step, full_open()};
+    }
+    detail::s_presence_gate = false;
+    if (full_open()) {
+        close_full();
+    }
+    if (detail::s_page != detail::RADAR_PAGE) {
+        detail::select_page(detail::RADAR_PAGE);
+    }
+    return s_scope != nullptr && s_last != nullptr && s_last->ok && map_located();
+}
+}  // namespace
+
+int bench_radar_open(char *out, std::size_t size)
+{
+    return std::snprintf(out, size, bench_ready() ? "ready\n" : "waiting for the feed\n");
+}
+
+// For a development build's /bench page, with the LVGL lock: opening the
+// fullscreen radar, drawing it whole and without each of its parts, zooming it
+// both ways and closing it. Afterwards the page, the range and the gate are as
+// they were before bench_radar_open.
+int bench_radar(char *out, std::size_t size)
+{
+    if (!bench_ready()) {
+        return std::snprintf(out, size, "waiting for the feed\n");
+    }
+    lv_obj_invalidate(lv_screen_active());
+    lv_refr_now(nullptr);
+
+    int n = std::snprintf(out, size, "page frame %d ms\n", whole_frame_ms());
+    const std::int64_t opening = esp_timer_get_time();
+    open_full();
+    const int laid_out = static_cast<int>((esp_timer_get_time() - opening) / units::kUsPerMs);
+    const int first    = timed_frame();
+    n += std::snprintf(out + n, size - n, "opening fullscreen: laid out %d ms, first frame %d ms\n", laid_out, first);
+    n += std::snprintf(out + n, size - n, "whole %d ms\n", whole_frame_ms());
+    const auto line = [&](const char *name, int ms) {
+        n += std::snprintf(out + n, size - n, "without %s %d ms\n", name, ms);
+    };
+    line("the picture", without_ms({s_canvas}));
+    line("the column", without_ms({s_column}));
+    line("the photo", without_ms({s_photo_frame}));
+    std::vector<lv_obj_t *> labels;
+    for (int i = 0; i < LABEL_MAX; ++i) {
+        labels.push_back(s_blips[i].label);
+    }
+    for (lv_obj_t *ring_label : s_rings) {
+        labels.push_back(ring_label);
+    }
+    line("the names", without_ms(labels));
+    line("the altitude scale", without_ms({std::begin(s_legend), std::end(s_legend)}));
+    line("the whole scope", without_ms({s_scope}));
+
+    const int start_step = s_range_step;
+    time_zoom(start_step > 0 ? -1 : 1, start_step > 0 ? "in" : "out", out, size, n);
+    time_zoom(start_step > 0 ? 1 : -1, start_step > 0 ? "out" : "in", out, size, n);
+
+    const std::int64_t closing = esp_timer_get_time();
+    close_full();
+    lv_refr_now(nullptr);
+    n += std::snprintf(out + n, size - n, "closing fullscreen %d ms\n",
+                       static_cast<int>((esp_timer_get_time() - closing) / units::kUsPerMs));
+    bench_put_back();
+    return n;
+}
+#endif
 
 }  // namespace ui
