@@ -876,14 +876,17 @@ bool note_of(int stop, std::int64_t starts, char *out, std::size_t size)
 {
     const int  legs   = s_going->leg_count;
     const bool leaves = stop < legs;
-    // Walking or riding onto a train is not a change.
-    if (stop > 0 && leaves && !is_walk_or_bike(s_going->legs[stop - 1].mode)) {
+    // Walking or riding onto a train is not a change, nor getting off to walk on.
+    if (stop > 0 && leaves && !is_walk_or_bike(s_going->legs[stop - 1].mode) &&
+        !is_walk_or_bike(s_going->legs[stop].mode)) {
         const int wait = whole_minutes(s_going->legs[stop].depart - s_going->legs[stop - 1].arrive);
         std::snprintf(out, size, "change, %d min", wait);
         return false;
     }
     if (!leaves && starts > 0) {
-        const int spare = whole_minutes(starts - s_going->legs[legs - 1].arrive);
+        // Counted from being there, the walk at the far end and all, as the
+        // choices count late: from the last stop it said early and late at once.
+        const int spare = whole_minutes(starts - s_going->arrive);
         if (spare >= 0) {
             std::snprintf(out, size, "%d min before it starts", spare);
         } else {
@@ -895,7 +898,14 @@ bool note_of(int stop, std::int64_t starts, char *out, std::size_t size)
     return false;
 }
 
-void show_stop(int i, const RouteLayout &layout, std::int64_t starts)
+// Where the walk at the end goes, which the backend leaves to be named: the
+// room the event is in, or just there.
+const char *end_name(const char *place)
+{
+    return place != nullptr && place[0] != '\0' ? place : "There";
+}
+
+void show_stop(int i, const RouteLayout &layout, std::int64_t starts, const char *place)
 {
     const Stop &stop = s_stop[i];
     const int   legs = s_going->leg_count;
@@ -925,7 +935,8 @@ void show_stop(int i, const RouteLayout &layout, std::int64_t starts)
     theme::set_text_color(stop.when, cancelled ? theme::red : guessed ? theme::secondary : theme::text);
     lv_obj_set_pos(stop.when, 0, y);
 
-    theme::set_text(stop.name, leaves ? s_going->legs[i].from : s_going->legs[legs - 1].to);
+    const char *last = s_going->legs[legs - 1].to;
+    theme::set_text(stop.name, leaves ? s_going->legs[i].from : last[0] != '\0' ? last : end_name(place));
     lv_obj_set_pos(stop.name, layout.text_x, y);
 
     const bool late = note_of(i, starts, text, sizeof(text));
@@ -984,7 +995,7 @@ void show_ride(int i, const RouteLayout &layout)
                    mid - label_h / 2);
 }
 
-void show_journey(std::int64_t starts)
+void show_journey(std::int64_t starts, const char *place)
 {
     if (s_going == nullptr) {
         return;
@@ -1000,7 +1011,7 @@ void show_journey(std::int64_t starts)
     layout.text_x = layout.rail_x + NODE / 2 + space::m;
 
     for (int i = 0; i < POINTS; ++i) {
-        show_stop(i, layout, starts);
+        show_stop(i, layout, starts, place);
     }
     for (int i = 0; i < travel::kLegsMax; ++i) {
         show_ride(i, layout);
@@ -1835,7 +1846,7 @@ void show_calendar()
     if (std::exchange(s_day_relayout, false)) {
         show_day(next, now);
     }
-    show_journey(next != nullptr ? next->start : 0);
+    show_journey(next != nullptr ? next->start : 0, next != nullptr ? place_of(*next) : "");
     if (s_detailed) {
         show_week(now);
     } else {
