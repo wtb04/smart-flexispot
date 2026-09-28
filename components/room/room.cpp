@@ -12,6 +12,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "picks.h"
+#include "room_layout.h"
 #include "segments.h"
 #include "radar.h"
 #include "ui.h"
@@ -35,52 +36,6 @@ namespace {
 constexpr char TAG[] = "room";
 
 constexpr char CLIMATE_ENTITY[] = "climate.office_thermostaat";
-
-struct PillSpec {
-    const char *entity;
-    const char *label;
-    float       good_lo, good_hi;
-    float       warn_lo, warn_hi;
-};
-
-constexpr PillSpec PILLS[] = {
-    {"sensor.office_awair_carbon_dioxide", "CO2", 0.0f, 800.0f, 0.0f, 1200.0f},
-    {"sensor.office_awair_volatile_organic_compounds_parts", "VOC", 0.0f, 333.0f, 0.0f,
-     1000.0f},
-    {"sensor.office_awair_humidity", "HUMIDITY", 40.0f, 60.0f, 30.0f, 70.0f},
-    {"sensor.office_awair_pm2_5", "PM2.5", 0.0f, 12.0f, 0.0f, 35.0f},
-};
-
-struct LightSpec {
-    const char *entity;
-    const char *name;
-};
-
-constexpr LightSpec LIGHTS[] = {
-    {"light.office_bureaulamp", "Desk lamp"},
-    {"light.office_lamp_muur", "Wall lamp"},
-    {"light.office_bed", "Bed"},
-    {"light.office_grote_lamp", "Main lamp"},
-};
-
-constexpr char ALL_LIGHTS_ENTITY[] = "input_boolean.office_verlichting_actief";
-constexpr char ALL_LIGHTS_ON[]     = "script.office_verlichting_aan";
-constexpr char ALL_LIGHTS_OFF[]    = "script.office_verlichting_uit";
-
-struct ToggleSpec {
-    const char *entity;
-    const char *on_label;
-    const char *off_label;
-};
-
-constexpr ToggleSpec TOGGLES[] = {
-    {"input_boolean.office_alleen_kast", "1", "2"},
-};
-
-const char *toggle_label(const ToggleSpec &spec, bool on)
-{
-    return on ? spec.on_label : spec.off_label;
-}
 
 // Two players, one card: the speaker, then Jellyfin. Anything playing outranks
 // anything paused, so a paused speaker gives way to Jellyfin starting.
@@ -128,14 +83,6 @@ constexpr int         MAX_POSITION_AGE_S = units::kSecondsPerDay;
 
 constexpr std::size_t SERVICE_VALUE_SIZE = 16;
 constexpr int         TENTHS_PER_DEGREE  = 10;
-
-constexpr int PILL_COUNT   = sizeof(PILLS) / sizeof(PILLS[0]);
-constexpr int LIGHT_COUNT  = sizeof(LIGHTS) / sizeof(LIGHTS[0]);
-constexpr int TOGGLE_COUNT = sizeof(TOGGLES) / sizeof(TOGGLES[0]);
-
-static_assert(PILL_COUNT <= ui::kPillCount, "more readings than the strip has chips");
-static_assert(LIGHT_COUNT <= ui::kLightCount, "more lights than the picker has buttons");
-static_assert(TOGGLE_COUNT <= ui::kDialToggleCount, "more toggles than the dial has corners");
 
 bool is_on(const std::string &state)
 {
@@ -875,20 +822,7 @@ void init()
         .skip_unhandled_events = true,
     };
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_timer_create(&volume_timer, &s_volume_timer));
-
-    for (int i = 0; i < PILL_COUNT; ++i) {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(
-            ui::set_pill(i, PILLS[i].label, "--", ui::Level::Neutral));
-    }
-    for (int i = 0; i < TOGGLE_COUNT; ++i) {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(
-            ui::set_dial_toggle(i, toggle_label(TOGGLES[i], false), false));
-    }
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_lights("LIGHTS", "--", false));
-    for (int i = 0; i < LIGHT_COUNT; ++i) {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_light(i, LIGHTS[i].name, "--", false));
-    }
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media("SPEAKER", "", "", "--", false, false));
+    show_unknown();
 }
 
 void render(const hass::ws::EntityStore &store)
