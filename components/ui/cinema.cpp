@@ -16,7 +16,6 @@ constexpr std::int32_t STILL_RADIUS  = 22;
 constexpr std::int32_t TEXT_GAP      = 40;
 constexpr lv_opa_t     PAUSED_DIM    = LV_OPA_50;  // as the card's cover
 constexpr std::int32_t TOP_Y         = 104;  // under the eyebrow and the close button
-constexpr std::int32_t CLOSE         = 64;
 constexpr std::int32_t PROGRESS_H    = 10;
 constexpr std::int32_t LINE_GAP      = 12;
 constexpr std::int32_t TRANSPORT_H   = 96;
@@ -466,9 +465,11 @@ void build_cinema(lv_obj_t *screen)
     // CINEMA, or the time while the clock chip is on.
     s_corner = theme::make_accent_label(s_view, "CINEMA", fonts::size_22());
     lv_obj_set_pos(s_corner, PAD, PAD);
-    lv_obj_t *close = button(s_view, "", CLOSE, CLOSE, [](lv_event_t *) { close_cinema(); },
-                             fonts::size_28());
-    mark(close, &icons::collapse_icon);
+    // The way back, the chip the radar's and the focus timer's fullscreen views have.
+    lv_obj_t *close = theme::make_chip(s_view, "");
+    theme::make_mark(close, &icons::collapse_icon);
+    lv_obj_set_ext_click_area(close, theme::space::s);
+    lv_obj_add_event_cb(close, [](lv_event_t *) { close_cinema(); }, LV_EVENT_CLICKED, nullptr);
     lv_obj_align(close, LV_ALIGN_TOP_RIGHT, -PAD, PAD - LINE_GAP);
 
     build_film(l.screen_w);

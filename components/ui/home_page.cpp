@@ -925,7 +925,7 @@ constexpr int           NEXT_UP_TAIL_S = 30;  // with no credits marked, the end
 constexpr std::uint32_t SKIP_CHECK_MS  = 500;
 constexpr std::int32_t  SKIP_H         = 40;
 constexpr std::int32_t  SKIP_PAD       = 16;
-constexpr std::int32_t  EXPAND_CHIP    = 48;
+constexpr std::int32_t  EXPAND_CHIP    = theme::chip::size;
 
 MediaSegment s_segments[kMaxSegments]{};
 int          s_segment_count = 0;
@@ -1015,10 +1015,8 @@ void build_skip_button(lv_obj_t *card)
     lv_obj_set_hidden(s_skip, true);
     lv_timer_create(skip_check, SKIP_CHECK_MS, nullptr);
 
-    // A corner chip, as the dial's, sized down for the smaller card.
+    // A corner chip, as the radar's and the focus dial's.
     s_expand = theme::make_chip(card, "");
-    lv_obj_set_size(s_expand, EXPAND_CHIP, EXPAND_CHIP);
-    lv_obj_set_style_radius(s_expand, EXPAND_CHIP / 2, 0);
     theme::make_mark(s_expand, &icons::expand_icon);
     lv_obj_align(s_expand, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
     lv_obj_add_event_cb(s_expand, [](lv_event_t *) { open_cinema(); }, LV_EVENT_CLICKED, nullptr);
