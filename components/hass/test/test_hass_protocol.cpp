@@ -168,8 +168,11 @@ void test_notification_parsing()
     check(!parse_notification(R"({"level":"info"})").valid, "no text means nothing to show");
     check(parse_notification(R"({"title":"Only a title"})").valid, "title alone is enough");
 
-    check(parse_notification(R"({"message":"x","timeout_s":9999})").timeout_ms == 120000,
-          "timeout clamped");
+    check(parse_notification(R"({"message":"x","timeout_s":9999})").timeout_ms == 600000,
+          "timeout clamped to ten minutes");
+    check(parse_notification(R"({"message":"x","timeout_s":0})").timeout_ms < 0,
+          "a timeout of 0 keeps it until tapped");
+    check(parse_notification(R"({"message":"x"})").timeout_ms == 0, "no timeout, the default");
 
     const std::string long_utf8 = std::string(399, 'a') + "\xc3\xa9";
     const Notification truncated = parse_notification(long_utf8);

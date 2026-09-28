@@ -16,7 +16,8 @@ namespace {
 constexpr std::size_t MAX_TITLE      = 80;
 constexpr std::size_t MAX_MESSAGE    = 400;
 constexpr int         MIN_TIMEOUT_MS = units::kMsPerSecond;
-constexpr int         MAX_TIMEOUT_MS = 2 * units::kMsPerMinute;
+constexpr int         MAX_TIMEOUT_MS = 10 * units::kMsPerMinute;
+constexpr int         UNTIL_TAPPED   = -1;  // timeout_s of 0: it stays until tapped
 
 constexpr unsigned char UTF8_CONTINUATION_MASK = 0xc0;
 constexpr unsigned char UTF8_CONTINUATION      = 0x80;
@@ -437,12 +438,17 @@ Notification parse_notification(const std::string &payload)
 
     const cJSON *timeout_s  = cJSON_GetObjectItemCaseSensitive(root, "timeout_s");
     const cJSON *timeout_ms = cJSON_GetObjectItemCaseSensitive(root, "timeout_ms");
+    bool given = false;
     if (cJSON_IsNumber(timeout_s)) {
         out.timeout_ms = static_cast<int>(timeout_s->valuedouble * units::kMsPerSecond);
+        given          = true;
     } else if (cJSON_IsNumber(timeout_ms)) {
         out.timeout_ms = static_cast<int>(timeout_ms->valuedouble);
+        given          = true;
     }
-    if (out.timeout_ms != 0) {
+    if (given && out.timeout_ms <= 0) {
+        out.timeout_ms = UNTIL_TAPPED;
+    } else if (out.timeout_ms != 0) {
         out.timeout_ms = std::clamp(out.timeout_ms, MIN_TIMEOUT_MS, MAX_TIMEOUT_MS);
     }
 
