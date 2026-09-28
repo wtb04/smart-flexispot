@@ -18,22 +18,17 @@ it, the same release is fetched from GitHub.
 The feeds the panel reads from the internet are fetched for real and read by
 the panel's own parsers: the calendar and the way there with the secrets in
 `components/ical` and `components/travel`, and the radar round `SIM_HOME`,
-where the panel has Home Assistant's `zone.home`. Nothing else goes out: Home
-Assistant, the desk and Jellyfin are never contacted. The
-home page's layout comes from `components/room`, as it looks until Home
-Assistant answers.
+where the panel has Home Assistant's `zone.home`. The home page's layout comes
+from `components/room`.
 
-Only the hardware is played, by `hardware.cpp`: the desk moves as the box moves
-it and holds its presets, the focus timer runs on `focus_plan.h`, and these keys
-change what nothing on the screen can:
+Everything else is played, and nothing but those read-only feeds leaves the Mac:
 
-| Key | |
-|---|---|
-| D | desk link lost, and back |
-| B | battery: charging, on battery, low, none |
-| P | phone away, and back, which hides the pages it gates as on the panel |
-| W | Wi-Fi down, and back |
-| S | screenshot into `sim/shots/` |
+- the desk, in `hardware.cpp`, moving as the box moves it and holding its
+  presets;
+- the focus timer, on `focus_plan.h`;
+- the battery, the phone and Wi-Fi.
+
+**H** lists the keys that put it in each of those states.
 
 ## Settings
 
@@ -44,6 +39,12 @@ SIM_HOME=lat,lon   # the radar's centre, in place of zone.home
 SIM_ZOOM=0.75      # the window's scale, for a smaller screen
 ```
 
-`--page N` opens a page (0 Home to 4 Setup), `--shot S` saves a screenshot
-after S seconds and quits, and `--splash` plays the twelve-second splash the
-panel boots with.
+`--page N` opens a page (0 Home to 4 Setup), `--press KEYS` presses keys as
+it starts, `bp` for on battery with the phone away, `--shot S` saves a
+screenshot after S seconds and quits, and `--splash` plays the twelve-second
+splash the panel boots with. Together they take a picture of a state without
+anyone at the keyboard:
+
+```sh
+sim/run.sh --press b --page 0 --shot 3   # the home page on battery
+```

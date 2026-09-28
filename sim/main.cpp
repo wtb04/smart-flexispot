@@ -110,24 +110,78 @@ void save_screenshot()
 
 bool s_quit = false;
 
-// Keys as well as the mouse: the hardware's states, which nothing on the
-// screen can change, and a screenshot.
+void toggle_help();
+
+// Everything the keyboard does, in the order H lists it: the states that only
+// the hardware and the services behind the panel can put it in.
+struct Key {
+    SDL_Keycode code;
+    const char *name;
+    const char *what;
+    void (*act)();
+};
+const Key KEYS[] = {
+    {SDLK_h, "H", "This list, and away again", toggle_help},
+    {SDLK_d, "D", "The desk link lost, and back", hardware::toggle_desk_link},
+    {SDLK_b, "B", "The battery: charging, on battery, low, none", hardware::next_battery},
+    {SDLK_p, "P", "The phone away, and back", hardware::toggle_phone},
+    {SDLK_w, "W", "Wi-Fi down, and back", hardware::toggle_wifi},
+    {SDLK_s, "S", "A screenshot into sim/shots/", save_screenshot},
+    {SDLK_ESCAPE, "Esc", "Quit", [] { s_quit = true; }},
+};
+
+// The list, over everything, notices and popups included, and in screenshots.
+lv_obj_t *s_help = nullptr;
+
+void build_help()
+{
+    constexpr std::int32_t W = 820, PAD = 32, ROW = 36, KEY_W = 90;
+    const std::int32_t     h = PAD * 2 + 56 + ROW * static_cast<std::int32_t>(std::size(KEYS));
+    s_help = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(s_help, W, h);
+    lv_obj_center(s_help);
+    ui::theme::style_panel(s_help, ui::theme::panel_light, ui::theme::radius::card);
+    lv_obj_set_style_pad_all(s_help, PAD, 0);
+    lv_obj_set_scrollable(s_help, false);
+
+    lv_obj_t *title = ui::theme::make_eyebrow(s_help, "SIMULATOR KEYS");
+    lv_obj_set_pos(title, 0, 0);
+    std::int32_t y = 56;
+    for (const Key &key : KEYS) {
+        lv_obj_t *name = ui::theme::make_label(s_help, key.name, ui::theme::primary, ui::fonts::size_22());
+        lv_obj_set_pos(name, 0, y);
+        lv_obj_t *what = ui::theme::make_label(s_help, key.what, ui::theme::text, ui::fonts::size_22());
+        lv_obj_set_pos(what, KEY_W, y);
+        y += ROW;
+    }
+    lv_obj_set_hidden(s_help, true);
+}
+
+void toggle_help()
+{
+    if (s_help == nullptr) {
+        build_help();
+    }
+    lv_obj_set_hidden(s_help, !lv_obj_is_hidden(s_help));
+    lv_obj_move_foreground(s_help);
+}
+
+void press(SDL_Keycode code)
+{
+    for (const Key &key : KEYS) {
+        if (key.code == code) {
+            key.act();
+        }
+    }
+}
+
 int on_event(void *, SDL_Event *event)
 {
     if (event->type == SDL_QUIT) {
         s_quit = true;
     }
-    if (event->type != SDL_KEYDOWN || event->key.repeat != 0) {
-        return 0;
-    }
-    switch (event->key.keysym.sym) {
-        case SDLK_d:      hardware::toggle_desk_link(); break;
-        case SDLK_b:      hardware::next_battery(); break;
-        case SDLK_p:      hardware::toggle_phone(); break;
-        case SDLK_w:      hardware::toggle_wifi(); break;
-        case SDLK_s:      save_screenshot(); break;
-        case SDLK_ESCAPE: s_quit = true; break;
-        default:          break;
+    if (event->type == SDL_KEYDOWN && event->key.repeat == 0) {
+        press(event->key.keysym.sym);
     }
     return 0;
 }
@@ -160,12 +214,14 @@ std::uint32_t ticks_past_splash()
     return SDL_GetTicks() + SPLASH_SKIP_MS;
 }
 
-// --page N opens page N; --shot S saves a screenshot after S seconds and quits;
-// --splash plays the twelve seconds of splash the panel boots with.
+// --page N opens page N; --press KEYS presses those keys, as "am" for Home
+// Assistant answering and music; --shot S saves a screenshot after S seconds
+// and quits; --splash plays the twelve seconds of splash the panel boots with.
 struct Options {
-    int  page   = -1;
-    int  shot_s = -1;
-    bool splash = false;
+    int         page   = -1;
+    int         shot_s = -1;
+    bool        splash = false;
+    std::string keys;
 };
 
 Options options(int argc, char **argv)
@@ -179,6 +235,9 @@ Options options(int argc, char **argv)
             ++i;
         } else if (name == "--shot") {
             o.shot_s = std::atoi(value);
+            ++i;
+        } else if (name == "--press") {
+            o.keys = value;
             ++i;
         } else if (name == "--splash") {
             o.splash = true;
@@ -218,7 +277,7 @@ int main(int argc, char **argv)
         lv_tick_set_cb(ticks_past_splash);
     }
 
-    if (opts.page >= 0) {
+    if (opts.page >= 0 || !opts.keys.empty()) {
         // Once what was set above has been applied: until the phone is seen,
         // the presence gate leaves only Home and Setup to open.
         const std::uint32_t settled = SDL_GetTicks() + 300;
@@ -226,7 +285,12 @@ int main(int argc, char **argv)
             lv_timer_handler();
             SDL_Delay(5);
         }
-        ui::detail::select_page(opts.page);
+        for (const char key : opts.keys) {
+            press(key == 'x' ? SDLK_ESCAPE : static_cast<SDL_Keycode>(key));  // letters are their own keycodes
+        }
+        if (opts.page >= 0) {
+            ui::detail::select_page(opts.page);
+        }
     }
 
     const std::uint32_t shot_at = opts.shot_s >= 0 ? SDL_GetTicks() + opts.shot_s * 1000u : 0;
