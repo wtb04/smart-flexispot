@@ -10,6 +10,7 @@
 #include "freertos/semphr.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "lvgl_private.h"  // the display's areas to redraw; the version is pinned in dependencies.lock
 
 #include <algorithm>
 #include <cstdint>
@@ -129,9 +130,34 @@ void note(Rect *list, int &count, const Rect &r)
     }
 }
 
+struct Placement {
+    Rect                     rect;
+    ppa_srm_rotation_angle_t angle;
+};
+Placement place_on_panel(lv_display_t *disp, const lv_area_t *area);
+
+bool inside(const Rect &part, const Rect &whole)
+{
+    return part.x >= whole.x && part.y >= whole.y && part.x + part.w <= whole.x + whole.w &&
+           part.y + part.h <= whole.y + whole.h;
+}
+
+// Whether the frame about to be drawn redraws all of `r` anyway, which LVGL
+// knows before the first of it arrives.
+bool redrawn(lv_display_t *disp, const Rect &r)
+{
+    for (std::uint32_t i = 0; i < disp->inv_p; ++i) {
+        if (!disp->inv_area_joined[i] && inside(r, place_on_panel(disp, &disp->inv_areas[i]).rect)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // The first area of a frame waits for the panel to have let go of the buffer
-// it last showed, which is at most one refresh, then brings it up to date.
-void prepare_back()
+// it last showed, which is at most one refresh, then brings it up to date:
+// only where this frame does not draw anew, since a whole screen took 43 ms.
+void prepare_back(lv_display_t *disp)
 {
     if (!s_swap_pending) {
         return;
@@ -143,16 +169,13 @@ void prepare_back()
     const std::uint8_t *front = s_fbs[1 - s_back];
     for (int i = 0; i < s_shown_count; ++i) {
         const Rect &r = s_shown[i];
-        copy_rect(front, s_fbs[s_back], r, PPA_SRM_ROTATION_ANGLE_0, BSP_LCD_H_RES, BSP_LCD_V_RES,
-                  r.x, r.y, r.x, r.y);
+        if (!redrawn(disp, r)) {
+            copy_rect(front, s_fbs[s_back], r, PPA_SRM_ROTATION_ANGLE_0, BSP_LCD_H_RES, BSP_LCD_V_RES,
+                      r.x, r.y, r.x, r.y);
+        }
     }
     s_shown_count = 0;
 }
-
-struct Placement {
-    Rect                     rect;
-    ppa_srm_rotation_angle_t angle;
-};
 
 // Where the area lands on the panel, which is portrait. The PPA turns
 // anticlockwise, as LVGL's rotations count.
@@ -211,7 +234,7 @@ void show_back_buffer()
 
 void flush_rotated(lv_display_t *disp, const lv_area_t *area, std::uint8_t *pixels)
 {
-    prepare_back();
+    prepare_back(disp);
 
     const auto      w     = static_cast<std::uint32_t>(lv_area_get_width(area));
     const auto      h     = static_cast<std::uint32_t>(lv_area_get_height(area));
