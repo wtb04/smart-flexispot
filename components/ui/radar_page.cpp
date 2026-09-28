@@ -471,7 +471,7 @@ void build_rings(lv_obj_t *scope, int range_km)
 
         lv_obj_t *label = theme::make_label(scope, "", theme::secondary, marking_font());
         lv_obj_set_style_text_opa(label, LV_OPA_40, 0);
-        lv_obj_set_style_bg_color(label, lv_color_hex(theme::background), 0);
+        lv_obj_set_style_bg_color(label, lv_color_hex(theme::panel), 0);  // the map's own colour
         lv_obj_set_style_bg_opa(label, LV_OPA_COVER, 0);
         lv_obj_set_style_pad_hor(label, RING_LABEL_PAD, 0);
         show_ring_distance(label, i, range_km);
@@ -853,18 +853,18 @@ bool is_water_body(radar::MapLayer layer)
     return layer == radar::MapLayer::Ocean || layer == radar::MapLayer::Lake;
 }
 
-// What the map lies on: on the page the scope's black disc in the card's colour,
-// and fullscreen a panel of the card's darker surface, rounded as the cards are.
+// What the map lies on, the cards' darker surface: on the page the scope's
+// disc in the card, and fullscreen a panel rounded as the cards are.
 std::uint16_t land_colour()
 {
-    return rgb565(s_to_edges ? theme::panel : theme::background);
+    return rgb565(theme::panel);
 }
 
 void paint_base()
 {
     const std::uint16_t land   = land_colour();
     const std::uint16_t around = rgb565(s_to_edges ? theme::background : theme::panel_light);
-    const std::uint16_t disc   = rgb565(theme::background);
+    const std::uint16_t disc   = land;
     for (std::int32_t y = 0; y < s_ground_h; ++y) {
         std::uint16_t *row = s_ground + static_cast<std::size_t>(y) * s_ground_w;
         std::fill(row, row + s_ground_w, around);
