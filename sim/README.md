@@ -31,6 +31,7 @@ Everything else is played, and nothing but those read-only feeds leaves the Mac:
 - what plays, in `media_stub.cpp`: the speaker with music, and a Jellyfin
   episode with its intro, the episodes either side, subtitles and cinema mode;
 - notices from Home Assistant, in `notices.cpp`, read by the panel's own parser;
+- firmware updates, in `updates.cpp`, arriving and waiting to be installed;
 - the battery, the phone and Wi-Fi.
 
 **H** lists the keys that put it in each of those states. Any notice Home

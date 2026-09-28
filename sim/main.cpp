@@ -5,6 +5,7 @@
 #include "live/live.h"
 #include "media_stub.h"
 #include "notices.h"
+#include "updates.h"
 #include "ui.h"
 #include "ui_internal.h"
 
@@ -129,6 +130,7 @@ const Key KEYS[] = {
     {SDLK_m, "M", "What plays: nothing, music, a Jellyfin episode", media_stub::next_scene},
     {SDLK_n, "N", "A notice from Home Assistant, another each time", notices::next_example},
     {SDLK_t, "T", "The focus part under way runs out now", hardware::end_focus_part},
+    {SDLK_u, "U", "An update: arriving, ready, the companion's, both, none", updates::next},
     {SDLK_d, "D", "The desk link lost, and back", hardware::toggle_desk_link},
     {SDLK_b, "B", "The battery: charging, on battery, low, none", hardware::next_battery},
     {SDLK_p, "P", "The phone away, and back", hardware::toggle_phone},
@@ -214,9 +216,9 @@ ui::Handlers handlers()
     h.setpoint    = home_assistant::on_setpoint;
     h.mode        = home_assistant::on_mode;
     h.dial_toggle = home_assistant::on_dial_toggle;
+    h.update_now  = updates::install;
     h.brightness  = [](int percent) { std::printf("I (sim) brightness %d%%\n", percent); };
     h.restart     = [] { said("restart asked for"); };
-    h.update_now  = [] { said("update asked for"); };
     h.screen      = [](bool on) { said(on ? "screen on" : "screen off"); };
     h.setting     = [](ui::Setting setting, bool on) {
         std::printf("I (sim) setting %d %s\n", static_cast<int>(setting), on ? "on" : "off");
@@ -324,6 +326,7 @@ int main(int argc, char **argv)
         notices::pump();
         hardware::tick();
         media_stub::tick();
+        updates::tick();
         const std::uint32_t idle = lv_timer_handler();
         SDL_Delay(idle < 5 ? idle : 5);
     }
