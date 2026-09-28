@@ -27,6 +27,7 @@ Answer get(const std::string &url, const std::vector<std::string> &headers)
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, list);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");  // the traces come gzipped whatever is asked
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, TIMEOUT_S);
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "smart-flexispot-sim");
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, take);

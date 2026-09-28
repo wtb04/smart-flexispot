@@ -20,6 +20,9 @@ bool fetch_sky(bool &busy);
 /** Who a plane is and where it flies, from the lookup service. */
 bool fetch_details(const char *hex, const char *callsign, radar::Details &out);
 
+/** Where it has been this last quarter hour, as its trail; false when unknown. */
+bool fetch_trace(const char *hex);
+
 /** Its photo as RGB565, no larger than the panel shows it; empty for none. */
 std::vector<std::uint16_t> fetch_photo(const char *hex, int &width, int &height);
 }  // namespace live

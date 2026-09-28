@@ -265,6 +265,27 @@ void test_trail()
           "asked for fewer, the newest are the ones given");
 }
 
+void test_trace(const std::string &json)
+{
+    Trail trail{};
+    std::snprintf(trail.hex, sizeof(trail.hex), "4ca27a");
+    note(trail, 40.0f, 1.0f, 1.0f);
+    int        positions = parse_trace(json.c_str(), json.size(), trail, 0.0f);
+    TrailPoint points[kTrailPoints];
+    int        count = oldest_first(trail, points, kTrailPoints);
+    check(positions == 5 && count == 5 && std::fabs(points[0].lat - 51.943452f) < 0.0001f &&
+              std::fabs(points[4].lon - 1.391204f) < 0.0001f,
+          "a trace's positions, oldest first, past objects inside an entry and one without a position");
+    check(std::strcmp(trail.hex, "4ca27a") == 0, "and what was there before is gone but whose it is");
+
+    parse_trace(json.c_str(), json.size(), trail, 20.0f);
+    count = oldest_first(trail, points, kTrailPoints);
+    check(count == 2 && std::fabs(points[1].lat - 52.090312f) < 0.0001f, "kept as far apart as the step asks");
+
+    const char *other = "{\"ac\":[]}";
+    check(parse_trace(other, std::strlen(other), trail, 1.0f) == -1, "not a trace");
+}
+
 int main(int argc, char **argv)
 {
     const std::string json = read_file(argc > 1 ? argv[1] : "adsb_sample.json");
@@ -285,6 +306,10 @@ int main(int argc, char **argv)
     }
     test_lookup_rejects();
     test_trail();
+    const std::string trace = read_file(argc > 6 ? argv[6] : "trace_recent.json");
+    if (!trace.empty()) {
+        test_trace(trace);
+    }
 
     const std::string photo = read_file(argc > 4 ? argv[4] : "planespotters_photo.json");
     const std::string none  = read_file(argc > 5 ? argv[5] : "planespotters_none.json");

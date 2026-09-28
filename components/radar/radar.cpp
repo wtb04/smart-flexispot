@@ -7,6 +7,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "jpeg.h"
+#include "miniz.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -25,6 +26,7 @@ constexpr char FEED_HOST[]        = "http://api.adsb.lol";
 constexpr char LOOKUP_HOST[]      = "https://api.adsbdb.com";
 constexpr char PHOTO_HOST[]       = "https://api.planespotters.net";
 constexpr char PHOTO_IMAGE_HOST[] = "http://t.plnspttrs.net";
+constexpr char TRACE_HOST[]       = "https://adsb.lol";
 constexpr char PHOTO_AGENT[]      = "smart-flexispot (+https://woutertenbrinke.nl)";
 constexpr char AGENT[]            = "smart-flexispot";
 
@@ -89,6 +91,7 @@ esp_http_client_handle_t s_feed_client     = nullptr;
 esp_http_client_handle_t s_lookup_client   = nullptr;
 esp_http_client_handle_t s_photoapi_client = nullptr;
 esp_http_client_handle_t s_photo_client    = nullptr;
+esp_http_client_handle_t s_trace_client    = nullptr;
 
 std::int64_t s_lookup_at_us = 0;
 bool         s_lookups_open = false;
@@ -309,6 +312,63 @@ void record_trails(const Aircraft *list, int count)
     }
 }
 
+// Traces come gzip-compressed whatever is asked for.
+char               *s_inflated = nullptr;  // BODY_MAX, as the feed's body would be
+tinfl_decompressor *s_inflater = nullptr;  // 11 KB: too much for the task's stack
+
+// The inflated length, or 0 when `in` is not a whole gzip stream.
+std::size_t gunzip(const std::uint8_t *in, std::size_t length, char *out, std::size_t size)
+{
+    constexpr std::size_t  HEADER = 10, TRAILER = 8;
+    constexpr std::uint8_t FHCRC = 2, FEXTRA = 4, FNAME = 8, FCOMMENT = 16;
+    if (length < HEADER + TRAILER || in[0] != 0x1f || in[1] != 0x8b || in[2] != 8) {
+        return 0;
+    }
+    const std::uint8_t flags = in[3];
+    std::size_t        at    = HEADER;
+    if ((flags & FEXTRA) != 0) {
+        at += 2 + (in[at] | (in[at + 1] << 8));
+    }
+    for (const std::uint8_t text : {FNAME, FCOMMENT}) {
+        if ((flags & text) != 0) {
+            while (at < length && in[at] != 0) {
+                ++at;
+            }
+            ++at;
+        }
+    }
+    if ((flags & FHCRC) != 0) {
+        at += 2;
+    }
+    if (at + TRAILER >= length) {
+        return 0;
+    }
+    std::size_t in_bytes  = length - at - TRAILER;
+    std::size_t out_bytes = size - 1;
+    tinfl_init(s_inflater);
+    const tinfl_status status =
+        tinfl_decompress(s_inflater, in + at, &in_bytes, reinterpret_cast<mz_uint8 *>(out),
+                         reinterpret_cast<mz_uint8 *>(out), &out_bytes, TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF);
+    if (status != TINFL_STATUS_DONE) {
+        return 0;
+    }
+    out[out_bytes] = '\0';
+    return out_bytes;
+}
+
+// The body as JSON: inflated into s_inflated when it came compressed. Null
+// when it came compressed and does not inflate.
+const char *unpacked(std::size_t &length)
+{
+    constexpr std::uint8_t GZIP_FIRST = 0x1f;
+    if (s_body_len == 0 || static_cast<std::uint8_t>(s_body[0]) != GZIP_FIRST) {
+        length = s_body_len;
+        return s_body;
+    }
+    length = gunzip(reinterpret_cast<const std::uint8_t *>(s_body), s_body_len, s_inflated, BODY_MAX);
+    return length > 0 ? s_inflated : nullptr;
+}
+
 bool s_feed_backoff = false;
 
 bool fetch(float lat, float lon)
@@ -437,6 +497,7 @@ void close_idle_lookups()
     if (s_lookups_open && now - s_lookup_at_us >= IDLE_CLOSE_US) {
         esp_http_client_close(s_lookup_client);
         esp_http_client_close(s_photoapi_client);
+        esp_http_client_close(s_trace_client);
         s_lookups_open = false;
     }
 }
@@ -460,6 +521,42 @@ void resolve_photo(const char *hex, Details &out)
                       found + HTTPS_PREFIX_LEN);
     } else {
         std::snprintf(out.photo_url, sizeof(out.photo_url), "%s", found);
+    }
+}
+
+// Where a tapped aircraft has been this last quarter hour, before the panel
+// was watching, so its trail reaches back across the view at once.
+void fetch_trace(const char *hex)
+{
+    const std::size_t len = std::strlen(hex);
+    if (s_inflated == nullptr || s_inflater == nullptr || len < 2 || hex[0] == '~') {
+        return;  // a ~ is a position from ground radar, which has no trace
+    }
+    char url[URL_SIZE];
+    std::snprintf(url, sizeof(url), "%s/data/traces/%.2s/trace_recent_%.7s.json", TRACE_HOST, hex + len - 2, hex);
+    if (get(s_trace_client, url, "trace") != HTTP_OK) {
+        return;
+    }
+    std::size_t  json_len = 0;
+    const char  *json     = unpacked(json_len);
+    static Trail trace;  // only this task
+    trace = Trail{};
+    if (json == nullptr || parse_trace(json, json_len, trace, TRAIL_STEP_KM) <= 0) {
+        ESP_LOGW(TAG, "%s: no trace in %u bytes", hex, static_cast<unsigned>(s_body_len));
+        return;
+    }
+
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    const std::int64_t now  = esp_timer_get_time();
+    Trail             *slot = trail_slot(hex, now);
+    std::memcpy(trace.hex, slot->hex, sizeof(trace.hex));
+    trace.seen_us = now;
+    *slot         = trace;
+    xSemaphoreGive(s_lock);
+
+    if (s_on_update != nullptr) {
+        snapshot(*s_published);
+        s_on_update(*s_published);
     }
 }
 
@@ -495,6 +592,7 @@ void look_up(const char *hex, const char *callsign, bool with_photo)
         s_on_details(hex, details);
     }
     if (with_photo) {
+        fetch_trace(hex);
         fetch_photo(hex, details);
     }
 }
@@ -698,6 +796,10 @@ esp_err_t start(UpdateHandler on_update, DetailsHandler on_details, PhotoHandler
     s_trails = static_cast<Trail *>(
         heap_caps_calloc(TRAIL_SLOTS, sizeof(Trail), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     ESP_RETURN_ON_FALSE(s_trails != nullptr, ESP_ERR_NO_MEM, TAG, "trails");
+    s_inflated = static_cast<char *>(heap_caps_malloc(BODY_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    s_inflater = static_cast<tinfl_decompressor *>(
+        heap_caps_malloc(sizeof(tinfl_decompressor), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    ESP_RETURN_ON_FALSE(s_inflated != nullptr && s_inflater != nullptr, ESP_ERR_NO_MEM, TAG, "inflate buffers");
 
     s_cache = static_cast<CacheEntry *>(
         heap_caps_calloc(CACHE_SIZE, sizeof(CacheEntry), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
@@ -707,8 +809,9 @@ esp_err_t start(UpdateHandler on_update, DetailsHandler on_details, PhotoHandler
     s_lookup_client   = open_client(LOOKUP_HOST);
     s_photoapi_client = open_client(PHOTO_HOST, PHOTO_AGENT);
     s_photo_client    = open_client(PHOTO_IMAGE_HOST);
+    s_trace_client    = open_client(TRACE_HOST);
     ESP_RETURN_ON_FALSE(s_feed_client != nullptr && s_lookup_client != nullptr &&
-                            s_photoapi_client != nullptr && s_photo_client != nullptr,
+                            s_photoapi_client != nullptr && s_photo_client != nullptr && s_trace_client != nullptr,
                         ESP_ERR_NO_MEM, TAG, "http clients");
 
     s_task = xTaskCreateStaticPinnedToCore(radar_task, "radar", TASK_STACK, nullptr,

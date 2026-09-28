@@ -101,6 +101,9 @@ void lookups()
             s_details       = details;
             s_details_ready = true;
         }
+        if (fetch_trace(hex.c_str())) {
+            s_sky_changed = true;
+        }
         int  w = 0, h = 0;
         auto pixels = fetch_photo(hex.c_str(), w, h);
         std::lock_guard<std::mutex> hold(s_lookup_lock);

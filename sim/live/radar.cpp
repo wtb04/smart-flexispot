@@ -27,6 +27,7 @@ namespace {
 constexpr char         FEED_HOST[]    = "https://api.adsb.lol";
 constexpr char         LOOKUP_HOST[]  = "https://api.adsbdb.com";
 constexpr char         PHOTO_HOST[]   = "https://api.planespotters.net";
+constexpr char         TRACE_HOST[]   = "https://adsb.lol";
 constexpr int          RANGE_KM       = 250;  // as components/radar asks
 constexpr float        NM_PER_KM      = 0.539957f;
 constexpr float        TRAIL_STEP_KM  = 2.0f;
@@ -142,6 +143,28 @@ bool fetch_details(const char *hex, const char *callsign, radar::Details &out)
         }
     }
     return out.has_aircraft || out.has_route;
+}
+
+// As radar.cpp's fetch_trace: where the plane has been this last quarter hour.
+bool fetch_trace(const char *hex)
+{
+    const std::size_t len = std::strlen(hex);
+    if (len < 2 || hex[0] == '~') {
+        return false;
+    }
+    char url[128];
+    std::snprintf(url, sizeof(url), "%s/data/traces/%s/trace_recent_%s.json", radar::TRACE_HOST, hex + len - 2,
+                  hex);
+    const Answer got = get(url);
+    radar::Trail trace{};
+    if (got.status != 200 || radar::parse_trace(got.body.c_str(), got.body.size(), trace, radar::TRAIL_STEP_KM) <= 0) {
+        return false;
+    }
+    std::lock_guard<std::mutex> hold(radar::s_lock);
+    std::snprintf(trace.hex, sizeof(trace.hex), "%s", hex);
+    trace.seen_us         = std::time(nullptr);
+    radar::s_trails[hex] = trace;
+    return true;
 }
 
 /** The photo as RGB565, fitted inside the size the panel decodes to; empty for none. */

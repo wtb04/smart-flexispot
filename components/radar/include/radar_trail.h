@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 // Where an aircraft has been, as the feed has shown it: a point kept each time
@@ -26,5 +27,11 @@ void note(Trail &trail, float lat, float lon, float step_km);
 
 /** The points, oldest first; how many were copied. */
 int oldest_first(const Trail &trail, TrailPoint *out, int max);
+
+/** Starts `trail` again from a readsb trace, trace_recent_{hex}.json, which
+ *  is where the aircraft has been this last quarter hour or so, kept as note()
+ *  would. `json` must be NUL-terminated. Returns how many positions the trace
+ *  had, or -1 when it is not one. */
+int parse_trace(const char *json, std::size_t length, Trail &trail, float step_km);
 
 }  // namespace radar
