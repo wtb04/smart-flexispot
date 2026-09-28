@@ -17,12 +17,12 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
 
 namespace radar {
 namespace {
 constexpr char TAG[] = "radar";
 
-constexpr char FEED_HOST[]        = "http://api.adsb.lol";
 constexpr char LOOKUP_HOST[]      = "https://api.adsbdb.com";
 constexpr char PHOTO_HOST[]       = "https://api.planespotters.net";
 constexpr char PHOTO_IMAGE_HOST[] = "http://t.plnspttrs.net";
@@ -87,7 +87,6 @@ std::size_t  s_body_len = 0;
 constexpr std::int64_t IDLE_CLOSE_US = 20 * units::kUsPerSecond;
 constexpr std::int64_t PHOTO_IDLE_US = 30 * units::kUsPerSecond;
 
-esp_http_client_handle_t s_feed_client     = nullptr;
 esp_http_client_handle_t s_lookup_client   = nullptr;
 esp_http_client_handle_t s_photoapi_client = nullptr;
 esp_http_client_handle_t s_photo_client    = nullptr;
@@ -312,7 +311,8 @@ void record_trails(const Aircraft *list, int count)
     }
 }
 
-// Traces come gzip-compressed whatever is asked for.
+// The feeds are asked for gzip, a seventh of the size, and traces come that
+// way whatever is asked for.
 char               *s_inflated = nullptr;  // BODY_MAX, as the feed's body would be
 tinfl_decompressor *s_inflater = nullptr;  // 11 KB: too much for the task's stack
 
@@ -369,24 +369,60 @@ const char *unpacked(std::size_t &length)
     return length > 0 ? s_inflated : nullptr;
 }
 
+// Two feeds of the same readsb data, taken in turn: one alone refused most
+// readings at one every five seconds, the panel sharing its address with
+// whatever else in the house asks.
+struct Feed {
+    const char              *name;
+    const char              *host;
+    const char              *query;  // host, lat, lon, radius in nautical miles
+    bool                     keep_open;
+    esp_http_client_handle_t client;
+};
+Feed s_feeds[] = {
+    // Measured: holding this one open doubled the share it refused.
+    {"adsb.lol", "http://api.adsb.lol", "%s/v2/point/%.4f/%.4f/%d", false, nullptr},
+    // https only, so held open rather than shaking hands every reading.
+    {"adsb.fi", "https://opendata.adsb.fi", "%s/api/v2/lat/%.4f/lon/%.4f/dist/%d", true, nullptr},
+};
+constexpr int FEED_COUNT = static_cast<int>(std::size(s_feeds));
+int           s_next_feed = 0;
+
 bool s_feed_backoff = false;
 
-bool fetch(float lat, float lon)
+int ask_feed(Feed &feed, float lat, float lon)
 {
     char url[URL_SIZE];
-    std::snprintf(url, sizeof(url), "%s/v2/point/%.4f/%.4f/%d", FEED_HOST,
-                  static_cast<double>(lat), static_cast<double>(lon),
+    std::snprintf(url, sizeof(url), feed.query, feed.host, static_cast<double>(lat), static_cast<double>(lon),
                   static_cast<int>(std::lround(static_cast<float>(RANGE_KM) * NM_PER_KM)));
-    const int status = get(s_feed_client, url, "feed");
-    // Measured: holding this open doubled the share the feed refused.
-    esp_http_client_close(s_feed_client);
-    if (status != HTTP_OK) {
-        s_feed_backoff = status == HTTP_TOO_MANY_REQUESTS;
+    char what[24];
+    std::snprintf(what, sizeof(what), "feed %s", feed.name);
+    const int status = get(feed.client, url, what);
+    if (!feed.keep_open) {
+        esp_http_client_close(feed.client);
+    }
+    return status;
+}
+
+// The next feed in turn, and the other at once when that one will not answer.
+bool fetch(float lat, float lon)
+{
+    int  status  = 0;
+    int  refused = 0;
+    for (int tried = 0; tried < FEED_COUNT && status != HTTP_OK; ++tried) {
+        Feed &feed  = s_feeds[s_next_feed];
+        s_next_feed = (s_next_feed + 1) % FEED_COUNT;
+        status      = ask_feed(feed, lat, lon);
+        refused += status == HTTP_TOO_MANY_REQUESTS ? 1 : 0;
+    }
+    s_feed_backoff = refused == FEED_COUNT;
+    std::size_t json_len = 0;
+    const char *json     = status == HTTP_OK ? unpacked(json_len) : nullptr;
+    if (json == nullptr) {
         return false;
     }
-    s_feed_backoff = false;
 
-    const int count = parse(s_body, s_body_len, s_scratch, kMaxAircraft);
+    const int count = parse(json, json_len, s_scratch, kMaxAircraft);
 
     xSemaphoreTake(s_lock, portMAX_DELAY);
     std::memcpy(s_list, s_scratch, sizeof(Aircraft) * static_cast<std::size_t>(count));
@@ -397,7 +433,7 @@ bool fetch(float lat, float lon)
     xSemaphoreGive(s_lock);
 
     ESP_LOGD(TAG, "%d aircraft within %d km, %u bytes", count, RANGE_KM,
-             static_cast<unsigned>(s_body_len));
+             static_cast<unsigned>(json_len));
 
     if (s_on_update != nullptr) {
         snapshot(*s_published);
@@ -805,12 +841,16 @@ esp_err_t start(UpdateHandler on_update, DetailsHandler on_details, PhotoHandler
         heap_caps_calloc(CACHE_SIZE, sizeof(CacheEntry), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     ESP_RETURN_ON_FALSE(s_cache != nullptr, ESP_ERR_NO_MEM, TAG, "lookup cache");
 
-    s_feed_client     = open_client(FEED_HOST);
+    for (Feed &feed : s_feeds) {
+        feed.client = open_client(feed.host);
+        ESP_RETURN_ON_FALSE(feed.client != nullptr, ESP_ERR_NO_MEM, TAG, "feed client");
+        esp_http_client_set_header(feed.client, "Accept-Encoding", "gzip");
+    }
     s_lookup_client   = open_client(LOOKUP_HOST);
     s_photoapi_client = open_client(PHOTO_HOST, PHOTO_AGENT);
     s_photo_client    = open_client(PHOTO_IMAGE_HOST);
     s_trace_client    = open_client(TRACE_HOST);
-    ESP_RETURN_ON_FALSE(s_feed_client != nullptr && s_lookup_client != nullptr &&
+    ESP_RETURN_ON_FALSE(s_lookup_client != nullptr &&
                             s_photoapi_client != nullptr && s_photo_client != nullptr && s_trace_client != nullptr,
                         ESP_ERR_NO_MEM, TAG, "http clients");
 

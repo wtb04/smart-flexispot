@@ -1,4 +1,4 @@
-// The sky round home, fetched from the feed radar.cpp polls and read by the
+// The sky round home, fetched from the feeds radar.cpp polls and read by the
 // same parser; the trails kept by the same code; a tapped plane looked up where
 // the panel looks it up. Home is SIM_HOME, "lat,lon", where the panel has
 // Home Assistant's zone.home; without it nothing is fetched.
@@ -24,7 +24,10 @@
 
 namespace radar {
 namespace {
-constexpr char         FEED_HOST[]    = "https://api.adsb.lol";
+// As radar.cpp: two feeds of the same data, taken in turn, the other asked at
+// once when one will not answer.
+constexpr const char  *FEEDS[]        = {"https://api.adsb.lol/v2/point/%.4f/%.4f/%d",
+                                         "https://opendata.adsb.fi/api/v2/lat/%.4f/lon/%.4f/dist/%d"};
 constexpr char         LOOKUP_HOST[]  = "https://api.adsbdb.com";
 constexpr char         PHOTO_HOST[]   = "https://api.planespotters.net";
 constexpr char         TRACE_HOST[]   = "https://adsb.lol";
@@ -70,11 +73,18 @@ bool fetch_sky(bool &busy)
     if (!radar::home(lat, lon)) {
         return false;
     }
-    char url[128];
-    std::snprintf(url, sizeof(url), "%s/v2/point/%.4f/%.4f/%d", radar::FEED_HOST, lat, lon,
-                  static_cast<int>(std::lround(radar::RANGE_KM * radar::NM_PER_KM)));
-    const Answer got = get(url);
-    busy             = got.status == 429;
+    static int next    = 0;
+    Answer     got;
+    int        refused = 0;
+    for (int tried = 0; tried < 2 && got.status != 200; ++tried) {
+        char url[128];
+        std::snprintf(url, sizeof(url), radar::FEEDS[next], lat, lon,
+                      static_cast<int>(std::lround(radar::RANGE_KM * radar::NM_PER_KM)));
+        next = 1 - next;
+        got  = get(url);
+        refused += got.status == 429 ? 1 : 0;
+    }
+    busy = refused == 2;
 
     static radar::Aircraft list[radar::kMaxAircraft];
     const int count = got.status == 200 ? radar::parse(got.body.data(), got.body.size(), list,
