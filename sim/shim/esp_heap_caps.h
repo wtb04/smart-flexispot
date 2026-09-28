@@ -17,6 +17,10 @@ static inline void *heap_caps_malloc(size_t size, unsigned) { return malloc(size
 static inline void *heap_caps_calloc(size_t n, size_t size, unsigned) { return calloc(n, size); }
 static inline void *heap_caps_realloc(void *p, size_t size, unsigned) { return realloc(p, size); }
 static inline void  heap_caps_free(void *p) { free(p); }
+static inline void *heap_caps_aligned_alloc(size_t alignment, size_t size, unsigned)
+{
+    return aligned_alloc(alignment, (size + alignment - 1) / alignment * alignment);
+}
 
 // As the panel reports itself on a quiet day, for the diagnostics page.
 static inline size_t heap_caps_get_total_size(unsigned caps)

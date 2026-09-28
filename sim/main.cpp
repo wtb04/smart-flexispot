@@ -341,20 +341,16 @@ int main(int argc, char **argv)
         lv_tick_set_cb(ticks_past_splash);
     }
 
-    if (opts.page >= 0 || !opts.keys.empty()) {
-        // Once what was set above has been applied: until the phone is seen,
-        // the presence gate leaves only Home and Setup to open.
-        const std::uint32_t settled = SDL_GetTicks() + 300;
-        while (SDL_GetTicks() < settled) {
-            lv_timer_handler();
-            SDL_Delay(5);
-        }
-        for (const char key : opts.keys) {
-            press(key == 'x' ? SDLK_ESCAPE : static_cast<SDL_Keycode>(key));  // letters are their own keycodes
-        }
-        if (opts.page >= 0) {
-            ui::detail::select_page(opts.page);
-        }
+    run_for(2000);  // what start-up set, the presence gate and the phone among it, applied
+    for (const char key : opts.keys) {
+        press(key == 'x' ? SDLK_ESCAPE : static_cast<SDL_Keycode>(key));  // letters are their own keycodes
+    }
+    // Asked for until it is up: until the phone is seen, the presence gate
+    // leaves only Home and Setup to open.
+    for (std::uint32_t until = SDL_GetTicks() + 5000; opts.page >= 0 && ui::detail::s_page != opts.page &&
+                                                      SDL_GetTicks() < until;) {
+        ui::detail::select_page(opts.page);
+        run_for(50);
     }
     for (const SDL_Point &at : opts.taps) {
         tap(at);
