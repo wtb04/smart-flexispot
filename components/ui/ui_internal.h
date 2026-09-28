@@ -65,6 +65,7 @@ struct Layout {
 constexpr int          NOTIFY_QUEUE_LEN  = 4;
 
 struct Notice {
+    char source[24];
     char title[64];
     char message[192];
     Level level;
@@ -247,6 +248,7 @@ void set_screen_state(bool on);
 void screen_off_cb(lv_event_t *);
 void register_desk_control(lv_obj_t *obj);
 void show_next_notice();
+void paint_notice_corner();  // when the notice on show came, and how many wait
 void create_notice_card();
 void create_rail(lv_obj_t *parent);
 void place_drawer(std::int32_t width);

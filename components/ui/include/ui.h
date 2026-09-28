@@ -370,7 +370,11 @@ esp_err_t set_focus(const Focus &focus);
 esp_err_t set_update(const UpdateState &state);
 
 
-/** Queued rather than shown at once: they arrive in bursts. A full queue drops the oldest. */
-esp_err_t notify(const char *title, const char *message, Level level, int timeout_ms);
+/** Queued rather than shown at once: they arrive in bursts. A full queue drops the oldest.
+ *  `source` says where it came from, over the title, which is the headline; the
+ *  message goes under it, or is the headline itself when there is no title.
+ *  A negative timeout keeps it until it is tapped. */
+esp_err_t notify(const char *source, const char *title, const char *message, Level level,
+                 int timeout_ms);
 
 }  // namespace ui

@@ -808,6 +808,8 @@ void apply_notice(const Notice &notice)
     s_notice_queue[s_notice_count++] = notice;
     if (lv_obj_is_hidden(s_notice_card)) {
         show_next_notice();
+    } else {
+        paint_notice_corner();
     }
 }
 
@@ -1352,13 +1354,15 @@ bool diagnostics_open()
     return s_setup_visible.load(std::memory_order_relaxed);
 }
 
-esp_err_t notify(const char *title, const char *message, Level level, int timeout_ms)
+esp_err_t notify(const char *source, const char *title, const char *message, Level level,
+                 int timeout_ms)
 {
     portENTER_CRITICAL(&s_pending_lock);
     if (s_inbox_count == NOTICE_INBOX_LEN) {
         drop_oldest(s_inbox, s_inbox_count);
     }
     Notice &slot = s_inbox[s_inbox_count++];
+    copy_text(slot.source, sizeof(slot.source), source);
     copy_text(slot.title, sizeof(slot.title), title);
     copy_text(slot.message, sizeof(slot.message), message);
     slot.level = level;

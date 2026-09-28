@@ -84,7 +84,7 @@ void show_desk_available(bool linked)
 void show_notice(const char *message, desk::Tone tone, int timeout_ms)
 {
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::notify(
-        "", message, tone == desk::Tone::Done ? ui::Level::Good : ui::Level::Neutral, timeout_ms));
+        "Desk", "", message, tone == desk::Tone::Done ? ui::Level::Good : ui::Level::Neutral, timeout_ms));
 }
 
 void on_setting(ui::Setting setting, bool on)
@@ -208,25 +208,26 @@ void on_focus_change(const focus::State &state, bool finished)
         return;
     }
     const focus::Plan plan = focus::plan();
+    char              title[FOCUS_MESSAGE_SIZE];
     char              message[FOCUS_MESSAGE_SIZE];
     switch (state.phase) {
         case focus::Phase::Break:
-            std::snprintf(message, sizeof(message), "Round %d done, %d min break is ready", state.round,
-                          plan.break_min);
+            std::snprintf(title, sizeof(title), "Round %d done", state.round);
+            std::snprintf(message, sizeof(message), "A %d min break is ready", plan.break_min);
             break;
         case focus::Phase::LongBreak:
-            std::snprintf(message, sizeof(message), "All %d rounds done, %d min break is ready",
-                          plan.rounds, plan.long_break_min);
+            std::snprintf(title, sizeof(title), "All %d rounds done", plan.rounds);
+            std::snprintf(message, sizeof(message), "A %d min break is ready", plan.long_break_min);
             break;
         case focus::Phase::Work:
-            std::snprintf(message, sizeof(message), "Break over, round %d of %d is ready", state.round,
-                          plan.rounds);
+            std::snprintf(title, sizeof(title), "Break over");
+            std::snprintf(message, sizeof(message), "Round %d of %d is ready", state.round, plan.rounds);
             break;
         case focus::Phase::Idle:
             return;
     }
     sound::ding();
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::notify("Focus", message, ui::Level::Good, FOCUS_NOTICE_MS));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::notify("Focus", title, message, ui::Level::Good, FOCUS_NOTICE_MS));
 }
 
 focus::Plan stored_plan()
@@ -288,7 +289,7 @@ void restart_now(void *)
 void restart_for_desk(bool bluetooth)
 {
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::notify(
-        "", bluetooth ? "Switching the desk to Bluetooth" : "Switching the desk to the wire",
+        "Desk", "", bluetooth ? "Switching the desk to Bluetooth" : "Switching the desk to the wire",
         ui::Level::Neutral, DESK_RESTART_DELAY_MS));
     static esp_timer_handle_t timer = nullptr;
     if (timer == nullptr) {

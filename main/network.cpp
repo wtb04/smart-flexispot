@@ -90,8 +90,9 @@ void on_brightness(int percent)
 void on_refusal(const char *reason)
 {
     char message[REFUSAL_MESSAGE_SIZE];
-    std::snprintf(message, sizeof(message), "Home Assistant did not do that: %s", reason);
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::notify("", message, ui::Level::Warn, REFUSAL_NOTICE_MS));
+    std::snprintf(message, sizeof(message), "%s", reason);
+    ESP_ERROR_CHECK_WITHOUT_ABORT(
+        ui::notify("Home Assistant", "That did not go through", message, ui::Level::Warn, REFUSAL_NOTICE_MS));
 }
 
 /** The journey to the next appointment is asked for well before it starts, so
@@ -134,8 +135,8 @@ void on_notify(const hass::protocol::Notification &notice)
                                : word == "warning" ? ui::Level::Warn
                                : word == "success" ? ui::Level::Good
                                                    : ui::Level::Neutral;
-    ESP_ERROR_CHECK_WITHOUT_ABORT(
-        ui::notify(notice.title.c_str(), notice.message.c_str(), level, notice.timeout_ms));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::notify("Home Assistant", notice.title.c_str(), notice.message.c_str(),
+                                             level, notice.timeout_ms));
 }
 
 void fill_network(hass::protocol::Telemetry &out)
