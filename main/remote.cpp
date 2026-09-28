@@ -33,6 +33,9 @@ constexpr int           LOG_LINES_MAX     = 400;
 constexpr std::uint32_t ALL_CHANNELS      = 0xffffffff;
 constexpr std::size_t   QUERY_MAX         = 32;
 constexpr std::size_t   SEND_CHUNK        = 16 * units::kBytesPerKiB;
+constexpr std::uint32_t CRASH_DELAY_MS    = 500;  // for the answer to get out first
+constexpr std::uint32_t CRASH_STACK       = 2048;
+constexpr UBaseType_t   CRASH_PRIORITY    = 5;
 
 esp_err_t refuse(httpd_req_t *req)
 {
@@ -323,6 +326,23 @@ void start_stats()
     }
     xTaskCreate(stats_task, "stats", STATS_STACK, nullptr, STATS_PRIORITY, nullptr);
 }
+// Crashes the panel on purpose, a moment after answering, to see that
+// last_words catches it: the log after the restart says where.
+esp_err_t crash_page(httpd_req_t *req)
+{
+    if (!ota::authorised(req)) {
+        return refuse(req);
+    }
+    httpd_resp_sendstr(req, "crashing\n");
+    xTaskCreate(
+        [](void *) {
+            vTaskDelay(pdMS_TO_TICKS(CRASH_DELAY_MS));
+            *static_cast<volatile int *>(nullptr) = 0;
+        },
+        "crash", CRASH_STACK, nullptr, CRASH_PRIORITY, nullptr);
+    return ESP_OK;
+}
+
 // How long the radar takes to open fullscreen, draw, zoom and close. With
 // ?open it is only shown, so its feed can start before the bench.
 esp_err_t bench_page(httpd_req_t *req)
@@ -358,6 +378,7 @@ esp_err_t start()
         {.uri = "/heap", .method = HTTP_GET, .handler = heap_page, .user_ctx = nullptr},
         {.uri = "/power", .method = HTTP_GET, .handler = power_page, .user_ctx = nullptr},
         {.uri = "/bench", .method = HTTP_GET, .handler = bench_page, .user_ctx = nullptr},
+        {.uri = "/crash", .method = HTTP_GET, .handler = crash_page, .user_ctx = nullptr},
     };
     for (const httpd_uri_t &page : pages) {
         ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &page), TAG, "page");

@@ -64,6 +64,8 @@ struct Stored {
 constexpr std::int64_t PROVE_WITHIN_US  = 3 * units::kUsPerMinute;
 constexpr std::int64_t RESTART_AFTER_US = units::kUsPerSecond;  // for the answer to get out
 constexpr int          RECV_TIMEOUT_S   = 30;
+// These and a development build's pages, with room for more; the default is 8.
+constexpr int MAX_ROUTES = 12;
 constexpr std::uint32_t SERVER_STACK    = 8 * units::kBytesPerKiB;
 constexpr std::uint32_t INSTALL_STACK   = 6 * units::kBytesPerKiB;
 constexpr UBaseType_t   INSTALL_PRIORITY = 3;
@@ -458,8 +460,10 @@ esp_err_t update_companion(httpd_req_t *req)
 esp_err_t version(httpd_req_t *req)
 {
     const esp_app_desc_t *running = esp_app_get_description();
-    char                  text[96];
-    std::snprintf(text, sizeof(text), "%s %s\n", running->project_name, running->version);
+    char                  text[128];
+    // With when it was built: every development build of a commit has the one version.
+    std::snprintf(text, sizeof(text), "%s %s, built %s %s\n", running->project_name, running->version,
+                  running->date, running->time);
     return answer(req, "200 OK", text);
 }
 
@@ -535,6 +539,7 @@ esp_err_t start(const Hooks &hooks)
     config.stack_size        = SERVER_STACK;
     config.recv_wait_timeout = RECV_TIMEOUT_S;
     config.send_wait_timeout = RECV_TIMEOUT_S;
+    config.max_uri_handlers  = MAX_ROUTES;
     ESP_RETURN_ON_ERROR(httpd_start(&s_server, &config), TAG, "server");
 
     const httpd_uri_t routes[] = {
