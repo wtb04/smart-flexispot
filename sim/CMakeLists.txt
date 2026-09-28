@@ -37,11 +37,21 @@ file(GLOB UI_SOURCES ${ROOT}/components/ui/*.cpp ${ROOT}/components/ui/fonts/*.c
      ${ROOT}/components/ui/fonts/*.cpp)
 file(GLOB SIM_SOURCES ${CMAKE_CURRENT_LIST_DIR}/*.cpp ${CMAKE_CURRENT_LIST_DIR}/stubs/*.cpp
      ${CMAKE_CURRENT_LIST_DIR}/live/*.cpp)
-# The feeds' own parsers, which are plain C++ and run here as on the panel.
 # What the home page holds, from the room component that fills it on the panel.
 set(ROOM_LAYOUT ${ROOT}/components/room/room_layout.cpp)
+
+# The panel's own parsers, which are plain C++ and run here as there: the
+# feeds', and Home Assistant's for its notices, with the cJSON ESP-IDF carries.
+if(DEFINED ENV{IDF_PATH})
+    set(IDF_DIR $ENV{IDF_PATH})
+else()
+    set(IDF_DIR $ENV{HOME}/esp/esp-idf)
+endif()
+set(CJSON_DIR ${IDF_DIR}/components/json/cJSON)
+set_source_files_properties(${CJSON_DIR}/cJSON.c PROPERTIES COMPILE_OPTIONS -w)
 set(PARSERS ${ROOT}/components/ical/ical_parse.cpp ${ROOT}/components/travel/travel_parse.cpp
-    ${ROOT}/components/radar/radar_parse.cpp ${ROOT}/components/radar/radar_trail.cpp)
+    ${ROOT}/components/radar/radar_parse.cpp ${ROOT}/components/radar/radar_trail.cpp
+    ${ROOT}/components/hass/hass_protocol.cpp ${CJSON_DIR}/cJSON.c)
 
 add_executable(sim ${SIM_SOURCES} ${UI_SOURCES} ${ROOM_LAYOUT} ${PARSERS})
 target_include_directories(sim PRIVATE
@@ -57,7 +67,8 @@ target_include_directories(sim PRIVATE
     ${ROOT}/components/room
     ${ROOT}/components/rtc/include
     ${ROOT}/components/travel ${ROOT}/components/travel/include
-    ${ROOT}/components/units/include)
+    ${ROOT}/components/units/include
+    ${CJSON_DIR})
 target_link_libraries(sim PRIVATE lvgl ZLIB::ZLIB CURL::libcurl)
 if(APPLE)
     target_link_libraries(sim PRIVATE "-framework CoreFoundation" "-framework CoreGraphics" "-framework ImageIO")

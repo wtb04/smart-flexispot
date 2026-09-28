@@ -24,15 +24,21 @@ from `components/room`.
 Everything else is played, and nothing but those read-only feeds leaves the Mac:
 
 - the desk, in `hardware.cpp`, moving as the box moves it and holding its
-  presets;
-- the focus timer, on `focus_plan.h`;
+  presets, with the notices the panel gives for them;
+- the focus timer, on `focus_plan.h`, with its notices as each part runs out;
 - Home Assistant, in `home_assistant.cpp`: not answering at first, then with
   readings, lights and a thermostat that the page's taps change;
 - what plays, in `media_stub.cpp`: the speaker with music, and a Jellyfin
   episode with its intro, the episodes either side, subtitles and cinema mode;
+- notices from Home Assistant, in `notices.cpp`, read by the panel's own parser;
 - the battery, the phone and Wi-Fi.
 
-**H** lists the keys that put it in each of those states.
+**H** lists the keys that put it in each of those states. Any notice Home
+Assistant could send goes to a running simulator with
+
+```sh
+sim/send.sh notify '{"title":"Hello","message":"Kept until tapped","level":"warning","timeout_s":0}'
+```
 
 ## Settings
 

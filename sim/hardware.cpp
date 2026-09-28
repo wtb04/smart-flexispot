@@ -12,7 +12,11 @@
 namespace hardware {
 namespace {
 // The box's presets as ours holds them, in its order, and how fast it moves.
-constexpr int HEIGHTS_MM[ui::kPresetCount] = {700, 660, 1120, 740, 720, 1060};
+// The last two are the panel's own, empty until held to save one.
+constexpr int HEIGHTS_MM[ui::kPresetCount] = {700, 660, 1120, 740, -1, -1};
+constexpr int SAVED_NOTICE_MS = 2500;  // as components/desk has them
+constexpr int HINT_NOTICE_MS  = 3000;
+constexpr int FOCUS_NOTICE_MS = 5000;  // as main.cpp has it
 constexpr int SPEED_MM_S                   = 38;
 constexpr int AT_PRESET_MM                 = 5;
 constexpr int REPORT_EVERY_MS              = 100;
@@ -46,7 +50,7 @@ void show_presets()
 {
     for (int i = 0; i < ui::kPresetCount; ++i) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(
-            ui::set_preset_active(i, s_linked && std::abs(s_height_mm - s_heights[i]) <= AT_PRESET_MM));
+            ui::set_preset_active(i, s_linked && s_heights[i] >= 0 && std::abs(s_height_mm - s_heights[i]) <= AT_PRESET_MM));
     }
 }
 
@@ -64,6 +68,42 @@ void show_focus()
         .break_min      = s_plan.break_min,
         .long_break_min = s_plan.long_break_min,
     }));
+}
+
+void desk_notice(const char *message, bool done, int timeout_ms)
+{
+    ESP_ERROR_CHECK_WITHOUT_ABORT(
+        ui::notify("Desk", "", message, done ? ui::Level::Good : ui::Level::Neutral, timeout_ms));
+}
+
+// As main.cpp's on_focus_change says a part ran out.
+void focus_notice()
+{
+    char title[64], message[64];
+    switch (s_focus.phase) {
+        case focus::Phase::Break:
+            std::snprintf(title, sizeof(title), "Round %d done", s_focus.round);
+            std::snprintf(message, sizeof(message), "A %d min break is ready", s_plan.break_min);
+            break;
+        case focus::Phase::LongBreak:
+            std::snprintf(title, sizeof(title), "All %d rounds done", s_plan.rounds);
+            std::snprintf(message, sizeof(message), "A %d min break is ready", s_plan.long_break_min);
+            break;
+        case focus::Phase::Work:
+            std::snprintf(title, sizeof(title), "Break over");
+            std::snprintf(message, sizeof(message), "Round %d of %d is ready", s_focus.round, s_plan.rounds);
+            break;
+        case focus::Phase::Idle:
+            return;
+    }
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::notify("Focus", title, message, ui::Level::Good, FOCUS_NOTICE_MS));
+}
+
+void finish_part(std::int64_t now)
+{
+    s_focus = focus::finished(s_focus, s_plan, now);
+    show_focus();
+    focus_notice();
 }
 
 void move_desk(std::int64_t now)
@@ -107,8 +147,7 @@ void tick()
         move_desk(now);
     }
     if (s_focus.running && now >= s_focus.ends_at) {
-        s_focus = focus::finished(s_focus, s_plan, now);
-        show_focus();
+        finish_part(now);
     }
     static std::time_t s_shown = 0;
     if (const std::time_t t = std::time(nullptr); t != s_shown) {
@@ -135,6 +174,9 @@ void on_preset(int index, bool store)
     if (store) {
         s_heights[index] = s_height_mm;
         show_presets();
+        desk_notice("Preset saved", true, SAVED_NOTICE_MS);
+    } else if (s_heights[index] < 0) {
+        desk_notice("Hold it to save the height it goes to", false, HINT_NOTICE_MS);
     } else {
         s_target_mm = s_heights[index];
     }
@@ -155,6 +197,13 @@ void on_focus_plan(int work_min, int break_min, int long_break_min, int rounds)
 {
     s_plan = {.work_min = work_min, .break_min = break_min, .rounds = rounds, .long_break_min = long_break_min};
     show_focus();
+}
+
+void end_focus_part()
+{
+    if (s_focus.phase != focus::Phase::Idle) {
+        finish_part(now_ms());
+    }
 }
 
 void toggle_desk_link()

@@ -4,6 +4,7 @@
 #include "home_assistant.h"
 #include "live/live.h"
 #include "media_stub.h"
+#include "notices.h"
 #include "ui.h"
 #include "ui_internal.h"
 
@@ -126,6 +127,8 @@ const Key KEYS[] = {
     {SDLK_a, "A", "Home Assistant answering, with states; again, gone", home_assistant::toggle},
     {SDLK_r, "R", "The air: good, some of it not, bad", home_assistant::next_air},
     {SDLK_m, "M", "What plays: nothing, music, a Jellyfin episode", media_stub::next_scene},
+    {SDLK_n, "N", "A notice from Home Assistant, another each time", notices::next_example},
+    {SDLK_t, "T", "The focus part under way runs out now", hardware::end_focus_part},
     {SDLK_d, "D", "The desk link lost, and back", hardware::toggle_desk_link},
     {SDLK_b, "B", "The battery: charging, on battery, low, none", hardware::next_battery},
     {SDLK_p, "P", "The phone away, and back", hardware::toggle_phone},
@@ -140,7 +143,7 @@ lv_obj_t *s_help = nullptr;
 void build_help()
 {
     constexpr std::int32_t W = 820, PAD = 32, ROW = 36, KEY_W = 90;
-    const std::int32_t     h = PAD * 2 + 56 + ROW * static_cast<std::int32_t>(std::size(KEYS));
+    const std::int32_t     h = PAD * 2 + 56 + ROW * static_cast<std::int32_t>(std::size(KEYS)) + 48;
     s_help = lv_obj_create(lv_layer_top());
     lv_obj_set_size(s_help, W, h);
     lv_obj_center(s_help);
@@ -158,6 +161,9 @@ void build_help()
         lv_obj_set_pos(what, KEY_W, y);
         y += ROW;
     }
+    lv_obj_t *send = ui::theme::make_label(s_help, "sim/send.sh notify '<json>' sends any notice Home Assistant could",
+                                           ui::theme::secondary, ui::fonts::size_20());
+    lv_obj_set_pos(send, 0, y + 12);
     lv_obj_set_hidden(s_help, true);
 }
 
@@ -284,6 +290,7 @@ int main(int argc, char **argv)
     hardware::start();
     media_stub::start();
     live::start();
+    notices::listen();
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("desk"));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("network"));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_done());
@@ -314,6 +321,7 @@ int main(int argc, char **argv)
             break;
         }
         live::pump();
+        notices::pump();
         hardware::tick();
         media_stub::tick();
         const std::uint32_t idle = lv_timer_handler();

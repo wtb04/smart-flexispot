@@ -17,6 +17,7 @@ void on_preset(int index, bool store);
 void on_focus(ui::FocusAction action);
 void on_focus_plan(int work_min, int break_min, int long_break_min, int rounds);
 
+void end_focus_part();  // the part under way runs out now
 void toggle_desk_link();
 void next_battery();
 void toggle_phone();
