@@ -324,7 +324,10 @@ esp_err_t probe_pack(bool &present)
         return err;
     }
 
-    if (std::fabs(now.current_amps) > CURRENT_DEADBAND_A || !s_charging_wanted) {
+    // Current flowing is a pack. Without any, the voltage says nothing until
+    // the charger is off: it holds the rail near 8.4 V on its own, and it is
+    // left as it was across a restart, whatever this side last asked of it.
+    if (std::fabs(now.current_amps) > CURRENT_DEADBAND_A) {
         present = pack_voltage(now.bus_volts);
         s_pack_present.store(present, std::memory_order_relaxed);
         return ESP_OK;
