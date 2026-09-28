@@ -7,13 +7,16 @@
 #include "esp_lcd_mipi_dsi.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_log.h"
+#include "esp_rom_sys.h"
 #include "esp_timer.h"
 #include "freertos/semphr.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "hal/axi_icm_ll.h"
 #include "lvgl_private.h"  // the display's areas to redraw; the version is pinned in dependencies.lock
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 
 namespace board {
@@ -357,11 +360,54 @@ esp_err_t start_display(lv_display_t **out_disp)
     return ESP_OK;
 }
 
+// The panel reads its frame from PSRAM through the DW-GDMA, some 140 MB/s at
+// the ST7121's 70 MHz. Every master starts level with every other, and when
+// the PPA and the CPU's cache were both busy with a fullscreen radar frame the
+// panel's reads fell behind and it showed blue for a moment: what IDF's DSI
+// driver calls an underrun, and says only the interconnect can prevent. Its
+// reads go first now; the rest keep taking turns behind them.
+constexpr std::uint32_t PANEL_READ_QOS = 15;  // the highest
+
+void put_panel_first()
+{
+    for (std::uint32_t port = 0; port < 2; ++port) {
+        axi_icm_ll_set_dw_gdma_qos_arbiter_prio(port, 0, PANEL_READ_QOS);
+    }
+}
+
+// The DSI driver says "can't fetch data from external memory fast enough,
+// underrun happens" from its interrupt, and only on the console. The ROM's
+// printf hands every character to a second channel too, so they are counted
+// there; in IRAM, as the interrupt may come while the cache is off.
+constexpr char             UNDERRUN[]  = "underrun";
+constexpr int              UNDERRUN_LEN = sizeof(UNDERRUN) - 1;
+std::atomic<std::uint32_t> s_underruns{0};
+int                        s_matched = 0;
+
+IRAM_ATTR void watch_console(char c)
+{
+    if (c == UNDERRUN[s_matched]) {
+        if (++s_matched == UNDERRUN_LEN) {
+            s_underruns.fetch_add(1, std::memory_order_relaxed);
+            s_matched = 0;
+        }
+    } else {
+        s_matched = c == UNDERRUN[0] ? 1 : 0;
+    }
+}
+
 }  // namespace
+
+std::uint32_t underruns()
+{
+    return s_underruns.load(std::memory_order_relaxed);
+}
 
 esp_err_t init(bool flipped)
 {
     ESP_RETURN_ON_ERROR(power_up_panel(), TAG, "panel power");
+    put_panel_first();
+    esp_rom_install_channel_putc(2, watch_console);
 
     lv_display_t *disp = nullptr;
     ESP_RETURN_ON_ERROR(start_display(&disp), TAG, "display");

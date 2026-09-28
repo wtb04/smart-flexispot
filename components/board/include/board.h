@@ -2,6 +2,8 @@
 
 #include "esp_err.h"
 
+#include <cstdint>
+
 namespace board {
 /** Brings up rails, panel, touch and the LVGL port task. Once, before any lv_*
  *  call. flipped hangs the panel the other way up. */
@@ -24,6 +26,10 @@ esp_err_t display_on(int percent);
  *  the MIPI link last left it, so anything that ends the program -- a restart,
  *  above all -- has to put it to sleep rather than only dim it. */
 esp_err_t display_off();
+
+/** How many times the panel's reads have fallen behind since it started: each
+ *  a moment of blue screen, which the DSI driver reports only on the console. */
+std::uint32_t underruns();
 
 /** Below this the panel does not get any dimmer, so offering the range is just a
  *  control that appears broken. */

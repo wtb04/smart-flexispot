@@ -1,3 +1,4 @@
+#include "board.h"
 #include "diagnostics.h"
 
 #include "ble.h"
@@ -571,6 +572,18 @@ constexpr TagSet TAG_SETS[] = {
 };
 static_assert(std::size(TAG_SETS) == CARDS, "a tag set per card");
 
+// Each a moment of blue screen, which otherwise leaves no trace in the log.
+void note_underruns()
+{
+    static std::uint32_t told = 0;
+    const std::uint32_t  now  = board::underruns();
+    if (now != told) {
+        ESP_LOGW("board", "the panel's reads fell behind %u times, %u since the last",
+                 static_cast<unsigned>(now), static_cast<unsigned>(now - told));
+        told = now;
+    }
+}
+
 void update()
 {
     update_wifi();
@@ -588,6 +601,7 @@ void update()
 {
     for (;;) {
         ulTaskNotifyTake(pdTRUE, TICK);
+        note_underruns();
         if (ui::diagnostics_open()) {
             update();
         }
