@@ -3,6 +3,7 @@
 #include "hardware.h"
 #include "home_assistant.h"
 #include "live/live.h"
+#include "media_stub.h"
 #include "ui.h"
 #include "ui_internal.h"
 
@@ -124,6 +125,7 @@ const Key KEYS[] = {
     {SDLK_h, "H", "This list, and away again", toggle_help},
     {SDLK_a, "A", "Home Assistant answering, with states; again, gone", home_assistant::toggle},
     {SDLK_r, "R", "The air: good, some of it not, bad", home_assistant::next_air},
+    {SDLK_m, "M", "What plays: nothing, music, a Jellyfin episode", media_stub::next_scene},
     {SDLK_d, "D", "The desk link lost, and back", hardware::toggle_desk_link},
     {SDLK_b, "B", "The battery: charging, on battery, low, none", hardware::next_battery},
     {SDLK_p, "P", "The phone away, and back", hardware::toggle_phone},
@@ -197,6 +199,10 @@ ui::Handlers handlers()
     h.focus_plan  = hardware::on_focus_plan;
     h.radar       = [](bool showing, bool) { live::set_radar_showing(showing); };
     h.details     = live::look_up;
+    h.media       = media_stub::on_media;
+    h.seek        = media_stub::on_seek;
+    h.media_volume = media_stub::on_volume;
+    h.pick        = media_stub::on_pick;
     h.lights      = home_assistant::on_lights;
     h.light       = home_assistant::on_light;
     h.setpoint    = home_assistant::on_setpoint;
@@ -276,6 +282,7 @@ int main(int argc, char **argv)
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_notification_volume(60));
     home_assistant::start();  // not answering yet: the page as the panel has it until it does
     hardware::start();
+    media_stub::start();
     live::start();
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("desk"));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("network"));
@@ -308,6 +315,7 @@ int main(int argc, char **argv)
         }
         live::pump();
         hardware::tick();
+        media_stub::tick();
         const std::uint32_t idle = lv_timer_handler();
         SDL_Delay(idle < 5 ? idle : 5);
     }

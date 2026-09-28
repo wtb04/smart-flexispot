@@ -28,6 +28,8 @@ Everything else is played, and nothing but those read-only feeds leaves the Mac:
 - the focus timer, on `focus_plan.h`;
 - Home Assistant, in `home_assistant.cpp`: not answering at first, then with
   readings, lights and a thermostat that the page's taps change;
+- what plays, in `media_stub.cpp`: the speaker with music, and a Jellyfin
+  episode with its intro, the episodes either side, subtitles and cinema mode;
 - the battery, the phone and Wi-Fi.
 
 **H** lists the keys that put it in each of those states.
