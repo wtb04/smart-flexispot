@@ -51,7 +51,8 @@ SIM_ZOOM=0.75      # the window's scale, for a smaller screen
 ```
 
 `--page N` opens a page (0 Home to 4 Setup), `--press KEYS` presses keys as
-it starts, `am` for Home Assistant answering and music, `--shot S` saves a
+it starts, `am` for Home Assistant answering and music, `--tap X,Y` taps the
+screen there, as often as given, `--shot S` saves a
 screenshot after S seconds and quits, and `--splash` plays the twelve-second
 splash the panel boots with. Together they take a picture of a state without
 anyone at the keyboard:

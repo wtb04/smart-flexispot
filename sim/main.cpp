@@ -187,6 +187,39 @@ void press(SDL_Keycode code)
     }
 }
 
+// A finger down and up again there, as the mouse would, a few frames apart.
+void run_for(std::uint32_t ms)
+{
+    const std::uint32_t until = SDL_GetTicks() + ms;
+    while (SDL_GetTicks() < until) {
+        lv_timer_handler();
+        SDL_Delay(5);
+    }
+}
+
+void tap(SDL_Point at)
+{
+    // Addressed to the window, as LVGL only takes a window's own events.
+    const Uint32 window = SDL_GetWindowID(lv_sdl_window_get_window(lv_display_get_default()));
+    SDL_Event    event{};
+    event.type            = SDL_MOUSEMOTION;
+    event.motion.windowID = window;
+    event.motion.x        = at.x;
+    event.motion.y        = at.y;
+    SDL_PushEvent(&event);
+    for (const Uint32 type : {SDL_MOUSEBUTTONDOWN, SDL_MOUSEBUTTONUP}) {
+        event                 = {};
+        event.type            = type;
+        event.button.windowID = window;
+        event.button.button   = SDL_BUTTON_LEFT;
+        event.button.x        = at.x;
+        event.button.y        = at.y;
+        SDL_PushEvent(&event);
+        run_for(120);
+    }
+    run_for(300);
+}
+
 int on_event(void *, SDL_Event *event)
 {
     if (event->type == SDL_QUIT) {
@@ -236,13 +269,15 @@ std::uint32_t ticks_past_splash()
 }
 
 // --page N opens page N; --press KEYS presses those keys, as "am" for Home
-// Assistant answering and music; --shot S saves a screenshot after S seconds
-// and quits; --splash plays the twelve seconds of splash the panel boots with.
+// Assistant answering and music; --tap X,Y taps there, as often as given;
+// --shot S saves a screenshot after S seconds and quits; --splash plays the
+// twelve seconds of splash the panel boots with.
 struct Options {
     int         page   = -1;
     int         shot_s = -1;
     bool        splash = false;
     std::string keys;
+    std::vector<SDL_Point> taps;
 };
 
 Options options(int argc, char **argv)
@@ -259,6 +294,12 @@ Options options(int argc, char **argv)
             ++i;
         } else if (name == "--press") {
             o.keys = value;
+            ++i;
+        } else if (name == "--tap") {
+            SDL_Point at{};
+            if (std::sscanf(value, "%d,%d", &at.x, &at.y) == 2) {
+                o.taps.push_back(at);
+            }
             ++i;
         } else if (name == "--splash") {
             o.splash = true;
@@ -314,6 +355,9 @@ int main(int argc, char **argv)
         if (opts.page >= 0) {
             ui::detail::select_page(opts.page);
         }
+    }
+    for (const SDL_Point &at : opts.taps) {
+        tap(at);
     }
 
     const std::uint32_t shot_at = opts.shot_s >= 0 ? SDL_GetTicks() + opts.shot_s * 1000u : 0;
