@@ -127,9 +127,11 @@ bool key_is(const char *start, std::size_t length, const char *name)
     return std::strlen(name) == length && std::strncmp(start, name, length) == 0;
 }
 
+// A callsign comes padded with spaces, or with '@', the blank of ADS-B's own
+// character set, which some transponders send in place of any callsign at all.
 void copy_trimmed(char *out, std::size_t size, const char *start, std::size_t length)
 {
-    while (length > 0 && start[length - 1] == ' ') {
+    while (length > 0 && (start[length - 1] == ' ' || start[length - 1] == '@')) {
         --length;
     }
     if (length >= size) {

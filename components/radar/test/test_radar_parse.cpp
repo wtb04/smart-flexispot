@@ -124,6 +124,13 @@ void test_shapes()
     check(parse(escaped.c_str(), escaped.size(), one, 4) == 1 && std::strcmp(one[0].hex, "f") == 0,
           "escapes inside strings");
 
+    const std::string blank =
+        R"({"aircraft":[{"flight":"@@@@@@@@","hex":"h","lat":1.0,"lon":2.0},)"
+        R"({"flight":"PHABC@@ ","hex":"i","lat":1.0,"lon":2.0}]})";
+    check(parse(blank.c_str(), blank.size(), one, 4) == 2 && one[0].flight[0] == '\0' &&
+              std::strcmp(one[1].flight, "PHABC") == 0,
+          "ADS-B's blank is padding, and all of it no callsign");
+
     const std::string long_name =
         R"({"aircraft":[{"flight":"ABCDEFGHIJKLMNOP","hex":"g","lat":1.0,"lon":2.0}]})";
     check(parse(long_name.c_str(), long_name.size(), one, 4) == 1 &&
