@@ -1,8 +1,8 @@
 // The panel's screen in a window: components/ui as it is, the live feeds
 // fetched for real, the hardware played by hardware.cpp. See README.md.
 #include "hardware.h"
+#include "home_assistant.h"
 #include "live/live.h"
-#include "room_layout.h"
 #include "ui.h"
 #include "ui_internal.h"
 
@@ -122,6 +122,8 @@ struct Key {
 };
 const Key KEYS[] = {
     {SDLK_h, "H", "This list, and away again", toggle_help},
+    {SDLK_a, "A", "Home Assistant answering, with states; again, gone", home_assistant::toggle},
+    {SDLK_r, "R", "The air: good, some of it not, bad", home_assistant::next_air},
     {SDLK_d, "D", "The desk link lost, and back", hardware::toggle_desk_link},
     {SDLK_b, "B", "The battery: charging, on battery, low, none", hardware::next_battery},
     {SDLK_p, "P", "The phone away, and back", hardware::toggle_phone},
@@ -195,6 +197,11 @@ ui::Handlers handlers()
     h.focus_plan  = hardware::on_focus_plan;
     h.radar       = [](bool showing, bool) { live::set_radar_showing(showing); };
     h.details     = live::look_up;
+    h.lights      = home_assistant::on_lights;
+    h.light       = home_assistant::on_light;
+    h.setpoint    = home_assistant::on_setpoint;
+    h.mode        = home_assistant::on_mode;
+    h.dial_toggle = home_assistant::on_dial_toggle;
     h.brightness  = [](int percent) { std::printf("I (sim) brightness %d%%\n", percent); };
     h.restart     = [] { said("restart asked for"); };
     h.update_now  = [] { said("update asked for"); };
@@ -267,7 +274,7 @@ int main(int argc, char **argv)
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_setting(ui::Setting::PresenceGate, true));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_setting(ui::Setting::DeskBluetooth, true));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_notification_volume(60));
-    room::show_unknown();  // as the panel shows it until Home Assistant answers
+    home_assistant::start();  // not answering yet: the page as the panel has it until it does
     hardware::start();
     live::start();
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("desk"));

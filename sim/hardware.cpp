@@ -35,6 +35,7 @@ constexpr Battery BATTERIES[] = {{true, true, 100}, {true, false, 64}, {true, fa
 int  s_battery = 0;
 bool s_phone   = true;
 bool s_wifi    = true;
+bool s_hass    = false;  // Home Assistant, as home_assistant.cpp plays it
 
 std::int64_t now_ms()
 {
@@ -95,7 +96,7 @@ void start()
     const Battery &b = BATTERIES[s_battery];
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_battery(b.present, b.percent, b.charging));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_presence(true, s_phone, true));
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_links(s_wifi, false));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_links(s_wifi, s_wifi && s_hass));
     show_focus();
 }
 
@@ -181,6 +182,12 @@ void toggle_phone()
 void toggle_wifi()
 {
     s_wifi = !s_wifi;
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_links(s_wifi, false));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_links(s_wifi, s_wifi && s_hass));
+}
+
+void set_home_assistant(bool up)
+{
+    s_hass = up;
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_links(s_wifi, s_wifi && s_hass));
 }
 }  // namespace hardware

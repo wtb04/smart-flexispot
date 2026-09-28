@@ -26,6 +26,8 @@ Everything else is played, and nothing but those read-only feeds leaves the Mac:
 - the desk, in `hardware.cpp`, moving as the box moves it and holding its
   presets;
 - the focus timer, on `focus_plan.h`;
+- Home Assistant, in `home_assistant.cpp`: not answering at first, then with
+  readings, lights and a thermostat that the page's taps change;
 - the battery, the phone and Wi-Fi.
 
 **H** lists the keys that put it in each of those states.
@@ -40,11 +42,11 @@ SIM_ZOOM=0.75      # the window's scale, for a smaller screen
 ```
 
 `--page N` opens a page (0 Home to 4 Setup), `--press KEYS` presses keys as
-it starts, `bp` for on battery with the phone away, `--shot S` saves a
+it starts, `am` for Home Assistant answering and music, `--shot S` saves a
 screenshot after S seconds and quits, and `--splash` plays the twelve-second
 splash the panel boots with. Together they take a picture of a state without
 anyone at the keyboard:
 
 ```sh
-sim/run.sh --press b --page 0 --shot 3   # the home page on battery
+sim/run.sh --press amm --page 0 --shot 3   # the home page with a Jellyfin episode on
 ```

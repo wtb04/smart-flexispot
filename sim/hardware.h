@@ -21,4 +21,7 @@ void toggle_desk_link();
 void next_battery();
 void toggle_phone();
 void toggle_wifi();
+
+/** Whether Home Assistant answers, which the rail shows beside Wi-Fi. */
+void set_home_assistant(bool up);
 }  // namespace hardware
