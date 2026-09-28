@@ -23,4 +23,7 @@ esp_err_t start();
 /** Thread-safe. */
 Stats stats();
 
+/** Listens for the phone less often while the screen is dark. From any task. */
+void set_dark(bool dark);
+
 }  // namespace ble

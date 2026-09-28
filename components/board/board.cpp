@@ -54,6 +54,7 @@ esp_err_t power_up_panel()
 // that has just been hidden, so both hold the same picture.
 constexpr int        MAX_DIRTY     = 16;
 constexpr int        FRAME_BUFFERS = 2;
+constexpr std::uint32_t DRAWING_LOCK_MS = 1000;
 constexpr TickType_t SWAP_TIMEOUT  = pdMS_TO_TICKS(100);
 
 struct Rect {
@@ -226,6 +227,26 @@ void flush_rotated(lv_display_t *disp, const lv_area_t *area, std::uint8_t *pixe
     lv_display_flush_ready(disp);
 }
 
+bool s_drawing = true;
+
+// Dark, LVGL draws nothing, and lit it draws the whole screen again. The video
+// stream itself goes on: this panel's touch is timed off it, and stopping it
+// left the picture torn and the touch waking the screen by itself. Under the
+// LVGL lock, which is recursive, so also from its own task.
+void set_drawing(bool on)
+{
+    if (on == s_drawing || s_disp == nullptr || !lvgl_port_lock(DRAWING_LOCK_MS)) {
+        return;
+    }
+    s_drawing = on;
+    lv_display_enable_invalidation(s_disp, on);
+    if (on) {
+        lv_obj_invalidate(lv_display_get_screen_active(s_disp));
+        lv_obj_invalidate(lv_display_get_layer_top(s_disp));
+    }
+    lvgl_port_unlock();
+}
+
 // esp_lvgl_port 2.9 keeps the panel only in its display context, whose first
 // fields are these. The version is pinned in dependencies.lock.
 struct PortDisplayHead {
@@ -332,6 +353,7 @@ void set_brightness_percent(int percent)
 
 esp_err_t display_on(int percent)
 {
+    set_drawing(true);
     return set_brightness(percent);
 }
 
@@ -341,7 +363,9 @@ esp_err_t display_on(int percent)
 // that is meant to wake it.
 esp_err_t display_off()
 {
-    return bsp_display_backlight_off();
+    const esp_err_t err = bsp_display_backlight_off();
+    set_drawing(false);
+    return err;
 }
 
 }  // namespace board

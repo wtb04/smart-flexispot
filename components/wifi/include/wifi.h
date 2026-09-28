@@ -12,6 +12,10 @@ inline constexpr int kSsidMax = 32;
  *  ten, and keeps trying if the radio would not come up at all. */
 esp_err_t start();
 
+/** Power saving on or off, from any task: on while nothing needs the link
+ *  answering at once, such as while the screen is dark. */
+void set_power_save(bool save);
+
 /** True once an IP address has been assigned. */
 bool connected();
 

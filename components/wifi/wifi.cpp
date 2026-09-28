@@ -97,6 +97,27 @@ StackType_t  s_task_stack[TASK_STACK];
 TaskHandle_t s_task = nullptr;
 
 std::atomic<bool> s_dropped{false};  // wants a connect
+std::atomic<bool> s_save_wanted{false};  // power saving asked for
+bool              s_save_applied = false;
+
+// With power saving the station sleeps between beacons and the access point
+// holds its packets until the next: round trips of 2 to 290 ms, measured here.
+// Too slow for a desk driven from the screen, but nothing waits on it while
+// the screen is dark, and the radio then costs a fraction.
+void apply_power_save()
+{
+    const bool save = s_save_wanted.load(std::memory_order_relaxed);
+    if (save == s_save_applied) {
+        return;
+    }
+    const esp_err_t err = esp_wifi_set_ps(save ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "power saving %s refused: %s", save ? "on" : "off", esp_err_to_name(err));
+        return;  // tried again on the next tick
+    }
+    s_save_applied = save;
+    ESP_LOGI(TAG, "power saving %s", save ? "on" : "off");
+}
 
 portMUX_TYPE s_info_lock = portMUX_INITIALIZER_UNLOCKED;
 Info         s_info;
@@ -232,6 +253,7 @@ esp_err_t bring_up()
         return err;
     }
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_ps(WIFI_PS_NONE));
+    s_save_applied = false;
     ESP_LOGI(TAG, "joining '%s'", WIFI_SSID);
     return ESP_OK;
 }
@@ -342,6 +364,7 @@ void recover_when_lost_long(Link &link, TickType_t now)
         }
 
         take_events(link, now);
+        apply_power_save();
         const bool is_up = s_connected.load(std::memory_order_relaxed);
         refresh_info_when_due(link, is_up, now);
         if (is_up) {
@@ -357,6 +380,14 @@ void recover_when_lost_long(Link &link, TickType_t now)
 }
 
 }  // namespace
+
+void set_power_save(bool save)
+{
+    s_save_wanted.store(save, std::memory_order_relaxed);
+    if (s_task != nullptr) {
+        xTaskNotifyGive(s_task);
+    }
+}
 
 esp_err_t start()
 {

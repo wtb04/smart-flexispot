@@ -67,7 +67,7 @@ std::atomic<bool> s_screen_on{true};
 
 void on_screen(bool on)
 {
-    s_screen_on.store(on, std::memory_order_relaxed);
+    note_screen(on);
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_screen(on));
     ESP_ERROR_CHECK_WITHOUT_ABORT(on ? board::display_on(settings::get(settings::Key::Brightness))
                                      : board::display_off());
@@ -351,7 +351,16 @@ esp_err_t start()
     return ESP_OK;
 }
 
-void note_screen(bool on) { s_screen_on.store(on, std::memory_order_relaxed); }
+// While the screen is dark nothing waits on the network or the radar, and the
+// phone is listened for less often; whoever turned it off, the panel or Home
+// Assistant.
+void note_screen(bool on)
+{
+    s_screen_on.store(on, std::memory_order_relaxed);
+    wifi::set_power_save(!on);
+    radar::set_screen(on);
+    ble::set_dark(!on);
+}
 
 void note_brightness(int percent)
 {

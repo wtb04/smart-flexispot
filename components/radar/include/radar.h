@@ -53,6 +53,9 @@ esp_err_t start(UpdateHandler on_update, DetailsHandler on_details,
  *  while it is not. Turning it on fetches at once rather than waiting. */
 void set_active(bool active);
 
+/** Nor does a screen that is dark. Turning it on fetches at once. */
+void set_screen(bool on);
+
 /** A page nobody can reach needs nothing fetched for it at all. */
 void set_enabled(bool enabled);
 

@@ -146,6 +146,7 @@ bool s_want_pending            = false;
 TaskHandle_t s_task    = nullptr;
 bool         s_active  = false;
 bool         s_enabled = true;
+bool         s_screen  = true;  // nothing is fetched while the screen is dark
 
 std::int64_t s_home_at_us = 0;
 float        s_home_lat   = 0.0f;
@@ -620,7 +621,7 @@ TickType_t rest_before_next(std::int64_t due_us, std::int64_t last_fetch_us)
         char callsign[kFlightLen] = {};
 
         xSemaphoreTake(s_lock, portMAX_DELAY);
-        const bool         ready   = s_has_home && s_enabled;
+        const bool         ready   = s_has_home && s_enabled && s_screen;
         const bool         active  = s_active;
         const bool         pending = s_want_pending;
         const float        lat     = s_home_lat;
@@ -741,6 +742,21 @@ void request_details(const char *hex, const char *callsign)
     xSemaphoreGive(s_lock);
 
     if (s_task != nullptr) {
+        xTaskNotifyGive(s_task);
+    }
+}
+
+void set_screen(bool on)
+{
+    if (s_lock == nullptr) {
+        return;
+    }
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    const bool woke = on && !s_screen;
+    s_screen        = on;
+    xSemaphoreGive(s_lock);
+
+    if (woke && s_task != nullptr) {
         xTaskNotifyGive(s_task);
     }
 }

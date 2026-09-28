@@ -35,6 +35,11 @@ constexpr int RSSI_SMOOTHING_SCALE = 10;
 
 constexpr std::uint16_t SCAN_INTERVAL_MS = 1000;
 constexpr std::uint16_t SCAN_WINDOW_MS   = 300;
+// While the screen is dark the phone is listened for a third as often: still
+// every few seconds, well inside SEEN_TIMEOUT, for what Home Assistant does
+// with the presence, at a third of the radio's time.
+constexpr std::uint16_t DARK_INTERVAL_MS = 3000;
+std::atomic<std::uint16_t> s_interval_ms{SCAN_INTERVAL_MS};
 constexpr int           SCAN_UNIT_US     = 625;
 
 constexpr std::size_t IRK_BYTES           = 16;
@@ -231,7 +236,7 @@ constexpr std::uint16_t scan_units(std::uint16_t ms)
 void start_scanning()
 {
     ble_gap_disc_params params{};
-    params.itvl              = scan_units(SCAN_INTERVAL_MS);
+    params.itvl              = scan_units(s_interval_ms.load(std::memory_order_relaxed));
     params.window            = scan_units(SCAN_WINDOW_MS);
     params.passive           = 1;  // no scan responses; the address is enough
     params.filter_duplicates = 0;  // duplicates carry a fresh RSSI, which is the point
@@ -270,15 +275,30 @@ void retry(ble_npl_event *)
     ble_npl_callout_reset(&s_retry, ble_npl_time_ms_to_ticks32(RETRY_MS));
 }
 
+// On the host's own queue, so the scan is only ever started and stopped there.
+ble_npl_event s_rescan;
+
+void rescan(ble_npl_event *)
+{
+    if (ble_gap_conn_active()) {
+        return;  // connecting to the desk; the retry starts scanning after, as it is
+    }
+    if (ble_gap_disc_active()) {
+        ble_gap_disc_cancel();
+    }
+    start_scanning();
+}
+
 void on_sync()
 {
-    proxy::set_rescan(start_scanning);
-    start_scanning();
     static bool armed = false;
     if (!armed) {
         armed = true;
         ble_npl_callout_init(&s_retry, nimble_port_get_dflt_eventq(), retry, nullptr);
+        ble_npl_event_init(&s_rescan, rescan, nullptr);
     }
+    proxy::set_rescan(start_scanning);
+    start_scanning();
     ble_npl_callout_reset(&s_retry, ble_npl_time_ms_to_ticks32(RETRY_MS));
 }
 
@@ -295,6 +315,14 @@ void host_task(void *)
 }
 
 }  // namespace
+
+void set_dark(bool dark)
+{
+    const std::uint16_t wanted = dark ? DARK_INTERVAL_MS : SCAN_INTERVAL_MS;
+    if (s_interval_ms.exchange(wanted) != wanted && s_ready.load(std::memory_order_relaxed)) {
+        ble_npl_eventq_put(nimble_port_get_dflt_eventq(), &s_rescan);
+    }
+}
 
 esp_err_t start()
 {
