@@ -1,4 +1,5 @@
 #include "power.h"
+#include "power_gauge.h"
 
 #include "bsp/esp-bsp.h"
 #include "driver/i2c_master.h"
@@ -63,14 +64,6 @@ constexpr float CALIBRATION_SCALE = 0.00512f;  // the datasheet's constant
 constexpr float BUS_VOLTAGE_LSB   = 0.00125f;
 constexpr float SHUNT_LSB_MV      = 0.0025f;
 
-struct CellPoint {
-    float volts;
-    int   percent;
-};
-constexpr std::array<CellPoint, 11> CELL_CURVE{{
-    {4.115f, 100}, {4.05f, 90}, {3.98f, 80}, {3.89f, 70}, {3.79f, 60}, {3.70f, 45},
-    {3.60f, 30},   {3.50f, 15}, {3.40f, 7},  {3.20f, 2},  {3.00f, 0},
-}};
 constexpr int CELLS_IN_SERIES = 2;
 
 constexpr float      PACK_MIN_VOLTS = 6.0f;
@@ -84,7 +77,9 @@ constexpr float FULL_TAPER_A = 0.06f;
 
 constexpr float PACK_RESISTANCE_OHMS = 0.24f;
 
-constexpr float PERCENT_TAU_S = 30.0f;
+// A count saved before a restart is taken up again if the voltage roughly
+// agrees; otherwise the pack was charged or used meanwhile, and the voltage is.
+constexpr float SAVED_AGREES = 0.20f;
 
 constexpr float CURRENT_DEADBAND_A = 0.01f;
 
@@ -103,9 +98,9 @@ bool         s_have_last = false;
 SemaphoreHandle_t s_read_lock = nullptr;
 StaticSemaphore_t s_read_lock_ctrl;
 
-float        s_percent  = 0.0f;
-bool         s_smoothed = false;
-std::int64_t s_percent_us = 0;
+Gauge        s_gauge;
+std::int64_t s_stepped_us = 0;
+int          s_saved_mah  = -1;  // as kept across the restart, -1 for none
 
 std::atomic<bool> s_pack_present{false};
 
@@ -131,24 +126,6 @@ bool pack_voltage(float volts)
     return volts >= PACK_MIN_VOLTS && volts <= PACK_MAX_VOLTS;
 }
 
-int percent_for(float pack_volts)
-{
-    const float cell = pack_volts / CELLS_IN_SERIES;
-    if (cell >= CELL_CURVE.front().volts) {
-        return CELL_CURVE.front().percent;
-    }
-    for (std::size_t i = 1; i < CELL_CURVE.size(); ++i) {
-        const CellPoint &hi = CELL_CURVE[i - 1];
-        const CellPoint &lo = CELL_CURVE[i];
-        if (cell >= lo.volts) {
-            const float span = hi.volts - lo.volts;
-            const float frac = span > 0.0f ? (cell - lo.volts) / span : 0.0f;
-            return lo.percent + static_cast<int>(std::lround(frac * (hi.percent - lo.percent)));
-        }
-    }
-    return CELL_CURVE.back().percent;
-}
-
 struct Raw {
     std::uint16_t bus     = 0;
     std::uint16_t current = 0;
@@ -163,22 +140,23 @@ esp_err_t read_raw(Raw &raw)
     return ESP_OK;
 }
 
-int smoothed_percent(bool present, int measured)
+int gauge_percent(const State &state, float cell_volts)
 {
-    const std::int64_t now = esp_timer_get_time();
-    if (!present) {
-        s_smoothed = false;
-    } else if (!s_smoothed) {
-        s_percent  = static_cast<float>(measured);
-        s_smoothed = true;
+    const float        by_volts = fraction_at(cell_volts);
+    const std::int64_t now      = esp_timer_get_time();
+    if (!s_gauge.known) {
+        const float saved = static_cast<float>(s_saved_mah) / kCapacityMah;
+        start(s_gauge, s_saved_mah >= 0 && std::fabs(saved - by_volts) <= SAVED_AGREES ? saved : by_volts);
+        s_saved_mah = -1;
     } else {
-        const float elapsed =
-            static_cast<float>(now - s_percent_us) / static_cast<float>(units::kUsPerSecond);
-        s_percent += (static_cast<float>(measured) - s_percent) *
-                     (1.0f - std::exp(-elapsed / PERCENT_TAU_S));
+        const float seconds = static_cast<float>(now - s_stepped_us) / static_cast<float>(units::kUsPerSecond);
+        step(s_gauge, state.current_amps, seconds, by_volts);
     }
-    s_percent_us = now;
-    return present ? static_cast<int>(std::lround(s_percent)) : 0;
+    if (state.full) {
+        full(s_gauge);
+    }
+    s_stepped_us = now;
+    return percent(s_gauge);
 }
 
 void remember(const State &state)
@@ -207,14 +185,26 @@ esp_err_t read_locked(State &out)
                        out.current_amps > -FULL_TAPER_A;
 
     const float open_circuit = out.bus_volts + out.current_amps * PACK_RESISTANCE_OHMS;
-    const int   measured     = out.present ? percent_for(open_circuit) : 0;
-    out.percent              = smoothed_percent(out.present, measured);
+    out.percent              = out.present ? gauge_percent(out, open_circuit / CELLS_IN_SERIES) : 0;
+    if (!out.present) {
+        s_gauge.known = false;
+    }
 
     remember(out);
     return ESP_OK;
 }
 
 }  // namespace
+
+void restore_charge(int mah)
+{
+    s_saved_mah = mah;
+}
+
+int charge_mah()
+{
+    return s_gauge.known ? static_cast<int>(std::lround(s_gauge.charge_mah)) : -1;
+}
 
 esp_err_t init()
 {

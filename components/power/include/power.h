@@ -7,12 +7,18 @@ struct State {
     bool  present;
     float bus_volts;
     float current_amps;  // positive on discharge, negative on charge
-    int   percent;       // approximate, and meaningless unless present
+    int   percent;       // counted from the current, see power_gauge.h; 0 unless present
     float shunt_millivolts;
     bool  charging;
     bool  on_battery;
     bool  full;          // at the top of its range and taking nothing more
 };
+
+/** The charge kept across a restart, from charge_mah(); before init(). -1 for none. */
+void restore_charge(int mah);
+
+/** The charge counted, in mAh, to keep across a restart; -1 until it is known. */
+int charge_mah();
 
 /** Requires bsp_i2c_init() first. */
 esp_err_t init();

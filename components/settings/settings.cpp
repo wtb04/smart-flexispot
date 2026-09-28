@@ -52,6 +52,7 @@ constexpr Spec SPECS[] = {
     {"focus_left", 0, 0, MAX_PART_MS},
     {"focus_length", 0, 0, MAX_PART_MS},
     {"focus_ends", 0, 0, MAX_EPOCH_S},
+    {"battery_mah", -1, -1, 1900},
 };
 constexpr int COUNT = static_cast<int>(Key::Count);
 static_assert(std::size(SPECS) == COUNT, "every key needs a spec");

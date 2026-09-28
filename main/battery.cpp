@@ -16,7 +16,10 @@ namespace battery {
 namespace {
 constexpr char TAG[] = "battery";
 
-constexpr TickType_t POLL_INTERVAL = pdMS_TO_TICKS(30 * units::kMsPerSecond);
+// Each reading adds its current to the charge counted, so they come often; the
+// rest, the charger and what the screen shows, only every CHECK_EVERY of them.
+constexpr TickType_t POLL_INTERVAL = pdMS_TO_TICKS(units::kMsPerSecond);
+constexpr int        CHECK_EVERY   = 30;
 
 constexpr float RESUME_VOLTS = 8.00f;
 
@@ -77,11 +80,18 @@ void steer_charger(const power::State &state, bool &topped_off)
     bool was_present = false;
     int  logged      = NEVER_LOGGED_PERCENT;
 
-    for (;;) {
-        power::reassert_charging();
-
+    int kept_percent = -1;
+    for (int pass = 0;; ++pass) {
         power::State state{};
-        if (power::read(state) == ESP_OK) {
+        const bool   read  = power::read(state) == ESP_OK;
+        // Woken early by refresh(), or at the turn of a round: the rest too.
+        const bool   check = pass % CHECK_EVERY == 0;
+        if (read && state.percent != kept_percent) {
+            kept_percent = state.percent;
+            settings::set(settings::Key::BatteryCharge, power::charge_mah());
+        }
+        if (read && check) {
+            power::reassert_charging();
             bool present = false;
             ESP_ERROR_CHECK_WITHOUT_ABORT(power::probe_pack(present));
             log_if_changed(state, present, was_present, logged);
@@ -89,7 +99,9 @@ void steer_charger(const power::State &state, bool &topped_off)
                 ui::set_battery(state.present, state.percent, state.charging));
             steer_charger(state, topped_off);
         }
-        ulTaskNotifyTake(pdTRUE, POLL_INTERVAL);
+        if (ulTaskNotifyTake(pdTRUE, POLL_INTERVAL) != 0) {
+            pass = -1;  // refresh(): check on the next pass
+        }
     }
 }
 
@@ -97,6 +109,7 @@ void steer_charger(const power::State &state, bool &topped_off)
 
 esp_err_t start()
 {
+    power::restore_charge(settings::get(settings::Key::BatteryCharge));
     ESP_RETURN_ON_ERROR(power::init(), TAG, "power monitor");
 
     // The task switches the charger on or off in its first pass, once it has
