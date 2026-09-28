@@ -275,15 +275,15 @@ std::uint32_t objects_under(lv_obj_t *obj)
             lvgl_port_unlock();
         }
         const auto kib = [](std::size_t bytes) { return static_cast<unsigned>(bytes / units::kBytesPerKiB); };
-        ESP_LOGI(TAG,
-                 "stats: internal %u KB free, largest %u, low %u; dma %u KB, largest %u; psram %u KB, "
-                 "largest %u; %u objects, %u timers, %u tasks; %u frames, slowest %d ms",
+        // Two lines, as the log keeps only so much of each.
+        ESP_LOGI(TAG, "heap: int %u/%u/%u dma %u/%u psram %u/%u KB",
                  kib(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
                  kib(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)),
                  kib(heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL)),
                  kib(heap_caps_get_free_size(MALLOC_CAP_DMA)), kib(heap_caps_get_largest_free_block(MALLOC_CAP_DMA)),
                  kib(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
-                 kib(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)), static_cast<unsigned>(objects),
+                 kib(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)));
+        ESP_LOGI(TAG, "lvgl: %u obj %u timers %u tasks, %u frames, slowest %d ms", static_cast<unsigned>(objects),
                  static_cast<unsigned>(timers), static_cast<unsigned>(uxTaskGetNumberOfTasks()),
                  static_cast<unsigned>(s_frames.exchange(0)),
                  static_cast<int>(s_slowest_us.exchange(0) / units::kUsPerMs));
