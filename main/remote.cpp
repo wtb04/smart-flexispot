@@ -2,6 +2,8 @@
 
 #include "esp_check.h"
 #include "esp_heap_caps.h"
+#include "esp_lvgl_port.h"
+#include "esp_timer.h"
 #include "esp_http_server.h"
 #include "esp_private/freertos_debug.h"
 #include "freertos/FreeRTOS.h"
@@ -13,6 +15,7 @@
 #include "units.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 
@@ -224,6 +227,79 @@ esp_err_t screen_page(httpd_req_t *req)
     heap_caps_free(pixels);
     return err == ESP_OK ? httpd_resp_send_chunk(req, nullptr, 0) : err;
 }
+// Every half minute, in the log: what could run down or pile up over a long
+// run, the heaps, the screen's objects and the slowest frame since the last
+// line, to see which of them a panel gone slow has run out of.
+constexpr std::uint32_t STATS_EVERY_MS  = 30 * units::kMsPerSecond;
+constexpr std::uint32_t STATS_LOCK_MS   = 1000;
+constexpr std::uint32_t STATS_STACK     = 4096;
+constexpr UBaseType_t   STATS_PRIORITY  = 1;
+
+std::atomic<std::int64_t> s_frame_began{0};
+std::atomic<std::int64_t> s_slowest_us{0};
+std::atomic<std::uint32_t> s_frames{0};
+
+void frame_timed(lv_event_t *event)
+{
+    const std::int64_t now = esp_timer_get_time();
+    if (lv_event_get_code(event) == LV_EVENT_REFR_START) {
+        s_frame_began = now;
+        return;
+    }
+    const std::int64_t took = now - s_frame_began.load();
+    if (took > s_slowest_us.load()) {
+        s_slowest_us = took;
+    }
+    ++s_frames;
+}
+
+std::uint32_t objects_under(lv_obj_t *obj)
+{
+    std::uint32_t count = 1;
+    for (std::uint32_t i = 0; i < lv_obj_get_child_count(obj); ++i) {
+        count += objects_under(lv_obj_get_child(obj, i));
+    }
+    return count;
+}
+
+[[noreturn]] void stats_task(void *)
+{
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(STATS_EVERY_MS));
+        std::uint32_t objects = 0, timers = 0;
+        if (lvgl_port_lock(STATS_LOCK_MS)) {
+            objects = objects_under(lv_screen_active()) + objects_under(lv_layer_top());
+            for (lv_timer_t *timer = lv_timer_get_next(nullptr); timer != nullptr; timer = lv_timer_get_next(timer)) {
+                ++timers;
+            }
+            lvgl_port_unlock();
+        }
+        const auto kib = [](std::size_t bytes) { return static_cast<unsigned>(bytes / units::kBytesPerKiB); };
+        ESP_LOGI(TAG,
+                 "stats: internal %u KB free, largest %u, low %u; dma %u KB, largest %u; psram %u KB, "
+                 "largest %u; %u objects, %u timers, %u tasks; %u frames, slowest %d ms",
+                 kib(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
+                 kib(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)),
+                 kib(heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL)),
+                 kib(heap_caps_get_free_size(MALLOC_CAP_DMA)), kib(heap_caps_get_largest_free_block(MALLOC_CAP_DMA)),
+                 kib(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
+                 kib(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)), static_cast<unsigned>(objects),
+                 static_cast<unsigned>(timers), static_cast<unsigned>(uxTaskGetNumberOfTasks()),
+                 static_cast<unsigned>(s_frames.exchange(0)),
+                 static_cast<int>(s_slowest_us.exchange(0) / units::kUsPerMs));
+    }
+}
+
+void start_stats()
+{
+    if (lvgl_port_lock(STATS_LOCK_MS)) {
+        lv_display_t *display = lv_display_get_default();
+        lv_display_add_event_cb(display, frame_timed, LV_EVENT_REFR_START, nullptr);
+        lv_display_add_event_cb(display, frame_timed, LV_EVENT_REFR_READY, nullptr);
+        lvgl_port_unlock();
+    }
+    xTaskCreate(stats_task, "stats", STATS_STACK, nullptr, STATS_PRIORITY, nullptr);
+}
 }  // namespace
 
 esp_err_t start()
@@ -231,6 +307,7 @@ esp_err_t start()
     if (!REMOTE_ENABLED) {
         return ESP_OK;
     }
+    start_stats();
     httpd_handle_t server = ota::server();
     ESP_RETURN_ON_FALSE(server != nullptr, ESP_ERR_INVALID_STATE, TAG, "no server");
     const httpd_uri_t pages[] = {
