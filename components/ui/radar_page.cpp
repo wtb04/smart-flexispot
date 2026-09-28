@@ -212,6 +212,18 @@ lv_obj_t *s_zoom_in     = nullptr;
 lv_obj_t *s_zoom_out    = nullptr;
 int       s_range_step  = INITIAL_RANGE_STEP;
 
+// The page's two cards, the scope's and the column beside it, which the
+// fullscreen view takes over the whole screen and gives back.
+lv_obj_t    *s_page      = nullptr;
+std::int32_t s_page_w    = 0;
+std::int32_t s_page_h    = 0;
+lv_obj_t    *s_bezel     = nullptr;
+lv_obj_t    *s_column    = nullptr;
+lv_obj_t    *s_full      = nullptr;  // over the whole screen while it is up
+lv_obj_t    *s_full_chip = nullptr;  // into it, and out again
+lv_obj_t    *s_full_mark = nullptr;
+lv_obj_t    *s_screw     = nullptr;
+
 lv_obj_t     *s_water_canvas = nullptr;
 lv_obj_t     *s_land_canvas  = nullptr;
 std::uint8_t *s_water_mask   = nullptr;
@@ -905,24 +917,40 @@ void range_clicked(lv_event_t *event)
     apply_range(from);
 }
 
-// Round chips in the top corners, the same as the heating card's: a dot of the
-// darker surface on the lighter card is what makes it read as something to
+// Round chips in the card's corners, the same as the heating card's: a dot of
+// the darker surface on the lighter card is what makes it read as something to
 // press. The hit area reaches past the dot, so a finger does not have to find it.
-lv_obj_t *zoom_chip(lv_obj_t *bezel, std::int32_t x, const lv_image_dsc_t *mark, int step)
+lv_obj_t *zoom_chip(lv_obj_t *bezel, const lv_image_dsc_t *mark, int step)
 {
     lv_obj_t *chip = theme::make_chip(bezel, "");
     theme::make_mark(chip, mark);
-    lv_obj_set_pos(chip, x, EDGE);
     lv_obj_set_ext_click_area(chip, (CORNER - ZOOM_D) / 2);
     lv_obj_add_event_cb(chip, range_clicked, LV_EVENT_PRESSED,
                         reinterpret_cast<void *>(static_cast<std::intptr_t>(step)));
     return chip;
 }
 
-void build_zoom(lv_obj_t *bezel, std::int32_t side)
+void full_clicked(lv_event_t *);
+
+// Zoom along the bottom, where the thumbs rest; fullscreen at the top right,
+// as the focus dial and the cinema card have it; a screw in the last corner.
+void build_corners(lv_obj_t *bezel)
 {
-    s_zoom_out = zoom_chip(bezel, EDGE, &icons::minus_icon, 1);
-    s_zoom_in  = zoom_chip(bezel, side - ZOOM_D - EDGE, &icons::plus_icon, -1);
+    s_zoom_out  = zoom_chip(bezel, &icons::minus_icon, 1);
+    s_zoom_in   = zoom_chip(bezel, &icons::plus_icon, -1);
+    s_screw     = theme::make_screw(bezel, ZOOM_D);
+    s_full_chip = theme::make_chip(bezel, "");
+    s_full_mark = theme::make_mark(s_full_chip, &icons::expand_icon);
+    lv_obj_set_ext_click_area(s_full_chip, (CORNER - ZOOM_D) / 2);
+    lv_obj_add_event_cb(s_full_chip, full_clicked, LV_EVENT_CLICKED, nullptr);
+}
+
+void place_corners(std::int32_t w, std::int32_t h)
+{
+    lv_obj_set_pos(s_screw, EDGE, EDGE);
+    lv_obj_set_pos(s_full_chip, w - ZOOM_D - EDGE, EDGE);
+    lv_obj_set_pos(s_zoom_out, EDGE, h - ZOOM_D - EDGE);
+    lv_obj_set_pos(s_zoom_in, w - ZOOM_D - EDGE, h - ZOOM_D - EDGE);
 }
 
 lv_obj_t *mask_canvas(lv_obj_t *parent, std::uint8_t *mask, std::uint32_t ink)
@@ -1134,19 +1162,26 @@ void build_identity(lv_obj_t *card)
     quiet(s_nearby);
 }
 
-void build_readings(lv_obj_t *card, std::int32_t height)
+// Along the column's foot, wherever that is.
+void place_readings_at(std::int32_t height)
 {
     const std::int32_t name_y  = height - 2 * INSET - theme::type_label()->line_height;
     const std::int32_t value_y = name_y - theme::type_value()->line_height;
+    for (const Row &row : s_rows) {
+        lv_obj_set_y(row.value, value_y);
+        lv_obj_set_y(row.name, name_y);
+    }
+}
+
+void build_readings(lv_obj_t *card, std::int32_t height)
+{
     for (int i = 0; i < READINGS; ++i) {
         s_rows[i].value = theme::make_label(card, NO_READING, theme::text, theme::type_value());
-        lv_obj_set_y(s_rows[i].value, value_y);
         quiet(s_rows[i].value);
-
         s_rows[i].name = theme::make_label(card, "", theme::secondary, theme::type_label());
-        lv_obj_set_y(s_rows[i].name, name_y);
         quiet(s_rows[i].name);
     }
+    place_readings_at(height);
 }
 
 void build_column(lv_obj_t *parent, std::int32_t x, std::int32_t height)
@@ -1156,6 +1191,7 @@ void build_column(lv_obj_t *parent, std::int32_t x, std::int32_t height)
     lv_obj_set_size(card, COLUMN_W, height);
     lv_obj_set_style_pad_all(card, INSET, 0);
     quiet(card);
+    s_column = card;
 
     build_photo(card);
     build_spinner(card);
@@ -1821,6 +1857,97 @@ const radar::Aircraft *draw_traffic(const bool *named)
     return chosen;
 }
 
+// Everything in the scope is laid out for one size of disc, so a view of
+// another size builds it again, and draws the map again to fit.
+void build_scope_for(std::int32_t disc, std::int32_t area_w, std::int32_t area_h)
+{
+    if (s_scope != nullptr) {
+        lv_anim_delete(s_scope, nullptr);  // a zoom under way ends where it was going
+        lv_obj_delete(s_scope);
+        for (void *buffer : {static_cast<void *>(s_water_mask), static_cast<void *>(s_land_mask),
+                             static_cast<void *>(s_air_mask), static_cast<void *>(s_map_points)}) {
+            heap_caps_free(buffer);
+        }
+        s_water_mask = s_land_mask = s_air_mask = nullptr;
+        s_map_points                            = nullptr;
+        s_water_canvas = s_land_canvas = s_air_canvas = nullptr;
+    }
+    s_shown_range = static_cast<float>(RANGES[s_range_step]);
+    build_scope(s_bezel, disc, RANGES[s_range_step]);
+    lv_obj_move_to_index(s_scope, 0);  // under the corners and the summary
+    lv_obj_set_pos(s_scope, (area_w - disc) / 2, (area_h - disc) / 2);
+    build_key(s_scope);
+    if (map_located()) {
+        draw_map(s_map_lat, s_map_lon, RANGES[s_range_step]);
+    }
+}
+
+// The scope's card and the column beside it in `parent`, at x, y. Fullscreen
+// there are no cards: the scope stands on the background at the screen's full
+// height, as the focus dial and cinema do, and the column beside it.
+void lay_out(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int32_t width, std::int32_t height,
+             bool full)
+{
+    const std::int32_t area_w = width - COLUMN_W - COLUMN_GAP;
+    const lv_opa_t     cards  = full ? LV_OPA_TRANSP : LV_OPA_COVER;
+    lv_obj_set_parent(s_bezel, parent);
+    lv_obj_set_pos(s_bezel, x, y);
+    lv_obj_set_size(s_bezel, area_w, height);
+    lv_obj_set_style_bg_opa(s_bezel, cards, 0);
+    build_scope_for(full ? height : std::min(area_w, height) - 2 * BEZEL, area_w, height);
+    place_corners(area_w, height);
+    lv_obj_set_hidden(s_screw, full);
+    lv_obj_align(s_summary, LV_ALIGN_BOTTOM_RIGHT, -(EDGE + ZOOM_D + theme::space::s),
+                 -(EDGE + (ZOOM_D - marking_font()->line_height) / 2));
+
+    const std::int32_t column_y = full ? detail::GAP : y;
+    const std::int32_t column_h = full ? height - 2 * detail::GAP : height;
+    lv_obj_set_parent(s_column, parent);
+    lv_obj_set_pos(s_column, x + area_w + COLUMN_GAP, column_y);
+    lv_obj_set_size(s_column, COLUMN_W, column_h);
+    lv_obj_set_style_bg_opa(s_column, cards, 0);
+    place_readings_at(column_h);
+    show_radar(*s_last);
+}
+
+bool full_open()
+{
+    return s_full != nullptr && !lv_obj_is_hidden(s_full);
+}
+
+// Over the whole screen, the rail and the tabs under it, the scope as large as
+// the screen is high.
+void open_full()
+{
+    const detail::Layout l = detail::layout();
+    if (s_full == nullptr) {
+        s_full = lv_obj_create(lv_screen_active());
+        lv_obj_set_pos(s_full, 0, 0);
+        lv_obj_set_size(s_full, l.screen_w, l.screen_h);
+        theme::style_panel(s_full, theme::background, 0);
+        lv_obj_set_scrollable(s_full, false);  // clickable, so nothing under it is
+    }
+    lv_obj_set_hidden(s_full, false);
+    lv_obj_move_foreground(s_full);
+    lay_out(s_full, 0, 0, l.screen_w - detail::GAP, l.screen_h, true);
+    lv_image_set_src(s_full_mark, &icons::collapse_icon);
+}
+
+void close_full()
+{
+    lay_out(s_page, 0, 0, s_page_w, s_page_h, false);
+    lv_obj_set_hidden(s_full, true);
+    lv_image_set_src(s_full_mark, &icons::expand_icon);
+}
+
+void full_clicked(lv_event_t *)
+{
+    if (full_open()) {
+        close_full();
+    } else {
+        open_full();
+    }
+}
 }  // namespace
 
 void build_radar_page(lv_obj_t *page, std::int32_t width, std::int32_t height)
@@ -1833,35 +1960,24 @@ void build_radar_page(lv_obj_t *page, std::int32_t width, std::int32_t height)
     }
     s_last->age_s = -1;  // nothing read yet, rather than a reading that failed
 
-    const std::int32_t card_w = width - COLUMN_W - COLUMN_GAP;
-    const std::int32_t side   = std::min(card_w, height);
-    const std::int32_t disc   = side - 2 * BEZEL;
+    s_page        = page;
+    s_page_w      = width;
+    s_page_h      = height;
     s_shown_range = static_cast<float>(RANGES[s_range_step]);
-    lv_obj_t *bezel = theme::make_card(page);
-    lv_obj_set_pos(bezel, 0, 0);
-    lv_obj_set_size(bezel, card_w, height);
-    lv_obj_set_style_pad_all(bezel, 0, 0);
-    quiet(bezel);
+    s_bezel       = theme::make_card(page);
+    lv_obj_set_style_pad_all(s_bezel, 0, 0);
+    quiet(s_bezel);
+    build_corners(s_bezel);
 
-    build_scope(bezel, disc, RANGES[s_range_step]);
-    lv_obj_set_pos(s_scope, (card_w - disc) / 2, (height - disc) / 2);
-    build_key(s_scope);
-    build_zoom(bezel, card_w);
-    lv_obj_set_pos(theme::make_screw(bezel, ZOOM_D), EDGE, height - ZOOM_D - EDGE);
-    lv_obj_set_pos(theme::make_screw(bezel, ZOOM_D), card_w - ZOOM_D - EDGE,
-                   height - ZOOM_D - EDGE);
-
-    s_summary = theme::make_label(bezel, "", theme::amber, marking_font());
+    s_summary = theme::make_label(s_bezel, "", theme::amber, marking_font());
     lv_obj_set_width(s_summary, SUMMARY_W);
     lv_obj_set_style_text_align(s_summary, LV_TEXT_ALIGN_RIGHT, 0);
     lv_label_set_long_mode(s_summary, LV_LABEL_LONG_MODE_DOTS);
     lv_obj_set_height(s_summary, marking_font()->line_height);
-    lv_obj_align(s_summary, LV_ALIGN_BOTTOM_RIGHT, -(EDGE + ZOOM_D + theme::space::s),
-                 -(EDGE + (ZOOM_D - marking_font()->line_height) / 2));
     quiet(s_summary);
     paint_range_buttons();
-    build_column(page, card_w + COLUMN_GAP, height);
-    show_radar(*s_last);
+    build_column(page, 0, height);
+    lay_out(page, 0, 0, width, height, false);
 }
 
 // Keeps what was on show: asking again only blanked the photograph while it
@@ -1920,6 +2036,9 @@ void refresh_radar()
     }
     if (detail::s_page != detail::RADAR_PAGE) {
         s_radar_stale = true;
+        if (full_open()) {
+            close_full();
+        }
         return;
     }
     s_radar_stale = false;
