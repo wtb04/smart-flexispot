@@ -6,7 +6,7 @@
 // it has gone far enough from the last, the oldest dropped once there are
 // kTrailPoints. Pure, so the host tests can run it.
 namespace radar {
-inline constexpr int kTrailPoints = 64;
+inline constexpr int kTrailPoints = 128;
 
 struct TrailPoint {
     float lat;

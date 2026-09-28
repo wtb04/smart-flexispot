@@ -60,7 +60,7 @@ constexpr TickType_t   HOME_SETTLE_CHECK    = pdMS_TO_TICKS(units::kMsPerSecond)
 // Enough for everything the feed has at its busiest, and some that have just
 // left; one not heard of this long is forgotten, and its trail with it.
 constexpr int          TRAIL_SLOTS    = 768;
-constexpr float        TRAIL_STEP_KM  = 1.5f;
+constexpr float        TRAIL_STEP_KM  = 2.0f;  // with the points kept, 256 km: past the edge fullscreen
 constexpr std::int64_t TRAIL_FORGET_US = 15 * units::kUsPerMinute;
 
 constexpr std::int64_t POLL_ACTIVE_US = 5 * units::kUsPerSecond;
