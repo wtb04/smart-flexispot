@@ -1831,6 +1831,7 @@ void build_radar_page(lv_obj_t *page, std::int32_t width, std::int32_t height)
     if (s_last == nullptr || s_blips == nullptr || s_plots == nullptr) {
         return;
     }
+    s_last->age_s = -1;  // nothing read yet, rather than a reading that failed
 
     const std::int32_t card_w = width - COLUMN_W - COLUMN_GAP;
     const std::int32_t side   = std::min(card_w, height);
