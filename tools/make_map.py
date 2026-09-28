@@ -6,7 +6,7 @@ Assistant says home is, so the data has to cover a region rather than a point:
 nothing here knows the panel's own position, and nothing here should.
 
     tools/make_map.py --out components/radar/map_data.h \
-        --box 49.5 2.0 54.5 9.0 --tolerance 150
+        --box 48.5 0.5 56.0 13.0
 """
 import argparse
 import json
