@@ -8,14 +8,13 @@
 #ifndef ICAL_WORK_URL
 #define ICAL_WORK_URL ""
 #endif
-#include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
-#include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "net.h"
 #include "units.h"
 #include "wifi.h"
 
@@ -76,8 +75,6 @@ constexpr TickType_t NOT_READY_WAIT = pdMS_TO_TICKS(2 * units::kMsPerSecond);
 
 constexpr std::size_t URL_SIZE         = 256;
 constexpr int         HTTP_TIMEOUT_MS  = 15 * units::kMsPerSecond;
-constexpr int         HTTP_BUFFER_SIZE = 2 * units::kBytesPerKiB;
-constexpr int         HTTP_OK          = 200;
 
 constexpr std::uint32_t TASK_STACK    = 6144;
 constexpr UBaseType_t   TASK_PRIORITY = 3;
@@ -100,21 +97,6 @@ Event *s_scratch  = nullptr;
 Event *s_building = nullptr;
 
 UpdateHandler s_on_update = nullptr;
-
-esp_err_t on_event(esp_http_client_event_t *event)
-{
-    if (event->event_id != HTTP_EVENT_ON_DATA || s_body == nullptr) {
-        return ESP_OK;
-    }
-    const auto room = BODY_MAX - 1 - s_body_len;
-    const auto take = static_cast<std::size_t>(event->data_len) < room
-                          ? static_cast<std::size_t>(event->data_len)
-                          : room;
-    std::memcpy(s_body + s_body_len, event->data, take);
-    s_body_len += take;
-    s_body[s_body_len] = '\0';
-    return ESP_OK;
-}
 
 int keep_only(Event *events, int count, const char *prefix)
 {
@@ -140,27 +122,23 @@ int fetch_feed(int index)
         std::snprintf(url, sizeof(url), "%s/%s", HOST, feed.name);
     }
 
-    esp_http_client_config_t cfg{};
-    cfg.url               = url;
-    cfg.event_handler     = on_event;
-    cfg.timeout_ms        = HTTP_TIMEOUT_MS;
-    cfg.buffer_size       = HTTP_BUFFER_SIZE;
-    cfg.crt_bundle_attach = esp_crt_bundle_attach;
+    // Tried again on its own schedule here, so net only keeps the connection.
+    net::HostConfig host;
+    host.timeout_ms  = HTTP_TIMEOUT_MS;
+    host.connections = 1;
+    host.idle_ms     = units::kMsPerMinute;
+    host.rest        = net::Rest{3, units::kMsPerMinute, units::kMsPerMinute};
 
-    esp_http_client_handle_t client = esp_http_client_init(&cfg);
-    if (client == nullptr) {
-        return -1;
-    }
-
-    s_body_len             = 0;
-    s_body[0]              = '\0';
-    const esp_err_t err    = esp_http_client_perform(client);
-    const int       status = err == ESP_OK ? esp_http_client_get_status_code(client) : 0;
-    esp_http_client_cleanup(client);
-
-    if (status != HTTP_OK) {
-        ESP_LOGW(TAG, "%s: %s", feed.name,
-                 err == ESP_OK ? "refused" : esp_err_to_name(err));
+    net::Request request;
+    request.host     = net::host_for(url, host);
+    request.path     = url;
+    request.priority = net::Priority::Now;
+    request.max_body = BODY_MAX - 1;
+    request.what     = feed.name;
+    const net::Fetched got = net::fetch(std::move(request), s_body, BODY_MAX);
+    s_body_len             = got.length;
+    if (!got.ok()) {
+        ESP_LOGW(TAG, "%s: %s", feed.name, got.outcome == net::Outcome::Answered ? "refused" : "not answered");
         return -1;
     }
     const int count =

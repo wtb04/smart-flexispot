@@ -1,8 +1,6 @@
 #include "media.h"
 
 #include "esp_check.h"
-#include "esp_crt_bundle.h"
-#include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -10,6 +8,7 @@
 #include "freertos/task.h"
 #include "esp_heap_caps.h"
 #include "jpeg.h"
+#include "net.h"
 #include "units.h"
 
 #include <algorithm>
@@ -20,9 +19,7 @@ namespace media {
 namespace {
 constexpr char TAG[] = "media";
 
-constexpr int HTTP_TIMEOUT_MS  = 8 * units::kMsPerSecond;
-constexpr int HTTP_BUFFER_SIZE = 2 * units::kBytesPerKiB;
-constexpr int HTTP_OK          = 200;
+constexpr int HTTP_TIMEOUT_MS = 8 * units::kMsPerSecond;
 
 constexpr std::size_t PATH_SIZE   = 320;
 constexpr std::size_t ORIGIN_SIZE = 96;
@@ -97,40 +94,37 @@ void copy_path(char *dest, const char *path)
     dest[PATH_SIZE - 1] = '\0';
 }
 
+// Covers come from Home Assistant, from Jellyfin and from wherever a
+// favourite's is kept: each origin a host of its own in net, found the first
+// time it is asked for.
+net::HostConfig cover_host()
+{
+    net::HostConfig config;
+    config.timeout_ms  = HTTP_TIMEOUT_MS;
+    config.connections = 1;
+    config.idle_ms     = units::kMsPerMinute;
+    config.retry       = net::Retry{1, 500, 200, false};
+    config.rest        = net::Rest{3, 30 * units::kMsPerSecond, units::kMsPerMinute};
+    return config;
+}
+
 std::size_t download(const char *url)
 {
-    esp_http_client_config_t cfg{};
-    cfg.url                   = url;
-    cfg.crt_bundle_attach     = esp_crt_bundle_attach;
-    cfg.timeout_ms            = HTTP_TIMEOUT_MS;
-    cfg.buffer_size           = HTTP_BUFFER_SIZE;
-    cfg.disable_auto_redirect = false;
-
-    esp_http_client_handle_t client = esp_http_client_init(&cfg);
-    if (client == nullptr) {
+    net::Request request;
+    request.host     = net::host_for(url, cover_host());
+    request.path     = url;
+    request.priority = net::Priority::Now;
+    request.key      = url;
+    request.dedupe   = net::Dedupe::Join;
+    request.max_body = jpeg::kMaxInput - 1;  // and the end of text fetch() puts after it
+    request.what     = "cover";
+    const net::Fetched got = net::fetch(std::move(request), reinterpret_cast<char *>(s_body), jpeg::kMaxInput);
+    if (!got.ok() || got.truncated || got.length >= jpeg::kMaxInput - 1) {
+        ESP_LOGW(TAG, "cover %s, http %d%s", got.ok() ? "answered" : "not had", got.status,
+                 got.truncated ? ", too large" : "");
         return 0;
     }
-
-    std::size_t total = 0;
-    if (esp_http_client_open(client, 0) == ESP_OK) {
-        const int64_t length = esp_http_client_fetch_headers(client);
-        const int     status = esp_http_client_get_status_code(client);
-        if (status == HTTP_OK && length <= static_cast<int64_t>(jpeg::kMaxInput)) {
-            while (total < jpeg::kMaxInput) {
-                const int read = esp_http_client_read(client, reinterpret_cast<char *>(s_body + total),
-                                                      static_cast<int>(jpeg::kMaxInput - total));
-                if (read <= 0) {
-                    break;
-                }
-                total += static_cast<std::size_t>(read);
-            }
-        } else {
-            ESP_LOGW(TAG, "cover http %d, %lld bytes", status, static_cast<long long>(length));
-        }
-    }
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
-    return total;
+    return got.length;
 }
 
 /** Where a decoded cover goes, and how big. */

@@ -1,14 +1,13 @@
 #include "travel.h"
 
 #include "esp_check.h"
-#include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
-#include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "net.h"
 #include "travel_secrets.h"
 #include "units.h"
 #include "wifi.h"
@@ -21,6 +20,7 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <string>
 
 namespace travel {
 namespace {
@@ -41,11 +41,6 @@ constexpr TickType_t CHECK_INTERVAL = pdMS_TO_TICKS(5 * units::kMsPerSecond);
 
 constexpr std::size_t URL_SIZE         = 176;
 constexpr int         HTTP_TIMEOUT_MS  = 15 * units::kMsPerSecond;
-constexpr int         HTTP_BUFFER_SIZE = units::kBytesPerKiB;
-constexpr int         HTTP_OK          = 200;
-
-constexpr char        HTTPS_PREFIX[]   = "https://";
-constexpr std::size_t HTTPS_PREFIX_LEN = sizeof(HTTPS_PREFIX) - 1;
 
 constexpr std::uint32_t TASK_STACK    = 5120;
 constexpr UBaseType_t   TASK_PRIORITY = 3;
@@ -73,37 +68,20 @@ std::int64_t              s_asked_at   = 0;
 
 UpdateHandler s_on_update = nullptr;
 
-esp_err_t on_event(esp_http_client_event_t *event)
-{
-    if (event->event_id != HTTP_EVENT_ON_DATA || s_body == nullptr) {
-        return ESP_OK;
-    }
-    const auto room = BODY_MAX - 1 - s_body_len;
-    const auto take = static_cast<std::size_t>(event->data_len) < room
-                          ? static_cast<std::size_t>(event->data_len)
-                          : room;
-    std::memcpy(s_body + s_body_len, event->data, take);
-    s_body_len += take;
-    s_body[s_body_len] = '\0';
-    return ESP_OK;
-}
+net::Host s_host = net::kNoHost;
 
-esp_http_client_handle_t open_client(const char *url)
+void add_host()
 {
-    esp_http_client_config_t cfg{};
-    cfg.url           = url;
-    cfg.event_handler = on_event;
-    cfg.timeout_ms    = HTTP_TIMEOUT_MS;
-    cfg.buffer_size   = HTTP_BUFFER_SIZE;
-    if (std::strncmp(TRAVEL_HOST, HTTPS_PREFIX, HTTPS_PREFIX_LEN) == 0) {
-        cfg.crt_bundle_attach = esp_crt_bundle_attach;
-    }
-
-    esp_http_client_handle_t client = esp_http_client_init(&cfg);
-    if (client != nullptr && TRAVEL_API_KEY[0] != '\0') {
-        esp_http_client_set_header(client, "X-Api-Key", TRAVEL_API_KEY);
-    }
-    return client;
+    static const std::string headers = std::string("X-Api-Key: ") + TRAVEL_API_KEY;
+    net::HostConfig config;
+    config.name        = "travel";
+    config.base        = TRAVEL_HOST;
+    config.headers     = TRAVEL_API_KEY[0] != '\0' ? headers.c_str() : "";
+    config.timeout_ms  = HTTP_TIMEOUT_MS;
+    config.connections = 1;
+    config.idle_ms     = units::kMsPerMinute;
+    config.retry       = net::Retry{1, units::kMsPerSecond, 200, false};
+    s_host             = net::add_host(config);
 }
 
 void set_ok(bool ok)
@@ -115,24 +93,23 @@ void set_ok(bool ok)
 
 bool fetch(std::int64_t arrive_by, Place place)
 {
-    char url[URL_SIZE];
-    std::snprintf(url, sizeof(url), "%s/v1/leave?arriveBy=%lld%s", TRAVEL_HOST,
-                  static_cast<long long>(arrive_by), place == Place::Work ? "&to=work" : "");
+    char path[URL_SIZE];
+    std::snprintf(path, sizeof(path), "/v1/leave?arriveBy=%lld%s", static_cast<long long>(arrive_by),
+                  place == Place::Work ? "&to=work" : "");
 
-    esp_http_client_handle_t client = open_client(url);
-    if (client == nullptr) {
-        return false;
-    }
-
-    s_body_len = 0;
-    s_body[0]  = '\0';
-    const std::int64_t began  = esp_timer_get_time();
-    const esp_err_t    err    = esp_http_client_perform(client);
-    const int          status = err == ESP_OK ? esp_http_client_get_status_code(client) : 0;
-    esp_http_client_cleanup(client);
-
-    if (status != HTTP_OK) {
-        ESP_LOGW(TAG, "%s", err == ESP_OK ? "refused" : esp_err_to_name(err));
+    net::Request request;
+    request.host     = s_host;
+    request.path     = path;
+    request.priority = net::Priority::Now;
+    request.key      = "leave";
+    request.dedupe   = net::Dedupe::Replace;
+    request.max_body = BODY_MAX - 1;
+    request.what     = "journey";
+    const std::int64_t began = esp_timer_get_time();
+    const net::Fetched got   = net::fetch(std::move(request), s_body, BODY_MAX);
+    s_body_len               = got.length;
+    if (!got.ok()) {
+        ESP_LOGW(TAG, "%s", got.outcome == net::Outcome::Answered ? "refused" : "not answered");
         set_ok(false);
         return false;
     }
@@ -193,6 +170,7 @@ esp_err_t start(UpdateHandler on_update)
                         ESP_ERR_NO_MEM, TAG, "buffers");
 
     s_on_update = on_update;
+    add_host();
     s_task = xTaskCreateStaticPinnedToCore(travel_task, "travel", TASK_STACK, nullptr,
                                            TASK_PRIORITY, s_task_stack, &s_task_ctrl, TASK_CORE);
     ESP_RETURN_ON_FALSE(s_task != nullptr, ESP_ERR_NO_MEM, TAG, "task");

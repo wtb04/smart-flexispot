@@ -6,9 +6,8 @@
 #include "ha_ws.h"
 #include "jellyfin.h"
 #include "media.h"
-#include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
-#include "esp_http_client.h"
+#include "net.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "picks.h"
@@ -64,7 +63,6 @@ constexpr TickType_t    PICKS_REFRESH     = pdMS_TO_TICKS(6 * units::kSecondsPer
 constexpr TickType_t    PICKS_RETRY       = pdMS_TO_TICKS(30 * units::kMsPerSecond);
 constexpr int           EMBED_TIMEOUT_MS  = 8 * units::kMsPerSecond;
 constexpr std::size_t   EMBED_MAX         = 8 * units::kBytesPerKiB;
-constexpr int           HTTP_OK           = 200;
 constexpr std::uint32_t PICKS_TASK_STACK  = 8192;  // TLS
 constexpr UBaseType_t   PICKS_TASK_PRIORITY = 2;
 constexpr BaseType_t    PICKS_TASK_CORE     = 0;
@@ -506,29 +504,16 @@ void show_picks()
 
 bool fetch_text(const std::string &url, std::string &out)
 {
-    esp_http_client_config_t cfg{};
-    cfg.url               = url.c_str();
-    cfg.timeout_ms        = EMBED_TIMEOUT_MS;
-    cfg.crt_bundle_attach = esp_crt_bundle_attach;
-    esp_http_client_handle_t client = esp_http_client_init(&cfg);
-    if (client == nullptr) {
-        return false;
-    }
-    out.clear();
-    bool ok = esp_http_client_open(client, 0) == ESP_OK &&
-              esp_http_client_fetch_headers(client) >= 0 &&
-              esp_http_client_get_status_code(client) == HTTP_OK;
-    char chunk[512];
-    while (ok && out.size() < EMBED_MAX) {
-        const int got = esp_http_client_read(client, chunk, sizeof(chunk));
-        if (got <= 0) {
-            break;
-        }
-        out.append(chunk, static_cast<std::size_t>(got));
-    }
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
-    return ok && !out.empty();
+    net::HostConfig host;
+    host.timeout_ms  = EMBED_TIMEOUT_MS;
+    host.connections = 1;
+    net::Request request;
+    request.host     = net::host_for(url, host);
+    request.path     = url;
+    request.priority = net::Priority::Now;
+    request.max_body = EMBED_MAX;
+    request.what     = "favourite";
+    return net::fetch(std::move(request), out).ok() && !out.empty();
 }
 
 // A video's intro and credits, asked of Jellyfin when an episode starts, so the

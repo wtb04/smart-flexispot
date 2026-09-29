@@ -314,7 +314,6 @@ void start_clients()
     ESP_ERROR_CHECK_WITHOUT_ABORT(ble::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(jpeg::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(media::start(hass::ws::http_origin(), on_album_art, on_pick_art, on_still));
-    ESP_ERROR_CHECK_WITHOUT_ABORT(net::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(radar::start(on_radar, on_radar_details, on_radar_photo));
 }
 

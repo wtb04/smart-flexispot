@@ -14,6 +14,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_system.h"
+#include "net.h"
 #include "last_words.h"
 #include "logbuf.h"
 #include "ota.h"
@@ -442,6 +443,7 @@ extern "C" void app_main(void)
     focus::restore(kept_focus);
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("desk"));
     ESP_ERROR_CHECK_WITHOUT_ABORT(wifi::start());
+    ESP_ERROR_CHECK_WITHOUT_ABORT(net::start());  // its requests wait for the network by themselves
     ESP_ERROR_CHECK_WITHOUT_ABORT(ota::start({
         .busy    = desk_moving,
         .status  = show_update,
