@@ -62,8 +62,6 @@ esp_err_t power_up_panel()
 #define REMOTE_ENABLED 0
 #endif
 
-// A development build logs where a slow frame's hand-over went.
-std::int64_t s_wait_us = 0, s_sync_us = 0, s_turn_us = 0;
 
 constexpr int        MAX_DIRTY     = 16;
 constexpr int        FRAME_BUFFERS = 2;
@@ -209,11 +207,9 @@ void prepare_back(lv_display_t *disp)
         return;
     }
     s_swap_pending = false;
-    const std::int64_t began = esp_timer_get_time();
     if (xSemaphoreTake(s_swapped, SWAP_TIMEOUT) != pdTRUE) {
         ESP_LOGW(TAG, "panel did not swap buffers");
     }
-    const std::int64_t swapped = esp_timer_get_time();
     const std::uint8_t *front = s_fbs[1 - s_back];
     for (int i = 0; i < s_shown_count; ++i) {
         const Rect &r = s_shown[i];
@@ -223,8 +219,6 @@ void prepare_back(lv_display_t *disp)
         }
     }
     s_shown_count = 0;
-    s_wait_us += swapped - began;
-    s_sync_us += esp_timer_get_time() - swapped;
 }
 
 // Where the area lands on the panel, which is portrait. The PPA turns
@@ -290,20 +284,12 @@ void flush_rotated(lv_display_t *disp, const lv_area_t *area, std::uint8_t *pixe
     const auto      h     = static_cast<std::uint32_t>(lv_area_get_height(area));
     const Placement place = place_on_panel(disp, area);
 
-    const Rect         in{0, 0, w, h};
-    const std::int64_t began = esp_timer_get_time();
+    const Rect in{0, 0, w, h};
     copy_rect(pixels, s_fbs[s_back], in, place.angle, w, h, 0, 0, place.rect.x, place.rect.y);
-    s_turn_us += esp_timer_get_time() - began;
     note(s_drawn, s_drawn_count, place.rect);
 
     if (lv_display_flush_is_last(disp)) {
         show_back_buffer();
-        constexpr std::int64_t WORTH_SAYING_US = 20000;
-        if (REMOTE_ENABLED && s_wait_us + s_sync_us + s_turn_us > WORTH_SAYING_US) {
-            ESP_LOGI(TAG, "hand-over: waited %d ms, synced %d, turned %d", static_cast<int>(s_wait_us / 1000),
-                     static_cast<int>(s_sync_us / 1000), static_cast<int>(s_turn_us / 1000));
-        }
-        s_wait_us = s_sync_us = s_turn_us = 0;
     }
     lv_display_flush_ready(disp);
 }

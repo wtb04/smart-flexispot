@@ -269,7 +269,7 @@ void frame_timed(lv_event_t *event)
             break;
     }
     const std::int64_t took = now - s_frame_began.load();
-    constexpr std::int64_t SLOW_FRAME_US = 60 * units::kUsPerMs;
+    constexpr std::int64_t SLOW_FRAME_US = 150 * units::kUsPerMs;  // full-screen frames take 90: only the really slow
     if (took > SLOW_FRAME_US) {
         ESP_LOGI(TAG, "frame %d ms, drawing %d", static_cast<int>(took / units::kUsPerMs),
                  static_cast<int>(s_render_us.load() / units::kUsPerMs));
