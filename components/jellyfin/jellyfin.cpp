@@ -225,13 +225,13 @@ esp_http_client_handle_t open_client(const std::string &url, esp_http_client_met
 // cost a TLS handshake each, which a run of volume presses waits through.
 esp_http_client_handle_t s_commander = nullptr;
 
-void post(const std::string &path, const std::string &body = "")
+esp_err_t post_once(const std::string &path, const std::string &body)
 {
     const std::string url = JELLYFIN_URL + path;
     if (s_commander == nullptr) {
         s_commander = open_client(url, HTTP_METHOD_POST);
         if (s_commander == nullptr) {
-            return;
+            return ESP_ERR_NO_MEM;
         }
     } else {
         esp_http_client_set_url(s_commander, url.c_str());
@@ -255,6 +255,40 @@ void post(const std::string &path, const std::string &body = "")
     if (err != ESP_OK) {
         esp_http_client_cleanup(s_commander);  // opened afresh for the next
         s_commander = nullptr;
+        return err;
+    }
+    return status < 300 ? ESP_OK : ESP_ERR_INVALID_RESPONSE;
+}
+
+// Once more on a fresh connection when the kept one failed: the server closes
+// it after a while without commands, which could cost the first command after
+// a quiet spell. Not after a timeout, which the server may have acted on, nor
+// after the server said no.
+bool post(const std::string &path, const std::string &body = "")
+{
+    esp_err_t err = post_once(path, body);
+    if (err != ESP_OK && err != ESP_ERR_HTTP_EAGAIN && err != ESP_ERR_TIMEOUT && err != ESP_ERR_INVALID_RESPONSE) {
+        err = post_once(path, body);
+    }
+    return err == ESP_OK;
+}
+
+// Taken as done once the server has it, as a subtitle is: a second tap before
+// the player reports then carries on rather than asks to pause again, and the
+// button turns at once.
+void now_paused(const std::string &session, bool paused)
+{
+    NowPlaying now;
+    {
+        std::lock_guard<std::mutex> hold(s_now_lock);
+        if (!s_now.active || s_now.session != session || s_now.paused == paused) {
+            return;
+        }
+        s_now.paused = paused;
+        now          = s_now;
+    }
+    if (s_on_change != nullptr) {
+        s_on_change(now);
     }
 }
 
@@ -267,37 +301,49 @@ void post(const std::string &path, const std::string &body = "")
             send_text(keep_alive());
             continue;
         }
+        // Taken before a command can be dropped, so the next level is asked for
+        // afresh: left waiting, it kept every later one from being sent.
+        const int percent = command.op == Op::SetVolume ? s_volume_wanted.exchange(-1) : -1;
         std::string session;
+        bool        paused = false;
         {
             std::lock_guard<std::mutex> hold(s_now_lock);
             session = s_now.active ? s_now.session : "";
+            paused  = s_now.paused;
         }
         if (session.empty()) {
             continue;
         }
         switch (command.op) {
-            case Op::PlayPause: post(play_pause_path(session)); break;
+            case Op::PlayPause:
+                if (post(pause_path(session, !paused))) {
+                    now_paused(session, !paused);
+                }
+                break;
             case Op::Seek:      post(seek_path(session, command.value)); break;
-            case Op::SetVolume: {
-                const int percent = s_volume_wanted.exchange(-1);
+            case Op::SetVolume:
                 if (percent >= 0) {
                     post(command_path(session), set_volume_body(percent));
                 }
                 break;
-            }
             case Op::PlayNow:   post(play_now_path(session, command.item)); break;
             case Op::Subtitles: post(command_path(session), set_subtitle_body(command.value)); break;
         }
     }
 }
 
-void queue(Op op, int value = 0, const std::string &item = "")
+bool queue(Op op, int value = 0, const std::string &item = "")
 {
     Command command{op, value, {}};
     std::snprintf(command.item, sizeof(command.item), "%s", item.c_str());
-    if (s_commands != nullptr && xQueueSend(s_commands, &command, 0) != pdTRUE) {
-        ESP_LOGW(TAG, "too many commands at once");
+    if (s_commands == nullptr) {
+        return false;
     }
+    if (xQueueSend(s_commands, &command, 0) != pdTRUE) {
+        ESP_LOGW(TAG, "too many commands at once");
+        return false;
+    }
+    return true;
 }
 
 std::string socket_uri()
@@ -382,8 +428,8 @@ void seek(int position_s)
 
 void set_volume(int percent)
 {
-    if (s_volume_wanted.exchange(percent) < 0) {
-        queue(Op::SetVolume);
+    if (s_volume_wanted.exchange(percent) < 0 && !queue(Op::SetVolume)) {
+        s_volume_wanted.store(-1);  // so the next level queues again
     }
 }
 

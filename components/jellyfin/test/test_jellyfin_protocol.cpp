@@ -131,7 +131,9 @@ void test_neighbours()
 
 void test_paths()
 {
-    check(play_pause_path("835c") == "/Sessions/835c/Playing/PlayPause", "pause or play");
+    check(pause_path("835c", true) == "/Sessions/835c/Playing/Pause" &&
+              pause_path("835c", false) == "/Sessions/835c/Playing/Unpause",
+          "pause, or carry on, outright");
     check(seek_path("835c", 90) == "/Sessions/835c/Playing/Seek?SeekPositionTicks=900000000",
           "a jump, in ticks");
     check(command_path("835c") == "/Sessions/835c/Command", "a general command");

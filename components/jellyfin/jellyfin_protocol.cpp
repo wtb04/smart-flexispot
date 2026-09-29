@@ -197,9 +197,9 @@ NowPlaying now_playing(const std::string &message, const std::string &own_device
     return chosen;
 }
 
-std::string play_pause_path(const std::string &session)
+std::string pause_path(const std::string &session, bool pause)
 {
-    return "/Sessions/" + session + "/Playing/PlayPause";
+    return "/Sessions/" + session + (pause ? "/Playing/Pause" : "/Playing/Unpause");
 }
 
 std::string seek_path(const std::string &session, int position_s)

@@ -60,8 +60,11 @@ std::string message_type(const std::string &message);
  *  paused one, never `own_device`'s. Not active when none plays anything. */
 NowPlaying now_playing(const std::string &message, const std::string &own_device);
 
-/** Where to post to toggle pause, or to jump, in `session`. */
-std::string play_pause_path(const std::string &session);
+/** Where to post to pause, or to carry on, in `session`: said outright rather
+ *  than toggled, so saying it twice does no harm. */
+std::string pause_path(const std::string &session, bool pause);
+
+/** Where to post to jump to `position_s` in `session`. */
 std::string seek_path(const std::string &session, int position_s);
 
 /** Where to post a general command, and the one that sets the volume. */
