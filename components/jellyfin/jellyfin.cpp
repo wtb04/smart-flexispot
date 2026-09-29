@@ -3,16 +3,14 @@
 #include "esp_check.h"
 #include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
-#include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_websocket_client.h"
 #include "freertos/FreeRTOS.h"
-#include "freertos/queue.h"
 #include "freertos/task.h"
+#include "net.h"
 #include "units.h"
 
-#include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <mutex>
@@ -48,31 +46,23 @@ constexpr int         RECONNECT_MS       = 5 * units::kMsPerSecond;
 constexpr TickType_t  SEND_TIMEOUT       = pdMS_TO_TICKS(5 * units::kMsPerSecond);
 constexpr std::size_t MAX_MESSAGE        = 64 * units::kBytesPerKiB;  // once trimmed
 constexpr int         HTTP_TIMEOUT_MS    = 5 * units::kMsPerSecond;
-constexpr int         HTTP_OK            = 200;
 
 constexpr int WS_OPCODE_CONTINUATION = 0x00;
 constexpr int WS_OPCODE_TEXT         = 0x01;
 
-constexpr std::uint32_t WORKER_STACK    = 6144;  // TLS
-constexpr UBaseType_t   WORKER_PRIORITY = 3;
-constexpr BaseType_t    WORKER_CORE     = 0;
-constexpr UBaseType_t   COMMAND_QUEUE   = 4;
+constexpr std::uint32_t KEEP_ALIVE_STACK    = 3072;
+constexpr UBaseType_t   KEEP_ALIVE_PRIORITY = 3;
+constexpr BaseType_t    KEEP_ALIVE_CORE     = 0;
+constexpr int           COMMAND_DEADLINE_MS = 10 * units::kMsPerSecond;
+constexpr std::size_t   COMMAND_ANSWER_MAX  = 4 * units::kBytesPerKiB;
+constexpr std::size_t   LOOKUP_ANSWER_MAX   = 16 * units::kBytesPerKiB;
 
 constexpr char HTTPS[] = "https://";
 constexpr char WSS[]   = "wss://";
 
-constexpr std::size_t ITEM_SIZE = 40;  // an id, 32 hex digits
-
-enum class Op : std::uint8_t { PlayPause, Seek, SetVolume, PlayNow, Subtitles };
-struct Command {
-    Op   op;
-    int  value;            // the position jumped to, or the volume set
-    char item[ITEM_SIZE];  // what is started now
-};
 
 esp_websocket_client_handle_t s_client   = nullptr;
 Handler                       s_on_change = nullptr;
-QueueHandle_t                 s_commands  = nullptr;
 std::string                   s_rx;
 Trimmer                       s_trim;
 std::int64_t                  s_rx_began_us = 0;  // when the message's first bytes came
@@ -86,10 +76,6 @@ NowPlaying s_now;  // what was last handed on
 constexpr std::int64_t SUBTITLE_HOLD_US = 15 * units::kUsPerSecond;
 int                    s_subtitle_asked    = -1;
 
-// Each command waits on the one before, a round trip through the server to
-// the player, so a slider dragged along queued up a trail of levels: only the
-// latest is sent, once the one before has gone.
-std::atomic<int> s_volume_wanted{-1};
 std::int64_t           s_subtitle_asked_at = 0;  // 0 when nothing waits
 
 bool same(const NowPlaying &a, const NowPlaying &b)
@@ -204,146 +190,66 @@ void on_event(void *, esp_event_base_t, std::int32_t id, void *data)
     }
 }
 
-esp_http_client_handle_t open_client(const std::string &url, esp_http_client_method_t method)
+// Commands and lookups go through net, on one connection kept for the
+// server, so they reach the player in the order they were given.
+net::Host s_host = net::kNoHost;
+
+void add_host()
 {
-    esp_http_client_config_t cfg{};
-    cfg.url               = url.c_str();
-    cfg.method            = method;
-    cfg.timeout_ms        = HTTP_TIMEOUT_MS;
-    cfg.crt_bundle_attach = esp_crt_bundle_attach;
-    esp_http_client_handle_t client = esp_http_client_init(&cfg);
-    if (client != nullptr) {
-        char authorization[96];
-        std::snprintf(authorization, sizeof(authorization), "MediaBrowser Token=\"%s\"",
-                      JELLYFIN_KEY);
-        esp_http_client_set_header(client, "Authorization", authorization);
-    }
-    return client;
+    static const std::string headers = std::string("Authorization: MediaBrowser Token=\"") + JELLYFIN_KEY + "\"";
+    net::HostConfig config;
+    config.name        = "jellyfin";
+    config.base        = JELLYFIN_URL;
+    config.headers     = headers.c_str();
+    config.timeout_ms  = HTTP_TIMEOUT_MS;
+    config.connections = 1;
+    config.idle_ms     = units::kMsPerMinute;
+    config.retry       = net::Retry{1, 300, 200, false};
+    config.rest        = net::Rest{3, 10 * units::kMsPerSecond, 30 * units::kMsPerSecond};
+    s_host             = net::add_host(config);
 }
 
-// One connection kept for the commands, on the worker's task: a new one would
-// cost a TLS handshake each, which a run of volume presses waits through.
-esp_http_client_handle_t s_commander = nullptr;
-
-esp_err_t post_once(const std::string &path, const std::string &body)
+std::string playing_session()
 {
-    const std::string url = JELLYFIN_URL + path;
-    if (s_commander == nullptr) {
-        s_commander = open_client(url, HTTP_METHOD_POST);
-        if (s_commander == nullptr) {
-            return ESP_ERR_NO_MEM;
+    std::lock_guard<std::mutex> hold(s_now_lock);
+    return s_now.active ? s_now.session : "";
+}
+
+// Posted to the player's session. With a key, a newer one of its kind takes
+// the place of one still waiting: a slider dragged along sends where it
+// stopped, not every level it passed.
+void command(const std::string &path, const std::string &body, const char *what, const char *key = nullptr)
+{
+    net::Request request;
+    request.host        = s_host;
+    request.path        = path;
+    request.method      = net::Method::Post;
+    request.body        = body;
+    request.priority    = net::Priority::Tap;
+    request.deadline_ms = COMMAND_DEADLINE_MS;
+    request.max_body    = COMMAND_ANSWER_MAX;
+    request.what        = what;
+    if (key != nullptr) {
+        request.key    = key;
+        request.dedupe = net::Dedupe::Replace;
+    }
+    request.done = [what](const net::Response &answer) {
+        if (answer.ok()) {
+            ESP_LOGI(TAG, "sent %s", what);
+        } else if (answer.outcome != net::Outcome::Replaced) {
+            ESP_LOGW(TAG, "%s not taken: %s, http %d", what, net::outcome_name(answer.outcome), answer.status);
         }
-    } else {
-        esp_http_client_set_url(s_commander, url.c_str());
-        esp_http_client_set_method(s_commander, HTTP_METHOD_POST);
-    }
-    // No body is null, not empty: the client gives an empty one a form's type,
-    // and takes the type away again only for null.
-    if (body.empty()) {
-        esp_http_client_set_post_field(s_commander, nullptr, 0);
-    } else {
-        esp_http_client_set_header(s_commander, "Content-Type", "application/json");
-        esp_http_client_set_post_field(s_commander, body.data(), static_cast<int>(body.size()));
-    }
-    const esp_err_t err    = esp_http_client_perform(s_commander);
-    const int       status = esp_http_client_get_status_code(s_commander);
-    if (err != ESP_OK || status >= 300) {
-        ESP_LOGW(TAG, "command refused (%s, %d)", esp_err_to_name(err), status);
-    } else {
-        ESP_LOGI(TAG, "sent %s", path.c_str());
-    }
-    if (err != ESP_OK) {
-        esp_http_client_cleanup(s_commander);  // opened afresh for the next
-        s_commander = nullptr;
-        return err;
-    }
-    return status < 300 ? ESP_OK : ESP_ERR_INVALID_RESPONSE;
+    };
+    net::submit(std::move(request));
 }
 
-// Once more on a fresh connection when the kept one failed: the server closes
-// it after a while without commands, which could cost the first command after
-// a quiet spell. Not after a timeout, which the server may have acted on, nor
-// after the server said no.
-bool post(const std::string &path, const std::string &body = "")
-{
-    esp_err_t err = post_once(path, body);
-    if (err != ESP_OK && err != ESP_ERR_HTTP_EAGAIN && err != ESP_ERR_TIMEOUT && err != ESP_ERR_INVALID_RESPONSE) {
-        err = post_once(path, body);
-    }
-    return err == ESP_OK;
-}
-
-// Taken as done once the server has it, as a subtitle is: a second tap before
-// the player reports then carries on rather than asks to pause again, and the
-// button turns at once.
-void now_paused(const std::string &session, bool paused)
-{
-    NowPlaying now;
-    {
-        std::lock_guard<std::mutex> hold(s_now_lock);
-        if (!s_now.active || s_now.session != session || s_now.paused == paused) {
-            return;
-        }
-        s_now.paused = paused;
-        now          = s_now;
-    }
-    if (s_on_change != nullptr) {
-        s_on_change(now);
-    }
-}
-
-// Sends commands as they come, and keeps the socket alive between them.
-[[noreturn]] void worker_task(void *)
+// Keeps the socket alive between the server's pushes.
+[[noreturn]] void keep_alive_task(void *)
 {
     for (;;) {
-        Command command{};
-        if (xQueueReceive(s_commands, &command, KEEP_ALIVE) != pdTRUE) {
-            send_text(keep_alive());
-            continue;
-        }
-        // Taken before a command can be dropped, so the next level is asked for
-        // afresh: left waiting, it kept every later one from being sent.
-        const int percent = command.op == Op::SetVolume ? s_volume_wanted.exchange(-1) : -1;
-        std::string session;
-        bool        paused = false;
-        {
-            std::lock_guard<std::mutex> hold(s_now_lock);
-            session = s_now.active ? s_now.session : "";
-            paused  = s_now.paused;
-        }
-        if (session.empty()) {
-            continue;
-        }
-        switch (command.op) {
-            case Op::PlayPause:
-                if (post(pause_path(session, !paused))) {
-                    now_paused(session, !paused);
-                }
-                break;
-            case Op::Seek:      post(seek_path(session, command.value)); break;
-            case Op::SetVolume:
-                if (percent >= 0) {
-                    post(command_path(session), set_volume_body(percent));
-                }
-                break;
-            case Op::PlayNow:   post(play_now_path(session, command.item)); break;
-            case Op::Subtitles: post(command_path(session), set_subtitle_body(command.value)); break;
-        }
+        vTaskDelay(KEEP_ALIVE);
+        send_text(keep_alive());
     }
-}
-
-bool queue(Op op, int value = 0, const std::string &item = "")
-{
-    Command command{op, value, {}};
-    std::snprintf(command.item, sizeof(command.item), "%s", item.c_str());
-    if (s_commands == nullptr) {
-        return false;
-    }
-    if (xQueueSend(s_commands, &command, 0) != pdTRUE) {
-        ESP_LOGW(TAG, "too many commands at once");
-        return false;
-    }
-    return true;
 }
 
 std::string socket_uri()
@@ -363,17 +269,16 @@ esp_err_t start(Handler on_change)
         return ESP_OK;
     }
     s_on_change = on_change;
-    s_commands  = xQueueCreate(COMMAND_QUEUE, sizeof(Command));
-    ESP_RETURN_ON_FALSE(s_commands != nullptr, ESP_ERR_NO_MEM, TAG, "command queue");
+    add_host();
 
-    static StaticTask_t worker_ctrl;
+    static StaticTask_t keep_alive_ctrl;
     auto *stack = static_cast<StackType_t *>(heap_caps_malloc(
-        WORKER_STACK * sizeof(StackType_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+        KEEP_ALIVE_STACK * sizeof(StackType_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     ESP_RETURN_ON_FALSE(stack != nullptr &&
-                            xTaskCreateStaticPinnedToCore(worker_task, "jellyfin", WORKER_STACK,
-                                                          nullptr, WORKER_PRIORITY, stack,
-                                                          &worker_ctrl, WORKER_CORE) != nullptr,
-                        ESP_ERR_NO_MEM, TAG, "worker");
+                            xTaskCreateStaticPinnedToCore(keep_alive_task, "jellyfin", KEEP_ALIVE_STACK,
+                                                          nullptr, KEEP_ALIVE_PRIORITY, stack,
+                                                          &keep_alive_ctrl, KEEP_ALIVE_CORE) != nullptr,
+                        ESP_ERR_NO_MEM, TAG, "keep-alive task");
 
     static std::string uri = socket_uri();
     esp_websocket_client_config_t cfg{};
@@ -394,57 +299,67 @@ esp_err_t start(Handler on_change)
 
 bool fetch(const std::string &path, std::string &out)
 {
-    constexpr std::size_t MAX_ANSWER = 16 * units::kBytesPerKiB;
-    esp_http_client_handle_t client = open_client(JELLYFIN_URL + path, HTTP_METHOD_GET);
-    if (client == nullptr) {
-        return false;
-    }
-    out.clear();
-    bool ok = esp_http_client_open(client, 0) == ESP_OK &&
-              esp_http_client_fetch_headers(client) >= 0 &&
-              esp_http_client_get_status_code(client) == HTTP_OK;
-    char chunk[512];
-    while (ok && out.size() < MAX_ANSWER) {
-        const int got = esp_http_client_read(client, chunk, sizeof(chunk));
-        if (got <= 0) {
-            break;
-        }
-        out.append(chunk, static_cast<std::size_t>(got));
-    }
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
-    return ok && !out.empty();
+    net::Request request;
+    request.host     = s_host;
+    request.path     = path;
+    request.priority = net::Priority::Now;
+    request.max_body = LOOKUP_ANSWER_MAX;
+    request.what     = "lookup";
+    return net::fetch(std::move(request), out).ok() && !out.empty();
 }
 
+// The button turns at once, and a second tap before the player reports
+// carries on rather than asks to pause again; the player's report corrects it
+// should the server not take it.
 void play_pause()
 {
-    queue(Op::PlayPause);
+    NowPlaying now;
+    bool       pause = false;
+    {
+        std::lock_guard<std::mutex> hold(s_now_lock);
+        if (!s_now.active) {
+            return;
+        }
+        pause        = !s_now.paused;
+        s_now.paused = pause;
+        now          = s_now;
+    }
+    if (s_on_change != nullptr) {
+        s_on_change(now);
+    }
+    command(pause_path(now.session, pause), "", pause ? "pause" : "carry on");
 }
 
 void seek(int position_s)
 {
-    queue(Op::Seek, position_s);
+    const std::string session = playing_session();
+    if (!session.empty()) {
+        command(seek_path(session, position_s), "", "seek", "seek");
+    }
 }
 
 void set_volume(int percent)
 {
-    if (s_volume_wanted.exchange(percent) < 0 && !queue(Op::SetVolume)) {
-        s_volume_wanted.store(-1);  // so the next level queues again
+    const std::string session = playing_session();
+    if (!session.empty()) {
+        command(command_path(session), set_volume_body(percent), "volume", "volume");
     }
 }
 
 void toggle_subtitles()
 {
     const int stream = toggle_subtitle_locally();
-    if (stream >= -1) {
-        queue(Op::Subtitles, stream);
+    const std::string session = playing_session();
+    if (stream >= -1 && !session.empty()) {
+        command(command_path(session), set_subtitle_body(stream), "subtitles", "subtitles");
     }
 }
 
 void play_now(const std::string &item)
 {
-    if (!item.empty()) {
-        queue(Op::PlayNow, 0, item);
+    const std::string session = playing_session();
+    if (!item.empty() && !session.empty()) {
+        command(play_now_path(session, item), "", "play", "play");
     }
 }
 
