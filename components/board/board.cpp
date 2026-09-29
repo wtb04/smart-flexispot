@@ -155,9 +155,12 @@ IRAM_ATTR bool frame_sent(esp_lcd_panel_handle_t, esp_lcd_dpi_panel_event_data_t
     return false;
 }
 
+std::atomic<std::uint32_t> s_swaps{0};
+
 // The buffer last handed over is the one on show, so the other is free.
 IRAM_ATTR bool frame_done(esp_lcd_panel_handle_t, esp_lcd_dpi_panel_event_data_t *, void *)
 {
+    s_swaps.fetch_add(1, std::memory_order_relaxed);
     BaseType_t woken = pdFALSE;
     xSemaphoreGiveFromISR(s_swapped, &woken);
     return woken == pdTRUE;
@@ -605,9 +608,39 @@ void set_brightness_percent(int percent)
     ESP_ERROR_CHECK_WITHOUT_ABORT(set_brightness(percent));
 }
 
+// The first light waits for a frame LVGL drew to be on the panel, and a few
+// refreshes of it, so that what it lights is the splash and not whatever the
+// panel had before.
+namespace {
+void wait_for_first_frame()
+{
+    constexpr std::int64_t  FIRST_FRAME_US   = 1000 * 1000;
+    constexpr std::uint32_t SETTLE_REFRESHES = 3;
+    const std::uint32_t     swaps            = s_swaps.load(std::memory_order_relaxed);
+    const std::int64_t      from             = esp_timer_get_time();
+    std::uint32_t           shown_at         = 0;
+    bool                    shown            = false;
+    while (esp_timer_get_time() - from < FIRST_FRAME_US) {
+        if (!shown && s_swaps.load(std::memory_order_relaxed) != swaps) {
+            shown    = true;
+            shown_at = s_refreshes.load(std::memory_order_relaxed);
+        }
+        if (shown && s_refreshes.load(std::memory_order_relaxed) - shown_at >= SETTLE_REFRESHES) {
+            break;
+        }
+        vTaskDelay(1);
+    }
+    ESP_LOGI(TAG, "first light after %d ms, %s", static_cast<int>((esp_timer_get_time() - from) / 1000),
+             shown ? "on a drawn frame" : "with no frame drawn");
+}
+}  // namespace
+
 esp_err_t display_on(int percent)
 {
     set_drawing(true);
+    if (gpio_ll_is_digital_io_hold(&GPIO, BSP_LCD_BACKLIGHT)) {
+        wait_for_first_frame();
+    }
     return set_brightness(percent);
 }
 

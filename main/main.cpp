@@ -407,7 +407,7 @@ extern "C" void app_main(void)
                              settings::enabled(settings::Key::OrientAuto) ? ui::Orientation::Auto
                              : flipped                                    ? ui::Orientation::Flipped
                                                                           : ui::Orientation::Normal));
-    on_brightness_changed(brightness);
+    network::note_brightness(brightness);
     ESP_ERROR_CHECK_WITHOUT_ABORT(board::display_on(brightness));
     ESP_ERROR_CHECK_WITHOUT_ABORT(
         ui::set_setting(ui::Setting::Charging, settings::enabled(settings::Key::Charging)));
