@@ -402,7 +402,11 @@ esp_err_t start_display(lv_display_t **out_disp)
         },
     };
 
+    // The port registers its own callback, which the panel refuses, as not in
+    // IRAM, with an error; flush_straight_to_panel() registers ours instead.
+    esp_log_level_set("lcd.dsi", ESP_LOG_NONE);
     lv_display_t *disp = bsp_display_start_with_config(&cfg);
+    esp_log_level_set("lcd.dsi", ESP_LOG_INFO);
     ESP_RETURN_ON_FALSE(disp != nullptr, ESP_FAIL, TAG, "display start");
     if (lvgl_port_lock(0)) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(flush_straight_to_panel(disp));
