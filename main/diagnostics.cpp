@@ -582,6 +582,15 @@ void note_underruns()
                  static_cast<unsigned>(now), static_cast<unsigned>(now - told));
         told = now;
     }
+
+    static std::uint32_t    late_told = 0;
+    const board::LateFrames late      = board::late_frames();
+    if (late.count != late_told) {
+        const std::int64_t ago_ms = (esp_timer_get_time() - late.at_us) / 1000;
+        ESP_LOGW("board", "a frame came %d ms after the one before, %d ms ago; %u late in all",
+                 static_cast<int>(late.gap_us / 1000), static_cast<int>(ago_ms), static_cast<unsigned>(late.count));
+        late_told = late.count;
+    }
 }
 
 void update()

@@ -31,6 +31,15 @@ esp_err_t display_off();
  *  second; fewer when something held its interrupt off. */
 std::uint32_t refreshes();
 
+/** Frames that came to the panel much later than their time: each a flicker
+ *  of blue. How many since it started, and the latest's gap and uptime. */
+struct LateFrames {
+    std::uint32_t count;
+    std::int32_t  gap_us;
+    std::int64_t  at_us;
+};
+LateFrames late_frames();
+
 /** How many times the panel's reads have fallen behind since it started: each
  *  a moment of blue screen, which the DSI driver reports only on the console. */
 std::uint32_t underruns();

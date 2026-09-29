@@ -105,9 +105,25 @@ IRAM_ATTR bool copied(esp_lcd_panel_handle_t, esp_lcd_dpi_panel_event_data_t *, 
 
 std::atomic<std::uint32_t> s_refreshes{0};
 
+// A frame is due every 17 ms; one much later means the panel went without
+// meanwhile, which it shows as a flicker of blue. Noted with when, so the log
+// can say what else was going on.
+constexpr std::int64_t     LATE_FRAME_US = 26000;
+std::int64_t               s_frame_at_us = 0;
+std::atomic<std::uint32_t> s_late_frames{0};
+std::atomic<std::int32_t>  s_latest_late_us{0};
+std::atomic<std::int64_t>  s_latest_late_at{0};
+
 IRAM_ATTR bool frame_done(esp_lcd_panel_handle_t, esp_lcd_dpi_panel_event_data_t *, void *)
 {
     s_refreshes.fetch_add(1, std::memory_order_relaxed);
+    const std::int64_t now = esp_timer_get_time();
+    if (s_frame_at_us != 0 && now - s_frame_at_us > LATE_FRAME_US) {
+        s_latest_late_us.store(static_cast<std::int32_t>(now - s_frame_at_us), std::memory_order_relaxed);
+        s_latest_late_at.store(now, std::memory_order_relaxed);
+        s_late_frames.fetch_add(1, std::memory_order_relaxed);
+    }
+    s_frame_at_us = now;
     BaseType_t woken = pdFALSE;
     xSemaphoreGiveFromISR(s_swapped, &woken);
     return woken == pdTRUE;
@@ -411,6 +427,12 @@ IRAM_ATTR void watch_console(char c)
 std::uint32_t refreshes()
 {
     return s_refreshes.load(std::memory_order_relaxed);
+}
+
+LateFrames late_frames()
+{
+    return {s_late_frames.load(std::memory_order_relaxed), s_latest_late_us.load(std::memory_order_relaxed),
+            s_latest_late_at.load(std::memory_order_relaxed)};
 }
 
 std::uint32_t underruns()
