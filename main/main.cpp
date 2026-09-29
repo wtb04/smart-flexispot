@@ -353,6 +353,7 @@ void before_update_restart()
 
 extern "C" void app_main(void)
 {
+    board::dark_from_the_start();
     cJSON_Hooks hooks{json_malloc, heap_caps_free};
     cJSON_InitHooks(&hooks);
     ota::watch();

@@ -5,6 +5,13 @@
 #include <cstdint>
 
 namespace board {
+/** The backlight off and held so, before anything else, and until the first
+ *  brightness is set: the panel shows flat blue while it has no picture. */
+void dark_from_the_start();
+
+/** The same, for a restart or a crash to leave behind. Safe in the panic handler. */
+void hold_dark();
+
 /** Brings up rails, panel, touch and the LVGL port task. Once, before any lv_*
  *  call. flipped hangs the panel the other way up. */
 esp_err_t init(bool flipped);

@@ -1,5 +1,7 @@
 #include "last_words.h"
 
+#include "board.h"
+
 #include "esp_attr.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -187,6 +189,7 @@ extern "C" void __real_esp_panic_handler(panic_info_t *info);
 extern "C" void __wrap_esp_panic_handler(panic_info_t *info)
 {
     using namespace last_words;
+    board::hold_dark();  // the panel shows blue from here until the restart has a picture
     Crash &crash = s_kept.crash;
     std::memset(&crash, 0, sizeof(crash));
     crash.core = info->core;

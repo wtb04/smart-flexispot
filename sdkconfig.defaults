@@ -238,6 +238,11 @@ CONFIG_CACHE_L2_CACHE_LINE_128B=y
 # board.cpp. With one, the panel shows each new page as a wipe.
 CONFIG_BSP_LCD_DPI_BUFFER_NUMS=2
 
+# The board package returns its errors rather than asserting, so that a part
+# slow to answer at start-up can be asked again (board.cpp) instead of taking
+# the panel down. Every call into it checks what came back.
+# CONFIG_BSP_ERROR_CHECK is not set
+
 # The panel's DMA is started again for every frame from an interrupt, which a
 # flash write held off while the cache was off: a setting being stored or an
 # update arriving could leave the panel a frame short, a flicker of blue. In

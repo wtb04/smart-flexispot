@@ -7,12 +7,16 @@
 #include "esp_lcd_mipi_dsi.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_log.h"
+#include "esp_rom_gpio.h"
 #include "esp_rom_sys.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/semphr.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "hal/axi_icm_ll.h"
+#include "hal/gpio_ll.h"
+#include "soc/gpio_sig_map.h"
 #include "soc/dw_gdma_struct.h"
 #include "lvgl_private.h"  // the display's areas to redraw; the version is pinned in dependencies.lock
 
@@ -42,9 +46,31 @@ constexpr int MAX_BRIGHTNESS = 100;
 // bsp_display_start() tells the two Tab5 display revisions apart by probing the
 // touch controller, and an ST7123 only answers once the LCD rail has been up for
 // a while. Raising the rails here first is idempotent. See espressif/esp-bsp#829.
+// Both I/O expanders are asked once at start-up, and one did not answer its
+// reset in time: the board package asserted, which on a new firmware sent the
+// panel back to the one before. Asked again a few times instead, as its
+// checks are off (sdkconfig.defaults) and it says so.
+constexpr int        EXPANDER_TRIES = 5;
+constexpr TickType_t EXPANDER_RETRY = pdMS_TO_TICKS(20);
+
+esp_err_t wake_expanders()
+{
+    for (int attempt = 1;; ++attempt) {
+        if (bsp_io_expander_init() != nullptr && bsp_io_expander1_init() != nullptr) {
+            return ESP_OK;
+        }
+        if (attempt == EXPANDER_TRIES) {
+            return ESP_ERR_TIMEOUT;
+        }
+        ESP_LOGW(TAG, "an I/O expander did not answer, asking again (%d)", attempt);
+        vTaskDelay(EXPANDER_RETRY);
+    }
+}
+
 esp_err_t power_up_panel()
 {
     ESP_RETURN_ON_ERROR(bsp_i2c_init(), TAG, "i2c");
+    ESP_RETURN_ON_ERROR(wake_expanders(), TAG, "io expanders");
     ESP_RETURN_ON_ERROR(bsp_feature_enable(BSP_FEATURE_LCD, true), TAG, "lcd rail");
     vTaskDelay(LCD_RAIL_SETTLE);
     ESP_RETURN_ON_ERROR(bsp_feature_enable(BSP_FEATURE_TOUCH, true), TAG, "touch rail");
@@ -511,8 +537,35 @@ std::uint32_t underruns()
     return s_underruns.load(std::memory_order_relaxed);
 }
 
+// The backlight lights whatever the panel shows, and with no video coming the
+// panel shows flat blue: the moment the chip restarts, until the first frame
+// is drawn. So the pin is driven low and held, which the chip keeps through a
+// restart, from before a restart and from the very start until there is a
+// picture to light. In IRAM, with nothing but ROM and inline calls, for the
+// panic handler.
+IRAM_ATTR void hold_dark()
+{
+    esp_rom_gpio_pad_select_gpio(BSP_LCD_BACKLIGHT);
+    esp_rom_gpio_connect_out_signal(BSP_LCD_BACKLIGHT, SIG_GPIO_OUT_IDX, false, false);
+    gpio_ll_output_enable(&GPIO, BSP_LCD_BACKLIGHT);
+    gpio_ll_set_level(&GPIO, BSP_LCD_BACKLIGHT, 0);
+    gpio_ll_hold_en(&GPIO, BSP_LCD_BACKLIGHT);
+}
+
+namespace {
+bool s_held_through_restart = false;
+}  // namespace
+
+void dark_from_the_start()
+{
+    s_held_through_restart = gpio_ll_is_digital_io_hold(&GPIO, BSP_LCD_BACKLIGHT);
+    hold_dark();
+}
+
 esp_err_t init(bool flipped)
 {
+    ESP_LOGI(TAG, "backlight %s", s_held_through_restart ? "held dark through the restart" : "not held at the restart");
+    esp_register_shutdown_handler(hold_dark);
     ESP_RETURN_ON_ERROR(power_up_panel(), TAG, "panel power");
     put_panel_first();
     esp_rom_install_channel_putc(2, watch_console);
@@ -540,6 +593,10 @@ void set_flipped(bool flipped)
 
 esp_err_t set_brightness(int percent)
 {
+    // The first light is what lets go of the pin held dark since the start.
+    if (gpio_ll_is_digital_io_hold(&GPIO, BSP_LCD_BACKLIGHT)) {
+        gpio_ll_hold_dis(&GPIO, BSP_LCD_BACKLIGHT);
+    }
     return bsp_display_brightness_set(std::clamp(percent, kMinBrightness, MAX_BRIGHTNESS));
 }
 
