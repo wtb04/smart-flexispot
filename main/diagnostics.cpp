@@ -583,12 +583,20 @@ void note_underruns()
         told = now;
     }
 
-    static std::uint32_t    late_told = 0;
-    const board::LateFrames late      = board::late_frames();
+    // Seven frames: the panel's DMA goes round eight by itself, one of them
+    // perhaps half gone when its interrupt is held off.
+    constexpr std::int32_t  WENT_WITHOUT_US = 120000;
+    static std::uint32_t    late_told       = 0;
+    const board::LateFrames late            = board::late_frames();
     if (late.count != late_told) {
-        const std::int64_t ago_ms = (esp_timer_get_time() - late.at_us) / 1000;
-        ESP_LOGW("board", "a frame came %d ms after the one before, %d ms ago; %u late in all",
-                 static_cast<int>(late.gap_us / 1000), static_cast<int>(ago_ms), static_cast<unsigned>(late.count));
+        const int ago_ms = static_cast<int>((esp_timer_get_time() - late.at_us) / 1000);
+        const int gap_ms = static_cast<int>(late.gap_us / 1000);
+        if (late.gap_us > WENT_WITHOUT_US) {
+            ESP_LOGW("board", "the panel went without frames: its interrupt held off %d ms, %d ms ago", gap_ms, ago_ms);
+        } else {
+            ESP_LOGI("board", "the panel's interrupt held off %d ms, %d ms ago; %u in all", gap_ms, ago_ms,
+                     static_cast<unsigned>(late.count));
+        }
         late_told = late.count;
     }
 }

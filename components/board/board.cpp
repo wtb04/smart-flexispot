@@ -13,6 +13,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "hal/axi_icm_ll.h"
+#include "soc/dw_gdma_struct.h"
 #include "lvgl_private.h"  // the display's areas to redraw; the version is pinned in dependencies.lock
 
 #include <algorithm>
@@ -105,17 +106,19 @@ IRAM_ATTR bool copied(esp_lcd_panel_handle_t, esp_lcd_dpi_panel_event_data_t *, 
 
 std::atomic<std::uint32_t> s_refreshes{0};
 
-// A frame is due every 17 ms, and the next must be under way within the 2.6 ms
-// of blanking between them; later, and the panel goes without, which it shows
-// as a flicker of blue. Noted with when, so the log can say what else was
-// going on.
-constexpr std::int64_t     LATE_FRAME_US = 20000;
+// A frame is due every 17 ms. The panel's DMA goes round a ring of eight
+// frames by itself (components/esp_lcd), and its interrupt only has to keep
+// the ring going: held off longer than the ring lasts, the panel goes
+// without, which it shows as a flicker of blue. Held off at all, it is noted,
+// with when, so the log can say what else was going on.
+constexpr std::int64_t     LATE_FRAME_US = 26000;
 std::int64_t               s_frame_at_us = 0;
 std::atomic<std::uint32_t> s_late_frames{0};
 std::atomic<std::int32_t>  s_latest_late_us{0};
 std::atomic<std::int64_t>  s_latest_late_at{0};
 
-IRAM_ATTR bool frame_done(esp_lcd_panel_handle_t, esp_lcd_dpi_panel_event_data_t *, void *)
+// Every frame sent, whichever buffer it came from.
+IRAM_ATTR bool frame_sent(esp_lcd_panel_handle_t, esp_lcd_dpi_panel_event_data_t *, void *)
 {
     s_refreshes.fetch_add(1, std::memory_order_relaxed);
     const std::int64_t now = esp_timer_get_time();
@@ -125,6 +128,12 @@ IRAM_ATTR bool frame_done(esp_lcd_panel_handle_t, esp_lcd_dpi_panel_event_data_t
         s_late_frames.fetch_add(1, std::memory_order_relaxed);
     }
     s_frame_at_us = now;
+    return false;
+}
+
+// The buffer last handed over is the one on show, so the other is free.
+IRAM_ATTR bool frame_done(esp_lcd_panel_handle_t, esp_lcd_dpi_panel_event_data_t *, void *)
+{
     BaseType_t woken = pdFALSE;
     xSemaphoreGiveFromISR(s_swapped, &woken);
     return woken == pdTRUE;
@@ -349,6 +358,7 @@ esp_err_t flush_straight_to_panel(lv_display_t *disp)
     esp_lcd_dpi_panel_event_callbacks_t callbacks{};
     callbacks.on_color_trans_done   = copied;
     callbacks.on_frame_buf_complete = frame_done;
+    callbacks.on_vsync              = frame_sent;
     s_disp = disp;
     ESP_RETURN_ON_ERROR(esp_lcd_dpi_panel_register_event_callbacks(s_panel, &callbacks, nullptr), TAG,
                         "panel callbacks");
@@ -424,6 +434,80 @@ IRAM_ATTR void watch_console(char c)
 }
 
 }  // namespace
+
+#if REMOTE_ENABLED
+namespace {
+struct StallRun {
+    int              ms;
+    StallProbe       result;
+    SemaphoreHandle_t done;
+};
+
+// Which DMA channel reads the frame buffers: the one whose source address is in them.
+int display_channel()
+{
+    const auto in_frames = [](std::uint32_t at) {
+        for (std::uint8_t *fb : s_fbs) {
+            const auto from = reinterpret_cast<std::uintptr_t>(fb);
+            if (fb != nullptr && at >= from && at < from + FRAME_BYTES) {
+                return true;
+            }
+        }
+        return false;
+    };
+    for (int ch = 0; ch < 4; ++ch) {
+        if (in_frames(DW_GDMA.ch[ch].sar0.val)) {
+            return ch;
+        }
+    }
+    return -1;
+}
+
+void stall_task(void *arg)
+{
+    auto &run = *static_cast<StallRun *>(arg);
+    StallProbe &out = run.result;
+    out.channel     = display_channel();
+    out.core        = xPortGetCoreID();
+    if (out.channel >= 0) {
+        static portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+        portENTER_CRITICAL(&mux);  // what a heap walk or a realloc does
+        const std::int64_t began = esp_timer_get_time();
+        std::uint32_t      last  = DW_GDMA.ch[out.channel].sar0.val;
+        std::int64_t       since = began;
+        out.first               = last;
+        for (std::int64_t now = began; now - began < run.ms * 1000; now = esp_timer_get_time()) {
+            const std::uint32_t at = DW_GDMA.ch[out.channel].sar0.val;
+            if (at != last) {
+                ++out.moves;
+                out.wraps += at < last ? 1 : 0;
+                out.longest_still_us = std::max<std::int32_t>(out.longest_still_us, static_cast<std::int32_t>(now - since));
+                since = now;
+                last  = at;
+            }
+            esp_rom_delay_us(50);
+        }
+        out.longest_still_us = std::max<std::int32_t>(out.longest_still_us,
+                                                      static_cast<std::int32_t>(esp_timer_get_time() - since));
+        out.last = last;
+        portEXIT_CRITICAL(&mux);
+    }
+    xSemaphoreGive(run.done);
+    vTaskDelete(nullptr);
+}
+}  // namespace
+
+StallProbe probe_stall(int ms, int core)
+{
+    StallRun run{ms, {}, xSemaphoreCreateBinary()};
+    xTaskCreatePinnedToCore(stall_task, "stall", 4096, &run, configMAX_PRIORITIES - 1, nullptr, core);
+    xSemaphoreTake(run.done, portMAX_DELAY);
+    vSemaphoreDelete(run.done);
+    run.result.fb0 = reinterpret_cast<std::uintptr_t>(s_fbs[0]);
+    run.result.fb1 = reinterpret_cast<std::uintptr_t>(s_fbs[1]);
+    return run.result;
+}
+#endif
 
 std::uint32_t refreshes()
 {

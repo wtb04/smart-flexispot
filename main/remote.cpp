@@ -334,6 +334,34 @@ void start_stats()
     }
     xTaskCreate(stats_task, "stats", STATS_STACK, nullptr, STATS_PRIORITY, nullptr);
 }
+// Interrupts held off on a core for a while, and what the display's DMA did
+// meanwhile: /stall?ms=30&core=0.
+esp_err_t stall_page(httpd_req_t *req)
+{
+    if (!ota::authorised(req)) {
+        return refuse(req);
+    }
+    char query[QUERY_MAX] = "", value[8] = "";
+    httpd_req_get_url_query_str(req, query, sizeof(query));
+    int ms = 30, core = 0;
+    if (httpd_query_key_value(query, "ms", value, sizeof(value)) == ESP_OK) {
+        ms = std::clamp(std::atoi(value), 1, 200);
+    }
+    if (httpd_query_key_value(query, "core", value, sizeof(value)) == ESP_OK) {
+        core = std::clamp(std::atoi(value), 0, 1);
+    }
+    const board::StallProbe p = board::probe_stall(ms, core);
+    char text[256];
+    std::snprintf(text, sizeof(text),
+                  "%d ms on core %d, channel %d: moved %d times, wrapped %d, still for %ld us at most\n"
+                  "from %08lx to %08lx; frames at %08lx and %08lx\n",
+                  ms, p.core, p.channel, p.moves, p.wraps, static_cast<long>(p.longest_still_us),
+                  static_cast<unsigned long>(p.first), static_cast<unsigned long>(p.last),
+                  static_cast<unsigned long>(p.fb0), static_cast<unsigned long>(p.fb1));
+    httpd_resp_set_type(req, "text/plain");
+    return httpd_resp_sendstr(req, text);
+}
+
 // Why this run started and, after one nobody asked for, what the run before
 // left behind: the log's copy is soon pushed out.
 esp_err_t restart_page(httpd_req_t *req)
@@ -407,6 +435,7 @@ esp_err_t start()
         {.uri = "/bench", .method = HTTP_GET, .handler = bench_page, .user_ctx = nullptr},
         {.uri = "/crash", .method = HTTP_GET, .handler = crash_page, .user_ctx = nullptr},
         {.uri = "/restart", .method = HTTP_GET, .handler = restart_page, .user_ctx = nullptr},
+        {.uri = "/stall", .method = HTTP_GET, .handler = stall_page, .user_ctx = nullptr},
     };
     for (const httpd_uri_t &page : pages) {
         ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &page), TAG, "page");

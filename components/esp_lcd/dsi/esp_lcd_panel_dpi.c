@@ -3,6 +3,14 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
+// The one change from ESP-IDF v5.5.5's copy, whose esp_lcd this component
+// stands in for: the DMA reads the frame buffers through a ring of whole
+// frames that it goes round by itself. IDF's restarts it from an interrupt
+// after every frame, within the 2.6 ms of blanking between two; anything that
+// held interrupts off longer at that moment left the panel without a frame,
+// which it shows flat blue. Here the interrupt only keeps the ring valid and
+// pointed at the buffer wanted, and can be late by frames. A new buffer is
+// taken up at a frame's start, never partway through one.
 #include <sys/param.h>
 #include "esp_lcd_panel_interface.h"
 #include "esp_lcd_mipi_dsi.h"
@@ -14,6 +22,11 @@
 #include "esp_memory_utils.h"
 #include "esp_private/dw_gdma.h"
 #include "hal/color_hal.h"
+#include "hal/dw_gdma_ll.h"
+#include "soc/dw_gdma_struct.h"
+
+// Frames the DMA can go on showing with its interrupt held off.
+#define DPI_PANEL_RING_ITEMS 8
 
 typedef struct esp_lcd_dpi_panel_t esp_lcd_dpi_panel_t;
 
@@ -36,7 +49,9 @@ struct esp_lcd_dpi_panel_t {
     lcd_color_format_t out_color_format; // Output color format
     dw_gdma_channel_handle_t dma_chan;   // DMA channel
     intr_handle_t brg_intr;              // DSI Bridge interrupt handle
-    dw_gdma_link_list_handle_t link_lists[DPI_PANEL_MAX_FB_NUM]; // DMA link list
+    dw_gdma_link_list_handle_t ring;     // DMA link list: whole frames, round and round
+    int dma_chan_id;                     // for reading where the DMA is
+    uint8_t shown_fb_index;              // the buffer the DMA was last seen reading
     esp_async_fbcpy_handle_t fbcpy_handle; // Use DMA2D to do frame buffer copy
     SemaphoreHandle_t draw_sem;            // A semaphore used to synchronize the draw operations when DMA2D is used
     esp_pm_lock_handle_t pm_lock;          // Power management lock
@@ -68,37 +83,69 @@ static bool async_fbcpy_done_cb(esp_async_fbcpy_handle_t mcp, esp_async_fbcpy_ev
     return need_yield;
 }
 
-bool mipi_dsi_dma_trans_done_cb(dw_gdma_channel_handle_t chan, const dw_gdma_trans_done_event_data_t *event_data, void *user_data)
+// Every item valid again, not the last, and reading the buffer wanted. The
+// DMA may be fetching one meanwhile: it sees the old address or the new, and
+// either is a whole frame.
+IRAM_ATTR static void dpi_panel_ring_refresh(esp_lcd_dpi_panel_t *dpi_panel)
+{
+    const uint32_t src = (uint32_t)dpi_panel->fbs[dpi_panel->cur_fb_index];
+    for (int i = 0; i < DPI_PANEL_RING_ITEMS; i++) {
+        dw_gdma_link_list_item_t *lli = (dw_gdma_link_list_item_t *)dw_gdma_link_list_get_item(dpi_panel->ring, i);
+        dw_gdma_ll_lli_set_src_addr(lli, src);
+        dw_gdma_ll_lli_set_block_markers(lli, true, false, true);
+    }
+}
+
+// Which buffer the DMA is reading, from its source address; the last known
+// while it is between two. Not the buffer asked for: the DMA fetches the next
+// item early, so a frame from the old buffer may be under way yet, and
+// drawing into it would show a frame half old and half new.
+IRAM_ATTR static uint8_t dpi_panel_reading(esp_lcd_dpi_panel_t *dpi_panel)
+{
+    const uint32_t at = DW_GDMA.ch[dpi_panel->dma_chan_id].sar0.val;
+    for (int i = 0; i < dpi_panel->num_fbs; i++) {
+        const uint32_t from = (uint32_t)dpi_panel->fbs[i];
+        if (at >= from && at < from + dpi_panel->fb_size) {
+            return i;
+        }
+    }
+    return dpi_panel->shown_fb_index;
+}
+
+IRAM_ATTR static bool mipi_dsi_dma_block_done_cb(dw_gdma_channel_handle_t chan, const dw_gdma_trans_done_event_data_t *event_data, void *user_data)
 {
     bool yield_needed = false;
     esp_lcd_dpi_panel_t *dpi_panel = (esp_lcd_dpi_panel_t *)user_data;
-    uint8_t fb_index = dpi_panel->cur_fb_index;
-    dw_gdma_link_list_handle_t link_list = dpi_panel->link_lists[fb_index];
+    dpi_panel_ring_refresh(dpi_panel);
+    dpi_panel->shown_fb_index = dpi_panel_reading(dpi_panel);
 
-    // restart the DMA transfer, keep refreshing the LCD
-    dw_gdma_block_markers_t markers = {
-        .is_valid = true,
-        .is_last = true,
-    };
-    dw_gdma_lli_set_block_markers(dw_gdma_link_list_get_item(link_list, 0), markers);
-    dw_gdma_channel_use_link_list(chan, link_list);
-    dw_gdma_channel_enable_ctrl(chan, true);
-
-    if (dpi_panel->on_frame_buf_complete) {
+    // Only once the buffer asked for is the one read is the other free.
+    if (dpi_panel->shown_fb_index == dpi_panel->cur_fb_index && dpi_panel->on_frame_buf_complete) {
         if (dpi_panel->on_frame_buf_complete(&dpi_panel->base, NULL, dpi_panel->user_ctx)) {
             yield_needed = true;
         }
     }
 
 #if !MIPI_DSI_BRG_LL_EVENT_VSYNC
-    // the DMA descriptor is large enough to carry a whole frame buffer, so this event can also be treated as a fake "vsync end"
     if (dpi_panel->on_vsync) {
         if (dpi_panel->on_vsync(&dpi_panel->base, NULL, dpi_panel->user_ctx)) {
             yield_needed = true;
         }
     }
 #endif
+
     return yield_needed;
+}
+
+// Held off longer than the ring lasts, the DMA stops at an item it has marked
+// used: valid again, and on.
+IRAM_ATTR static bool mipi_dsi_dma_invalid_block_cb(dw_gdma_channel_handle_t chan, const dw_gdma_break_event_data_t *event_data, void *user_data)
+{
+    esp_lcd_dpi_panel_t *dpi_panel = (esp_lcd_dpi_panel_t *)user_data;
+    dpi_panel_ring_refresh(dpi_panel);
+    // dw_gdma_channel_continue() is not in IRAM; what it does, inline.
+    dw_gdma_ll_channel_resume_multi_block_transfer(&DW_GDMA, dpi_panel->dma_chan_id);
+    return false;
 }
 
 void mipi_dsi_bridge_isr_handler(void *args)
@@ -150,19 +197,19 @@ static esp_err_t dpi_panel_create_dma_link(esp_lcd_dpi_panel_t *dpi_panel)
     ESP_RETURN_ON_ERROR(dw_gdma_new_channel(&dma_alloc_config, &dma_chan), TAG, "create DMA channel failed");
     dpi_panel->dma_chan = dma_chan;
 
-    // create DMA link lists
+    // create the DMA ring
     dw_gdma_link_list_config_t link_list_config = {
-        .num_items = DPI_PANEL_MIN_DMA_NODES_PER_LINK,
-        .link_type = DW_GDMA_LINKED_LIST_TYPE_SINGLY,
+        .num_items = DPI_PANEL_RING_ITEMS,
+        .link_type = DW_GDMA_LINKED_LIST_TYPE_CIRCULAR,
     };
-    for (int i = 0; i < dpi_panel->num_fbs; i++) {
-        ESP_RETURN_ON_ERROR(dw_gdma_new_link_list(&link_list_config, &link_list), TAG, "create DMA link list failed");
-        dpi_panel->link_lists[i] = link_list;
-    }
+    ESP_RETURN_ON_ERROR(dw_gdma_new_link_list(&link_list_config, &link_list), TAG, "create DMA link list failed");
+    dpi_panel->ring = link_list;
+    ESP_RETURN_ON_ERROR(dw_gdma_channel_get_id(dma_chan, &dpi_panel->dma_chan_id), TAG, "DMA channel id");
 
     // register DMA ISR callbacks
     dw_gdma_event_callbacks_t dsi_dma_cbs = {
-        .on_full_trans_done = mipi_dsi_dma_trans_done_cb,
+        .on_block_trans_done = mipi_dsi_dma_block_done_cb,
+        .on_invalid_block = mipi_dsi_dma_invalid_block_cb,
     };
     ESP_RETURN_ON_ERROR(dw_gdma_channel_register_event_callbacks(dma_chan, &dsi_dma_cbs, dpi_panel), TAG, "register DMA callbacks failed");
 
@@ -387,10 +434,8 @@ static esp_err_t dpi_panel_del(esp_lcd_panel_t *panel)
             free(dpi_panel->fbs[i]);
         }
     }
-    for (int i = 0; i < DPI_PANEL_MAX_FB_NUM; i++) {
-        if (dpi_panel->link_lists[i]) {
-            dw_gdma_del_link_list(dpi_panel->link_lists[i]);
-        }
+    if (dpi_panel->ring) {
+        dw_gdma_del_link_list(dpi_panel->ring);
     }
     if (dpi_panel->fbcpy_handle) {
         esp_async_fbcpy_uninstall(dpi_panel->fbcpy_handle);
@@ -451,20 +496,15 @@ static esp_err_t dpi_panel_init(esp_lcd_panel_t *panel)
         },
         .size = dpi_panel->fb_size * 8 / 64,
     };
-    for (int i = 0; i < dpi_panel->num_fbs; i++) {
-        link_list = dpi_panel->link_lists[i];
-        dma_transfer_config.src.addr = (uint32_t)(dpi_panel->fbs[i]);
-        dw_gdma_lli_config_transfer(dw_gdma_link_list_get_item(link_list, 0), &dma_transfer_config);
-        dw_gdma_block_markers_t markers = {
-            .is_valid = true,
-            .is_last = true,
-        };
-        dw_gdma_lli_set_block_markers(dw_gdma_link_list_get_item(link_list, 0), markers);
+    // every item a whole frame of fb0, the first working frame buffer
+    dpi_panel->cur_fb_index   = 0;
+    dpi_panel->shown_fb_index = 0;
+    link_list                 = dpi_panel->ring;
+    dma_transfer_config.src.addr = (uint32_t)(dpi_panel->fbs[0]);
+    for (int i = 0; i < DPI_PANEL_RING_ITEMS; i++) {
+        dw_gdma_lli_config_transfer(dw_gdma_link_list_get_item(link_list, i), &dma_transfer_config);
     }
-
-    // by default, we use the fb0 as the first working frame buffer
-    dpi_panel->cur_fb_index = 0;
-    link_list = dpi_panel->link_lists[0];
+    dpi_panel_ring_refresh(dpi_panel);
     dw_gdma_channel_use_link_list(dma_chan, link_list);
     // enable the DMA channel
     dw_gdma_channel_enable_ctrl(dma_chan, true);
@@ -522,6 +562,7 @@ static esp_err_t dpi_panel_draw_bitmap(esp_lcd_panel_t *panel, int x_start, int 
         esp_cache_msync(cache_sync_start, cache_sync_size, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
 
         dpi_panel->cur_fb_index = draw_buf_fb_index;
+        dpi_panel_ring_refresh(dpi_panel);  // taken up at the next frame's start
         // invoke the trans done callback
         if (dpi_panel->on_color_trans_done) {
             dpi_panel->on_color_trans_done(&dpi_panel->base, NULL, dpi_panel->user_ctx);
