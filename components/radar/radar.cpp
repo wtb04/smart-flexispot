@@ -1,50 +1,33 @@
 #include "radar.h"
 
 #include "esp_check.h"
-#include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
-#include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_timer.h"
-#include "jpeg.h"
-#include "miniz.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "jpeg.h"
+#include "net.h"
 #include "units.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <iterator>
+#include <memory>
+#include <string>
 
+// The sky round home, and who is flying in it, through net: the feeds read on
+// the planner's task every few seconds, and for a tapped aircraft its details,
+// photo and trail asked for all at once, each answered on a net worker.
 namespace radar {
 namespace {
 constexpr char TAG[] = "radar";
 
-constexpr char LOOKUP_HOST[]      = "https://api.adsbdb.com";
-constexpr char PHOTO_HOST[]       = "https://api.planespotters.net";
-constexpr char PHOTO_IMAGE_HOST[] = "http://t.plnspttrs.net";
-constexpr char TRACE_HOST[]       = "https://adsb.lol";
-constexpr char PHOTO_AGENT[]      = "smart-flexispot (+https://woutertenbrinke.nl)";
-constexpr char AGENT[]            = "smart-flexispot";
-
-constexpr char        HTTPS_PREFIX[]   = "https://";
-constexpr std::size_t HTTPS_PREFIX_LEN = sizeof(HTTPS_PREFIX) - 1;
-
-constexpr int HTTP_TIMEOUT_MS  = 10 * units::kMsPerSecond;
-// A trace only makes a trail longer, and waiting on it held up the next tap's
-// lookups: adsb.lol's traces took 6 to 12 s on a busy evening.
-constexpr int TRACE_TIMEOUT_MS = 4 * units::kMsPerSecond;
-constexpr int HTTP_BUFFER_SIZE = 2 * units::kBytesPerKiB;
-
-constexpr int HTTP_OK                = 200;
-constexpr int HTTP_NOT_FOUND         = 404;
-constexpr int HTTP_TOO_MANY_REQUESTS = 429;
-
-constexpr std::size_t URL_SIZE        = 128;
-constexpr std::size_t LOOKUP_URL_SIZE = 192;
+constexpr char PHOTO_AGENT[] = "smart-flexispot (+https://woutertenbrinke.nl)";
 
 // Past the last ring, since the fullscreen view shows the sky to the screen's
 // edges, as far as 1.5 times the range from home at the widest.
@@ -57,227 +40,193 @@ constexpr float HOME_GRID_DEG = 0.01f;
 
 constexpr int PHOTO_MAX_W = 320;
 constexpr int PHOTO_MAX_H = 240;
+// Decoded photos kept, so a plane tapped again shows at once; one of them is
+// always the photo on screen, which the page draws straight from here.
+constexpr int PHOTO_SLOTS   = 6;
+constexpr int PHOTO_ENTRIES = 64;  // what is known of a photo: where it is, or that there is none
 
 constexpr std::int64_t FIRST_FETCH_DELAY_US = 6 * units::kUsPerSecond;
 constexpr TickType_t   HOME_SETTLE_CHECK    = pdMS_TO_TICKS(units::kMsPerSecond);
 
-// Measured: three seconds runs into the feed's rate limit and gets 429s.
 // Enough for everything the feed has at its busiest, and some that have just
 // left; one not heard of this long is forgotten, and its trail with it.
-constexpr int          TRAIL_SLOTS    = 768;
-constexpr float        TRAIL_STEP_KM  = 2.0f;  // with the points kept, 256 km: past the edge fullscreen
+constexpr int          TRAIL_SLOTS     = 768;
+constexpr float        TRAIL_STEP_KM   = 2.0f;  // with the points kept, 256 km: past the edge fullscreen
 constexpr std::int64_t TRAIL_FORGET_US = 15 * units::kUsPerMinute;
-// Past the slowest the feed is read, once a minute put off to two: unseen
-// longer, a trail starts again.
+// Past the slowest the feed is read, once a minute: unseen longer, a trail
+// starts again.
 constexpr std::int64_t TRAIL_GAP_US = 3 * units::kUsPerMinute;
 
+// Measured: three seconds runs into the feed's rate limit and gets 429s.
 constexpr std::int64_t POLL_ACTIVE_US = 5 * units::kUsPerSecond;
 constexpr std::int64_t POLL_IDLE_US   = units::kUsPerMinute;
+constexpr TickType_t   PLANNER_REST   = pdMS_TO_TICKS(units::kMsPerSecond);
 
-constexpr std::int64_t OVERDUE_REST_MS = units::kMsPerSecond;
-// Short enough to close idle lookup connections on time.
-constexpr std::int64_t LOOKUPS_OPEN_REST_MS = 2 * units::kMsPerSecond;
+constexpr std::size_t FEED_BODY_MAX    = 640 * units::kBytesPerKiB;  // uncompressed, about 940 bytes an aircraft
+constexpr std::size_t LOOKUP_BODY_MAX  = 16 * units::kBytesPerKiB;
+constexpr std::size_t PHOTO_BODY_MAX   = 256 * units::kBytesPerKiB;
+constexpr std::size_t TRACE_BODY_MAX   = 64 * units::kBytesPerKiB;  // compressed
+constexpr int         FEED_DEADLINE_MS = 10 * units::kMsPerSecond;
+constexpr int         TAP_DEADLINE_MS  = 10 * units::kMsPerSecond;
+constexpr std::size_t PATH_SIZE        = 160;
 
-constexpr std::size_t BODY_MAX = 640 * units::kBytesPerKiB;  // about 940 bytes an aircraft
-
-constexpr std::uint32_t TASK_STACK    = 8192;  // measured: uses 3.1 KB; the TLS handshake runs on it
-constexpr UBaseType_t   TASK_PRIORITY = 2;
-constexpr BaseType_t    TASK_CORE     = 0;
-
-StaticTask_t s_task_ctrl;
-StackType_t  s_task_stack[TASK_STACK];
-
-char        *s_body     = nullptr;
-std::size_t  s_body_len = 0;
-
-constexpr std::int64_t IDLE_CLOSE_US = 20 * units::kUsPerSecond;
-constexpr std::int64_t PHOTO_IDLE_US = 30 * units::kUsPerSecond;
-
-esp_http_client_handle_t s_lookup_client   = nullptr;
-esp_http_client_handle_t s_photoapi_client = nullptr;
-esp_http_client_handle_t s_photo_client    = nullptr;
-esp_http_client_handle_t s_trace_client    = nullptr;
-
-std::int64_t s_lookup_at_us = 0;
-bool         s_lookups_open = false;
-std::int64_t s_photo_at_us  = 0;
-bool         s_photo_open   = false;
+constexpr int HTTP_OK        = 200;
+constexpr int HTTP_NOT_FOUND = 404;
 
 constexpr int PREFETCH_PER_SWEEP = 6;
 // Fewer than the cache holds: prefetching every aircraft in range evicted what
 // the next sweep fetched again, forever.
 constexpr int PREFETCH_NEAREST = 20;
-
-constexpr int CACHE_SIZE = 48;
+constexpr int CACHE_SIZE       = 48;
 static_assert(PREFETCH_NEAREST < CACHE_SIZE, "the prefetched set has to fit, or it churns");
 
-struct CacheEntry {
-    char         hex[kHexLen];
-    char         flight[kFlightLen];
-    Details      details;
-    std::int64_t used_us;
-    bool         valid;
-};
+constexpr std::uint32_t TASK_STACK    = 4096;  // it only plans: net does the fetching
+constexpr UBaseType_t   TASK_PRIORITY = 2;
+constexpr BaseType_t    TASK_CORE     = 0;
 
-CacheEntry *s_cache = nullptr;
+StaticTask_t s_task_ctrl;
+StackType_t  s_task_stack[TASK_STACK];
+TaskHandle_t s_task = nullptr;
 
+// Everything below the lock is shared between the planner and net's workers.
 SemaphoreHandle_t s_lock = nullptr;
 StaticSemaphore_t s_lock_ctrl;
+SemaphoreHandle_t s_publish_lock = nullptr;  // one snapshot handed on at a time
+StaticSemaphore_t s_publish_lock_ctrl;
 
-Aircraft    *s_list       = nullptr;
-int          s_count      = 0;
-Aircraft    *s_scratch    = nullptr;
-Snapshot    *s_published  = nullptr;
-
-// What prefetch_visible() asks about, gathered under the lock and looked up
-// after it; in PSRAM, as the lists it is taken from are.
-struct Want {
-    char  hex[kHexLen];
-    char  flight[kFlightLen];
-    float distance;
+struct Lock {
+    Lock() { xSemaphoreTake(s_lock, portMAX_DELAY); }
+    ~Lock() { xSemaphoreGive(s_lock); }
 };
-Want *s_wanted = nullptr;
-bool         s_ok         = false;
-std::int64_t s_fetched_us = 0;
 
 UpdateHandler  s_on_update  = nullptr;
 DetailsHandler s_on_details = nullptr;
 PhotoHandler   s_on_photo   = nullptr;
 
-std::uint16_t *s_photo              = nullptr;
-int            s_photo_w            = 0;
-int            s_photo_h            = 0;
-char           s_photo_hex[kHexLen] = {};
+Aircraft    *s_list       = nullptr;
+int          s_count      = 0;
+Aircraft    *s_scratch    = nullptr;  // one feed is read at a time
+Snapshot    *s_published  = nullptr;
+bool         s_ok         = false;
+std::int64_t s_fetched_us = 0;
 
-char s_want_hex[kHexLen]       = {};
-char s_want_flight[kFlightLen] = {};
-bool s_want_pending            = false;
-
-TaskHandle_t s_task    = nullptr;
 bool         s_active  = false;
 bool         s_enabled = true;
 bool         s_screen  = true;  // nothing is fetched while the screen is dark
-
 std::int64_t s_home_at_us = 0;
 float        s_home_lat   = 0.0f;
 float        s_home_lon   = 0.0f;
 bool         s_has_home   = false;
+
+// What was tapped last: only its answers reach the page.
+std::atomic<std::uint32_t> s_tap{0};
+char                       s_tap_hex[kHexLen]       = {};
+char                       s_tap_flight[kFlightLen] = {};
+std::int64_t               s_tap_at_us              = 0;
+// The page asks on every redraw until the details are in; once asked, the
+// same aircraft is not asked about again this soon.
+constexpr std::int64_t TAP_REPEAT_US = 5 * units::kUsPerSecond;
 
 int ms_since(std::int64_t began_us)
 {
     return static_cast<int>((esp_timer_get_time() - began_us) / units::kUsPerMs);
 }
 
-bool is_https(const char *url)
+bool tapped(std::uint32_t tap)
 {
-    return std::strncmp(url, HTTPS_PREFIX, HTTPS_PREFIX_LEN) == 0;
+    return tap == s_tap.load();
 }
 
-esp_err_t on_event(esp_http_client_event_t *event)
+// ---- hosts
+
+// Two feeds of the same readsb data, taken in turn: one alone refused most
+// readings at one every five seconds, the panel sharing its address with
+// whatever else in the house asks.
+struct Feed {
+    const char *name;
+    const char *query;  // lat, lon, radius in nautical miles
+    net::Host   host;
+};
+Feed s_feeds[] = {
+    {"adsb.lol", "/v2/point/%.4f/%.4f/%d", net::kNoHost},
+    {"adsb.fi", "/api/v2/lat/%.4f/lon/%.4f/dist/%d", net::kNoHost},
+};
+constexpr int FEED_COUNT = static_cast<int>(std::size(s_feeds));
+
+net::Host s_lookup_host   = net::kNoHost;  // adsbdb: the airframe and the flight
+net::Host s_photoapi_host = net::kNoHost;  // planespotters: where the photo is
+net::Host s_photo_host    = net::kNoHost;  // and the photo
+net::Host s_trace_host    = net::kNoHost;  // adsb.lol's traces
+
+void add_hosts()
 {
-    if (event->event_id != HTTP_EVENT_ON_DATA || event->data_len <= 0) {
-        return ESP_OK;
-    }
-    const std::size_t room = BODY_MAX - 1 - s_body_len;
-    const std::size_t take = static_cast<std::size_t>(event->data_len) < room
-                                 ? static_cast<std::size_t>(event->data_len)
-                                 : room;
-    if (take > 0) {
-        std::memcpy(s_body + s_body_len, event->data, take);
-        s_body_len += take;
-        s_body[s_body_len] = '\0';
-    }
-    return ESP_OK;
+    // The two feeds stand in for each other, so one that fails is not tried
+    // again but rested, and the other asked.
+    net::HostConfig lol{};
+    lol.name        = "adsb.lol";
+    lol.base        = "http://api.adsb.lol";
+    lol.timeout_ms  = 6 * units::kMsPerSecond;
+    lol.connections = 1;
+    lol.gzip        = true;
+    lol.keep_open   = false;  // measured: holding it open doubled the share it refused
+    lol.rest        = net::Rest{1, units::kMsPerMinute, units::kMsPerMinute};
+    s_feeds[0].host = net::add_host(lol);
+
+    net::HostConfig fi = lol;
+    fi.name         = "adsb.fi";
+    fi.base         = "https://opendata.adsb.fi";
+    fi.keep_open    = true;  // https only, so held rather than shaking hands every reading
+    s_feeds[1].host = net::add_host(fi);
+
+    // Asked while somebody waits: tried once more shortly, and a moment's
+    // failure rests them only briefly.
+    net::HostConfig lookup{};
+    lookup.name    = "adsbdb";
+    lookup.base    = "https://api.adsbdb.com";
+    lookup.idle_ms = units::kMsPerMinute;
+    lookup.retry   = net::Retry{1, 300, 200, false};
+    lookup.rest    = net::Rest{3, 10 * units::kMsPerSecond, 30 * units::kMsPerSecond};
+    s_lookup_host  = net::add_host(lookup);
+
+    net::HostConfig photoapi = lookup;
+    photoapi.name   = "planespotters";
+    photoapi.base   = "https://api.planespotters.net";
+    photoapi.agent  = PHOTO_AGENT;
+    s_photoapi_host = net::add_host(photoapi);
+
+    net::HostConfig photo = lookup;
+    photo.name   = "photos";
+    photo.base   = "http://t.plnspttrs.net";
+    s_photo_host = net::add_host(photo);
+
+    net::HostConfig trace = lookup;
+    trace.name        = "adsb.lol traces";
+    trace.base        = "https://adsb.lol";
+    trace.timeout_ms  = 4 * units::kMsPerSecond;  // a trace only makes a trail longer
+    trace.connections = 1;
+    trace.retry       = net::Retry{};
+    trace.rest        = net::Rest{2, units::kMsPerMinute, units::kMsPerMinute};
+    s_trace_host      = net::add_host(trace);
 }
 
-esp_http_client_handle_t open_client(const char *url, const char *agent = AGENT,
-                                     int timeout_ms = HTTP_TIMEOUT_MS)
+// ---- publishing
+
+void publish()
 {
-    esp_http_client_config_t cfg = {};
-    cfg.url                      = url;
-    cfg.event_handler            = on_event;
-    cfg.timeout_ms               = timeout_ms;
-    cfg.user_agent               = agent;
-    cfg.buffer_size              = HTTP_BUFFER_SIZE;
-    cfg.keep_alive_enable        = true;
-    // Only where TLS can actually be negotiated: two of these hosts are plain
-    // http, and a root store there is internal memory spent on nothing.
-    if (is_https(url)) {
-        cfg.crt_bundle_attach = esp_crt_bundle_attach;
-    }
-    return esp_http_client_init(&cfg);
-}
-
-int get(esp_http_client_handle_t client, const char *url, const char *what)
-{
-    if (client == nullptr || esp_http_client_set_url(client, url) != ESP_OK) {
-        return 0;
-    }
-
-    s_body_len = 0;
-    s_body[0]  = '\0';
-
-    const esp_err_t err    = esp_http_client_perform(client);
-    const int       status = esp_http_client_get_status_code(client);
-
-    if (err != ESP_OK) {
-        esp_http_client_close(client);
-        // `what` rather than the url: the feed's url carries the panel's own
-        // coordinates, and these lines show on the diagnostics page.
-        ESP_LOGW(TAG, "%s unreachable: %s", what, esp_err_to_name(err));
-        return 0;
-    }
-    if (status == HTTP_NOT_FOUND) {
-        ESP_LOGD(TAG, "%s not known", what);
-    } else if (status != HTTP_OK) {
-        ESP_LOGW(TAG, "%s: http %d", what, status);
-    }
-    return status;
-}
-
-CacheEntry *cache_find(const char *hex, const char *flight)
-{
-    if (s_cache == nullptr) {
-        return nullptr;
-    }
-    for (int i = 0; i < CACHE_SIZE; ++i) {
-        CacheEntry &entry = s_cache[i];
-        if (entry.valid && std::strcmp(entry.hex, hex) == 0 &&
-            std::strcmp(entry.flight, flight) == 0) {
-            entry.used_us = esp_timer_get_time();
-            return &entry;
-        }
-    }
-    return nullptr;
-}
-
-void cache_put(const char *hex, const char *flight, const Details &details)
-{
-    if (s_cache == nullptr) {
+    if (s_on_update == nullptr) {
         return;
     }
-    CacheEntry *slot = cache_find(hex, flight);
-    if (slot == nullptr) {
-        slot = &s_cache[0];
-        for (int i = 0; i < CACHE_SIZE; ++i) {
-            if (!s_cache[i].valid) {
-                slot = &s_cache[i];
-                break;
-            }
-            if (s_cache[i].used_us < slot->used_us) {
-                slot = &s_cache[i];
-            }
-        }
-    }
-    std::snprintf(slot->hex, sizeof(slot->hex), "%s", hex);
-    std::snprintf(slot->flight, sizeof(slot->flight), "%s", flight);
-    slot->details = details;
-    slot->used_us = esp_timer_get_time();
-    slot->valid   = true;
+    xSemaphoreTake(s_publish_lock, portMAX_DELAY);
+    snapshot(*s_published);
+    s_on_update(*s_published);
+    xSemaphoreGive(s_publish_lock);
 }
+
+// ---- trails
 
 Trail *s_trails = nullptr;
 
+// Under the lock.
 Trail *trail_slot(const char *hex, std::int64_t now)
 {
     Trail *free_slot = nullptr;
@@ -300,12 +249,9 @@ Trail *trail_slot(const char *hex, std::int64_t now)
     return slot;
 }
 
-// Each reading adds to where those in it have been. Under s_lock.
+// Each reading adds to where those in it have been. Under the lock.
 void record_trails(const Aircraft *list, int count)
 {
-    if (s_trails == nullptr) {
-        return;
-    }
     const std::int64_t now = esp_timer_get_time();
     for (int i = 0; i < count; ++i) {
         const Aircraft &aircraft = list[i];
@@ -318,500 +264,626 @@ void record_trails(const Aircraft *list, int count)
     }
 }
 
-// The feeds are asked for gzip, a seventh of the size, and traces come that
-// way whatever is asked for.
-char               *s_inflated = nullptr;  // BODY_MAX, as the feed's body would be
-tinfl_decompressor *s_inflater = nullptr;  // 11 KB: too much for the task's stack
+// ---- details, cached
 
-// The inflated length, or 0 when `in` is not a whole gzip stream.
-std::size_t gunzip(const std::uint8_t *in, std::size_t length, char *out, std::size_t size)
-{
-    constexpr std::size_t  HEADER = 10, TRAILER = 8;
-    constexpr std::uint8_t FHCRC = 2, FEXTRA = 4, FNAME = 8, FCOMMENT = 16;
-    if (length < HEADER + TRAILER || in[0] != 0x1f || in[1] != 0x8b || in[2] != 8) {
-        return 0;
-    }
-    const std::uint8_t flags = in[3];
-    std::size_t        at    = HEADER;
-    if ((flags & FEXTRA) != 0) {
-        at += 2 + (in[at] | (in[at + 1] << 8));
-    }
-    for (const std::uint8_t text : {FNAME, FCOMMENT}) {
-        if ((flags & text) != 0) {
-            while (at < length && in[at] != 0) {
-                ++at;
-            }
-            ++at;
-        }
-    }
-    if ((flags & FHCRC) != 0) {
-        at += 2;
-    }
-    if (at + TRAILER >= length) {
-        return 0;
-    }
-    std::size_t in_bytes  = length - at - TRAILER;
-    std::size_t out_bytes = size - 1;
-    tinfl_init(s_inflater);
-    const tinfl_status status =
-        tinfl_decompress(s_inflater, in + at, &in_bytes, reinterpret_cast<mz_uint8 *>(out),
-                         reinterpret_cast<mz_uint8 *>(out), &out_bytes, TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF);
-    if (status != TINFL_STATUS_DONE) {
-        return 0;
-    }
-    out[out_bytes] = '\0';
-    return out_bytes;
-}
+enum class Known : std::uint8_t { Empty, Asked, Known };
 
-// The body as JSON: inflated into s_inflated when it came compressed. Null
-// when it came compressed and does not inflate.
-const char *unpacked(std::size_t &length)
-{
-    constexpr std::uint8_t GZIP_FIRST = 0x1f;
-    if (s_body_len == 0 || static_cast<std::uint8_t>(s_body[0]) != GZIP_FIRST) {
-        length = s_body_len;
-        return s_body;
-    }
-    length = gunzip(reinterpret_cast<const std::uint8_t *>(s_body), s_body_len, s_inflated, BODY_MAX);
-    return length > 0 ? s_inflated : nullptr;
-}
-
-// Two feeds of the same readsb data, taken in turn: one alone refused most
-// readings at one every five seconds, the panel sharing its address with
-// whatever else in the house asks.
-struct Feed {
-    const char              *name;
-    const char              *host;
-    const char              *query;  // host, lat, lon, radius in nautical miles
-    bool                     keep_open;
-    esp_http_client_handle_t client;
+struct CacheEntry {
+    char         hex[kHexLen];
+    char         flight[kFlightLen];
+    Details      details;
+    std::int64_t used_us;
+    Known        state;
 };
-Feed s_feeds[] = {
-    // Measured: holding this one open doubled the share it refused.
-    {"adsb.lol", "http://api.adsb.lol", "%s/v2/point/%.4f/%.4f/%d", false, nullptr},
-    // https only, so held open rather than shaking hands every reading.
-    {"adsb.fi", "https://opendata.adsb.fi", "%s/api/v2/lat/%.4f/lon/%.4f/dist/%d", true, nullptr},
-};
-constexpr int FEED_COUNT = static_cast<int>(std::size(s_feeds));
-int           s_next_feed = 0;
+CacheEntry *s_cache = nullptr;
 
-bool s_feed_backoff = false;
-
-int ask_feed(Feed &feed, float lat, float lon)
+// Under the lock.
+CacheEntry *cache_find(const char *hex, const char *flight)
 {
-    char url[URL_SIZE];
-    std::snprintf(url, sizeof(url), feed.query, feed.host, static_cast<double>(lat), static_cast<double>(lon),
-                  static_cast<int>(std::lround(static_cast<float>(RANGE_KM) * NM_PER_KM)));
-    char what[24];
-    std::snprintf(what, sizeof(what), "feed %s", feed.name);
-    const int status = get(feed.client, url, what);
-    if (!feed.keep_open) {
-        esp_http_client_close(feed.client);
-    }
-    return status;
-}
-
-// The next feed in turn, and the other at once when that one will not answer.
-bool fetch(float lat, float lon)
-{
-    int  status  = 0;
-    int  refused = 0;
-    for (int tried = 0; tried < FEED_COUNT && status != HTTP_OK; ++tried) {
-        Feed &feed  = s_feeds[s_next_feed];
-        s_next_feed = (s_next_feed + 1) % FEED_COUNT;
-        status      = ask_feed(feed, lat, lon);
-        refused += status == HTTP_TOO_MANY_REQUESTS ? 1 : 0;
-    }
-    s_feed_backoff = refused == FEED_COUNT;
-    std::size_t json_len = 0;
-    const char *json     = status == HTTP_OK ? unpacked(json_len) : nullptr;
-    if (json == nullptr) {
-        return false;
-    }
-
-    const int count = parse(json, json_len, s_scratch, kMaxAircraft);
-
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    std::memcpy(s_list, s_scratch, sizeof(Aircraft) * static_cast<std::size_t>(count));
-    record_trails(s_list, count);
-    s_count      = count;
-    s_ok         = true;
-    s_fetched_us = esp_timer_get_time();
-    xSemaphoreGive(s_lock);
-
-    ESP_LOGD(TAG, "%d aircraft within %d km, %u bytes", count, RANGE_KM,
-             static_cast<unsigned>(json_len));
-
-    if (s_on_update != nullptr) {
-        snapshot(*s_published);
-        s_on_update(*s_published);
-    }
-    return true;
-}
-
-void fetch_photo(const char *hex, const Details &details)
-{
-    if (s_photo != nullptr && s_photo_w > 0 && std::strcmp(s_photo_hex, hex) == 0) {
-        if (s_on_photo != nullptr) {
-            s_on_photo(hex, s_photo, s_photo_w, s_photo_h);
-        }
-        return;
-    }
-
-    if (s_photo == nullptr || details.photo_url[0] == '\0') {
-        if (s_on_photo != nullptr) {
-            s_on_photo(hex, nullptr, 0, 0);
-        }
-        return;
-    }
-
-    const std::int64_t began  = esp_timer_get_time();
-    int                width  = 0;
-    int                height = 0;
-    const int status = get(s_photo_client, details.photo_url, "photo");
-    s_photo_at_us    = esp_timer_get_time();
-    s_photo_open     = true;
-    if (status == HTTP_OK &&
-        jpeg::decode_into(s_body, s_body_len, s_photo, PHOTO_MAX_W, PHOTO_MAX_H, width, height)) {
-        s_photo_w = width;
-        s_photo_h = height;
-        std::snprintf(s_photo_hex, sizeof(s_photo_hex), "%s", hex);
-        ESP_LOGI(TAG, "%s: photo %dx%d in %d ms", hex, width, height, ms_since(began));
-        if (s_on_photo != nullptr) {
-            s_on_photo(hex, s_photo, width, height);
-        }
-        return;
-    }
-    s_photo_hex[0] = '\0';
-    s_photo_w      = 0;
-    if (s_on_photo != nullptr) {
-        s_on_photo(hex, nullptr, 0, 0);
-    }
-}
-
-bool fetch_details(const char *hex, const char *callsign, Details &out)
-{
-    char url[LOOKUP_URL_SIZE];
-    bool want_aircraft = true;
-    bool want_route    = callsign[0] != '\0';
-
-    // One request answers for the airframe and the flight it is on, which is one
-    // handshake instead of two -- but it is all or nothing: an unknown callsign
-    // 404s the whole thing. The body says which half was missing, so only that
-    // half is asked for again.
-    if (want_route) {
-        std::snprintf(url, sizeof(url), "%s/v0/aircraft/%s?callsign=%s", LOOKUP_HOST, hex,
-                      callsign);
-        const int status = get(s_lookup_client, url, "details");
-        if (status == HTTP_OK) {
-            parse_aircraft(s_body, s_body_len, out);
-            parse_route(s_body, s_body_len, out);
-            return true;
-        }
-        if (status != HTTP_NOT_FOUND) {
-            return false;
-        }
-        want_route    = std::strstr(s_body, "unknown callsign") == nullptr;
-        want_aircraft = std::strstr(s_body, "unknown aircraft") == nullptr;
-    }
-
-    if (want_aircraft) {
-        std::snprintf(url, sizeof(url), "%s/v0/aircraft/%s", LOOKUP_HOST, hex);
-        if (get(s_lookup_client, url, "aircraft") == HTTP_OK) {
-            parse_aircraft(s_body, s_body_len, out);
+    for (int i = 0; i < CACHE_SIZE; ++i) {
+        CacheEntry &entry = s_cache[i];
+        if (entry.state != Known::Empty && std::strcmp(entry.hex, hex) == 0 && std::strcmp(entry.flight, flight) == 0) {
+            entry.used_us = esp_timer_get_time();
+            return &entry;
         }
     }
-    if (want_route) {
-        std::snprintf(url, sizeof(url), "%s/v0/callsign/%s", LOOKUP_HOST, callsign);
-        if (get(s_lookup_client, url, "route") == HTTP_OK) {
-            parse_route(s_body, s_body_len, out);
-        }
-    }
-    return out.has_aircraft || out.has_route;
+    return nullptr;
 }
 
-void close_idle_lookups()
+// Under the lock: the entry for `hex` on `flight`, taking the least used one
+// for it when there is none.
+CacheEntry &cache_slot(const char *hex, const char *flight)
 {
-    const std::int64_t now = esp_timer_get_time();
-    if (s_photo_open && now - s_photo_at_us >= PHOTO_IDLE_US) {
-        esp_http_client_close(s_photo_client);
-        s_photo_open = false;
+    if (CacheEntry *found = cache_find(hex, flight); found != nullptr) {
+        return *found;
     }
-    if (s_lookups_open && now - s_lookup_at_us >= IDLE_CLOSE_US) {
-        esp_http_client_close(s_lookup_client);
-        esp_http_client_close(s_photoapi_client);
-        esp_http_client_close(s_trace_client);
-        s_lookups_open = false;
-    }
-}
-
-void resolve_photo(const char *hex, Details &out)
-{
-    out.photo_checked = true;
-
-    char url[URL_SIZE];
-    std::snprintf(url, sizeof(url), "%s/pub/photos/hex/%s", PHOTO_HOST, hex);
-    if (get(s_photoapi_client, url, "photo lookup") != HTTP_OK) {
-        return;
-    }
-
-    char found[sizeof(out.photo_url)];
-    if (!parse_photo(s_body, s_body_len, found, sizeof(found))) {
-        return;
-    }
-    if (is_https(found)) {
-        std::snprintf(out.photo_url, sizeof(out.photo_url), "http://%s",
-                      found + HTTPS_PREFIX_LEN);
-    } else {
-        std::snprintf(out.photo_url, sizeof(out.photo_url), "%s", found);
-    }
-}
-
-// Where a tapped aircraft has been this last quarter hour, before the panel
-// was watching, so its trail reaches back across the view at once.
-void fetch_trace(const char *hex)
-{
-    const std::size_t len = std::strlen(hex);
-    if (s_inflated == nullptr || s_inflater == nullptr || len < 2 || hex[0] == '~') {
-        return;  // a ~ is a position from ground radar, which has no trace
-    }
-    char url[URL_SIZE];
-    std::snprintf(url, sizeof(url), "%s/data/traces/%.2s/trace_recent_%.7s.json", TRACE_HOST, hex + len - 2, hex);
-    const std::int64_t began = esp_timer_get_time();
-    if (get(s_trace_client, url, "trace") != HTTP_OK) {
-        return;
-    }
-    std::size_t  json_len = 0;
-    const char  *json     = unpacked(json_len);
-    static Trail trace;  // only this task
-    trace = Trail{};
-    const int positions = json != nullptr ? parse_trace(json, json_len, trace, TRAIL_STEP_KM) : -1;
-    if (positions <= 0) {
-        ESP_LOGW(TAG, "%s: no trace in %u bytes", hex, static_cast<unsigned>(s_body_len));
-        return;
-    }
-    ESP_LOGI(TAG, "%s: trace, %d positions in %d ms", hex, positions, ms_since(began));
-
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    const std::int64_t now  = esp_timer_get_time();
-    Trail             *slot = trail_slot(hex, now);
-    std::memcpy(trace.hex, slot->hex, sizeof(trace.hex));
-    trace.seen_us = now;
-    *slot         = trace;
-    xSemaphoreGive(s_lock);
-
-    if (s_on_update != nullptr) {
-        snapshot(*s_published);
-        s_on_update(*s_published);
-    }
-}
-
-bool tap_waiting();
-
-void look_up(const char *hex, const char *callsign, bool with_photo)
-{
-    Details           details{};
-    CacheEntry *hit = cache_find(hex, callsign);
-
-    s_lookup_at_us = esp_timer_get_time();
-    s_lookups_open = true;
-
-    if (hit != nullptr) {
-        details = hit->details;
-    } else {
-        const std::int64_t began = esp_timer_get_time();
-        fetch_details(hex, callsign, details);
-        cache_put(hex, callsign, details);
-        hit = cache_find(hex, callsign);
-        ESP_LOGI(TAG, "%s: %s%s%s in %d ms", hex,
-                 details.has_aircraft ? details.model : "unknown type",
-                 details.has_route ? ", " : "", details.has_route ? details.origin_code : "",
-                 ms_since(began));
-    }
-
-    if (with_photo && !details.photo_checked) {
-        resolve_photo(hex, details);
-        if (hit != nullptr) {
-            hit->details = details;
-        }
-    }
-
-    if (s_on_details != nullptr) {
-        s_on_details(hex, details);
-    }
-    // The photo first: it is what a tap waits to see, and the trace, slow
-    // when adsb.lol is busy, held it up by seconds.
-    if (with_photo) {
-        fetch_photo(hex, details);
-        if (!tap_waiting()) {  // a newer tap's lookups come before this one's trail
-            fetch_trace(hex);
-        }
-    }
-}
-
-void warm_photo(const char *hex, const char *callsign)
-{
-    CacheEntry *entry = cache_find(hex, callsign);
-    if (entry == nullptr || entry->details.photo_checked) {
-        return;
-    }
-    resolve_photo(hex, entry->details);
-}
-
-bool tap_waiting()
-{
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    const bool waiting = s_want_pending;
-    xSemaphoreGive(s_lock);
-    return waiting;
-}
-
-void prefetch_visible()
-{
-    Want *wanted = s_wanted;
-    int   count  = 0;
-
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    for (int i = 0; i < s_count && count < kMaxAircraft; ++i) {
-        const Aircraft &aircraft = s_list[i];
-        if (aircraft.on_ground || aircraft.hex[0] == '\0') {
-            continue;
-        }
-        std::memcpy(wanted[count].hex, aircraft.hex, sizeof(wanted[count].hex));
-        std::memcpy(wanted[count].flight, aircraft.flight, sizeof(wanted[count].flight));
-        wanted[count].distance = aircraft.distance_nm;
-        ++count;
-    }
-    xSemaphoreGive(s_lock);
-
-    std::sort(wanted, wanted + count,
-              [](const Want &a, const Want &b) { return a.distance < b.distance; });
-
-    int chosen[PREFETCH_PER_SWEEP];
-    int fetched = 0;
-    for (int i = 0; i < count && i < PREFETCH_NEAREST && fetched < PREFETCH_PER_SWEEP; ++i) {
-        if (tap_waiting()) {
+    CacheEntry *slot = &s_cache[0];
+    for (int i = 0; i < CACHE_SIZE; ++i) {
+        if (s_cache[i].state == Known::Empty) {
+            slot = &s_cache[i];
             break;
         }
-        if (cache_find(wanted[i].hex, wanted[i].flight) != nullptr) {
-            continue;
+        if (s_cache[i].used_us < slot->used_us) {
+            slot = &s_cache[i];
         }
-        look_up(wanted[i].hex, wanted[i].flight, false);
-        chosen[fetched++] = i;
     }
-    if (fetched == 0) {
-        return;
-    }
-
-    esp_http_client_close(s_lookup_client);
-    for (int i = 0; i < fetched; ++i) {
-        if (tap_waiting()) {
-            break;
-        }
-        warm_photo(wanted[chosen[i]].hex, wanted[chosen[i]].flight);
-    }
-    esp_http_client_close(s_photoapi_client);
+    *slot = CacheEntry{};
+    std::snprintf(slot->hex, sizeof(slot->hex), "%s", hex);
+    std::snprintf(slot->flight, sizeof(slot->flight), "%s", flight);
+    slot->used_us = esp_timer_get_time();
+    return *slot;
 }
 
+// Under the lock: known details of those no longer in the feed dropped.
 void expire_cache()
 {
-    if (s_cache == nullptr) {
-        return;
-    }
-    xSemaphoreTake(s_lock, portMAX_DELAY);
     for (int i = 0; i < CACHE_SIZE; ++i) {
-        if (!s_cache[i].valid) {
+        if (s_cache[i].state != Known::Known) {
             continue;
         }
         bool still_here = false;
         for (int j = 0; j < s_count && !still_here; ++j) {
             still_here = std::strcmp(s_cache[i].hex, s_list[j].hex) == 0;
         }
-        s_cache[i].valid = still_here;
+        if (!still_here) {
+            s_cache[i].state = Known::Empty;
+        }
     }
-    xSemaphoreGive(s_lock);
+}
+
+// A lookup of the airframe and the flight it is on, in as many requests as it
+// takes. One answers for both -- but it is all or nothing: an unknown callsign
+// 404s the whole thing, and the body says which half was missing, so only
+// that half is asked for again.
+struct DetailsJob {
+    char          hex[kHexLen];
+    char          flight[kFlightLen];
+    Details       details{};
+    net::Priority priority;
+    std::uint32_t tap;  // 0 when prefetched
+    bool          want_aircraft = false;
+    bool          want_route    = false;
+    bool          failed        = false;
+    std::int64_t  began_us      = 0;
+};
+using DetailsJobPtr = std::shared_ptr<DetailsJob>;
+
+void details_step(const DetailsJobPtr &job);
+
+void details_done(const DetailsJobPtr &job)
+{
+    {
+        Lock        hold;
+        CacheEntry &entry = cache_slot(job->hex, job->flight);
+        if (job->failed) {
+            entry.state = Known::Empty;  // asked again next time rather than known as nothing
+        } else {
+            entry.details = job->details;
+            entry.state   = Known::Known;
+        }
+    }
+    ESP_LOGI(TAG, "%s: %s%s%s in %d ms", job->hex, job->details.has_aircraft ? job->details.model : "unknown type",
+             job->details.has_route ? ", " : "", job->details.has_route ? job->details.origin_code : "",
+             ms_since(job->began_us));
+    if (job->tap != 0 && tapped(job->tap) && s_on_details != nullptr) {
+        s_on_details(job->hex, job->details);
+    }
+}
+
+void ask_lookup(const DetailsJobPtr &job, const char *path, const char *what, net::Done done)
+{
+    net::Request request;
+    request.host        = s_lookup_host;
+    request.path        = path;
+    request.priority    = job->priority;
+    // Keyed by the aircraft, not by who asks: a tap joins a prefetch already
+    // under way, at a tap's priority, rather than ask again.
+    request.key         = std::string("details:") + job->hex;
+    request.dedupe      = net::Dedupe::Join;
+    request.deadline_ms = job->tap != 0 ? TAP_DEADLINE_MS : 0;
+    request.max_body    = LOOKUP_BODY_MAX;
+    request.what        = what;
+    request.done        = std::move(done);
+    net::submit(std::move(request));
+}
+
+void details_step(const DetailsJobPtr &job)
+{
+    char path[PATH_SIZE];
+    if (job->want_aircraft && job->want_route) {
+        std::snprintf(path, sizeof(path), "/v0/aircraft/%s?callsign=%s", job->hex, job->flight);
+        ask_lookup(job, path, "details", [job](const net::Response &answer) {
+            if (answer.status == HTTP_OK) {
+                parse_aircraft(answer.body, answer.length, job->details);
+                parse_route(answer.body, answer.length, job->details);
+                job->want_aircraft = job->want_route = false;
+            } else if (answer.status == HTTP_NOT_FOUND) {
+                job->want_route    = std::strstr(answer.body, "unknown callsign") == nullptr;
+                job->want_aircraft = std::strstr(answer.body, "unknown aircraft") == nullptr;
+            } else {
+                job->failed        = true;
+                job->want_aircraft = job->want_route = false;
+            }
+            details_step(job);
+        });
+    } else if (job->want_aircraft) {
+        std::snprintf(path, sizeof(path), "/v0/aircraft/%s", job->hex);
+        ask_lookup(job, path, "aircraft", [job](const net::Response &answer) {
+            if (answer.status == HTTP_OK) {
+                parse_aircraft(answer.body, answer.length, job->details);
+            }
+            job->want_aircraft = false;
+            details_step(job);
+        });
+    } else if (job->want_route) {
+        std::snprintf(path, sizeof(path), "/v0/callsign/%s", job->flight);
+        ask_lookup(job, path, "route", [job](const net::Response &answer) {
+            if (answer.status == HTTP_OK) {
+                parse_route(answer.body, answer.length, job->details);
+            }
+            job->want_route = false;
+            details_step(job);
+        });
+    } else {
+        details_done(job);
+    }
+}
+
+void ask_details(const char *hex, const char *flight, net::Priority priority, std::uint32_t tap)
+{
+    auto job = std::make_shared<DetailsJob>();
+    std::snprintf(job->hex, sizeof(job->hex), "%s", hex);
+    std::snprintf(job->flight, sizeof(job->flight), "%s", flight);
+    job->priority      = priority;
+    job->tap           = tap;
+    job->want_aircraft = true;
+    job->want_route    = flight[0] != '\0';
+    job->began_us      = esp_timer_get_time();
+    details_step(job);
+}
+
+// ---- photos, cached
+
+enum class Photo : std::uint8_t { Unknown, Asked, None, Found };
+
+struct PhotoEntry {
+    char         hex[kHexLen];
+    char         url[kPhotoUrlLen];
+    Photo        state;
+    int          slot;  // decoded into, or -1
+    std::int64_t used_us;
+};
+struct PhotoSlot {
+    std::uint16_t *pixels;
+    int            width;
+    int            height;
+    int            entry;  // whose it is, or -1
+    bool           filling;
+};
+PhotoEntry *s_photo_entries = nullptr;
+PhotoSlot   s_photo_slots[PHOTO_SLOTS];
+int         s_shown_slot = -1;  // the page draws straight from it, so it is never reused
+
+// Under the lock: the entry for `hex`, taking the least used one when there is none.
+int photo_entry(const char *hex)
+{
+    int least = 0;
+    for (int i = 0; i < PHOTO_ENTRIES; ++i) {
+        PhotoEntry &entry = s_photo_entries[i];
+        if (entry.hex[0] != '\0' && std::strcmp(entry.hex, hex) == 0) {
+            entry.used_us = esp_timer_get_time();
+            return i;
+        }
+        const bool holds_shown = entry.slot >= 0 && entry.slot == s_shown_slot;
+        if (!holds_shown && entry.used_us < s_photo_entries[least].used_us) {
+            least = i;
+        }
+    }
+    PhotoEntry &entry = s_photo_entries[least];
+    if (entry.slot >= 0) {
+        s_photo_slots[entry.slot].entry = -1;
+    }
+    entry = PhotoEntry{};
+    std::snprintf(entry.hex, sizeof(entry.hex), "%s", hex);
+    entry.slot    = -1;
+    entry.used_us = esp_timer_get_time();
+    return least;
+}
+
+// Under the lock: a slot to decode into, taken from the least used photo
+// that is not on screen; -1 when every one is busy.
+int photo_slot_for(int entry)
+{
+    int chosen = -1;
+    for (int i = 0; i < PHOTO_SLOTS; ++i) {
+        const PhotoSlot &slot = s_photo_slots[i];
+        if (slot.filling || i == s_shown_slot) {
+            continue;
+        }
+        if (slot.entry < 0) {
+            chosen = i;
+            break;
+        }
+        if (chosen < 0 ||
+            s_photo_entries[slot.entry].used_us < s_photo_entries[s_photo_slots[chosen].entry].used_us) {
+            chosen = i;
+        }
+    }
+    if (chosen >= 0) {
+        PhotoSlot &slot = s_photo_slots[chosen];
+        if (slot.entry >= 0) {
+            s_photo_entries[slot.entry].slot = -1;
+        }
+        slot.entry   = entry;
+        slot.filling = true;
+    }
+    return chosen;
+}
+
+void show_photo(const char *hex, std::uint32_t tap, int slot)
+{
+    if (!tapped(tap) || s_on_photo == nullptr) {
+        return;
+    }
+    if (slot < 0) {
+        s_on_photo(hex, nullptr, 0, 0);
+        return;
+    }
+    const PhotoSlot &photo = s_photo_slots[slot];
+    s_on_photo(hex, photo.pixels, photo.width, photo.height);
+}
+
+void ask_image(const std::string &hex, const std::string &url, std::uint32_t tap)
+{
+    net::Request request;
+    request.host        = s_photo_host;
+    request.path        = url;
+    request.priority    = net::Priority::Tap;
+    request.key         = "photo";
+    request.dedupe      = net::Dedupe::Replace;
+    request.deadline_ms = TAP_DEADLINE_MS;
+    request.max_body    = PHOTO_BODY_MAX;
+    request.what        = "photo";
+    request.done        = [hex, tap](const net::Response &answer) {
+        int slot = -1;
+        {
+            Lock hold;
+            const int entry = photo_entry(hex.c_str());
+            if (answer.status == HTTP_OK) {
+                slot = photo_slot_for(entry);
+            }
+        }
+        if (slot < 0) {
+            show_photo(hex.c_str(), tap, -1);
+            return;
+        }
+        PhotoSlot &photo = s_photo_slots[slot];
+        int        width = 0, height = 0;
+        const bool decoded =
+            jpeg::decode_into(answer.body, answer.length, photo.pixels, PHOTO_MAX_W, PHOTO_MAX_H, width, height);
+        {
+            Lock hold;
+            const int entry = photo_entry(hex.c_str());
+            photo.filling   = false;
+            if (decoded) {
+                photo.width                   = width;
+                photo.height                  = height;
+                s_photo_entries[entry].slot   = slot;
+                if (tapped(tap)) {
+                    s_shown_slot = slot;
+                }
+            } else {
+                photo.entry = -1;
+                slot        = -1;
+            }
+        }
+        if (decoded) {
+            ESP_LOGI(TAG, "%s: photo %dx%d in %d ms", hex.c_str(), width, height, answer.ms);
+        }
+        show_photo(hex.c_str(), tap, slot);
+    };
+    net::submit(std::move(request));
+}
+
+// Where the photo is, from planespotters; then, for a tap, the photo.
+void ask_photo_lookup(const char *hex, net::Priority priority, std::uint32_t tap)
+{
+    char path[PATH_SIZE];
+    std::snprintf(path, sizeof(path), "/pub/photos/hex/%s", hex);
+    net::Request request;
+    request.host        = s_photoapi_host;
+    request.path        = path;
+    request.priority    = priority;
+    request.key         = std::string("photo lookup:") + hex;
+    request.dedupe      = net::Dedupe::Join;
+    request.deadline_ms = tap != 0 ? TAP_DEADLINE_MS : 0;
+    request.max_body    = LOOKUP_BODY_MAX;
+    request.what        = "photo lookup";
+    request.done        = [hex = std::string(hex), tap](const net::Response &answer) {
+        char found[kPhotoUrlLen] = "";
+        const bool answered = answer.status == HTTP_OK || answer.status == HTTP_NOT_FOUND;
+        const bool has      = answer.status == HTTP_OK && parse_photo(answer.body, answer.length, found, sizeof(found));
+        std::string url;
+        if (has) {
+            // Over plain http: the image host takes it, and it saves a handshake.
+            url = std::strncmp(found, "https://", 8) == 0 ? std::string("http://") + (found + 8) : found;
+        }
+        {
+            Lock        hold;
+            PhotoEntry &entry = s_photo_entries[photo_entry(hex.c_str())];
+            entry.state       = has ? Photo::Found : answered ? Photo::None : Photo::Unknown;
+            std::snprintf(entry.url, sizeof(entry.url), "%s", url.c_str());
+        }
+        if (tap == 0 || !tapped(tap)) {
+            return;
+        }
+        if (has) {
+            ask_image(hex, url, tap);
+        } else {
+            show_photo(hex.c_str(), tap, -1);
+        }
+    };
+    net::submit(std::move(request));
+}
+
+void photo_for_tap(const char *hex, std::uint32_t tap)
+{
+    int         slot = -1;
+    Photo       state;
+    std::string url;
+    {
+        Lock        hold;
+        PhotoEntry &entry = s_photo_entries[photo_entry(hex)];
+        state             = entry.state;
+        slot              = entry.slot;
+        url               = entry.url;
+        if (slot >= 0) {
+            s_shown_slot = slot;
+        }
+    }
+    if (slot >= 0 || state == Photo::None) {
+        show_photo(hex, tap, slot);
+    } else if (state == Photo::Found) {
+        ask_image(hex, url, tap);
+    } else {
+        ask_photo_lookup(hex, net::Priority::Tap, tap);
+    }
+}
+
+// ---- traces
+
+// Where a tapped aircraft has been this last quarter hour, before the panel
+// was watching, so its trail reaches back across the view at once.
+void ask_trace(const char *hex)
+{
+    const std::size_t len = std::strlen(hex);
+    if (len < 2 || hex[0] == '~') {
+        return;  // a ~ is a position from ground radar, which has no trace
+    }
+    char path[PATH_SIZE];
+    std::snprintf(path, sizeof(path), "/data/traces/%.2s/trace_recent_%.7s.json", hex + len - 2, hex);
+    net::Request request;
+    request.host        = s_trace_host;
+    request.path        = path;
+    request.priority    = net::Priority::Now;
+    request.key         = "trace";
+    request.dedupe      = net::Dedupe::Replace;
+    request.deadline_ms = TAP_DEADLINE_MS;
+    request.max_body    = TRACE_BODY_MAX;
+    request.what        = "trace";
+    request.done        = [hex = std::string(hex)](const net::Response &answer) {
+        if (answer.status != HTTP_OK) {
+            return;
+        }
+        auto      trace     = std::make_unique<Trail>();
+        const int positions = parse_trace(answer.body, answer.length, *trace, TRAIL_STEP_KM);
+        if (positions <= 0) {
+            ESP_LOGW(TAG, "%s: no trace in %u bytes", hex.c_str(), static_cast<unsigned>(answer.length));
+            return;
+        }
+        ESP_LOGI(TAG, "%s: trace, %d positions in %d ms", hex.c_str(), positions, answer.ms);
+        {
+            Lock               hold;
+            const std::int64_t now  = esp_timer_get_time();
+            Trail             *slot = trail_slot(hex.c_str(), now);
+            std::memcpy(trace->hex, slot->hex, sizeof(trace->hex));
+            trace->seen_us = now;
+            *slot          = *trace;
+        }
+        publish();
+    };
+    net::submit(std::move(request));
+}
+
+// ---- prefetch
+
+struct Want {
+    char  hex[kHexLen];
+    char  flight[kFlightLen];
+    float distance;
+};
+Want *s_wanted = nullptr;  // PSRAM, as the lists it is taken from are
+
+// The nearest aircraft's details and where their photos are, asked for in the
+// background: a tap on one then waits only for the photo itself.
+void prefetch()
+{
+    int count = 0;
+    {
+        Lock hold;
+        for (int i = 0; i < s_count; ++i) {
+            const Aircraft &aircraft = s_list[i];
+            if (aircraft.on_ground || aircraft.hex[0] == '\0') {
+                continue;
+            }
+            std::memcpy(s_wanted[count].hex, aircraft.hex, sizeof(s_wanted[count].hex));
+            std::memcpy(s_wanted[count].flight, aircraft.flight, sizeof(s_wanted[count].flight));
+            s_wanted[count].distance = aircraft.distance_nm;
+            ++count;
+        }
+    }
+    std::sort(s_wanted, s_wanted + count, [](const Want &a, const Want &b) { return a.distance < b.distance; });
+
+    int details = 0, photos = 0;
+    for (int i = 0; i < count && i < PREFETCH_NEAREST; ++i) {
+        const Want &want      = s_wanted[i];
+        bool        ask_about = false, ask_where = false;
+        {
+            Lock hold;
+            if (details < PREFETCH_PER_SWEEP && cache_find(want.hex, want.flight) == nullptr) {
+                cache_slot(want.hex, want.flight).state = Known::Asked;  // not asked twice while it waits
+                ask_about = true;
+                ++details;
+            }
+            PhotoEntry &entry = s_photo_entries[photo_entry(want.hex)];
+            if (photos < PREFETCH_PER_SWEEP && entry.state == Photo::Unknown) {
+                entry.state = Photo::Asked;
+                ask_where   = true;
+                ++photos;
+            }
+        }
+        if (ask_about) {
+            ask_details(want.hex, want.flight, net::Priority::Background, 0);
+        }
+        if (ask_where) {
+            ask_photo_lookup(want.hex, net::Priority::Background, 0);
+        }
+    }
+}
+
+// ---- feeds
+
+std::atomic<bool> s_feed_out{false};  // a reading asked for and not yet in
+int               s_next_feed = 0;
+
+void feed_failed()
+{
+    {
+        Lock hold;
+        s_ok = false;
+    }
+    s_feed_out.store(false);
+    publish();
+}
+
+void ask_feed(int feed, int tried, float lat, float lon);
+
+void take_feed(const net::Response &answer, int feed, int tried, float lat, float lon, bool active)
+{
+    if (answer.status != HTTP_OK) {
+        // The other at once, unless it has been tried already.
+        const int other = (feed + 1) % FEED_COUNT;
+        if ((tried & (1 << other)) == 0) {
+            ask_feed(other, tried, lat, lon);
+        } else {
+            feed_failed();
+        }
+        return;
+    }
+    const int count = parse(answer.body, answer.length, s_scratch, kMaxAircraft);
+    {
+        Lock hold;
+        std::memcpy(s_list, s_scratch, sizeof(Aircraft) * static_cast<std::size_t>(count));
+        record_trails(s_list, count);
+        s_count      = count;
+        s_ok         = true;
+        s_fetched_us = esp_timer_get_time();
+        expire_cache();
+    }
+    ESP_LOGD(TAG, "%s: %d aircraft within %d km, %u bytes in %d ms", s_feeds[feed].name, count, RANGE_KM,
+             static_cast<unsigned>(answer.length), answer.ms);
+    s_feed_out.store(false);
+    publish();
+    if (active) {
+        prefetch();
+    }
+}
+
+void ask_feed(int feed, int tried, float lat, float lon)
+{
+    // Past one that is resting, when the other is not.
+    const int other = (feed + 1) % FEED_COUNT;
+    if (net::resting(s_feeds[feed].host) && (tried & (1 << other)) == 0 && !net::resting(s_feeds[other].host)) {
+        feed = other;
+    }
+    tried |= 1 << feed;
+    bool active = false;
+    {
+        Lock hold;
+        active = s_active;
+    }
+    char path[PATH_SIZE];
+    std::snprintf(path, sizeof(path), s_feeds[feed].query, static_cast<double>(lat), static_cast<double>(lon),
+                  static_cast<int>(std::lround(static_cast<float>(RANGE_KM) * NM_PER_KM)));
+    net::Request request;
+    request.host        = s_feeds[feed].host;
+    request.path        = path;
+    request.priority    = net::Priority::Now;
+    request.key         = "feed";
+    request.dedupe      = net::Dedupe::Replace;
+    request.deadline_ms = FEED_DEADLINE_MS;
+    request.max_body    = FEED_BODY_MAX;
+    request.what        = "feed";  // not the path: it carries the panel's own coordinates
+    request.done        = [feed, tried, lat, lon, active](const net::Response &answer) {
+        take_feed(answer, feed, tried, lat, lon, active);
+    };
+    net::submit(std::move(request));
+}
+
+// Reads the feed when it is due; the rest happens on net's workers.
+[[noreturn]] void planner_task(void *)
+{
+    std::int64_t last_fetch = 0;
+    for (;;) {
+        bool         ready = false, active = false;
+        float        lat = 0.0f, lon = 0.0f;
+        std::int64_t home_at = 0;
+        {
+            Lock hold;
+            ready   = s_has_home && s_enabled && s_screen;
+            active  = s_active;
+            lat     = s_home_lat;
+            lon     = s_home_lon;
+            home_at = s_home_at_us;
+        }
+        if (!ready) {
+            ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+            continue;
+        }
+        const std::int64_t now = esp_timer_get_time();
+        if (last_fetch == 0 && now - home_at < FIRST_FETCH_DELAY_US) {
+            ulTaskNotifyTake(pdTRUE, HOME_SETTLE_CHECK);
+            continue;
+        }
+        const std::int64_t due = active ? POLL_ACTIVE_US : POLL_IDLE_US;
+        if (!s_feed_out.load() && (last_fetch == 0 || now - last_fetch >= due)) {
+            last_fetch = now;
+            s_feed_out.store(true);
+            const int feed = s_next_feed;
+            s_next_feed    = (s_next_feed + 1) % FEED_COUNT;
+            ask_feed(feed, 0, lat, lon);
+        }
+        ulTaskNotifyTake(pdTRUE, PLANNER_REST);
+    }
+}
+
+void wake()
+{
+    if (s_task != nullptr) {
+        xTaskNotifyGive(s_task);
+    }
 }
 
 // Call with the lock held.
 int age_s()
 {
-    return s_fetched_us == 0 ? -1
-                             : static_cast<int>((esp_timer_get_time() - s_fetched_us) /
-                                                units::kUsPerSecond);
+    return s_fetched_us == 0 ? -1 : static_cast<int>((esp_timer_get_time() - s_fetched_us) / units::kUsPerSecond);
 }
 
-void sweep(float lat, float lon, bool active)
+template <typename T>
+T *psram_calloc(std::size_t count)
 {
-    if (fetch(lat, lon)) {
-        expire_cache();
-        if (active) {
-            prefetch_visible();
-        }
-        return;
-    }
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    s_ok = false;
-    xSemaphoreGive(s_lock);
-}
-
-TickType_t rest_before_next(std::int64_t due_us, std::int64_t last_fetch_us)
-{
-    const std::int64_t waited = esp_timer_get_time() - last_fetch_us;
-    std::int64_t rest_ms = waited >= due_us ? OVERDUE_REST_MS : (due_us - waited) / units::kUsPerMs;
-    if ((s_photo_open || s_lookups_open) && rest_ms > LOOKUPS_OPEN_REST_MS) {
-        rest_ms = LOOKUPS_OPEN_REST_MS;
-    }
-    return pdMS_TO_TICKS(rest_ms);
-}
-
-[[noreturn]] void radar_task(void *)
-{
-    std::int64_t last_fetch = 0;
-
-    for (;;) {
-        char hex[kHexLen]         = {};
-        char callsign[kFlightLen] = {};
-
-        xSemaphoreTake(s_lock, portMAX_DELAY);
-        const bool         ready   = s_has_home && s_enabled && s_screen;
-        const bool         active  = s_active;
-        const bool         pending = s_want_pending;
-        const float        lat     = s_home_lat;
-        const float        lon     = s_home_lon;
-        const std::int64_t home_at = s_home_at_us;
-        std::memcpy(hex, s_want_hex, sizeof(hex));
-        std::memcpy(callsign, s_want_flight, sizeof(callsign));
-        s_want_pending = false;
-        xSemaphoreGive(s_lock);
-
-        if (pending) {
-            look_up(hex, callsign, true);
-            continue;
-        }
-
-        if (!ready) {
-            ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-            continue;
-        }
-
-        if (last_fetch == 0 && esp_timer_get_time() - home_at < FIRST_FETCH_DELAY_US) {
-            ulTaskNotifyTake(pdTRUE, HOME_SETTLE_CHECK);
-            continue;
-        }
-
-        std::int64_t due = active ? POLL_ACTIVE_US : POLL_IDLE_US;
-        if (s_feed_backoff) {
-            due *= 2;
-        }
-        if (last_fetch == 0 || esp_timer_get_time() - last_fetch >= due) {
-            const std::int64_t began = esp_timer_get_time();
-            sweep(lat, lon, active);
-            last_fetch = began;
-        }
-
-        close_idle_lookups();
-        ulTaskNotifyTake(pdTRUE, rest_before_next(due, last_fetch));
-    }
+    return static_cast<T *>(heap_caps_calloc(count, sizeof(T), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
 }
 
 }  // namespace
@@ -822,56 +894,31 @@ esp_err_t start(UpdateHandler on_update, DetailsHandler on_details, PhotoHandler
     s_on_details = on_details;
     s_on_photo   = on_photo;
 
-    s_lock = xSemaphoreCreateMutexStatic(&s_lock_ctrl);
-    ESP_RETURN_ON_FALSE(s_lock != nullptr, ESP_ERR_NO_MEM, TAG, "lock");
+    s_lock         = xSemaphoreCreateMutexStatic(&s_lock_ctrl);
+    s_publish_lock = xSemaphoreCreateMutexStatic(&s_publish_lock_ctrl);
+    ESP_RETURN_ON_FALSE(s_lock != nullptr && s_publish_lock != nullptr, ESP_ERR_NO_MEM, TAG, "locks");
 
-    s_body = static_cast<char *>(heap_caps_malloc(BODY_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    ESP_RETURN_ON_FALSE(s_body != nullptr, ESP_ERR_NO_MEM, TAG, "body buffer");
-
-    s_photo = static_cast<std::uint16_t *>(heap_caps_malloc(
-        static_cast<std::size_t>(PHOTO_MAX_W) * PHOTO_MAX_H * sizeof(std::uint16_t),
-        MALLOC_CAP_SPIRAM));
-    ESP_RETURN_ON_FALSE(s_photo != nullptr, ESP_ERR_NO_MEM, TAG, "photo buffer");
-
-    s_list      = static_cast<Aircraft *>(
-        heap_caps_calloc(kMaxAircraft, sizeof(Aircraft), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    s_scratch   = static_cast<Aircraft *>(
-        heap_caps_calloc(kMaxAircraft, sizeof(Aircraft), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    s_published = static_cast<Snapshot *>(
-        heap_caps_calloc(1, sizeof(Snapshot), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    s_wanted = static_cast<Want *>(
-        heap_caps_calloc(kMaxAircraft, sizeof(Want), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    ESP_RETURN_ON_FALSE(s_list != nullptr && s_scratch != nullptr && s_published != nullptr &&
-                            s_wanted != nullptr,
-                        ESP_ERR_NO_MEM, TAG, "aircraft buffers");
-
-    s_trails = static_cast<Trail *>(
-        heap_caps_calloc(TRAIL_SLOTS, sizeof(Trail), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    ESP_RETURN_ON_FALSE(s_trails != nullptr, ESP_ERR_NO_MEM, TAG, "trails");
-    s_inflated = static_cast<char *>(heap_caps_malloc(BODY_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    s_inflater = static_cast<tinfl_decompressor *>(
-        heap_caps_malloc(sizeof(tinfl_decompressor), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    ESP_RETURN_ON_FALSE(s_inflated != nullptr && s_inflater != nullptr, ESP_ERR_NO_MEM, TAG, "inflate buffers");
-
-    s_cache = static_cast<CacheEntry *>(
-        heap_caps_calloc(CACHE_SIZE, sizeof(CacheEntry), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    ESP_RETURN_ON_FALSE(s_cache != nullptr, ESP_ERR_NO_MEM, TAG, "lookup cache");
-
-    for (Feed &feed : s_feeds) {
-        feed.client = open_client(feed.host);
-        ESP_RETURN_ON_FALSE(feed.client != nullptr, ESP_ERR_NO_MEM, TAG, "feed client");
-        esp_http_client_set_header(feed.client, "Accept-Encoding", "gzip");
+    s_list          = psram_calloc<Aircraft>(kMaxAircraft);
+    s_scratch       = psram_calloc<Aircraft>(kMaxAircraft);
+    s_published     = psram_calloc<Snapshot>(1);
+    s_wanted        = psram_calloc<Want>(kMaxAircraft);
+    s_trails        = psram_calloc<Trail>(TRAIL_SLOTS);
+    s_cache         = psram_calloc<CacheEntry>(CACHE_SIZE);
+    s_photo_entries = psram_calloc<PhotoEntry>(PHOTO_ENTRIES);
+    ESP_RETURN_ON_FALSE(s_list != nullptr && s_scratch != nullptr && s_published != nullptr && s_wanted != nullptr &&
+                            s_trails != nullptr && s_cache != nullptr && s_photo_entries != nullptr,
+                        ESP_ERR_NO_MEM, TAG, "buffers");
+    for (int i = 0; i < PHOTO_ENTRIES; ++i) {
+        s_photo_entries[i].slot = -1;
     }
-    s_lookup_client   = open_client(LOOKUP_HOST);
-    s_photoapi_client = open_client(PHOTO_HOST, PHOTO_AGENT);
-    s_photo_client    = open_client(PHOTO_IMAGE_HOST);
-    s_trace_client    = open_client(TRACE_HOST, AGENT, TRACE_TIMEOUT_MS);
-    ESP_RETURN_ON_FALSE(s_lookup_client != nullptr &&
-                            s_photoapi_client != nullptr && s_photo_client != nullptr && s_trace_client != nullptr,
-                        ESP_ERR_NO_MEM, TAG, "http clients");
+    for (PhotoSlot &slot : s_photo_slots) {
+        slot = {psram_calloc<std::uint16_t>(static_cast<std::size_t>(PHOTO_MAX_W) * PHOTO_MAX_H), 0, 0, -1, false};
+        ESP_RETURN_ON_FALSE(slot.pixels != nullptr, ESP_ERR_NO_MEM, TAG, "photo buffers");
+    }
 
-    s_task = xTaskCreateStaticPinnedToCore(radar_task, "radar", TASK_STACK, nullptr,
-                                           TASK_PRIORITY, s_task_stack, &s_task_ctrl, TASK_CORE);
+    add_hosts();
+    s_task = xTaskCreateStaticPinnedToCore(planner_task, "radar", TASK_STACK, nullptr, TASK_PRIORITY, s_task_stack,
+                                           &s_task_ctrl, TASK_CORE);
     ESP_RETURN_ON_FALSE(s_task != nullptr, ESP_ERR_NO_MEM, TAG, "task");
     return ESP_OK;
 }
@@ -881,13 +928,14 @@ void set_active(bool active)
     if (s_lock == nullptr) {
         return;
     }
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    const bool woke = active && !s_active;
-    s_active        = active;
-    xSemaphoreGive(s_lock);
-
-    if (woke && s_task != nullptr) {
-        xTaskNotifyGive(s_task);
+    bool woke = false;
+    {
+        Lock hold;
+        woke     = active && !s_active;
+        s_active = active;
+    }
+    if (woke) {
+        wake();
     }
 }
 
@@ -896,15 +944,39 @@ void request_details(const char *hex, const char *callsign)
     if (s_lock == nullptr || hex == nullptr) {
         return;
     }
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    std::snprintf(s_want_hex, sizeof(s_want_hex), "%s", hex);
-    std::snprintf(s_want_flight, sizeof(s_want_flight), "%s", callsign != nullptr ? callsign : "");
-    s_want_pending = true;
-    xSemaphoreGive(s_lock);
-
-    if (s_task != nullptr) {
-        xTaskNotifyGive(s_task);
+    const char        *flight = callsign != nullptr ? callsign : "";
+    const std::int64_t now    = esp_timer_get_time();
+    std::uint32_t      tap    = 0;
+    bool               known  = false;
+    Details            details{};
+    {
+        Lock hold;
+        if (std::strcmp(s_tap_hex, hex) == 0 && std::strcmp(s_tap_flight, flight) == 0 &&
+            now - s_tap_at_us < TAP_REPEAT_US) {
+            return;  // already on its way
+        }
+        tap = s_tap.fetch_add(1) + 1;
+        if (tap == 0) {
+            tap = s_tap.fetch_add(1) + 1;  // 0 is a prefetch's
+        }
+        std::snprintf(s_tap_hex, sizeof(s_tap_hex), "%s", hex);
+        std::snprintf(s_tap_flight, sizeof(s_tap_flight), "%s", flight);
+        s_tap_at_us = now;
+        if (const CacheEntry *entry = cache_find(hex, flight); entry != nullptr && entry->state == Known::Known) {
+            known   = true;
+            details = entry->details;
+        }
     }
+    // All three at once: none needs what another brings.
+    if (known) {
+        if (s_on_details != nullptr) {
+            s_on_details(hex, details);
+        }
+    } else {
+        ask_details(hex, flight, net::Priority::Tap, tap);
+    }
+    photo_for_tap(hex, tap);
+    ask_trace(hex);
 }
 
 void set_screen(bool on)
@@ -912,13 +984,14 @@ void set_screen(bool on)
     if (s_lock == nullptr) {
         return;
     }
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    const bool woke = on && !s_screen;
-    s_screen        = on;
-    xSemaphoreGive(s_lock);
-
-    if (woke && s_task != nullptr) {
-        xTaskNotifyGive(s_task);
+    bool woke = false;
+    {
+        Lock hold;
+        woke     = on && !s_screen;
+        s_screen = on;
+    }
+    if (woke) {
+        wake();
     }
 }
 
@@ -927,13 +1000,14 @@ void set_enabled(bool enabled)
     if (s_lock == nullptr) {
         return;
     }
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    const bool woke = enabled && !s_enabled;
-    s_enabled       = enabled;
-    xSemaphoreGive(s_lock);
-
-    if (woke && s_task != nullptr) {
-        xTaskNotifyGive(s_task);
+    bool woke = false;
+    {
+        Lock hold;
+        woke      = enabled && !s_enabled;
+        s_enabled = enabled;
+    }
+    if (woke) {
+        wake();
     }
 }
 
@@ -942,21 +1016,20 @@ void set_home(float lat, float lon)
     if (s_lock == nullptr) {
         return;
     }
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    const bool first = !s_has_home;
-    if (first) {
-        s_home_at_us = esp_timer_get_time();
+    bool first = false;
+    {
+        Lock hold;
+        first = !s_has_home;
+        if (first) {
+            s_home_at_us = esp_timer_get_time();
+        }
+        s_home_lat = std::round(lat / HOME_GRID_DEG) * HOME_GRID_DEG;
+        s_home_lon = std::round(lon / HOME_GRID_DEG) * HOME_GRID_DEG;
+        s_has_home = true;
     }
-    s_home_lat       = std::round(lat / HOME_GRID_DEG) * HOME_GRID_DEG;
-    s_home_lon       = std::round(lon / HOME_GRID_DEG) * HOME_GRID_DEG;
-    s_has_home       = true;
-    xSemaphoreGive(s_lock);
-
     if (first) {
         ESP_LOGI(TAG, "centred on Home Assistant's home zone");
-        if (s_task != nullptr) {
-            xTaskNotifyGive(s_task);
-        }
+        wake();
     }
 }
 
@@ -965,26 +1038,23 @@ int trail(const char *hex, TrailPoint *out, int max)
     if (s_lock == nullptr || s_trails == nullptr || hex == nullptr || hex[0] == '\0') {
         return 0;
     }
-    int count = 0;
-    xSemaphoreTake(s_lock, portMAX_DELAY);
+    Lock hold;
     for (int i = 0; i < TRAIL_SLOTS; ++i) {
         if (std::strcmp(s_trails[i].hex, hex) == 0) {
-            count = oldest_first(s_trails[i], out, max);
-            break;
+            return oldest_first(s_trails[i], out, max);
         }
     }
-    xSemaphoreGive(s_lock);
-    return count;
+    return 0;
 }
 
 void snapshot(Snapshot &out)
 {
     if (s_lock == nullptr) {
-        out = Snapshot{};
+        out       = Snapshot{};
         out.age_s = -1;
         return;
     }
-    xSemaphoreTake(s_lock, portMAX_DELAY);
+    Lock hold;
     std::memcpy(out.list, s_list, sizeof(Aircraft) * static_cast<std::size_t>(s_count));
     out.count    = s_count;
     out.home_lat = s_home_lat;
@@ -992,17 +1062,19 @@ void snapshot(Snapshot &out)
     out.range_km = RANGE_KM;
     out.ok       = s_ok;
     out.age_s    = age_s();
-    xSemaphoreGive(s_lock);
 }
 
 void status(Status &out)
 {
-    xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (s_lock == nullptr) {
+        out = Status{0, RANGE_KM, false, -1};
+        return;
+    }
+    Lock hold;
     out.count    = s_count;
     out.range_km = RANGE_KM;
     out.ok       = s_ok;
     out.age_s    = age_s();
-    xSemaphoreGive(s_lock);
 }
 
 }  // namespace radar

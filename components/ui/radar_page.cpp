@@ -2484,9 +2484,11 @@ void show_radar_details(const char *hex, const radar::Details &details)
     }
     s_details = details;
     std::snprintf(s_details_hex, sizeof(s_details_hex), "%s", hex);
-    s_picture = !details.photo_checked          ? Picture::Loading
-                : details.photo_url[0] != '\0' ? Picture::Loading
-                                                : Picture::Missing;
+    // The photo comes on its own, before these or after: only a wait for
+    // both becomes a wait for the photo.
+    if (s_picture == Picture::Looking) {
+        s_picture = Picture::Loading;
+    }
     show_radar(*s_last);
 }
 

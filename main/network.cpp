@@ -19,6 +19,7 @@
 #include "travel.h"
 #include "ical.h"
 #include "power.h"
+#include "net.h"
 #include "radar.h"
 #include "room.h"
 #include "settings.h"
@@ -313,6 +314,7 @@ void start_clients()
     ESP_ERROR_CHECK_WITHOUT_ABORT(ble::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(jpeg::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(media::start(hass::ws::http_origin(), on_album_art, on_pick_art, on_still));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(net::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(radar::start(on_radar, on_radar_details, on_radar_photo));
 }
 
@@ -360,6 +362,7 @@ void note_screen(bool on)
     s_screen_on.store(on, std::memory_order_relaxed);
     wifi::set_power_save(!on);
     radar::set_screen(on);
+    net::set_screen(on);
     ble::set_dark(!on);
 }
 
