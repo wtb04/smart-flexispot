@@ -126,7 +126,7 @@ int fetch_feed(int index)
     net::HostConfig host;
     host.timeout_ms  = HTTP_TIMEOUT_MS;
     host.connections = 1;
-    host.idle_ms     = units::kMsPerMinute;
+    host.idle_ms     = 15 * units::kMsPerSecond;  // five feeds in a row, then half an hour of none
     host.rest        = net::Rest{3, units::kMsPerMinute, units::kMsPerMinute};
 
     net::Request request;

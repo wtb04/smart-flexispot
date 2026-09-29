@@ -40,6 +40,10 @@ constexpr int           HTTP_BUFFER     = 2 * units::kBytesPerKiB;
 constexpr UBaseType_t   WAKE_MAX        = 32;
 constexpr std::size_t   FIRST_RESERVE   = 4 * units::kBytesPerKiB;
 constexpr int           NOT_FOUND       = 404;
+// Connections kept open at once, over every host: each holds one of lwIP's
+// sockets, which the live ones and the update server need too. At the limit,
+// the one unused longest is closed for the next.
+constexpr int           MAX_OPEN        = 10;
 
 // Grown to what a request needs, and kept, in PSRAM. Never by realloc: the
 // heap copies the old contents with its lock held and interrupts off, and a
@@ -301,6 +305,32 @@ Exchange send(const HostConfig &config, Connection &connection, const Running &r
     return exchange;
 }
 
+// Under the lock: room for `wanted` to open, closing the connection unused
+// longest when as many as MAX_OPEN are held.
+void make_room(const Connection &wanted)
+{
+    if (wanted.open) {
+        return;  // it has its socket
+    }
+    int         open   = 0;
+    Connection *oldest = nullptr;
+    for (int h = 0; h < s_core.host_count(); ++h) {
+        for (Connection &connection : s_connections[h]) {
+            if (!connection.open) {
+                continue;
+            }
+            ++open;
+            if (!connection.busy && (oldest == nullptr || connection.used_us < oldest->used_us)) {
+                oldest = &connection;
+            }
+        }
+    }
+    if (open >= MAX_OPEN && oldest != nullptr) {
+        esp_http_client_close(oldest->client);
+        oldest->open = false;
+    }
+}
+
 // Under the lock: connections left unused past their host's idle time closed.
 void close_idle(std::int64_t now)
 {
@@ -344,8 +374,9 @@ void log_outcome(const HostConfig &config, const Running &running, const Exchang
             busy = s_core.waiting() > 0;
             close_idle(now);
             if (took) {
-                config           = s_core.config(running.host);
-                connection       = &s_connections[running.host][running.slot];
+                config     = s_core.config(running.host);
+                connection = &s_connections[running.host][running.slot];
+                make_room(*connection);
                 connection->busy = true;
             }
         }

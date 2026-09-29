@@ -102,7 +102,7 @@ net::HostConfig cover_host()
     net::HostConfig config;
     config.timeout_ms  = HTTP_TIMEOUT_MS;
     config.connections = 1;
-    config.idle_ms     = units::kMsPerMinute;
+    config.idle_ms     = 15 * units::kMsPerSecond;  // asked in bursts, a track at a time
     config.retry       = net::Retry{1, 500, 200, false};
     config.rest        = net::Rest{3, 30 * units::kMsPerSecond, units::kMsPerMinute};
     return config;
