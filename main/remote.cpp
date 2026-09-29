@@ -302,14 +302,15 @@ std::uint32_t objects_under(lv_obj_t *obj)
             lvgl_port_unlock();
         }
         const auto kib = [](std::size_t bytes) { return static_cast<unsigned>(bytes / units::kBytesPerKiB); };
-        // Two lines, as the log keeps only so much of each.
-        ESP_LOGI(TAG, "heap: int %u/%u/%u dma %u/%u psram %u/%u KB",
+        // Two lines, as the log keeps only so much of each. The largest block
+        // is found by walking the heap with interrupts off, which took 5.5 ms
+        // across PSRAM and cost the panel a frame: only for the small heaps.
+        ESP_LOGI(TAG, "heap: int %u/%u/%u dma %u/%u psram %u KB",
                  kib(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
                  kib(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)),
                  kib(heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL)),
                  kib(heap_caps_get_free_size(MALLOC_CAP_DMA)), kib(heap_caps_get_largest_free_block(MALLOC_CAP_DMA)),
-                 kib(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
-                 kib(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)));
+                 kib(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)));
         ESP_LOGI(TAG, "lvgl: %u obj %u timers %u tasks, %u frames, slowest %d ms", static_cast<unsigned>(objects),
                  static_cast<unsigned>(timers), static_cast<unsigned>(uxTaskGetNumberOfTasks()),
                  static_cast<unsigned>(s_frames.exchange(0)),
