@@ -75,6 +75,15 @@ bool read_entry(const char *p, const char *end, float &lat, float &lon)
 }
 }  // namespace
 
+void seen(Trail &trail, std::int64_t now, std::int64_t gap)
+{
+    if (trail.count > 0 && now - trail.seen_us > gap) {
+        trail.count = 0;
+        trail.head  = 0;
+    }
+    trail.seen_us = now;
+}
+
 void note(Trail &trail, float lat, float lon, float step_km)
 {
     if (trail.count > 0) {

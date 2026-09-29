@@ -22,6 +22,12 @@ struct Trail {
     TrailPoint   points[kTrailPoints];
 };
 
+/** Marks it seen at `now`. After longer than `gap` unseen, the screen dark or
+ *  the aircraft out of range, it starts again: joined up, where it was before
+ *  and where it is now made a line across ground it never flew over. Any unit
+ *  of time, the same for all three. */
+void seen(Trail &trail, std::int64_t now, std::int64_t gap);
+
 /** Keeps where it is now, if that is at least `step_km` from the last point. */
 void note(Trail &trail, float lat, float lon, float step_km);
 

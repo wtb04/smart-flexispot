@@ -265,6 +265,21 @@ void test_trail()
           "asked for fewer, the newest are the ones given");
 }
 
+void test_seen()
+{
+    Trail trail{};
+    seen(trail, 100, 180);
+    note(trail, 52.0f, 5.0f, 1.0f);
+    seen(trail, 160, 180);
+    note(trail, 52.02f, 5.0f, 1.0f);
+    check(trail.count == 2 && trail.seen_us == 160, "seen again in time, it goes on");
+    seen(trail, 400, 180);
+    note(trail, 52.5f, 5.0f, 1.0f);
+    TrailPoint points[kTrailPoints];
+    const int  count = oldest_first(trail, points, kTrailPoints);
+    check(count == 1 && points[0].lat == 52.5f, "unseen too long, it starts again rather than join up");
+}
+
 void test_trace(const std::string &json)
 {
     Trail trail{};
@@ -306,6 +321,7 @@ int main(int argc, char **argv)
     }
     test_lookup_rejects();
     test_trail();
+    test_seen();
     const std::string trace = read_file(argc > 6 ? argv[6] : "trace_recent.json");
     if (!trace.empty()) {
         test_trace(trace);

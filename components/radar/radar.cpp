@@ -64,6 +64,9 @@ constexpr TickType_t   HOME_SETTLE_CHECK    = pdMS_TO_TICKS(units::kMsPerSecond)
 constexpr int          TRAIL_SLOTS    = 768;
 constexpr float        TRAIL_STEP_KM  = 2.0f;  // with the points kept, 256 km: past the edge fullscreen
 constexpr std::int64_t TRAIL_FORGET_US = 15 * units::kUsPerMinute;
+// Past the slowest the feed is read, once a minute put off to two: unseen
+// longer, a trail starts again.
+constexpr std::int64_t TRAIL_GAP_US = 3 * units::kUsPerMinute;
 
 constexpr std::int64_t POLL_ACTIVE_US = 5 * units::kUsPerSecond;
 constexpr std::int64_t POLL_IDLE_US   = units::kUsPerMinute;
@@ -305,8 +308,8 @@ void record_trails(const Aircraft *list, int count)
         if (aircraft.on_ground || aircraft.hex[0] == '\0') {
             continue;
         }
-        Trail *trail   = trail_slot(aircraft.hex, now);
-        trail->seen_us = now;
+        Trail *trail = trail_slot(aircraft.hex, now);
+        seen(*trail, now, TRAIL_GAP_US);
         note(*trail, aircraft.lat, aircraft.lon, TRAIL_STEP_KM);
     }
 }

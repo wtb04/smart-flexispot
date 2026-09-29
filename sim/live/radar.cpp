@@ -37,6 +37,7 @@ constexpr float        TRAIL_STEP_KM  = 2.0f;
 constexpr int          PHOTO_MAX_W    = 320;
 constexpr int          PHOTO_MAX_H    = 240;
 constexpr std::int64_t TRAIL_FORGET_S = 15 * 60; // unheard of this long, its trail goes
+constexpr std::int64_t TRAIL_GAP_S    = 3 * 60;  // unseen this long, it starts again
 
 std::mutex                             s_lock;
 Snapshot                               s_snapshot{};
@@ -108,7 +109,7 @@ bool fetch_sky(bool &busy)
         if (!list[i].on_ground && list[i].hex[0] != '\0') {
             radar::Trail &trail = radar::s_trails[list[i].hex];
             std::snprintf(trail.hex, sizeof(trail.hex), "%s", list[i].hex);
-            trail.seen_us = radar::s_fetched_at; // seconds here, which is all forgetting needs
+            radar::seen(trail, radar::s_fetched_at, radar::TRAIL_GAP_S); // seconds here
             radar::note(trail, list[i].lat, list[i].lon, radar::TRAIL_STEP_KM);
         }
     }
