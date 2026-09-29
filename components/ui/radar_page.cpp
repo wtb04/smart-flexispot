@@ -300,6 +300,7 @@ char             s_chosen[radar::kHexLen]      = {};
 bool             s_following                   = true;
 radar::Details   s_details                     = {};
 char             s_details_hex[radar::kHexLen] = {};
+char             s_picture_hex[radar::kHexLen] = {};  // whose photo s_picture is about
 Picture          s_picture                     = Picture::Idle;
 
 void ask_details(const char *hex, const char *callsign)
@@ -504,6 +505,16 @@ void remember_chosen(const radar::Aircraft &aircraft)
     s_chosen[sizeof(s_chosen) - 1] = '\0';
 }
 
+// A photo waits only for an aircraft whose photo has not come yet: it can
+// come before the details, and asking for those again must not undo it.
+void await_picture()
+{
+    if (std::strcmp(s_picture_hex, s_chosen) != 0) {
+        s_picture = Picture::Looking;
+        std::snprintf(s_picture_hex, sizeof(s_picture_hex), "%s", s_chosen);
+    }
+}
+
 void forget_details()
 {
     s_details        = radar::Details{};
@@ -515,7 +526,7 @@ void choose(const radar::Aircraft &aircraft)
     remember_chosen(aircraft);
     if (std::strcmp(s_details_hex, s_chosen) != 0) {
         forget_details();
-        s_picture = Picture::Looking;
+        await_picture();
         ask_details(s_chosen, aircraft.flight);
     }
 }
@@ -524,7 +535,8 @@ void choose_none()
 {
     s_chosen[0] = '\0';
     forget_details();
-    s_picture = Picture::Idle;
+    s_picture        = Picture::Idle;
+    s_picture_hex[0] = '\0';
 }
 
 void scope_clicked(lv_event_t *event)
@@ -2006,7 +2018,7 @@ void follow_nearest()
         remember_chosen(*s_plots[0].aircraft);
     }
     if (std::strcmp(s_details_hex, s_chosen) != 0) {
-        s_picture = Picture::Looking;
+        await_picture();
         ask_details(s_chosen, s_plots[at].aircraft->flight);
     }
 }
