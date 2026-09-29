@@ -407,6 +407,13 @@ float distance_km(const radar::Aircraft &aircraft)
     return aircraft.distance_nm * KM_PER_NM;
 }
 
+// Kilometres east and north of home, flat, as the map is drawn.
+void flat_km(float lat, float lon, float &east, float &north)
+{
+    east  = (lon - s_last->home_lon) * KM_PER_LON * std::cos(s_last->home_lat * DEG);
+    north = (lat - s_last->home_lat) * KM_PER_LAT;
+}
+
 const char *blip_name(const radar::Aircraft &aircraft)
 {
     return aircraft.flight[0] != '\0' ? aircraft.flight : aircraft.hex;
@@ -1933,9 +1940,12 @@ void plot_traffic(float range_km)
         if (aircraft.on_ground) {
             continue;
         }
-        const float away_km  = distance_km(aircraft);
-        const float east_km  = away_km * std::sin(aircraft.bearing_deg * DEG);
-        const float north_km = away_km * std::cos(aircraft.bearing_deg * DEG);
+        // From where it is, as its trail and the map are placed: by the feed's
+        // bearing and distance it sat beside its own trail, the further out
+        // the more.
+        float east_km = 0.0f, north_km = 0.0f;
+        flat_km(aircraft.lat, aircraft.lon, east_km, north_km);
+        const float away_km = std::hypot(east_km, north_km);
         if (s_to_edges) {
             const float scale = static_cast<float>(s_radius) / range_km;
             const auto  x     = static_cast<std::int32_t>(std::lround(static_cast<float>(s_cx) + east_km * scale));
@@ -2112,8 +2122,8 @@ struct Placed {
 Placed place_at(float lat, float lon, float range_km)
 {
     const float scale = static_cast<float>(s_radius) / range_km;
-    const float east  = (lon - s_last->home_lon) * KM_PER_LON * std::cos(s_last->home_lat * DEG);
-    const float north = (lat - s_last->home_lat) * KM_PER_LAT;
+    float       east = 0.0f, north = 0.0f;
+    flat_km(lat, lon, east, north);
     return {static_cast<float>(s_cx) + east * scale, static_cast<float>(s_cy) - north * scale};
 }
 
