@@ -298,6 +298,7 @@ extern int  s_media_volume;  // percent, as last reported or set, -1 before eith
 // Jellyfin fullscreen: the film, its controls, the desk and the lights.
 void build_cinema(lv_obj_t *screen);
 void open_cinema();
+bool cinema_open();
 void apply_cinema_still(const void *pixels);
 void apply_media_neighbours(bool previous, bool next);
 bool cinema_has_next();  // an episode after this one to go on to

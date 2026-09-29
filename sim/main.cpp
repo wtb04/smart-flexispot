@@ -270,6 +270,7 @@ std::uint32_t ticks_past_splash()
 
 // --page N opens page N; --press KEYS presses those keys, as "am" for Home
 // Assistant answering and music; --tap X,Y taps there, as often as given;
+// --then KEYS presses those after the taps, as a notice over a view they opened;
 // --shot S saves a screenshot after S seconds and quits; --splash plays the
 // twelve seconds of splash the panel boots with.
 struct Options {
@@ -278,6 +279,7 @@ struct Options {
     bool        splash = false;
     std::string keys;
     std::vector<SDL_Point> taps;
+    std::string then;
 };
 
 Options options(int argc, char **argv)
@@ -294,6 +296,9 @@ Options options(int argc, char **argv)
             ++i;
         } else if (name == "--press") {
             o.keys = value;
+            ++i;
+        } else if (name == "--then") {
+            o.then = value;
             ++i;
         } else if (name == "--tap") {
             SDL_Point at{};
@@ -342,9 +347,12 @@ int main(int argc, char **argv)
     }
 
     run_for(2000);  // what start-up set, the presence gate and the phone among it, applied
-    for (const char key : opts.keys) {
-        press(key == 'x' ? SDLK_ESCAPE : static_cast<SDL_Keycode>(key));  // letters are their own keycodes
-    }
+    const auto press_all = [](const std::string &keys) {
+        for (const char key : keys) {
+            press(key == 'x' ? SDLK_ESCAPE : static_cast<SDL_Keycode>(key));  // letters are their own keycodes
+        }
+    };
+    press_all(opts.keys);
     // Asked for until it is up: until the phone is seen, the presence gate
     // leaves only Home and Setup to open.
     for (std::uint32_t until = SDL_GetTicks() + 5000; opts.page >= 0 && ui::detail::s_page != opts.page &&
@@ -355,6 +363,7 @@ int main(int argc, char **argv)
     for (const SDL_Point &at : opts.taps) {
         tap(at);
     }
+    press_all(opts.then);
 
     const std::uint32_t shot_at = opts.shot_s >= 0 ? SDL_GetTicks() + opts.shot_s * 1000u : 0;
     while (!s_quit) {

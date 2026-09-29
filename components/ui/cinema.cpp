@@ -523,6 +523,11 @@ void apply_cinema_still(const void *pixels)
     lv_obj_invalidate(s_still);
 }
 
+bool cinema_open()
+{
+    return s_view != nullptr && !lv_obj_is_hidden(s_view);
+}
+
 void open_cinema()
 {
     if (s_view == nullptr) {

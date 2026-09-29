@@ -14,4 +14,7 @@ void build_focus_full(lv_obj_t *screen);
 /** Runs with the LVGL lock held. */
 void show_focus(const Focus &focus);
 
+/** Whether the timer is open over the whole screen. */
+bool focus_full_open();
+
 }  // namespace ui

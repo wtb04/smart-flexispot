@@ -820,6 +820,11 @@ void show_focus(const Focus &focus)
     show_tab();
 }
 
+bool focus_full_open()
+{
+    return s_full != nullptr && !lv_obj_is_hidden(s_full);
+}
+
 void build_focus_full(lv_obj_t *screen)
 {
     build_full(screen);

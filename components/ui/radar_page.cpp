@@ -2336,6 +2336,11 @@ void full_clicked(lv_event_t *)
 }
 }  // namespace
 
+bool radar_full_open()
+{
+    return full_open();
+}
+
 void build_radar_page(lv_obj_t *page, std::int32_t width, std::int32_t height)
 {
     s_last  = psram_array<radar::Snapshot>(1);

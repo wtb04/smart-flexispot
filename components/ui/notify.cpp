@@ -116,8 +116,25 @@ void write_notice(const Notice &notice)
     paint_notice_corner();
 }
 
+// Over the page, the rail left clear, or over the whole screen when a view
+// has it all and the rail is out of sight.
+void place_notice()
+{
+    const Layout l    = layout();
+    const bool   full = radar_full_open() || focus_full_open() || cinema_open();
+    lv_obj_set_pos(s_notice_scrim, full || l.rail_right ? 0 : RAIL_W, 0);
+    lv_obj_set_size(s_notice_scrim, full ? l.screen_w : l.screen_w - RAIL_W, l.screen_h);
+    if (full) {
+        lv_obj_align(s_notice_card, LV_ALIGN_CENTER, 0, 0);
+    } else {
+        lv_obj_align(s_notice_card, LV_ALIGN_CENTER, l.content_x + l.content_w / 2 - l.screen_w / 2,
+                     GAP + l.content_h / 2 - l.screen_h / 2);
+    }
+}
+
 void raise_notice()
 {
+    place_notice();
     lv_obj_set_hidden(s_notice_scrim, false);
     lv_obj_move_foreground(s_notice_scrim);
     lv_obj_set_hidden(s_notice_card, false);
@@ -179,11 +196,9 @@ namespace {
 void notice_timeout_cb(lv_timer_t *) { show_next_notice(); }
 void notice_tapped_cb(lv_event_t *) { show_next_notice(); }
 
-lv_obj_t *make_notice_scrim(const Layout &l)
+lv_obj_t *make_notice_scrim()
 {
     lv_obj_t *scrim = lv_obj_create(lv_layer_top());
-    lv_obj_set_pos(scrim, l.rail_right ? 0 : RAIL_W, 0);
-    lv_obj_set_size(scrim, l.screen_w - RAIL_W, l.screen_h);
     theme::style_panel(scrim, theme::background, 0);
     lv_obj_set_style_bg_opa(scrim, SCRIM_OPA, 0);
     lv_obj_set_hidden(scrim, true);
@@ -195,7 +210,7 @@ lv_obj_t *make_notice_scrim(const Layout &l)
 // A card as the pages have them, on the scrim: a dot in the notice's colour
 // and what it is about over the message, the time it came at the right, and
 // along the foot a line running down until it goes. A tap moves it on.
-lv_obj_t *make_notice_frame(const Layout &l)
+lv_obj_t *make_notice_frame()
 {
     lv_obj_t *card = lv_obj_create(lv_layer_top());
     lv_obj_set_width(card, NOTIFY_W);
@@ -204,8 +219,6 @@ lv_obj_t *make_notice_frame(const Layout &l)
     lv_obj_set_style_pad_all(card, NOTIFY_PAD, 0);
     lv_obj_set_scrollable(card, false);
     lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
-    lv_obj_align(card, LV_ALIGN_CENTER, l.content_x + l.content_w / 2 - l.screen_w / 2,
-                 GAP + l.content_h / 2 - l.screen_h / 2);
     lv_obj_set_hidden(card, true);
     lv_obj_add_event_cb(card, notice_tapped_cb, LV_EVENT_CLICKED, nullptr);
     return card;
@@ -262,10 +275,8 @@ void build_foot(lv_obj_t *card)
 
 void create_notice_card()
 {
-    const Layout l = layout();
-
-    s_notice_scrim = make_notice_scrim(l);
-    s_notice_card  = make_notice_frame(l);
+    s_notice_scrim = make_notice_scrim();
+    s_notice_card  = make_notice_frame();
     build_eyebrow(s_notice_card);
     s_notice_title = wrapped(s_notice_card, theme::text, theme::type_title(), HEADLINE_ROWS, HEADLINE_GAP);
     s_notice_body  = wrapped(s_notice_card, theme::secondary, theme::type_value(), MESSAGE_ROWS, MESSAGE_GAP);

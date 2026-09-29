@@ -21,4 +21,7 @@ void show_radar_details(const char *hex, const radar::Details &details);
 
 void show_radar_photo(const char *hex, const void *pixels, int width, int height);
 
+/** Whether the radar is open over the whole screen. */
+bool radar_full_open();
+
 }  // namespace ui
