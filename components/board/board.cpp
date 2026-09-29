@@ -90,15 +90,24 @@ constexpr std::uint32_t FRAME_PIXELS = BSP_LCD_H_RES * BSP_LCD_V_RES;
 constexpr std::uint32_t FRAME_BYTES  = FRAME_PIXELS * sizeof(std::uint16_t);  // RGB565
 
 // What the port's own flush waits on; its last copy may still be under way
-// when this one takes over.
-bool copied(esp_lcd_panel_handle_t, esp_lcd_dpi_panel_event_data_t *, void *disp)
+// when this one takes over. In IRAM, like frame_done, since the panel's
+// interrupts now run through flash writes (sdkconfig.defaults) and the driver
+// will take nothing else; the flag is all lv_display_flush_ready() clears. It
+// comes only as a copy ends, never inside a flash write, so the display it
+// reaches may be in PSRAM.
+IRAM_ATTR bool copied(esp_lcd_panel_handle_t, esp_lcd_dpi_panel_event_data_t *, void *)
 {
-    lv_display_flush_ready(static_cast<lv_display_t *>(disp));
+    if (s_disp != nullptr) {
+        s_disp->flushing = 0;
+    }
     return false;
 }
 
-bool frame_done(esp_lcd_panel_handle_t, esp_lcd_dpi_panel_event_data_t *, void *)
+std::atomic<std::uint32_t> s_refreshes{0};
+
+IRAM_ATTR bool frame_done(esp_lcd_panel_handle_t, esp_lcd_dpi_panel_event_data_t *, void *)
 {
+    s_refreshes.fetch_add(1, std::memory_order_relaxed);
     BaseType_t woken = pdFALSE;
     xSemaphoreGiveFromISR(s_swapped, &woken);
     return woken == pdTRUE;
@@ -323,7 +332,8 @@ esp_err_t flush_straight_to_panel(lv_display_t *disp)
     esp_lcd_dpi_panel_event_callbacks_t callbacks{};
     callbacks.on_color_trans_done   = copied;
     callbacks.on_frame_buf_complete = frame_done;
-    ESP_RETURN_ON_ERROR(esp_lcd_dpi_panel_register_event_callbacks(s_panel, &callbacks, disp), TAG,
+    s_disp = disp;
+    ESP_RETURN_ON_ERROR(esp_lcd_dpi_panel_register_event_callbacks(s_panel, &callbacks, nullptr), TAG,
                         "panel callbacks");
 
     lv_display_set_flush_cb(disp, flush_rotated);
@@ -397,6 +407,11 @@ IRAM_ATTR void watch_console(char c)
 }
 
 }  // namespace
+
+std::uint32_t refreshes()
+{
+    return s_refreshes.load(std::memory_order_relaxed);
+}
 
 std::uint32_t underruns()
 {

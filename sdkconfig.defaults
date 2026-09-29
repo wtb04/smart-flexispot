@@ -238,6 +238,13 @@ CONFIG_CACHE_L2_CACHE_LINE_128B=y
 # board.cpp. With one, the panel shows each new page as a wipe.
 CONFIG_BSP_LCD_DPI_BUFFER_NUMS=2
 
+# The panel's DMA is started again for every frame from an interrupt, which a
+# flash write held off while the cache was off: a setting being stored or an
+# update arriving could leave the panel a frame short, a flicker of blue. In
+# 22 s of writing it flickered once; with these interrupts running through the
+# writes, 90 s went by without. board.cpp's callbacks are in IRAM for it.
+CONFIG_LCD_DSI_ISR_CACHE_SAFE=y
+
 # A firmware booted from an update that does not reach the network in time
 # restarts, and the bootloader returns to the one before. See components/ota.
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y

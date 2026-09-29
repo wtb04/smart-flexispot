@@ -27,6 +27,10 @@ esp_err_t display_on(int percent);
  *  above all -- has to put it to sleep rather than only dim it. */
 esp_err_t display_off();
 
+/** How many frames the panel has been sent since it started, some 58 a
+ *  second; fewer when something held its interrupt off. */
+std::uint32_t refreshes();
+
 /** How many times the panel's reads have fallen behind since it started: each
  *  a moment of blue screen, which the DSI driver reports only on the console. */
 std::uint32_t underruns();

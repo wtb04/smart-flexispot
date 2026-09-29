@@ -9,6 +9,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "last_words.h"
+#include "board.h"
 #include "logbuf.h"
 #include "ota.h"
 #include "power.h"
@@ -313,6 +314,10 @@ std::uint32_t objects_under(lv_obj_t *obj)
                  static_cast<unsigned>(timers), static_cast<unsigned>(uxTaskGetNumberOfTasks()),
                  static_cast<unsigned>(s_frames.exchange(0)),
                  static_cast<int>(s_slowest_us.exchange(0) / units::kUsPerMs));
+        static std::uint32_t refreshed = 0;
+        const std::uint32_t  now       = board::refreshes();
+        ESP_LOGI(TAG, "panel: %u refreshes", static_cast<unsigned>(now - refreshed));
+        refreshed = now;
     }
 }
 
