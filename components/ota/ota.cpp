@@ -460,10 +460,12 @@ esp_err_t update_companion(httpd_req_t *req)
 esp_err_t version(httpd_req_t *req)
 {
     const esp_app_desc_t *running = esp_app_get_description();
-    char                  text[128];
-    // With when it was built: every development build of a commit has the one version.
-    std::snprintf(text, sizeof(text), "%s %s, built %s %s\n", running->project_name, running->version,
-                  running->date, running->time);
+    // With the start of the image's checksum: every development build of a
+    // commit has the one version, and often the one build time too.
+    char sha[9];
+    esp_app_get_elf_sha256(sha, sizeof(sha));
+    char text[128];
+    std::snprintf(text, sizeof(text), "%s %s, image %s\n", running->project_name, running->version, sha);
     return answer(req, "200 OK", text);
 }
 

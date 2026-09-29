@@ -8,4 +8,7 @@ namespace last_words {
 /** Logs why the panel started and what the run before left behind, then
  *  starts keeping this run's. After logbuf::start, so that it keeps both. */
 void start();
+
+/** What start() logged, for as long as this run lasts. */
+const char *report();
 }  // namespace last_words

@@ -8,6 +8,7 @@
 #include "esp_private/freertos_debug.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "last_words.h"
 #include "logbuf.h"
 #include "ota.h"
 #include "power.h"
@@ -19,6 +20,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 
 #ifndef REMOTE_ENABLED
 #define REMOTE_ENABLED 0
@@ -326,6 +328,25 @@ void start_stats()
     }
     xTaskCreate(stats_task, "stats", STATS_STACK, nullptr, STATS_PRIORITY, nullptr);
 }
+// Why this run started and, after one nobody asked for, what the run before
+// left behind: the log's copy is soon pushed out.
+esp_err_t restart_page(httpd_req_t *req)
+{
+    if (!ota::authorised(req)) {
+        return refuse(req);
+    }
+    const std::time_t started = std::time(nullptr) - esp_timer_get_time() / units::kUsPerSecond;
+    std::tm           local{};
+    localtime_r(&started, &local);
+    char head[48];
+    std::snprintf(head, sizeof(head), "up since %02d-%02d %02d:%02d\n", local.tm_mday, local.tm_mon + 1,
+                  local.tm_hour, local.tm_min);
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_sendstr_chunk(req, head);
+    httpd_resp_sendstr_chunk(req, last_words::report());
+    return httpd_resp_sendstr_chunk(req, nullptr);
+}
+
 // Crashes the panel on purpose, a moment after answering, to see that
 // last_words catches it: the log after the restart says where.
 esp_err_t crash_page(httpd_req_t *req)
@@ -379,6 +400,7 @@ esp_err_t start()
         {.uri = "/power", .method = HTTP_GET, .handler = power_page, .user_ctx = nullptr},
         {.uri = "/bench", .method = HTTP_GET, .handler = bench_page, .user_ctx = nullptr},
         {.uri = "/crash", .method = HTTP_GET, .handler = crash_page, .user_ctx = nullptr},
+        {.uri = "/restart", .method = HTTP_GET, .handler = restart_page, .user_ctx = nullptr},
     };
     for (const httpd_uri_t &page : pages) {
         ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &page), TAG, "page");

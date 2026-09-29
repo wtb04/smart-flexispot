@@ -1,6 +1,7 @@
 #include "last_words.h"
 
 #include "esp_attr.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_private/panic_internal.h"
 #include "esp_system.h"
@@ -113,18 +114,38 @@ const char *reason_name(esp_reset_reason_t reason)
     }
 }
 
+// What start() found, logged and kept as text for this run: the log's ring
+// moves on, and a development build's chatter pushed it out within the hour.
+constexpr std::size_t REPORT_SIZE = (LINES + 8) * (LINE_BYTES + 16);
+char                 *s_report     = nullptr;
+std::size_t           s_report_len = 0;
+
+[[gnu::format(printf, 2, 3)]] void tell(esp_log_level_t level, const char *format, ...)
+{
+    char    line[LINE_BYTES + 16];
+    va_list args;
+    va_start(args, format);
+    std::vsnprintf(line, sizeof(line), format, args);
+    va_end(args);
+    ESP_LOG_LEVEL(level, TAG, "%s", line);
+    if (s_report != nullptr && s_report_len + std::strlen(line) + 2 < REPORT_SIZE) {
+        s_report_len += std::snprintf(s_report + s_report_len, REPORT_SIZE - s_report_len, "%s\n", line);
+    }
+}
+
 void tell_crash(const Crash &crash)
 {
-    ESP_LOGW(TAG, "crash on core %d in %s: %s", crash.core, crash.task, crash.reason);
-    ESP_LOGW(TAG, "pc 0x%08lx ra 0x%08lx sp 0x%08lx cause %lu value 0x%08lx", static_cast<unsigned long>(crash.pc),
-             static_cast<unsigned long>(crash.ra), static_cast<unsigned long>(crash.sp),
-             static_cast<unsigned long>(crash.cause), static_cast<unsigned long>(crash.value));
+    tell(ESP_LOG_WARN, "crash on core %d in %s: %s", crash.core, crash.task, crash.reason);
+    tell(ESP_LOG_WARN, "pc 0x%08lx ra 0x%08lx sp 0x%08lx cause %lu value 0x%08lx",
+         static_cast<unsigned long>(crash.pc), static_cast<unsigned long>(crash.ra),
+         static_cast<unsigned long>(crash.sp), static_cast<unsigned long>(crash.cause),
+         static_cast<unsigned long>(crash.value));
     char line[LINE_BYTES] = "";
     int  n                = 0;
     for (int i = 0; i < crash.caller_count && i < CALLERS; ++i) {
         n += std::snprintf(line + n, sizeof(line) - n, " 0x%08lx", static_cast<unsigned long>(crash.callers[i]));
     }
-    ESP_LOGW(TAG, "stack:%s", line);
+    tell(ESP_LOG_WARN, "stack:%s", line);
 }
 }  // namespace
 
@@ -134,11 +155,9 @@ void start()
     const bool               unasked  = reason != ESP_RST_POWERON && reason != ESP_RST_SW &&
                                         reason != ESP_RST_DEEPSLEEP;
     const bool               had_kept = s_kept.magic == MAGIC;
-    if (unasked) {
-        ESP_LOGW(TAG, "restarted after %s", reason_name(reason));
-    } else {
-        ESP_LOGI(TAG, "started after %s", reason_name(reason));
-    }
+    s_report = static_cast<char *>(heap_caps_calloc(1, REPORT_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    tell(unasked ? ESP_LOG_WARN : ESP_LOG_INFO, "%s after %s", unasked ? "restarted" : "started",
+         reason_name(reason));
     if (unasked && had_kept) {
         if (s_kept.crash.magic == MAGIC) {
             tell_crash(s_kept.crash);
@@ -146,13 +165,18 @@ void start()
         for (int i = 0; i < LINES; ++i) {
             const char *line = s_kept.lines[(s_kept.next + i) % LINES];
             if (line[0] != '\0' && std::memchr(line, '\0', LINE_BYTES) != nullptr) {
-                ESP_LOGW(TAG, "before: %s", line);
+                tell(ESP_LOG_WARN, "before: %s", line);
             }
         }
     }
     std::memset(&s_kept, 0, sizeof(s_kept));
     s_kept.magic = MAGIC;
     s_next_sink  = esp_log_set_vprintf(sink);
+}
+
+const char *report()
+{
+    return s_report != nullptr ? s_report : "";
 }
 }  // namespace last_words
 
