@@ -78,6 +78,19 @@ enum class Outcome : std::uint8_t {
     Cancelled,  // cancel() asked
 };
 
+inline const char *outcome_name(Outcome outcome)
+{
+    switch (outcome) {
+        case Outcome::Answered: return "answered";
+        case Outcome::Failed: return "failed";
+        case Outcome::Resting: return "host resting";
+        case Outcome::Replaced: return "replaced";
+        case Outcome::Expired: return "expired";
+        case Outcome::Cancelled: return "cancelled";
+    }
+    return "?";
+}
+
 struct Response {
     Outcome     outcome  = Outcome::Failed;
     int         status   = 0;       // HTTP, when answered

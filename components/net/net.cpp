@@ -16,6 +16,8 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <memory>
+#include <vector>
 #include <cstdlib>
 #include <cstring>
 #include <strings.h>
@@ -406,6 +408,107 @@ Host add_host(const HostConfig &config)
     HostConfig capped  = config;
     capped.connections = std::clamp(config.connections, 1, MAX_CONNECTIONS);
     return s_core.add_host(capped);
+}
+
+namespace {
+// What add_host() was given for hosts found by host_for(): the core keeps
+// only pointers to it.
+std::vector<std::unique_ptr<std::string>> s_origins;
+std::vector<Host>                         s_origin_hosts;
+
+std::string origin_of(const std::string &url)
+{
+    const std::size_t scheme = url.find("://");
+    if (scheme == std::string::npos) {
+        return {};
+    }
+    const std::size_t path = url.find('/', scheme + 3);
+    return url.substr(0, path);
+}
+}  // namespace
+
+Host host_for(const std::string &url, const HostConfig &like)
+{
+    const std::string origin = origin_of(url);
+    if (origin.empty() || s_lock == nullptr) {
+        return kNoHost;
+    }
+    {
+        Lock hold;
+        for (std::size_t i = 0; i < s_origins.size(); ++i) {
+            if (*s_origins[i] == origin) {
+                return s_origin_hosts[i];
+            }
+        }
+        s_origins.push_back(std::make_unique<std::string>(origin));
+    }
+    HostConfig config = like;
+    config.base       = s_origins.back()->c_str();
+    config.name       = config.base;
+    const Host host   = add_host(config);
+    Lock hold;
+    s_origin_hosts.push_back(host);
+    return host;
+}
+
+namespace {
+struct Waiting {
+    SemaphoreHandle_t done;
+    Fetched           got;
+    char             *into;
+    std::size_t       size;
+    std::string      *text;
+    std::size_t       text_max;
+};
+
+Fetched wait_for(Request request, Waiting &waiting)
+{
+    if (request.deadline_ms <= 0) {
+        request.deadline_ms = kFetchDeadlineMs;
+    }
+    request.done = [&waiting](const Response &answer) {
+        Fetched &got = waiting.got;
+        got.outcome  = answer.outcome;
+        got.status   = answer.status;
+        got.error    = answer.error;
+        got.ms       = answer.ms;
+        if (waiting.into != nullptr && waiting.size > 0) {
+            got.length    = std::min(answer.length, waiting.size - 1);
+            got.truncated = got.length < answer.length;
+            std::memcpy(waiting.into, answer.body, got.length);
+            waiting.into[got.length] = '\0';
+        } else if (waiting.text != nullptr) {
+            got.length    = std::min(answer.length, waiting.text_max);
+            got.truncated = got.length < answer.length;
+            waiting.text->assign(answer.body, got.length);
+        }
+        xSemaphoreGive(waiting.done);
+    };
+    submit(std::move(request));
+    xSemaphoreTake(waiting.done, portMAX_DELAY);  // done always comes, the deadline at the latest
+    vSemaphoreDelete(waiting.done);
+    return waiting.got;
+}
+}  // namespace
+
+Fetched fetch(Request request, char *into, std::size_t size)
+{
+    Waiting waiting{xSemaphoreCreateBinary(), {}, into, size, nullptr, 0};
+    if (waiting.done == nullptr) {
+        return {};
+    }
+    return wait_for(std::move(request), waiting);
+}
+
+Fetched fetch(Request request, std::string &into)
+{
+    const std::size_t max = request.max_body;
+    Waiting           waiting{xSemaphoreCreateBinary(), {}, nullptr, 0, &into, max};
+    if (waiting.done == nullptr) {
+        return {};
+    }
+    into.clear();
+    return wait_for(std::move(request), waiting);
 }
 
 Ticket submit(Request request)

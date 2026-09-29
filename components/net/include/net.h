@@ -38,6 +38,32 @@ Host add_host(const HostConfig &config);
  *  the caller's task for one it replaces. */
 Ticket submit(Request request);
 
+/** The host for a whole address, found by its origin, or added with `like`'s
+ *  settings when it is new: for addresses that come at run time, as covers
+ *  do. Thread-safe. */
+Host host_for(const std::string &url, const HostConfig &like);
+
+/** What fetch() came back with; the body is where it was asked to go. */
+struct Fetched {
+    Outcome     outcome   = Outcome::Failed;
+    int         status    = 0;
+    int         error     = 0;
+    std::size_t length    = 0;
+    int         ms        = 0;
+    bool        truncated = false;  // the body was more than there was room for
+
+    bool ok() const { return outcome == Outcome::Answered && status >= 200 && status < 300; }
+};
+
+/** For a task that simply waits for the answer: sends `request`, whose `done`
+ *  is not used, and waits on the caller's task for what becomes of it, the
+ *  body copied into `into`, NUL-terminated. Given kFetchDeadlineMs when it
+ *  says none, so that it cannot wait for ever offline. Not from a callback. */
+Fetched fetch(Request request, char *into, std::size_t size);
+Fetched fetch(Request request, std::string &into);
+
+inline constexpr int kFetchDeadlineMs = 60 * 1000;
+
 void cancel(Ticket ticket);
 void cancel(Host host, const std::string &key);
 
