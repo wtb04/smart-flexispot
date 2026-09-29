@@ -34,6 +34,9 @@ constexpr char        HTTPS_PREFIX[]   = "https://";
 constexpr std::size_t HTTPS_PREFIX_LEN = sizeof(HTTPS_PREFIX) - 1;
 
 constexpr int HTTP_TIMEOUT_MS  = 10 * units::kMsPerSecond;
+// A trace only makes a trail longer, and waiting on it held up the next tap's
+// lookups: adsb.lol's traces took 6 to 12 s on a busy evening.
+constexpr int TRACE_TIMEOUT_MS = 4 * units::kMsPerSecond;
 constexpr int HTTP_BUFFER_SIZE = 2 * units::kBytesPerKiB;
 
 constexpr int HTTP_OK                = 200;
@@ -187,12 +190,13 @@ esp_err_t on_event(esp_http_client_event_t *event)
     return ESP_OK;
 }
 
-esp_http_client_handle_t open_client(const char *url, const char *agent = AGENT)
+esp_http_client_handle_t open_client(const char *url, const char *agent = AGENT,
+                                     int timeout_ms = HTTP_TIMEOUT_MS)
 {
     esp_http_client_config_t cfg = {};
     cfg.url                      = url;
     cfg.event_handler            = on_event;
-    cfg.timeout_ms               = HTTP_TIMEOUT_MS;
+    cfg.timeout_ms               = timeout_ms;
     cfg.user_agent               = agent;
     cfg.buffer_size              = HTTP_BUFFER_SIZE;
     cfg.keep_alive_enable        = true;
@@ -573,6 +577,7 @@ void fetch_trace(const char *hex)
     }
     char url[URL_SIZE];
     std::snprintf(url, sizeof(url), "%s/data/traces/%.2s/trace_recent_%.7s.json", TRACE_HOST, hex + len - 2, hex);
+    const std::int64_t began = esp_timer_get_time();
     if (get(s_trace_client, url, "trace") != HTTP_OK) {
         return;
     }
@@ -580,10 +585,12 @@ void fetch_trace(const char *hex)
     const char  *json     = unpacked(json_len);
     static Trail trace;  // only this task
     trace = Trail{};
-    if (json == nullptr || parse_trace(json, json_len, trace, TRAIL_STEP_KM) <= 0) {
+    const int positions = json != nullptr ? parse_trace(json, json_len, trace, TRAIL_STEP_KM) : -1;
+    if (positions <= 0) {
         ESP_LOGW(TAG, "%s: no trace in %u bytes", hex, static_cast<unsigned>(s_body_len));
         return;
     }
+    ESP_LOGI(TAG, "%s: trace, %d positions in %d ms", hex, positions, ms_since(began));
 
     xSemaphoreTake(s_lock, portMAX_DELAY);
     const std::int64_t now  = esp_timer_get_time();
@@ -598,6 +605,8 @@ void fetch_trace(const char *hex)
         s_on_update(*s_published);
     }
 }
+
+bool tap_waiting();
 
 void look_up(const char *hex, const char *callsign, bool with_photo)
 {
@@ -630,9 +639,13 @@ void look_up(const char *hex, const char *callsign, bool with_photo)
     if (s_on_details != nullptr) {
         s_on_details(hex, details);
     }
+    // The photo first: it is what a tap waits to see, and the trace, slow
+    // when adsb.lol is busy, held it up by seconds.
     if (with_photo) {
-        fetch_trace(hex);
         fetch_photo(hex, details);
+        if (!tap_waiting()) {  // a newer tap's lookups come before this one's trail
+            fetch_trace(hex);
+        }
     }
 }
 
@@ -852,7 +865,7 @@ esp_err_t start(UpdateHandler on_update, DetailsHandler on_details, PhotoHandler
     s_lookup_client   = open_client(LOOKUP_HOST);
     s_photoapi_client = open_client(PHOTO_HOST, PHOTO_AGENT);
     s_photo_client    = open_client(PHOTO_IMAGE_HOST);
-    s_trace_client    = open_client(TRACE_HOST);
+    s_trace_client    = open_client(TRACE_HOST, AGENT, TRACE_TIMEOUT_MS);
     ESP_RETURN_ON_FALSE(s_lookup_client != nullptr &&
                             s_photoapi_client != nullptr && s_photo_client != nullptr && s_trace_client != nullptr,
                         ESP_ERR_NO_MEM, TAG, "http clients");
