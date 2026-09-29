@@ -419,6 +419,7 @@ esp_err_t start()
     s_task = xTaskCreateStatic(wifi_task, "wifi_sup", TASK_STACK, nullptr, TASK_PRIORITY,
                                s_task_stack, &s_task_ctrl);
     ESP_RETURN_ON_FALSE(s_task != nullptr, ESP_ERR_NO_MEM, TAG, "task");
+    xTaskNotifyGive(s_task);  // up now, not at its first tick
     return ESP_OK;
 }
 

@@ -140,7 +140,7 @@ void take_screenshots(lv_timer_t *timer)
     lv_timer_delete(timer);
 }
 
-void build_screen()
+void prepare_screen()
 {
     lv_obj_t *scr = lv_screen_active();
     lv_obj_set_style_bg_color(scr, lv_color_hex(theme::background), 0);
@@ -151,22 +151,40 @@ void build_screen()
          dev = lv_indev_get_next(dev)) {
         lv_indev_add_event_cb(dev, wake_on_touch, LV_EVENT_PRESSED, nullptr);
     }
+}
 
-    create_rail(scr);
-    create_content(scr);
-    // Development: hands a picture of the screen to tools/screenshot.py a little
-    // after boot. It holds the LVGL lock for several seconds, so it is off
-    // unless wanted.
-    if (SHOT_ENABLED) {
-        lv_timer_create(take_screenshots, SHOT_START_MS, nullptr);
+// Behind the splash, one part at a time, laid out before the next, so that
+// between parts the splash moves on. Each is hidden until the splash leaves.
+bool build_next_part()
+{
+    static int next = 0;
+    lv_obj_t  *scr  = lv_screen_active();
+    switch (next++) {
+        case 0:
+            create_rail(scr);
+            create_content(scr);
+            return true;
+        case 1:
+            if (build_next_page()) {
+                --next;
+            }
+            return true;
+        case 2:
+            // Development: hands a picture of the screen to tools/screenshot.py a
+            // little after boot. It holds the LVGL lock for several seconds, so
+            // it is off unless wanted.
+            if (SHOT_ENABLED) {
+                lv_timer_create(take_screenshots, SHOT_START_MS, nullptr);
+            }
+            create_drawer(scr);  // after the content, so it overlays it when open
+            build_cinema(scr);
+            build_focus_full(scr);
+            lv_obj_move_foreground(s_rail);  // and under the rail, which it slides out from
+            create_notice_card();
+            return true;
+        default:
+            return false;
     }
-    create_drawer(scr);  // after the content, so it overlays it when open
-    build_cinema(scr);
-    build_focus_full(scr);
-    lv_obj_move_foreground(s_rail);  // and under the rail, which it slides out from
-    create_notice_card();
-    build_splash();  // last, so it covers everything until startup finishes
-
 }
 }  // namespace
 
@@ -1385,10 +1403,29 @@ esp_err_t init(const Handlers &handlers, int initial_brightness, std::uint32_t a
     s_orientation        = orientation;
     s_handlers           = handlers;
     s_initial_brightness = initial_brightness;
-    build_screen();
-    lv_timer_create(apply_pending, APPLY_PERIOD_MS, nullptr);
+    prepare_screen();
+    build_splash();
     lv_refr_now(nullptr);
     lvgl_port_unlock();
+    return ESP_OK;
+}
+
+esp_err_t build()
+{
+    constexpr TickType_t BETWEEN_PARTS = pdMS_TO_TICKS(20);
+    const std::uint32_t  from          = lv_tick_get();
+    for (bool more = true; more;) {
+        ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
+        more = build_next_part();
+        keep_under_splash();
+        lv_obj_update_layout(lv_screen_active());
+        if (!more) {
+            lv_timer_create(apply_pending, APPLY_PERIOD_MS, nullptr);
+        }
+        lvgl_port_unlock();
+        vTaskDelay(BETWEEN_PARTS);
+    }
+    ESP_LOGI(TAG, "built behind the splash in %u ms", static_cast<unsigned>(lv_tick_elaps(from)));
     return ESP_OK;
 }
 

@@ -249,6 +249,11 @@ hass::protocol::Telemetry gather_telemetry(const ble::Stats &radio)
     return out;
 }
 
+bool links_up()
+{
+    return wifi::connected() && hass::connected() && hass::ws::connected();
+}
+
 void show_links(const ble::Stats &radio)
 {
     ESP_ERROR_CHECK_WITHOUT_ABORT(
@@ -256,8 +261,19 @@ void show_links(const ble::Stats &radio)
     ESP_ERROR_CHECK_WITHOUT_ABORT(
         ui::set_presence(radio.has_key, radio.phone_present, radio.ever_seen));
 
-    if (wifi::connected() && hass::connected() && hass::ws::connected()) {
+    if (links_up()) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_done());
+    }
+}
+
+// The splash waits on the links, so at startup they are looked at often
+// rather than at the next publish.
+void wait_for_links()
+{
+    constexpr TickType_t LOOK_EVERY = pdMS_TO_TICKS(100);
+    constexpr int        LOOKS      = 100;
+    for (int i = 0; i < LOOKS && !links_up(); ++i) {
+        vTaskDelay(LOOK_EVERY);
     }
 }
 
@@ -324,6 +340,7 @@ void start_clients()
                  NETWORK_WAIT_MS / units::kMsPerSecond);
     }
     start_clients();
+    wait_for_links();
 
     for (;;) {
         if (wifi::connected()) {

@@ -262,14 +262,23 @@ void create_content(lv_obj_t *parent)
         }
         s_pages[i]    = make_page(area, l);
     }
+}
 
-    build_home_page(s_pages[HOME_PAGE]);
-    build_padded_page(RADAR_PAGE, build_radar_page, l);
-    build_padded_page(CALENDAR_PAGE, build_calendar_page, l);
-    build_padded_page(FOCUS_PAGE, build_focus_page, l);
-    build_settings_page(s_pages[SETUP_PAGE]);
-
-    select_page(HOME_PAGE);
+bool build_next_page()
+{
+    static int  next = 0;
+    const Layout l   = layout();
+    switch (next++) {
+        case 0: build_home_page(s_pages[HOME_PAGE]); return true;
+        case 1: build_padded_page(RADAR_PAGE, build_radar_page, l); return true;
+        case 2: build_padded_page(CALENDAR_PAGE, build_calendar_page, l); return true;
+        case 3: build_padded_page(FOCUS_PAGE, build_focus_page, l); return true;
+        case 4:
+            build_settings_page(s_pages[SETUP_PAGE]);
+            select_page(HOME_PAGE);
+            return false;
+        default: return false;
+    }
 }
 
 void paint_setup_dot(bool ready)

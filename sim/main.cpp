@@ -261,7 +261,8 @@ ui::Handlers handlers()
 
 // Without --splash, LVGL's clock runs this far ahead of SDL's, which the splash
 // takes for its twelve seconds having gone by.
-constexpr std::uint32_t SPLASH_SKIP_MS = 13000;
+constexpr std::uint32_t SPLASH_SKIP_MS  = 13000;
+constexpr std::uint32_t SPLASH_READY_MS = 7000;
 
 std::uint32_t ticks_past_splash()
 {
@@ -272,7 +273,7 @@ std::uint32_t ticks_past_splash()
 // Assistant answering and music; --tap X,Y taps there, as often as given;
 // --then KEYS presses those after the taps, as a notice over a view they opened;
 // --shot S saves a screenshot after S seconds and quits; --splash plays the
-// twelve seconds of splash the panel boots with.
+// splash the panel boots with.
 struct Options {
     int         page   = -1;
     int         shot_s = -1;
@@ -329,6 +330,7 @@ int main(int argc, char **argv)
 
     ui::set_cards(CARDS, static_cast<int>(std::size(CARDS)));
     ESP_ERROR_CHECK(ui::init(handlers(), 80, 0, false, ui::Orientation::Normal));
+    ESP_ERROR_CHECK(ui::build());
     // The settings as a panel fresh from the factory has them, from settings.cpp.
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_setting(ui::Setting::Charging, true));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_setting(ui::Setting::PresenceGate, true));
@@ -341,8 +343,13 @@ int main(int argc, char **argv)
     notices::listen();
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("desk"));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("network"));
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_done());
-    if (!opts.splash) {
+    if (opts.splash) {
+        // About when the panel's Home Assistant answers, so the splash plays as it does there.
+        lv_timer_t *ready = lv_timer_create([](lv_timer_t *) { ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_done()); },
+                                            SPLASH_READY_MS, nullptr);
+        lv_timer_set_repeat_count(ready, 1);
+    } else {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_done());
         lv_tick_set_cb(ticks_past_splash);
     }
 

@@ -36,6 +36,9 @@ bool          s_splash_up       = false;
 lv_timer_t   *s_splash_tick     = nullptr;
 std::uint32_t s_splash_start    = 0;
 bool          s_splash_ready    = false;
+std::uint32_t s_splash_tick_at  = 0;
+float         s_splash_at       = 0.0f;  // how far into the splash's own twelve seconds
+float         s_splash_rush     = 0.0f;  // its pace once startup is ready, if faster
 
 constexpr std::int32_t DESK_W            = 300;
 constexpr std::int32_t DESK_H            = 160;
@@ -55,8 +58,12 @@ constexpr std::int32_t SEG_W   = 30;
 constexpr std::int32_t SEG_H   = 10;
 constexpr std::int32_t SEG_GAP = 8;
 
-// Driven by the clock alone, so a slow frame does not slow the splash.
+// Driven by the clock alone, so a slow frame does not slow the splash. Twelve
+// seconds of movement, played in eight, and what is left of it in a moment
+// once startup is ready.
 constexpr std::uint32_t SPLASH_MS       = 12000;
+constexpr float         SPLASH_PACE     = 12000.0f / 8000.0f;
+constexpr float         SPLASH_RUSH_MS  = 600.0f;
 constexpr std::uint32_t FRAME_MS        = 16;
 constexpr std::uint32_t SPLASH_HOLD_MS  = 400;
 constexpr float         RISE_FROM_MS    = 300.0f;
@@ -199,47 +206,41 @@ void splash_frame(std::uint32_t elapsed)
     stretch_legs(top);
 }
 
-// Boot takes nine to ten seconds; the splash always takes twelve, one even
-// movement rather than a lurch per step, and waits at the end if boot is slower.
+// One even movement rather than a lurch per step, which waits at the end if
+// boot is slower.
 constexpr std::uint32_t SPLASH_GUARD_MS  = 15000;
 bool                    s_splash_leaving = false;
 
 // LVGL draws the screen under the top layer even where the splash covers it, and
 // Home Assistant filling the pages in cost a fifth of a second a frame.
-constexpr int SPLASH_HIDDEN_MAX               = 16;
+constexpr int SPLASH_HIDDEN_MAX               = 24;
 lv_obj_t     *s_splash_hid[SPLASH_HIDDEN_MAX] = {};
-
-void hide_under_splash()
-{
-    lv_obj_t *scr  = lv_screen_active();
-    int       used = 0;
-    for (std::uint32_t i = 0; i < lv_obj_get_child_count(scr) && used < SPLASH_HIDDEN_MAX; ++i) {
-        lv_obj_t *child = lv_obj_get_child(scr, i);
-        if (!lv_obj_is_hidden(child)) {
-            lv_obj_set_hidden(child, true);
-            s_splash_hid[used++] = child;
-        }
-    }
-}
+int           s_splash_hid_count              = 0;
 
 // A cut, not a fade: a full-screen blend takes a quarter of a second a frame here.
 void splash_leave()
 {
+    ESP_LOGI(TAG, "splash: left after %u ms", static_cast<unsigned>(lv_tick_elaps(s_splash_start)));
     s_splash_leaving = true;
-    for (lv_obj_t *&obj : s_splash_hid) {
-        if (obj != nullptr) {
-            lv_obj_set_hidden(obj, false);
-            obj = nullptr;
-        }
+    for (int i = 0; i < s_splash_hid_count; ++i) {
+        lv_obj_set_hidden(s_splash_hid[i], false);
     }
+    s_splash_hid_count = 0;
     splash_hide(nullptr);
 }
 
 void splash_animate(lv_timer_t *)
 {
-    const std::uint32_t elapsed = lv_tick_elaps(s_splash_start);
-    splash_frame(elapsed);
-    if (elapsed >= SPLASH_MS + SPLASH_HOLD_MS && s_splash_ready && !s_splash_leaving) {
+    const auto end  = static_cast<float>(SPLASH_MS + SPLASH_HOLD_MS);
+    const auto real = static_cast<float>(lv_tick_elaps(s_splash_tick_at));
+    s_splash_tick_at = lv_tick_get();
+    if (s_splash_ready && s_splash_rush == 0.0f) {
+        s_splash_rush = std::max(SPLASH_PACE, (end - s_splash_at) / SPLASH_RUSH_MS);
+    }
+    s_splash_at += real * (s_splash_ready ? s_splash_rush : SPLASH_PACE);
+    s_splash_at = std::min(s_splash_at, s_splash_ready ? end : static_cast<float>(SPLASH_MS));
+    splash_frame(static_cast<std::uint32_t>(s_splash_at));
+    if (s_splash_at >= end && !s_splash_leaving) {
         splash_leave();
     }
 }
@@ -447,8 +448,9 @@ void build_steps(lv_obj_t *panel, std::int32_t x, std::int32_t h)
 
 void start_splash_timers()
 {
-    s_splash_start = lv_tick_get();
-    s_splash_tick  = lv_timer_create(splash_animate, FRAME_MS, nullptr);
+    s_splash_start   = lv_tick_get();
+    s_splash_tick_at = s_splash_start;
+    s_splash_tick    = lv_timer_create(splash_animate, FRAME_MS, nullptr);
 
     s_splash_guard = lv_timer_create(splash_expired, SPLASH_GUARD_MS, nullptr);
     lv_timer_set_repeat_count(s_splash_guard, 1);
@@ -465,7 +467,6 @@ void build_splash()
     theme::style_panel(s_splash, theme::background, 0);
     lv_obj_set_clickable(s_splash, true);
     s_splash_up = true;
-    hide_under_splash();
 
     lv_obj_t          *panel   = build_splash_panel(l);
     const std::int32_t inner_w = l.screen_w - 2 * GAP - 2 * PANEL_PAD;
@@ -477,6 +478,26 @@ void build_splash()
     splash_mark(0);
     splash_frame(0);
     start_splash_timers();
+}
+
+void keep_under_splash()
+{
+    if (s_splash_leaving) {
+        return;
+    }
+    lv_obj_t *scr = lv_screen_active();
+    for (std::uint32_t i = 0; i < lv_obj_get_child_count(scr); ++i) {
+        lv_obj_t *child = lv_obj_get_child(scr, i);
+        if (lv_obj_is_hidden(child)) {
+            continue;
+        }
+        if (s_splash_hid_count == SPLASH_HIDDEN_MAX) {
+            ESP_LOGW(TAG, "splash: more on the screen than it can keep hidden");
+            return;
+        }
+        lv_obj_set_hidden(child, true);
+        s_splash_hid[s_splash_hid_count++] = child;
+    }
 }
 
 void apply_splash()

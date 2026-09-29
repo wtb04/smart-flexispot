@@ -299,6 +299,11 @@ struct Handlers {
 esp_err_t init(const Handlers &handlers, int initial_brightness, std::uint32_t accent,
                bool rail_right, Orientation orientation);
 
+/** After init() has put up the splash and the screen is lit: everything else,
+ *  built behind the splash a part at a time so that it keeps moving. Nothing
+ *  set before this returns is drawn until it has. */
+esp_err_t build();
+
 /** A part of the boot has finished: "desk" or "network". */
 esp_err_t splash_step(const char *label);
 

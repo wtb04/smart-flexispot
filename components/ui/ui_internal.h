@@ -339,6 +339,10 @@ lv_obj_t *build_slider_card(lv_obj_t *parent, std::int32_t y, std::int32_t w, co
                             lv_obj_t **out_value);
 void build_settings_page(lv_obj_t *page);
 void create_content(lv_obj_t *parent);
+/** The pages, one a call; false after the last. */
+bool build_next_page();
 void build_splash();
+/** Hides what has been put on the screen since, until the splash leaves. */
+void keep_under_splash();
 
 }  // namespace ui::detail

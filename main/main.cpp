@@ -370,6 +370,9 @@ extern "C" void app_main(void)
 
     const bool flipped = settings::enabled(settings::Key::Flipped);
     ESP_ERROR_CHECK(board::init(flipped));
+    // The radio takes eight seconds to join, which it spends while the pages are built.
+    ESP_ERROR_CHECK_WITHOUT_ABORT(wifi::start());
+    ESP_ERROR_CHECK_WITHOUT_ABORT(net::start());  // its requests wait for the network by themselves
     // Named, since several share a signature and a swap would still compile.
     const ui::Handlers handlers{
         .move        = on_move,
@@ -409,6 +412,7 @@ extern "C" void app_main(void)
                                                                           : ui::Orientation::Normal));
     network::note_brightness(brightness);
     ESP_ERROR_CHECK_WITHOUT_ABORT(board::display_on(brightness));
+    ESP_ERROR_CHECK(ui::build());
     ESP_ERROR_CHECK_WITHOUT_ABORT(
         ui::set_setting(ui::Setting::Charging, settings::enabled(settings::Key::Charging)));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_setting(
@@ -442,8 +446,6 @@ extern "C" void app_main(void)
     focus::set_plan(stored_plan());  // which shows it too
     focus::restore(kept_focus);
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("desk"));
-    ESP_ERROR_CHECK_WITHOUT_ABORT(wifi::start());
-    ESP_ERROR_CHECK_WITHOUT_ABORT(net::start());  // its requests wait for the network by themselves
     ESP_ERROR_CHECK_WITHOUT_ABORT(ota::start({
         .busy    = desk_moving,
         .status  = show_update,
