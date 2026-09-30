@@ -34,12 +34,14 @@ std::atomic<bool> s_sky_changed{false};
 std::atomic<bool> s_radar_showing{false};
 std::atomic<bool> s_sky_now{false};  // the page came up: fetch without waiting
 
-std::mutex              s_wake_lock;
-std::condition_variable s_wake;
+// The threads' own, never destroyed: they are detached, and glibc waits for
+// ever to destroy a condition variable a thread still waits on.
+std::mutex              &s_wake_lock = *new std::mutex;
+std::condition_variable &s_wake      = *new std::condition_variable;
 
 // One lookup at a time, the last tap winning, as on the panel.
-std::mutex                 s_lookup_lock;
-std::condition_variable    s_lookup_wake;
+std::mutex                 &s_lookup_lock = *new std::mutex;
+std::condition_variable    &s_lookup_wake = *new std::condition_variable;
 std::string                s_lookup_hex, s_lookup_callsign;
 bool                       s_lookup_wanted = false;
 bool                       s_details_ready = false;

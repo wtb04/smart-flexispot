@@ -97,9 +97,11 @@ std::int64_t now_us()
     return duration_cast<microseconds>(steady_clock::now().time_since_epoch()).count();
 }
 
-Core                    s_core;
-std::mutex              s_lock;
-std::condition_variable s_wake;
+// Used by the workers, which are detached and outlive main: never destroyed,
+// as glibc waits for ever to destroy a condition variable a thread waits on.
+Core                    &s_core = *new Core;
+std::mutex              &s_lock = *new std::mutex;
+std::condition_variable &s_wake = *new std::condition_variable;
 bool                    s_started = false;
 
 void tell(Tells &tells)

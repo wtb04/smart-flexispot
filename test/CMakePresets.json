@@ -20,8 +20,8 @@
         { "name": "coverage-report", "configurePreset": "coverage", "targets": ["coverage-report"] }
     ],
     "testPresets": [
-        { "name": "host", "configurePreset": "host", "output": { "outputOnFailure": true } },
-        { "name": "coverage", "configurePreset": "coverage", "output": { "outputOnFailure": true } }
+        { "name": "host", "configurePreset": "host", "output": { "outputOnFailure": true, "outputJUnitFile": "junit.xml" } },
+        { "name": "coverage", "configurePreset": "coverage", "output": { "outputOnFailure": true, "outputJUnitFile": "junit.xml" } }
     ],
     "workflowPresets": [
         {
