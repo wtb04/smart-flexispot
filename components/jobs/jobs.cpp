@@ -19,7 +19,11 @@ constexpr char TAG[] = "jobs";
 // PSRAM cannot be used through; slow ones only fetch and parse.
 constexpr std::uint32_t QUICK_STACK   = 6144;
 constexpr std::uint32_t SLOW_STACK    = 8192;
-constexpr UBaseType_t   PRIORITY      = 2;
+// Quick ones above net's workers, whose TLS handshakes kept the clock and the
+// rest waiting a second on end; being quick, they hold net up hardly at all.
+// Slow ones wait on net anyway.
+constexpr UBaseType_t   QUICK_PRIORITY = 4;
+constexpr UBaseType_t   SLOW_PRIORITY  = 2;
 constexpr BaseType_t    CORE          = 0;  // LVGL has the other
 constexpr std::int64_t  LONGEST_SLEEP = 60 * 1000 * 1000;
 constexpr int           QUICK_MOST_MS = 100;  // a quick job taking longer holds up the rest
@@ -92,13 +96,13 @@ void start_workers()
     static StaticSemaphore_t lock_ctrl;
     s_lock = xSemaphoreCreateMutexStatic(&lock_ctrl);
     s_workers[0] = xTaskCreateStaticPinnedToCore(worker_task, "jobs", QUICK_STACK,
-                                                 reinterpret_cast<void *>(Lane::Quick), PRIORITY,
+                                                 reinterpret_cast<void *>(Lane::Quick), QUICK_PRIORITY,
                                                  s_quick_stack, &s_quick_ctrl, CORE);
     auto *slow_stack = static_cast<StackType_t *>(
         heap_caps_malloc(SLOW_STACK * sizeof(StackType_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     if (slow_stack != nullptr) {
         s_workers[1] = xTaskCreateStaticPinnedToCore(worker_task, "jobs_slow", SLOW_STACK,
-                                                     reinterpret_cast<void *>(Lane::Slow), PRIORITY,
+                                                     reinterpret_cast<void *>(Lane::Slow), SLOW_PRIORITY,
                                                      slow_stack, &s_slow_ctrl, CORE);
     }
     if (s_workers[0] == nullptr || s_workers[1] == nullptr) {
