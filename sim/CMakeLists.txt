@@ -48,6 +48,13 @@ else()
     set(IDF_DIR $ENV{HOME}/esp/esp-idf)
 endif()
 set(CJSON_DIR ${IDF_DIR}/components/json/cJSON)
+if(NOT EXISTS ${CJSON_DIR}/cJSON.c)  # no ESP-IDF here, as in CI: the version it bundles
+    include(FetchContent)
+    FetchContent_Declare(cjson URL https://github.com/DaveGamble/cJSON/archive/refs/tags/v1.7.19.tar.gz
+                         DOWNLOAD_EXTRACT_TIMESTAMP ON)
+    FetchContent_Populate(cjson)
+    set(CJSON_DIR ${cjson_SOURCE_DIR})
+endif()
 set_source_files_properties(${CJSON_DIR}/cJSON.c PROPERTIES COMPILE_OPTIONS -w)
 set(NET_CORE ${ROOT}/components/net/net_core.cpp)  # the panel's own, under net_desktop.cpp
 set(PARSERS ${ROOT}/components/ical/ical_parse.cpp ${ROOT}/components/travel/travel_parse.cpp
@@ -75,3 +82,29 @@ target_link_libraries(sim PRIVATE lvgl ZLIB::ZLIB CURL::libcurl)
 if(APPLE)
     target_link_libraries(sim PRIVATE "-framework CoreFoundation" "-framework CoreGraphics" "-framework ImageIO")
 endif()
+
+# `cmake --build sim/build --target screenshots`: the main views, offline and
+# the same each time, into sim/build/screenshots, as CI keeps them.
+set(SCENES
+    "home|--press amm --shot 2"
+    "radar|--page 1 --shot 2"
+    "calendar|--page 2 --shot 2"
+    "focus|--page 3 --shot 2"
+    "setup|--page 4 --shot 2"
+    "diagnostics|--page 4 --tap 800,310 --shot 3"
+    "cinema|--press amm --tap 1200,548 --shot 3"
+    "notice|--press amm --tap 1200,548 --then n --shot 4"
+    "splash|--splash --shot 5")
+set(SHOTS ${CMAKE_BINARY_DIR}/screenshots)
+set(SHOT_COMMANDS COMMAND ${CMAKE_COMMAND} -E make_directory ${SHOTS})
+foreach(scene IN LISTS SCENES)
+    string(REPLACE "|" ";" parts "${scene}")
+    list(GET parts 0 name)
+    list(GET parts 1 args)
+    separate_arguments(args UNIX_COMMAND "${args}")
+    list(APPEND SHOT_COMMANDS COMMAND ${CMAKE_COMMAND} -E env SIM_OFFLINE=1
+         $<TARGET_FILE:sim> ${args} --out ${SHOTS}/${name}.png)
+endforeach()
+add_custom_target(screenshots ${SHOT_COMMANDS}
+    DEPENDS sim WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR} VERBATIM
+    COMMENT "Screenshots of the main views in ${SHOTS}")

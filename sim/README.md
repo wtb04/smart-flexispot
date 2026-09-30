@@ -48,6 +48,8 @@ sim/send.sh notify '{"title":"Hello","message":"Kept until tapped","level":"warn
 
 ## Settings
 
+`SIM_OFFLINE=1` leaves the live feeds off, as CI does for its screenshots.
+
 `sim/sim.env`, gitignored, is read by `run.sh`:
 
 ```sh

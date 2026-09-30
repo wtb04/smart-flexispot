@@ -56,6 +56,8 @@ void said(const char *what)
 }
 
 // A PNG of whatever is on screen, next to the simulator in shots/.
+std::string s_shot_to;  // --out: the screenshot's file, rather than one named for the time
+
 void save_screenshot()
 {
     int            w = 0, h = 0;
@@ -100,10 +102,14 @@ void save_screenshot()
     chunk("IDAT", packed.data(), packed_size);
     chunk("IEND", nullptr, 0);
 
-    char              name[64];
+    char              name[256];
     const std::time_t now = std::time(nullptr);
     std::strftime(name, sizeof(name), "shots/%Y%m%d-%H%M%S.png", std::localtime(&now));
-    std::system("mkdir -p shots");
+    if (!s_shot_to.empty()) {
+        std::snprintf(name, sizeof(name), "%s", s_shot_to.c_str());
+    } else {
+        std::system("mkdir -p shots");
+    }
     if (FILE *file = std::fopen(name, "wb"); file != nullptr) {
         std::fwrite(png.data(), 1, png.size(), file);
         std::fclose(file);
@@ -272,8 +278,8 @@ std::uint32_t ticks_past_splash()
 // --page N opens page N; --press KEYS presses those keys, as "am" for Home
 // Assistant answering and music; --tap X,Y taps there, as often as given;
 // --then KEYS presses those after the taps, as a notice over a view they opened;
-// --shot S saves a screenshot after S seconds and quits; --splash plays the
-// splash the panel boots with.
+// --shot S saves a screenshot after S seconds and quits, to --out FILE if
+// given; --splash plays the splash the panel boots with.
 struct Options {
     int         page   = -1;
     int         shot_s = -1;
@@ -294,6 +300,9 @@ Options options(int argc, char **argv)
             ++i;
         } else if (name == "--shot") {
             o.shot_s = std::atoi(value);
+            ++i;
+        } else if (name == "--out") {
+            s_shot_to = value;
             ++i;
         } else if (name == "--press") {
             o.keys = value;
@@ -339,7 +348,11 @@ int main(int argc, char **argv)
     home_assistant::start();  // not answering yet: the page as the panel has it until it does
     hardware::start();
     media_stub::start();
-    live::start();
+    // SIM_OFFLINE: nothing fetched at all, as in CI, whose screenshots should
+    // show the same each time and nothing of anybody's calendar.
+    if (std::getenv("SIM_OFFLINE") == nullptr) {
+        live::start();
+    }
     notices::listen();
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("desk"));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("network"));
