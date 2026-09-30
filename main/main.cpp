@@ -371,6 +371,7 @@ extern "C" void app_main(void)
     const bool flipped = settings::enabled(settings::Key::Flipped);
     ESP_ERROR_CHECK(board::init(flipped));
     // The radio takes eight seconds to join, which it spends while the pages are built.
+    wifi::on_radio_stuck(board::restart_cold);
     ESP_ERROR_CHECK_WITHOUT_ABORT(wifi::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(net::start());  // its requests wait for the network by themselves
     // Named, since several share a signature and a swap would still compile.

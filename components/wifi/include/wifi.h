@@ -12,6 +12,10 @@ inline constexpr int kSsidMax = 32;
  *  ten, and keeps trying if the radio would not come up at all. */
 esp_err_t start();
 
+/** What to do when the co-processor stays out of reach, as it has after a
+ *  plain restart: board::restart_cold(). Before start(). */
+void on_radio_stuck(void (*restart_cold)());
+
 /** True once an IP address has been assigned. */
 bool connected();
 

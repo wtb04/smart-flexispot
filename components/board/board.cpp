@@ -11,6 +11,8 @@
 #include "esp_rom_sys.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "hal/wdt_hal.h"
+#include "soc/rtc.h"
 #include "freertos/semphr.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -562,6 +564,25 @@ IRAM_ATTR void hold_dark()
 namespace {
 bool s_held_through_restart = false;
 }  // namespace
+
+void restart_cold()
+{
+    constexpr std::uint32_t OFF_MS   = 500;
+    constexpr std::uint32_t RESET_MS = 100;
+    ESP_ERROR_CHECK_WITHOUT_ABORT(bsp_feature_enable(BSP_FEATURE_WIFI, false));
+    hold_dark();
+    vTaskDelay(pdMS_TO_TICKS(OFF_MS));
+    // The chip's own watchdog, set to reset all of it as power on does, pins
+    // and all: a plain restart leaves them as they were.
+    wdt_hal_context_t wdt = RWDT_HAL_CONTEXT_DEFAULT();
+    wdt_hal_init(&wdt, WDT_RWDT, 0, false);
+    wdt_hal_write_protect_disable(&wdt);
+    wdt_hal_config_stage(&wdt, WDT_STAGE0, RESET_MS * rtc_clk_slow_freq_get_hz() / 1000, WDT_STAGE_ACTION_RESET_RTC);
+    wdt_hal_enable(&wdt);
+    wdt_hal_write_protect_enable(&wdt);
+    for (;;) {
+    }
+}
 
 void dark_from_the_start()
 {

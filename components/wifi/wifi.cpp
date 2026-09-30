@@ -1,6 +1,9 @@
 #include "wifi.h"
 
 #include "app_state.h"
+#include "esp_attr.h"
+#include "esp_timer.h"
+#include "jobs.h"
 
 #include "bsp/esp-bsp.h"
 #include "esp_check.h"
@@ -92,6 +95,22 @@ constexpr TickType_t RESTART_AFTER = pdMS_TO_TICKS(10 * units::kMsPerMinute);
 
 constexpr TickType_t RADIO_POWER_OFF    = pdMS_TO_TICKS(1000);
 constexpr TickType_t RADIO_POWER_SETTLE = pdMS_TO_TICKS(300);
+
+// Up in two or three seconds as a rule. Out of reach this long, after a plain
+// restart it has been seen to stay so for good, and only a restart from cold
+// brought it back; twice in a row at most, so a radio that is really gone
+// leaves the panel running without it rather than restarting for ever.
+constexpr std::int64_t  RADIO_STUCK_US  = 20 * units::kUsPerSecond;
+constexpr int           RADIO_LOOK_MS   = units::kMsPerSecond;
+constexpr std::uint32_t COLD_TRIES      = 2;
+constexpr std::uint32_t COLD_TRIES_SEAL = 0x57a11ed0;
+
+RTC_NOINIT_ATTR std::uint32_t s_cold_seal;   // COLD_TRIES_SEAL when the count below means anything
+RTC_NOINIT_ATTR std::uint32_t s_cold_tries;  // cold restarts in a row for this
+
+std::atomic<std::int64_t> s_bring_up_at{0};
+std::atomic<bool>         s_radio_up{false};
+void (*s_restart_cold)()  = nullptr;
 
 constexpr int MAC_LENGTH = 6;
 
@@ -233,6 +252,7 @@ esp_err_t init_nvs()
 /** Powers the radio and starts the driver. Safe to try again after a failure. */
 esp_err_t bring_up()
 {
+    s_bring_up_at = esp_timer_get_time();
     // Off first, for long enough to be off: across a restart it keeps its
     // power, and has come back unreachable, its reset line doing nothing.
     ESP_RETURN_ON_ERROR(bsp_feature_enable(BSP_FEATURE_WIFI, false), TAG, "wifi power");
@@ -263,8 +283,38 @@ esp_err_t bring_up()
     }
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_wifi_set_ps(WIFI_PS_NONE));
     s_save_applied = false;
+    s_radio_up     = true;
+    s_cold_tries   = 0;
     ESP_LOGI(TAG, "joining '%s'", WIFI_SSID);
     return ESP_OK;
+}
+
+// On a shared worker, as the Wi-Fi task is stuck in the driver waiting.
+jobs::Result watch_radio()
+{
+    const std::int64_t at = s_bring_up_at;
+    if (s_radio_up) {
+        return jobs::sleep();
+    }
+    if (at == 0 || esp_timer_get_time() - at < RADIO_STUCK_US) {
+        return jobs::again_in(RADIO_LOOK_MS);
+    }
+    if (s_cold_seal != COLD_TRIES_SEAL) {
+        s_cold_seal  = COLD_TRIES_SEAL;
+        s_cold_tries = 0;
+    }
+    if (s_cold_tries >= COLD_TRIES || s_restart_cold == nullptr) {
+        ESP_LOGE(TAG, "radio out of reach, and %u restarts from cold did not bring it back: going on without",
+                 static_cast<unsigned>(s_cold_tries));
+        return jobs::sleep();
+    }
+    ++s_cold_tries;
+    ESP_LOGE(TAG, "radio out of reach for %d s, restarting from cold (%u of %u)",
+             static_cast<int>((esp_timer_get_time() - at) / units::kUsPerSecond),
+             static_cast<unsigned>(s_cold_tries), static_cast<unsigned>(COLD_TRIES));
+    vTaskDelay(pdMS_TO_TICKS(200));  // for the log to be kept
+    s_restart_cold();
+    return jobs::sleep();
 }
 
 bool reached(TickType_t now, TickType_t at)
@@ -400,6 +450,11 @@ void set_power_save(bool save)
 }  // namespace
 
 
+void on_radio_stuck(void (*restart_cold)())
+{
+    s_restart_cold = restart_cold;
+}
+
 esp_err_t start()
 {
     setenv("TZ", TIMEZONE, 1);
@@ -433,6 +488,11 @@ esp_err_t start()
     set_power_save(!app::get(app::Fact::ScreenOn));
     app::watch(app::Fact::ScreenOn, [](bool on) { set_power_save(!on); });
     xTaskNotifyGive(s_task);  // up now, not at its first tick
+    jobs::Spec watch;
+    watch.name      = "radio";
+    watch.period_ms = RADIO_LOOK_MS;
+    watch.run       = watch_radio;
+    jobs::add(std::move(watch));
     return ESP_OK;
 }
 

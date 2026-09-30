@@ -12,6 +12,12 @@ void dark_from_the_start();
 /** The same, for a restart or a crash to leave behind. Safe in the panic handler. */
 void hold_dark();
 
+/** A restart the chip comes out of as from power on, as a plain one does not:
+ *  the Wi-Fi co-processor switched off, then all of the chip reset, its pins
+ *  let go, by its own watchdog. The co-processor has come back from a plain
+ *  restart out of reach. Does not return. */
+[[noreturn]] void restart_cold();
+
 /** Brings up rails, panel, touch and the LVGL port task. Once, before any lv_*
  *  call. flipped hangs the panel the other way up. */
 esp_err_t init(bool flipped);
