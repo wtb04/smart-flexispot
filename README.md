@@ -54,7 +54,7 @@ Once there was a screen on the desk it made sense to put the rest of what I look
 The rail down the left is always there: the height as the control box reports it, Stand and Sit, and an arrow to the other presets. Tap a preset to go there, hold it to save the current height.
 
 - **Six presets instead of four.** The control box has four of its own. The panel drives the desk to the other two itself, and learns how far the desk rolls on after the keys are let go, so it stops where you asked.
-- **No cable across the room, if you want.** The desk can be wired straight to the Tab5, or to a small ESP32 left at the desk that the panel talks to over Bluetooth (see [the companion](#optional-the-companion)).
+- **No cable across the room, if you want.** The desk can be wired straight to the Tab5, or to a small ESP32 left at the desk that the panel talks to over Bluetooth (see [option 2](#option-2-over-bluetooth-with-a-companion)).
 - **Safe by default.** A key that stops changing the height is let go of, a move from Home Assistant stops unless it keeps being asked for, and the byte that would factory-reset the control box is pinned by a test.
 
 ### The room
@@ -119,34 +119,109 @@ The protocol and pinouts come from [iMicknl/LoctekMotion_IoT](https://github.com
 - A Flexispot with a supported control box (see above) and an RJ45 cable you do not mind cutting.
 - Optionally, any ESP32 as the companion.
 
-### 2. Wire the desk
+### 2. Connect the desk
+
+There are two ways to reach the control box. Either the Tab5 is wired to it directly, or a small ESP32 stays at the desk on the wire and the Tab5 talks to that over Bluetooth, so the panel can go anywhere in the room on its battery.
+
+```mermaid
+flowchart TB
+    subgraph one ["Option 1: a cable"]
+        direction LR
+        tab5a["Tab5"] ---|"UART, RJ45 cable"| box1["Control box"]
+    end
+    subgraph two ["Option 2: Bluetooth"]
+        direction LR
+        tab5b["Tab5"] -. "Bluetooth" .- esp["ESP32 companion"]
+        esp ---|"UART, RJ45 cable"| box2["Control box"]
+    end
+    one ~~~ two
+```
 
 > [!WARNING]
 > **The control box talks at 5 V and the Tab5's pins are 3.3 V**, with no level shifter anywhere on the M5-Bus ([measured here](https://github.com/iMicknl/LoctekMotion_IoT/issues/34)). People wire it directly and it works for them, but it is out of spec. A level shifter, or at least a series resistor on RX and the wake line, is cheap insurance.
->
-> **Do not feed the desk's 5 V (RJ45 pin 8) into the Tab5.** M5-Bus pins 25/27/29 are the 6 to 24 V input, not 5 V. The Tab5 powers itself.
 
-| Signal | Tab5 M5-Bus | GPIO | Control box RJ45 |
-|---|---|---|---|
-| TX (Tab5 to box) | pin 14, `TXD0` | 37 | pin 6 |
-| RX (box to Tab5) | pin 13, `RXD0` | 38 | pin 5 |
-| Wake ("PIN 20") | pin 23 | 47 | pin 4 |
-| GND | pin 1, 3 or 5 | | pin 7 |
+The pins below are the HS01B-1 / HS13B-1 pinout. **Measure your own first**: the HS13A-1 puts 29 V on pins 7 and 8, and people have killed control boxes by trusting the wrong table.
 
-That is the HS01B-1 / HS13B-1 pinout. **Measure your own first**: the HS13A-1 puts 29 V on pins 7 and 8, and people have killed control boxes by trusting the wrong table.
+#### Option 1: a cable to the Tab5
 
-#### Optional: the companion
+```mermaid
+flowchart LR
+    subgraph tab5 ["Tab5, M5-Bus"]
+        t_tx["pin 14, GPIO37, TX"]
+        t_rx["pin 13, GPIO38, RX"]
+        t_wake["pin 23, GPIO47, wake"]
+        t_gnd["pin 1, 3 or 5, GND"]
+    end
+    subgraph rj45 ["Control box, RJ45"]
+        r6["pin 6"]
+        r5["pin 5"]
+        r4["pin 4, PIN 20"]
+        r7["pin 7, GND"]
+    end
+    t_tx --- r6
+    t_rx --- r5
+    t_wake --- r4
+    t_gnd --- r7
+    linkStyle 0 stroke:#f58a3a,stroke-width:3px
+    linkStyle 1 stroke:#4a90d9,stroke-width:3px
+    linkStyle 2 stroke:#5bb974,stroke-width:3px
+    linkStyle 3 stroke:#888888,stroke-width:3px
+```
 
-If you want the panel to move freely, flash `proxy/` onto any ESP32 and leave that at the desk instead:
+#### Option 2: over Bluetooth, with a companion
 
-| Signal | ESP32 GPIO | Control box RJ45 |
-|---|---|---|
-| TX (ESP32 to box) | 16 | pin 5 |
-| RX (box to ESP32) | 17 | pin 6 |
-| Wake ("PIN 20") | 23 | pin 4 |
-| GND | GND | pin 7 |
+The companion is an ESP32 DevKit V1 (30-pin) on a small carrier board with an RJ45 jack. The board takes its power from the desk, shifts the box's 5 V signal down to 3.3 V for the ESP32, and uses the two LEDs in the jack for Bluetooth (`BT`) and the desk link (`LINK`).
 
-Pin 8's 5 V can power the ESP32 through its `5V`/`VIN` pin, so it needs no supply of its own. Measure pin 8 first, on an HS13A-1 it is 29 V. Build it with `cd proxy && idf.py build flash monitor`, pins and timings are under `idf.py menuconfig`, *Loctek desk control*.
+| Top | Bottom |
+|---|---|
+| ![The carrier board, top](pcb/img/board-top.png) | ![The carrier board, bottom](pcb/img/board-bottom.png) |
+
+![The carrier board in 3D, with the DevKit socket and the RJ45 jack](pcb/img/board-3d.png)
+
+```mermaid
+flowchart LR
+    subgraph rj45 ["Control box, RJ45"]
+        p8["pin 8, 5 V"]
+        p7["pin 7, GND"]
+        p6["pin 6, box TX"]
+        p5["pin 5, box RX"]
+        p4["pin 4, wake"]
+    end
+    subgraph board ["Carrier board"]
+        fuse["PTC fuse, diode"]
+        shift["10k / 15k divider, clamp"]
+        rtx["220 Ω"]
+        rwake["220 Ω"]
+    end
+    subgraph esp ["ESP32 DevKit"]
+        vin["VIN"]
+        gnd["GND"]
+        rx["GPIO16, RX2"]
+        tx["GPIO17, TX2"]
+        wake["GPIO23"]
+    end
+    p8 --- fuse --- vin
+    p7 --- gnd
+    p6 --- shift --- rx
+    p5 --- rtx --- tx
+    p4 --- rwake --- wake
+    linkStyle 0,1 stroke:#d9534f,stroke-width:3px
+    linkStyle 2 stroke:#888888,stroke-width:3px
+    linkStyle 3,4 stroke:#4a90d9,stroke-width:3px
+    linkStyle 5,6 stroke:#f58a3a,stroke-width:3px
+    linkStyle 7,8 stroke:#5bb974,stroke-width:3px
+```
+
+<details>
+<summary>The schematic</summary>
+
+![The carrier board's schematic](pcb/img/schematic.png)
+
+</details>
+
+Everything to have it made is in [pcb/](pcb/): the KiCad project, the [schematic as a PDF](pcb/fab/tab5-desk-ctrl-schematic.pdf), and the gerbers, BOM and placement files for JLCPCB.
+
+Flash `proxy/` onto the DevKit with `cd proxy && idf.py build flash monitor`. Its defaults are for the breadboard it was first built on, which had TX and RX the other way round, so for the board set `CONFIG_LOCTEK_TX_GPIO=17` and `CONFIG_LOCTEK_RX_GPIO=16` under `idf.py menuconfig`, *Loctek desk control*.
 
 ### 3. Install ESP-IDF
 

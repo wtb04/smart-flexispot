@@ -1,0 +1,6 @@
+# Others' code and generated tables, left out of GitHub's language count.
+components/esp_hosted/** linguist-vendored
+components/esp_lcd/** linguist-vendored
+components/ui/fonts/*.c linguist-generated
+components/ui/icons.h linguist-generated
+components/radar/map_data.h linguist-generated
