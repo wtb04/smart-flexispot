@@ -2,21 +2,12 @@
 // driven here as the panel's workers drive it.
 #include "job_core.h"
 
+#include <gtest/gtest.h>
 #include <cstdio>
 
 using namespace jobs;
 
 namespace {
-int g_failures = 0;
-
-void check(bool ok, const char *what)
-{
-    std::printf("%s  %s\n", ok ? "ok  " : "FAIL", what);
-    if (!ok) {
-        ++g_failures;
-    }
-}
-
 constexpr std::int64_t MS = 1000;
 
 Spec every(int period_ms, Lane lane = Lane::Quick)
@@ -38,31 +29,31 @@ int run_due(Core &core, Lane lane, std::int64_t now, Result result = done())
     return job;
 }
 
-void test_period()
+TEST(JobCore, period)
 {
     Core core;
     core.conditions(true, true);
     const Job a = core.add(every(1000), 0);
-    check(run_due(core, Lane::Quick, 0) == a, "runs at once when added");
-    check(run_due(core, Lane::Quick, 999 * MS) == -1, "not again before its period");
-    check(run_due(core, Lane::Quick, 1000 * MS) == a, "again after it");
-    check(core.due(Lane::Quick, 1000 * MS) == 2000 * MS, "and is due a period on");
+    EXPECT_EQ(run_due(core, Lane::Quick, 0), a) << "runs at once when added";
+    EXPECT_EQ(run_due(core, Lane::Quick, 999 * MS), -1) << "not again before its period";
+    EXPECT_EQ(run_due(core, Lane::Quick, 1000 * MS), a) << "again after it";
+    EXPECT_EQ(core.due(Lane::Quick, 1000 * MS), 2000 * MS) << "and is due a period on";
 }
 
-void test_first_and_poke()
+TEST(JobCore, first_and_poke)
 {
     Core core;
     core.conditions(true, true);
     Spec later = every(0);
     later.first_ms = kNever;
     const Job a    = core.add(later, 0);
-    check(run_due(core, Lane::Quick, 100000 * MS) == -1, "one only poked does not run by itself");
+    EXPECT_EQ(run_due(core, Lane::Quick, 100000 * MS), -1) << "one only poked does not run by itself";
     core.poke(a, 5 * MS);
-    check(run_due(core, Lane::Quick, 5 * MS) == a, "and runs when poked");
-    check(run_due(core, Lane::Quick, 100000 * MS) == -1, "then waits to be poked again");
+    EXPECT_EQ(run_due(core, Lane::Quick, 5 * MS), a) << "and runs when poked";
+    EXPECT_EQ(run_due(core, Lane::Quick, 100000 * MS), -1) << "then waits to be poked again";
 }
 
-void test_poke_while_running()
+TEST(JobCore, poke_while_running)
 {
     Core core;
     core.conditions(true, true);
@@ -71,20 +62,20 @@ void test_poke_while_running()
     core.next(Lane::Quick, 0, got);
     core.poke(a, 1 * MS);
     core.finish(a, done(), 1, 2 * MS);
-    check(run_due(core, Lane::Quick, 2 * MS) == a, "poked while running, it runs again straight after");
+    EXPECT_EQ(run_due(core, Lane::Quick, 2 * MS), a) << "poked while running, it runs again straight after";
 }
 
-void test_one_at_a_time()
+TEST(JobCore, one_at_a_time)
 {
     Core core;
     core.conditions(true, true);
     core.add(every(10), 0);
     Job first = kNoJob, second = kNoJob;
     core.next(Lane::Quick, 0, first);
-    check(!core.next(Lane::Quick, 100 * MS, second), "a running job is not started twice");
+    EXPECT_TRUE(!core.next(Lane::Quick, 100 * MS, second)) << "a running job is not started twice";
 }
 
-void test_soonest_first()
+TEST(JobCore, soonest_first)
 {
     Core core;
     core.conditions(true, true);
@@ -94,41 +85,41 @@ void test_soonest_first()
     early.first_ms = 20;
     core.add(late, 0);
     const Job e = core.add(early, 0);
-    check(run_due(core, Lane::Quick, 100 * MS) == e, "the one due soonest goes first");
+    EXPECT_EQ(run_due(core, Lane::Quick, 100 * MS), e) << "the one due soonest goes first";
 }
 
-void test_lanes()
+TEST(JobCore, lanes)
 {
     Core core;
     core.conditions(true, true);
     const Job slow = core.add(every(1000, Lane::Slow), 0);
-    check(run_due(core, Lane::Quick, 0) == -1, "a slow job is not on the quick lane");
-    check(run_due(core, Lane::Slow, 0) == slow, "but on its own");
+    EXPECT_EQ(run_due(core, Lane::Quick, 0), -1) << "a slow job is not on the quick lane";
+    EXPECT_EQ(run_due(core, Lane::Slow, 0), slow) << "but on its own";
 }
 
-void test_waits_for_network_and_screen()
+TEST(JobCore, waits_for_network_and_screen)
 {
     Core core;
     core.conditions(false, true);
     Spec fetch   = every(1000, Lane::Slow);
     fetch.online = true;
     const Job f  = core.add(fetch, 0);
-    check(run_due(core, Lane::Slow, 5000 * MS) == -1, "one needing the network waits for it");
-    check(core.status(f, 5000 * MS).waiting, "and says so");
+    EXPECT_EQ(run_due(core, Lane::Slow, 5000 * MS), -1) << "one needing the network waits for it";
+    EXPECT_TRUE(core.status(f, 5000 * MS).waiting) << "and says so";
     core.conditions(true, true);
-    check(run_due(core, Lane::Slow, 5000 * MS) == f, "and runs as soon as it comes");
+    EXPECT_EQ(run_due(core, Lane::Slow, 5000 * MS), f) << "and runs as soon as it comes";
 
     Spec shown  = every(1000);
     shown.lit   = true;
     const Job s = core.add(shown, 6000 * MS);
     core.conditions(true, false);
-    check(run_due(core, Lane::Quick, 6000 * MS) == -1, "one needing the screen waits while it is dark");
-    check(core.due(Lane::Quick, 6000 * MS) == Core::kNeverUs, "and does not keep the lane awake");
+    EXPECT_EQ(run_due(core, Lane::Quick, 6000 * MS), -1) << "one needing the screen waits while it is dark";
+    EXPECT_EQ(core.due(Lane::Quick, 6000 * MS), Core::kNeverUs) << "and does not keep the lane awake";
     core.conditions(true, true);
-    check(run_due(core, Lane::Quick, 9000 * MS) == s, "and runs when it is lit");
+    EXPECT_EQ(run_due(core, Lane::Quick, 9000 * MS), s) << "and runs when it is lit";
 }
 
-void test_backoff()
+TEST(JobCore, backoff)
 {
     Core core;
     core.conditions(true, true);
@@ -137,43 +128,29 @@ void test_backoff()
     feed.max_retry_ms = 4000;
     const Job a       = core.add(feed, 0);
     run_due(core, Lane::Slow, 0, failed());
-    check(core.due(Lane::Slow, 0) == 1000 * MS, "after a failure, its retry");
+    EXPECT_EQ(core.due(Lane::Slow, 0), 1000 * MS) << "after a failure, its retry";
     run_due(core, Lane::Slow, 1000 * MS, failed());
-    check(core.due(Lane::Slow, 1000 * MS) == 3000 * MS, "twice as long after the second");
+    EXPECT_EQ(core.due(Lane::Slow, 1000 * MS), 3000 * MS) << "twice as long after the second";
     run_due(core, Lane::Slow, 3000 * MS, failed());
     run_due(core, Lane::Slow, 7000 * MS, failed());
-    check(core.due(Lane::Slow, 7000 * MS) == 11000 * MS, "no longer than the most");
-    check(core.status(a, 7000 * MS).failures == 4, "counting each");
+    EXPECT_EQ(core.due(Lane::Slow, 7000 * MS), 11000 * MS) << "no longer than the most";
+    EXPECT_EQ(core.status(a, 7000 * MS).failures, 4) << "counting each";
     run_due(core, Lane::Slow, 11000 * MS);
-    check(core.due(Lane::Slow, 11000 * MS) == 611000 * MS, "and its period once it works");
-    check(core.status(a, 11000 * MS).failures == 0, "counted from none again");
+    EXPECT_EQ(core.due(Lane::Slow, 11000 * MS), 611000 * MS) << "and its period once it works";
+    EXPECT_EQ(core.status(a, 11000 * MS).failures, 0) << "counted from none again";
 }
 
-void test_again_in_and_sleep()
+TEST(JobCore, again_in_and_sleep)
 {
     Core core;
     core.conditions(true, true);
     const Job a = core.add(every(1000), 0);
     run_due(core, Lane::Quick, 0, again_in(50));
-    check(core.due(Lane::Quick, 0) == 50 * MS, "it can say when it wants to run next");
+    EXPECT_EQ(core.due(Lane::Quick, 0), 50 * MS) << "it can say when it wants to run next";
     run_due(core, Lane::Quick, 50 * MS, sleep());
-    check(core.due(Lane::Quick, 50 * MS) == Core::kNeverUs, "or that it waits to be poked");
+    EXPECT_EQ(core.due(Lane::Quick, 50 * MS), Core::kNeverUs) << "or that it waits to be poked";
     core.poke(a, 60 * MS);
-    check(run_due(core, Lane::Quick, 60 * MS) == a, "which wakes it");
+    EXPECT_EQ(run_due(core, Lane::Quick, 60 * MS), a) << "which wakes it";
 }
 }  // namespace
 
-int main()
-{
-    test_period();
-    test_first_and_poke();
-    test_poke_while_running();
-    test_one_at_a_time();
-    test_soonest_first();
-    test_lanes();
-    test_waits_for_network_and_screen();
-    test_backoff();
-    test_again_in_and_sleep();
-    std::printf("\n%s\n", g_failures == 0 ? "ALL PASS" : "FAILURES");
-    return g_failures == 0 ? 0 : 1;
-}

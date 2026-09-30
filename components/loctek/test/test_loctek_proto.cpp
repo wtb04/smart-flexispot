@@ -1,21 +1,12 @@
 #include "loctek_proto.h"
 
+#include <gtest/gtest.h>
 #include <cstdio>
 #include <initializer_list>
 #include <vector>
 
 namespace {
 using namespace loctek;
-
-int g_failures = 0;
-
-void check(bool ok, const char *what)
-{
-    std::printf("%-5s %s\n", ok ? "ok" : "FAIL", what);
-    if (!ok) {
-        ++g_failures;
-    }
-}
 
 std::vector<std::uint8_t> bytes(std::initializer_list<int> in)
 {
@@ -35,7 +26,7 @@ std::vector<Frame> feed(const std::vector<std::uint8_t> &stream)
     return frames;
 }
 
-void test_key_frames()
+TEST(LoctekProto, key_frames)
 {
     const struct {
         Key                       key;
@@ -55,7 +46,7 @@ void test_key_frames()
 
     for (const auto &c : cases) {
         const KeyFrame got = build_key_frame(c.key);
-        check(std::vector<std::uint8_t>(got.begin(), got.end()) == c.expect, c.name);
+        EXPECT_TRUE(std::vector<std::uint8_t>(got.begin(), got.end()) == c.expect) << c.name;
     }
 }
 
@@ -64,7 +55,7 @@ static_assert(build_key_frame(Key::Up) ==
 static_assert(build_key_frame(Key::None) ==
               KeyFrame{0x9b, 0x06, 0x02, 0x00, 0x00, 0x6c, 0xa1, 0x9d});
 
-void test_presets()
+TEST(LoctekProto, presets)
 {
     const struct {
         Preset                    preset;
@@ -79,12 +70,10 @@ void test_presets()
 
     for (const auto &c : cases) {
         const KeyFrame got = build_key_frame(key_for(c.preset));
-        check(std::vector<std::uint8_t>(got.begin(), got.end()) == c.expect, c.name);
+        EXPECT_TRUE(std::vector<std::uint8_t>(got.begin(), got.end()) == c.expect) << c.name;
     }
 
-    check(build_key_frame(Key::Memory) ==
-              KeyFrame{0x9b, 0x06, 0x02, 0x20, 0x00, 0xac, 0xb8, 0x9d},
-          "memory key frame");
+    EXPECT_EQ(build_key_frame(Key::Memory), (KeyFrame{0x9b, 0x06, 0x02, 0x20, 0x00, 0xac, 0xb8, 0x9d})) << "memory key frame";
 
     const Key keys[] = {key_for(Preset::One), key_for(Preset::Two), key_for(Preset::Three),
                         key_for(Preset::Four)};
@@ -95,10 +84,10 @@ void test_presets()
         }
         distinct &= keys[i] != Key::None;
     }
-    check(distinct, "presets map to four distinct keys");
+    EXPECT_TRUE(distinct) << "presets map to four distinct keys";
 }
 
-void test_height_decode()
+TEST(LoctekProto, height_decode)
 {
     const struct {
         std::vector<std::uint8_t> frame;
@@ -119,76 +108,57 @@ void test_height_decode()
 
     for (const auto &c : cases) {
         const std::vector<Frame> frames = feed(c.frame);
-        check(frames.size() == 1 && decode_height_mm(frames[0]) == c.expect, c.name);
+        EXPECT_TRUE(frames.size() == 1 && decode_height_mm(frames[0]) == c.expect) << c.name;
     }
 }
 
-void test_stream()
+TEST(LoctekProto, stream)
 {
     const std::vector<Frame> frames = feed(bytes({0x9b, 0x04, 0x15, 0xbf, 0xc2, 0x9d,
                                                   0x9b, 0x07, 0x12, 0x07, 0xe6, 0x06, 0x1b, 0xef,
                                                   0x9d, 0x9b, 0x04, 0x11, 0x7c, 0xc3, 0x9d}));
-    check(frames.size() == 3, "three concatenated frames");
+    EXPECT_EQ(frames.size(), 3) << "three concatenated frames";
     if (frames.size() == 3) {
-        check(frames[1].type() == FrameType::Height, "height frame type");
-        check(frames[2].type() == FrameType::Heartbeat, "heartbeat frame type");
+        EXPECT_EQ(frames[1].type(), FrameType::Height) << "height frame type";
+        EXPECT_EQ(frames[2].type(), FrameType::Heartbeat) << "heartbeat frame type";
     }
 }
 
-void test_payload_bounds()
+TEST(LoctekProto, payload_bounds)
 {
     const std::vector<Frame> height =
         feed(bytes({0x9b, 0x07, 0x12, 0x07, 0xe6, 0x06, 0x1b, 0xef, 0x9d}));
-    check(height.size() == 1 && height[0].payload().size() == 3,
-          "height frame carries exactly three payload bytes");
+    EXPECT_TRUE(height.size() == 1 && height[0].payload().size() == 3) << "height frame carries exactly three payload bytes";
 
     const std::vector<Frame> heartbeat = feed(bytes({0x9b, 0x04, 0x11, 0x7c, 0xc3, 0x9d}));
-    check(heartbeat.size() == 1 && heartbeat[0].payload().size() == 0,
-          "heartbeat carries no payload");
-    check(heartbeat.size() == 1 && !decode_height_mm(heartbeat[0]).has_value(),
-          "a payloadless frame decodes to no height");
+    EXPECT_TRUE(heartbeat.size() == 1 && heartbeat[0].payload().size() == 0) << "heartbeat carries no payload";
+    EXPECT_TRUE(heartbeat.size() == 1 && !decode_height_mm(heartbeat[0]).has_value()) << "a payloadless frame decodes to no height";
 }
 
-void test_rejects()
+TEST(LoctekProto, rejects)
 {
-    check(feed(bytes({0x9b, 0x07, 0x12, 0x07, 0xe6, 0x06, 0x00, 0x00, 0x9d})).empty(),
-          "rejects bad CRC");
-    check(feed(bytes({0x9b, 0x04, 0x11, 0x7c, 0xc3, 0x00})).empty(), "rejects bad end byte");
-    check(feed(bytes({0x00, 0xff, 0x12, 0x9b, 0x04, 0x11, 0x7c, 0xc3, 0x9d})).size() == 1,
-          "resynchronises after garbage");
-    check(feed(bytes({0x9b, 0x07, 0x12,
+    EXPECT_TRUE(feed(bytes({0x9b, 0x07, 0x12, 0x07, 0xe6, 0x06, 0x00, 0x00, 0x9d})).empty()) << "rejects bad CRC";
+    EXPECT_TRUE(feed(bytes({0x9b, 0x04, 0x11, 0x7c, 0xc3, 0x00})).empty()) << "rejects bad end byte";
+    EXPECT_EQ(feed(bytes({0x00, 0xff, 0x12, 0x9b, 0x04, 0x11, 0x7c, 0xc3, 0x9d})).size(), 1) << "resynchronises after garbage";
+    EXPECT_EQ(feed(bytes({0x9b, 0x07, 0x12,
                       0x9b, 0x04, 0x11, 0x7c, 0xc3, 0x9d,
-                      0x9b, 0x04, 0x11, 0x7c, 0xc3, 0x9d})).size() == 1,
-          "recovers one frame after a truncation");
-    check(feed(bytes({0x9b, 0xff, 0x12, 0x9b, 0x04, 0x11, 0x7c, 0xc3, 0x9d})).size() == 1,
-          "rejects oversized length and recovers");
+                      0x9b, 0x04, 0x11, 0x7c, 0xc3, 0x9d})).size(), 1) << "recovers one frame after a truncation";
+    EXPECT_EQ(feed(bytes({0x9b, 0xff, 0x12, 0x9b, 0x04, 0x11, 0x7c, 0xc3, 0x9d})).size(), 1) << "rejects oversized length and recovers";
 }
 
-void test_steer()
+TEST(LoctekProto, steer)
 {
-    check(steer(1000, 900, Move::Stop, 8) == Move::Up, "steers up from below");
-    check(steer(1000, 1100, Move::Stop, 8) == Move::Down, "steers down from above");
-    check(steer(1000, 991, Move::Up, 8) == Move::Up, "keeps going outside the margin");
-    check(steer(1000, 992, Move::Up, 8) == Move::Stop, "releases at the margin");
-    check(steer(1000, 1010, Move::Up, 8) == Move::Stop, "stops rather than reverses once past");
-    check(steer(1000, 990, Move::Down, 8) == Move::Stop, "same going down");
-    check(steer(1000, 1000, Move::Stop, 0) == Move::Stop, "zero margin stops on the number");
-    check(steer(1000, 1001, Move::Stop, 0) == Move::Down, "zero margin moves off by one");
+    EXPECT_EQ(steer(1000, 900, Move::Stop, 8), Move::Up) << "steers up from below";
+    EXPECT_EQ(steer(1000, 1100, Move::Stop, 8), Move::Down) << "steers down from above";
+    EXPECT_EQ(steer(1000, 991, Move::Up, 8), Move::Up) << "keeps going outside the margin";
+    EXPECT_EQ(steer(1000, 992, Move::Up, 8), Move::Stop) << "releases at the margin";
+    EXPECT_EQ(steer(1000, 1010, Move::Up, 8), Move::Stop) << "stops rather than reverses once past";
+    EXPECT_EQ(steer(1000, 990, Move::Down, 8), Move::Stop) << "same going down";
+    EXPECT_EQ(steer(1000, 1000, Move::Stop, 0), Move::Stop) << "zero margin stops on the number";
+    EXPECT_EQ(steer(1000, 1001, Move::Stop, 0), Move::Down) << "zero margin moves off by one";
 }
 
 static_assert(steer(500, 400, Move::Stop, 8) == Move::Up);
 
 }  // namespace
 
-int main()
-{
-    test_steer();
-    test_key_frames();
-    test_presets();
-    test_height_decode();
-    test_stream();
-    test_payload_bounds();
-    test_rejects();
-    std::printf("\n%s\n", g_failures == 0 ? "ALL PASS" : "FAILURES");
-    return g_failures == 0 ? 0 : 1;
-}

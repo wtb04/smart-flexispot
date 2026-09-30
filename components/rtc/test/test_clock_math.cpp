@@ -1,18 +1,11 @@
 #include "clock_math.h"
 
+#include <gtest/gtest.h>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
 
 namespace {
-int g_failures = 0;
-
-void check(bool ok, const char *what)
-{
-    std::printf("%-4s  %s\n", ok ? "ok" : "FAIL", what);
-    g_failures += ok ? 0 : 1;
-}
-
 std::tm made(int year, int mon, int day, int hour, int min, int sec)
 {
     std::tm out{};
@@ -25,43 +18,40 @@ std::tm made(int year, int mon, int day, int hour, int min, int sec)
     return out;
 }
 
-void test_bcd()
+TEST(ClockMath, bcd)
 {
-    check(rtc::from_bcd(0x00) == 0, "bcd 0x00 is 0");
-    check(rtc::from_bcd(0x09) == 9, "bcd 0x09 is 9");
-    check(rtc::from_bcd(0x10) == 10, "bcd 0x10 is 10");
-    check(rtc::from_bcd(0x59) == 59, "bcd 0x59 is 59");
-    check(rtc::to_bcd(0) == 0x00, "0 is bcd 0x00");
-    check(rtc::to_bcd(9) == 0x09, "9 is bcd 0x09");
-    check(rtc::to_bcd(23) == 0x23, "23 is bcd 0x23");
-    check(rtc::to_bcd(59) == 0x59, "59 is bcd 0x59");
+    EXPECT_EQ(rtc::from_bcd(0x00), 0) << "bcd 0x00 is 0";
+    EXPECT_EQ(rtc::from_bcd(0x09), 9) << "bcd 0x09 is 9";
+    EXPECT_EQ(rtc::from_bcd(0x10), 10) << "bcd 0x10 is 10";
+    EXPECT_EQ(rtc::from_bcd(0x59), 59) << "bcd 0x59 is 59";
+    EXPECT_EQ(rtc::to_bcd(0), 0x00) << "0 is bcd 0x00";
+    EXPECT_EQ(rtc::to_bcd(9), 0x09) << "9 is bcd 0x09";
+    EXPECT_EQ(rtc::to_bcd(23), 0x23) << "23 is bcd 0x23";
+    EXPECT_EQ(rtc::to_bcd(59), 0x59) << "59 is bcd 0x59";
 
     bool round_trips = true;
     for (int i = 0; i <= 99; ++i) {
         round_trips = round_trips && rtc::from_bcd(rtc::to_bcd(i)) == i;
     }
-    check(round_trips, "every value 0 to 99 survives the round trip");
+    EXPECT_TRUE(round_trips) << "every value 0 to 99 survives the round trip";
 }
 
-void test_epoch()
+TEST(ClockMath, epoch)
 {
-    check(rtc::utc_seconds(made(1970, 1, 1, 0, 0, 0)) == 0, "the epoch itself");
-    check(rtc::utc_seconds(made(1970, 1, 1, 0, 0, 1)) == 1, "one second past it");
-    check(rtc::utc_seconds(made(2000, 1, 1, 0, 0, 0)) == 946684800, "the millennium");
-    check(rtc::utc_seconds(made(2024, 2, 29, 12, 0, 0)) == 1709208000, "a leap day");
-    check(rtc::utc_seconds(made(2038, 1, 19, 3, 14, 7)) == 2147483647, "the far end of 32 bits");
+    EXPECT_EQ(rtc::utc_seconds(made(1970, 1, 1, 0, 0, 0)), 0) << "the epoch itself";
+    EXPECT_EQ(rtc::utc_seconds(made(1970, 1, 1, 0, 0, 1)), 1) << "one second past it";
+    EXPECT_EQ(rtc::utc_seconds(made(2000, 1, 1, 0, 0, 0)), 946684800) << "the millennium";
+    EXPECT_EQ(rtc::utc_seconds(made(2024, 2, 29, 12, 0, 0)), 1709208000) << "a leap day";
+    EXPECT_EQ(rtc::utc_seconds(made(2038, 1, 19, 3, 14, 7)), 2147483647) << "the far end of 32 bits";
 }
 
-void test_century()
+TEST(ClockMath, century)
 {
-    check(rtc::utc_seconds(made(2000 + rtc::from_bcd(0x00), 1, 1, 0, 0, 0)) == 946684800,
-          "chip year 00 reads as 2000");
-    check(rtc::utc_seconds(made(2000 + rtc::from_bcd(0x25), 6, 15, 8, 30, 0)) ==
-              rtc::utc_seconds(made(2025, 6, 15, 8, 30, 0)),
-          "chip year 25 reads as 2025");
+    EXPECT_EQ(rtc::utc_seconds(made(2000 + rtc::from_bcd(0x00), 1, 1, 0, 0, 0)), 946684800) << "chip year 00 reads as 2000";
+    EXPECT_EQ(rtc::utc_seconds(made(2000 + rtc::from_bcd(0x25), 6, 15, 8, 30, 0)), rtc::utc_seconds(made(2025, 6, 15, 8, 30, 0))) << "chip year 25 reads as 2025";
 }
 
-void test_against_the_system()
+TEST(ClockMath, against_the_system)
 {
     static const std::tm cases[] = {
         made(1999, 12, 31, 23, 59, 59), made(2001, 3, 1, 0, 0, 0),
@@ -81,17 +71,8 @@ void test_against_the_system()
             all_match = false;
         }
     }
-    check(all_match, "agrees with the host's timegm across the years");
+    EXPECT_TRUE(all_match) << "agrees with the host's timegm across the years";
 }
 
 }  // namespace
 
-int main()
-{
-    test_bcd();
-    test_epoch();
-    test_century();
-    test_against_the_system();
-    std::printf("\n%s\n", g_failures == 0 ? "ALL PASS" : "FAILURES");
-    return g_failures == 0 ? 0 : 1;
-}

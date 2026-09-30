@@ -2,6 +2,7 @@
 // ESP-IDF needed: the core is driven here as the panel's workers drive it.
 #include "net_core.h"
 
+#include <gtest/gtest.h>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -9,16 +10,6 @@
 using namespace net;
 
 namespace {
-int g_failures = 0;
-
-void check(bool ok, const char *what)
-{
-    std::printf("%s  %s\n", ok ? "ok  " : "FAIL", what);
-    if (!ok) {
-        ++g_failures;
-    }
-}
-
 constexpr std::int64_t MS = 1000;
 
 // Records what each request was told, by name.
@@ -86,7 +77,7 @@ std::string next_path(Core &core, std::int64_t now, Running &running, Tells &tel
     return core.next(now, true, screen_on, running, tells) ? running.request.path : "";
 }
 
-void test_order()
+TEST(NetCore, order)
 {
     Core    core;
     Host    host = core.add_host(HostConfig{});
@@ -96,14 +87,14 @@ void test_order()
     core.submit(make(host, "background", Priority::Background, log.done("b")), 0, tells);
     core.submit(make(host, "now", Priority::Now, log.done("n")), 1, tells);
     core.submit(make(host, "tap", Priority::Tap, log.done("t")), 2, tells);
-    check(next_path(core, 3, running, tells) == "tap", "a tap before everything");
-    check(next_path(core, 3, running, tells) == "now", "then what is due");
-    check(next_path(core, 3, running, tells) == "", "and no more than the host has connections for");
+    EXPECT_EQ(next_path(core, 3, running, tells), "tap") << "a tap before everything";
+    EXPECT_EQ(next_path(core, 3, running, tells), "now") << "then what is due";
+    EXPECT_EQ(next_path(core, 3, running, tells), "") << "and no more than the host has connections for";
     core.finish(running, answer(), 4, tells);
-    check(next_path(core, 4, running, tells) == "background", "background once one is free");
+    EXPECT_EQ(next_path(core, 4, running, tells), "background") << "background once one is free";
 }
 
-void test_background_held()
+TEST(NetCore, background_held)
 {
     Core    core;
     Host    host = core.add_host(HostConfig{});
@@ -112,12 +103,12 @@ void test_background_held()
     Running running;
     core.submit(make(host, "one", Priority::Background, log.done("one")), 0, tells);
     core.submit(make(host, "two", Priority::Background, log.done("two")), 0, tells);
-    check(next_path(core, 1, running, tells, false) == "", "no background while the screen is dark");
-    check(next_path(core, 1, running, tells) == "one", "it goes once it is lit");
-    check(next_path(core, 1, running, tells) == "", "one background request at a time");
+    EXPECT_EQ(next_path(core, 1, running, tells, false), "") << "no background while the screen is dark";
+    EXPECT_EQ(next_path(core, 1, running, tells), "one") << "it goes once it is lit";
+    EXPECT_EQ(next_path(core, 1, running, tells), "") << "one background request at a time";
 }
 
-void test_offline()
+TEST(NetCore, offline)
 {
     Core    core;
     Host    host = core.add_host(HostConfig{});
@@ -125,11 +116,11 @@ void test_offline()
     Log     log;
     Running running;
     core.submit(make(host, "tap", Priority::Tap, log.done("t")), 0, tells);
-    check(!core.next(1, false, true, running, tells) && core.waiting() == 1, "nothing goes while offline");
-    check(core.next(2, true, true, running, tells), "and it goes once online");
+    EXPECT_TRUE(!core.next(1, false, true, running, tells) && core.waiting() == 1) << "nothing goes while offline";
+    EXPECT_TRUE(core.next(2, true, true, running, tells)) << "and it goes once online";
 }
 
-void test_replace()
+TEST(NetCore, replace)
 {
     Core    core;
     Host    host = core.add_host(HostConfig{});
@@ -145,11 +136,11 @@ void test_replace()
     core.submit(first, 0, tells);
     core.submit(later, 1, tells);
     run(tells);
-    check(log.has("first replaced") && core.waiting() == 1, "a newer one takes the waiting one's place");
-    check(next_path(core, 2, running, tells) == "later", "and is what goes");
+    EXPECT_TRUE(log.has("first replaced") && core.waiting() == 1) << "a newer one takes the waiting one's place";
+    EXPECT_EQ(next_path(core, 2, running, tells), "later") << "and is what goes";
 }
 
-void test_join()
+TEST(NetCore, join)
 {
     Core    core;
     Host    host = core.add_host(HostConfig{});
@@ -164,14 +155,14 @@ void test_join()
     tap.done           = log.done("tap");
     const Ticket a     = core.submit(background, 0, tells);
     const Ticket b     = core.submit(tap, 1, tells);
-    check(a == b && core.waiting() == 1, "a second asking for the same joins the first");
-    check(next_path(core, 2, running, tells, false) == "details", "at the more urgent priority, dark or not");
+    EXPECT_TRUE(a == b && core.waiting() == 1) << "a second asking for the same joins the first";
+    EXPECT_EQ(next_path(core, 2, running, tells, false), "details") << "at the more urgent priority, dark or not";
     core.finish(running, answer(), 3, tells);
     run(tells);
-    check(log.has("prefetch answered") && log.has("tap answered"), "and both are told of the one answer");
+    EXPECT_TRUE(log.has("prefetch answered") && log.has("tap answered")) << "and both are told of the one answer";
 }
 
-void test_aging()
+TEST(NetCore, aging)
 {
     Core    core;
     Host    host = core.add_host(HostConfig{});
@@ -183,10 +174,10 @@ void test_aging()
     old.deadline_ms        = 60 * 1000;  // longer than it is allowed: capped, but past the test
     core.submit(old, 0, tells);
     core.submit(make(host, "fresh tap", Priority::Tap, log.done("tap")), 2 * age, tells);
-    check(next_path(core, 2 * age, running, tells) == "old", "background that has waited long enough goes first");
+    EXPECT_EQ(next_path(core, 2 * age, running, tells), "old") << "background that has waited long enough goes first";
 }
 
-void test_expired()
+TEST(NetCore, expired)
 {
     Core    core;
     Host    host = core.add_host(HostConfig{});
@@ -196,12 +187,12 @@ void test_expired()
     Request tap     = make(host, "tap", Priority::Tap, log.done("tap"));
     tap.deadline_ms = 100;
     core.submit(tap, 0, tells);
-    check(!core.next(200 * MS, false, true, running, tells), "offline");
+    EXPECT_TRUE(!core.next(200 * MS, false, true, running, tells)) << "offline";
     run(tells);
-    check(log.has("tap expired") && core.waiting() == 0, "past its deadline it is told so");
+    EXPECT_TRUE(log.has("tap expired") && core.waiting() == 0) << "past its deadline it is told so";
 }
 
-void test_retry()
+TEST(NetCore, retry)
 {
     Core       core;
     HostConfig config;
@@ -214,17 +205,17 @@ void test_retry()
     core.submit(make(host, "flaky", Priority::Now, log.done("flaky")), 0, tells);
     next_path(core, 0, running, tells);
     core.finish(running, failure(), 0, tells);
-    check(next_path(core, 99 * MS, running, tells) == "", "not tried again before its delay");
-    check(next_path(core, 100 * MS, running, tells) == "flaky" && running.attempt == 2, "but after it");
+    EXPECT_EQ(next_path(core, 99 * MS, running, tells), "") << "not tried again before its delay";
+    EXPECT_TRUE(next_path(core, 100 * MS, running, tells) == "flaky" && running.attempt == 2) << "but after it";
     core.finish(running, failure(), 100 * MS, tells);
-    check(next_path(core, 299 * MS, running, tells) == "", "the next delay twice as long");
-    check(next_path(core, 300 * MS, running, tells) == "flaky" && running.attempt == 3, "and then again");
+    EXPECT_EQ(next_path(core, 299 * MS, running, tells), "") << "the next delay twice as long";
+    EXPECT_TRUE(next_path(core, 300 * MS, running, tells) == "flaky" && running.attempt == 3) << "and then again";
     core.finish(running, failure(), 300 * MS, tells);
     run(tells);
-    check(log.has("flaky failed"), "failed once the attempts are spent");
+    EXPECT_TRUE(log.has("flaky failed")) << "failed once the attempts are spent";
 }
 
-void test_no_retry()
+TEST(NetCore, no_retry)
 {
     Core       core;
     HostConfig config;
@@ -238,7 +229,7 @@ void test_no_retry()
     next_path(core, 0, running, tells);
     core.finish(running, failure(true), 0, tells);
     run(tells);
-    check(log.has("slow failed"), "no retry after a timeout, which the server may have acted on");
+    EXPECT_TRUE(log.has("slow failed")) << "no retry after a timeout, which the server may have acted on";
 
     Request post    = make(host, "post", Priority::Now, log.done("post"));
     post.repeatable = false;
@@ -246,10 +237,10 @@ void test_no_retry()
     next_path(core, 0, running, tells);
     core.finish(running, failure(), 0, tells);
     run(tells);
-    check(log.has("post failed"), "nor for what is not safe to send twice");
+    EXPECT_TRUE(log.has("post failed")) << "nor for what is not safe to send twice";
 }
 
-void test_rest()
+TEST(NetCore, rest)
 {
     Core       core;
     HostConfig config;
@@ -263,22 +254,22 @@ void test_rest()
         next_path(core, 0, running, tells);
         core.finish(running, failure(), 0, tells);
     }
-    check(core.status(host, 0).resting, "resting after two failures in a row");
+    EXPECT_TRUE(core.status(host, 0).resting) << "resting after two failures in a row";
 
     Request hurried     = make(host, "hurried", Priority::Now, log.done("hurried"));
     hurried.deadline_ms = 500;
     Request patient     = make(host, "patient", Priority::Now, log.done("patient"));
     core.submit(hurried, 0, tells);
     core.submit(patient, 0, tells);
-    check(next_path(core, 10 * MS, running, tells) == "", "nothing goes while it rests");
+    EXPECT_EQ(next_path(core, 10 * MS, running, tells), "") << "nothing goes while it rests";
     run(tells);
-    check(log.has("hurried resting"), "one that cannot wait is told at once, to go elsewhere");
-    check(next_path(core, 1000 * MS, running, tells) == "patient", "one that can goes when the rest is over");
+    EXPECT_TRUE(log.has("hurried resting")) << "one that cannot wait is told at once, to go elsewhere";
+    EXPECT_EQ(next_path(core, 1000 * MS, running, tells), "patient") << "one that can goes when the rest is over";
     core.finish(running, answer(), 1000 * MS, tells);
-    check(core.status(host, 1000 * MS).failures_in_row == 0, "an answer ends the run of failures");
+    EXPECT_EQ(core.status(host, 1000 * MS).failures_in_row, 0) << "an answer ends the run of failures";
 }
 
-void test_busy()
+TEST(NetCore, busy)
 {
     Core       core;
     HostConfig config;
@@ -293,12 +284,11 @@ void test_busy()
     busy.retry_after_ms = 2000;
     core.finish(running, busy, 0, tells);
     run(tells);
-    check(log.has("a answered"), "a 429 is an answer, for its asker to read");
-    check(core.status(host, 1999 * MS).resting && !core.status(host, 2000 * MS).resting,
-          "and rests the host as long as its Retry-After says");
+    EXPECT_TRUE(log.has("a answered")) << "a 429 is an answer, for its asker to read";
+    EXPECT_TRUE(core.status(host, 1999 * MS).resting && !core.status(host, 2000 * MS).resting) << "and rests the host as long as its Retry-After says";
 }
 
-void test_cancel()
+TEST(NetCore, cancel)
 {
     Core    core;
     Host    host = core.add_host(HostConfig{});
@@ -311,27 +301,10 @@ void test_cancel()
     core.cancel(waiting, tells);
     core.cancel(running.ticket, tells);
     run(tells);
-    check(log.has("waiting cancelled") && !log.has("sent cancelled"), "a waiting one is told at once");
+    EXPECT_TRUE(log.has("waiting cancelled") && !log.has("sent cancelled")) << "a waiting one is told at once";
     core.finish(running, answer(), 1, tells);
     run(tells);
-    check(log.has("sent cancelled") && !log.has("sent answered"), "one under way when its answer comes");
+    EXPECT_TRUE(log.has("sent cancelled") && !log.has("sent answered")) << "one under way when its answer comes";
 }
 }  // namespace
 
-int main()
-{
-    test_order();
-    test_background_held();
-    test_offline();
-    test_replace();
-    test_join();
-    test_aging();
-    test_expired();
-    test_retry();
-    test_no_retry();
-    test_rest();
-    test_busy();
-    test_cancel();
-    std::printf("\n%s\n", g_failures == 0 ? "ALL PASS" : "FAILURES");
-    return g_failures == 0 ? 0 : 1;
-}
