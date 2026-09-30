@@ -1,0 +1,138 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  host-tests:
+    name: Host tests and coverage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install gcovr
+        run: pipx install gcovr
+
+      - name: Build, run and measure the tests
+        working-directory: test
+        run: cmake --workflow --preset coverage
+
+      - name: Coverage in the summary
+        if: always()
+        run: |
+          if [ -f build_tests/coverage/coverage/coverage.md ]; then
+            cat build_tests/coverage/coverage/coverage.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Keep the coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: build_tests/coverage/coverage/
+
+      - name: Keep the test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: build_tests/coverage/junit.xml
+
+  firmware:
+    name: Firmware (${{ matrix.variant }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    container: espressif/idf:v5.5.5
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: release
+            dir: build
+            flags: ""
+          # The development build: the remote log, screen, bench and crash pages.
+          - variant: remote
+            dir: build_remote
+            flags: -DCMAKE_CXX_FLAGS=-DREMOTE_ENABLED=1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # the version comes from git describe
+
+      - name: Secrets from their templates
+        shell: bash
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          for template in $(git ls-files '*_secrets.example.h'); do
+            cp "$template" "${template%.example.h}.h"
+          done
+
+      # The component manager records the local esp_hosted copy by the absolute
+      # path of whoever last built; here it is this checkout's.
+      - name: The local component where it is here
+        shell: bash
+        run: |
+          sed -i "s|path: .*/components/esp_hosted$|path: $PWD/components/esp_hosted|" dependencies.lock
+
+      - name: Build
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          idf.py -B ${{ matrix.dir }} ${{ matrix.flags }} build
+
+      - name: Size in the summary
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          {
+            echo "### Firmware size, ${{ matrix.variant }}"
+            echo '```'
+            idf.py -B ${{ matrix.dir }} size
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the images
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.variant }}
+          path: |
+            ${{ matrix.dir }}/smart_flexispot.bin
+            ${{ matrix.dir }}/smart_flexispot.elf
+            ${{ matrix.dir }}/bootloader/bootloader.bin
+            ${{ matrix.dir }}/partition_table/partition-table.bin
+            ${{ matrix.dir }}/ota_data_initial.bin
+            ${{ matrix.dir }}/flash_args
+
+  simulator:
+    name: Simulator and screenshots
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SDL, curl, zlib and a virtual display
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsdl2-dev libcurl4-openssl-dev zlib1g-dev pkg-config xvfb
+
+      - name: Build
+        run: |
+          cmake -S sim -B sim/build -DCMAKE_BUILD_TYPE=Release
+          cmake --build sim/build -j "$(nproc)"
+
+      # SDL's dummy driver has no renderer on Linux; a virtual X server has.
+      - name: Screenshots of the main views
+        run: xvfb-run -a -s "-screen 0 1280x720x24" cmake --build sim/build --target screenshots
+
+      - name: Keep the screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: sim/build/screenshots/

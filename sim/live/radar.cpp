@@ -182,6 +182,11 @@ bool fetch_trace(const char *hex)
 std::vector<std::uint16_t> fetch_photo(const char *hex, int &width, int &height)
 {
     std::vector<std::uint16_t> pixels;
+    // SIM_NO_PHOTOS: none, for screenshots that are to be kept: the photos
+    // are their photographers' own.
+    if (std::getenv("SIM_NO_PHOTOS") != nullptr) {
+        return pixels;
+    }
 #if __APPLE__
     char url[128];
     std::snprintf(url, sizeof(url), "%s/pub/photos/hex/%s", radar::PHOTO_HOST, hex);

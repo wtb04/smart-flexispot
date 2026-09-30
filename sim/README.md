@@ -48,7 +48,9 @@ sim/send.sh notify '{"title":"Hello","message":"Kept until tapped","level":"warn
 
 ## Settings
 
-`SIM_OFFLINE=1` leaves the live feeds off, as CI does for its screenshots.
+`SIM_OFFLINE=1` leaves the live feeds off, as CI does for its screenshots. `SIM_NO_PHOTOS=1` leaves out
+the aircraft photos, which belong to their photographers, from screenshots
+that are to be kept.
 
 `sim/sim.env`, gitignored, is read by `run.sh`:
 
