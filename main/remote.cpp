@@ -1,6 +1,8 @@
 #include "remote.h"
 
 #include "esp_check.h"
+#include "esp_core_dump.h"
+#include "esp_flash.h"
 #include "esp_heap_caps.h"
 #include "esp_lvgl_port.h"
 #include "esp_timer.h"
@@ -435,6 +437,37 @@ esp_err_t jobs_page(httpd_req_t *req)
     return httpd_resp_sendstr_chunk(req, nullptr);
 }
 
+// The last crash, whole, as the panic handler wrote it: for
+// `idf.py coredump-info -c dump.elf` with this build's ELF. ?erase=1 clears it.
+esp_err_t coredump_page(httpd_req_t *req)
+{
+    if (!ota::authorised(req)) {
+        return refuse(req);
+    }
+    char query[QUERY_MAX] = "", value[8] = "";
+    httpd_req_get_url_query_str(req, query, sizeof(query));
+    if (httpd_query_key_value(query, "erase", value, sizeof(value)) == ESP_OK) {
+        httpd_resp_set_type(req, "text/plain");
+        return httpd_resp_sendstr(req, esp_core_dump_image_erase() == ESP_OK ? "erased\n" : "nothing to erase\n");
+    }
+    std::size_t at = 0, size = 0;
+    if (esp_core_dump_image_check() != ESP_OK || esp_core_dump_image_get(&at, &size) != ESP_OK) {
+        httpd_resp_set_status(req, "404 Not Found");
+        return httpd_resp_sendstr(req, "no crash dump kept\n");
+    }
+    httpd_resp_set_type(req, "application/octet-stream");
+    static char chunk[4096];
+    for (std::size_t sent = 0; sent < size;) {
+        const std::size_t n = std::min(sizeof(chunk), size - sent);
+        if (esp_flash_read(nullptr, chunk, at + sent, n) != ESP_OK ||
+            httpd_resp_send_chunk(req, chunk, static_cast<ssize_t>(n)) != ESP_OK) {
+            return ESP_FAIL;
+        }
+        sent += n;
+    }
+    return httpd_resp_send_chunk(req, nullptr, 0);
+}
+
 // Why this run started and, after one nobody asked for, what the run before
 // left behind: the log's copy is soon pushed out.
 esp_err_t restart_page(httpd_req_t *req)
@@ -511,6 +544,7 @@ esp_err_t start()
         {.uri = "/stall", .method = HTTP_GET, .handler = stall_page, .user_ctx = nullptr},
         {.uri = "/streams", .method = HTTP_GET, .handler = streams_page, .user_ctx = nullptr},
         {.uri = "/jobs", .method = HTTP_GET, .handler = jobs_page, .user_ctx = nullptr},
+        {.uri = "/coredump", .method = HTTP_GET, .handler = coredump_page, .user_ctx = nullptr},
     };
     for (const httpd_uri_t &page : pages) {
         ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &page), TAG, "page");

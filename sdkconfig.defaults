@@ -265,3 +265,8 @@ CONFIG_LWIP_TCP_WND_DEFAULT=32768
 CONFIG_LWIP_TCP_RECVMBOX_SIZE=32
 CONFIG_LWIP_L2_TO_L3_COPY=y
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+
+# The last crash kept whole, in its partition, for idf.py coredump-info with
+# the build's ELF; its summary goes in the restart's report.
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y

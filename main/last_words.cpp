@@ -3,6 +3,7 @@
 #include "board.h"
 
 #include "esp_attr.h"
+#include "esp_core_dump.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_private/panic_internal.h"
@@ -149,6 +150,26 @@ void tell_crash(const Crash &crash)
     }
     tell(ESP_LOG_WARN, "stack:%s", line);
 }
+// Written by the panic handler, beside what it noted here: the whole of the
+// crash, for idf.py coredump-info and the build's ELF, fetched by /coredump.
+void tell_dump()
+{
+#if CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH && CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF
+    std::size_t at = 0, size = 0;
+    if (esp_core_dump_image_check() != ESP_OK || esp_core_dump_image_get(&at, &size) != ESP_OK) {
+        return;
+    }
+    auto *summary = static_cast<esp_core_dump_summary_t *>(
+        heap_caps_calloc(1, sizeof(esp_core_dump_summary_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (summary != nullptr && esp_core_dump_get_summary(summary) == ESP_OK) {
+        tell(ESP_LOG_WARN, "crash dump kept, %u KB: %s at 0x%08lx, ra 0x%08lx, cause %lu, image %.8s",
+             static_cast<unsigned>(size / 1024), summary->exc_task, static_cast<unsigned long>(summary->exc_pc),
+             static_cast<unsigned long>(summary->ex_info.ra), static_cast<unsigned long>(summary->ex_info.mcause),
+             reinterpret_cast<const char *>(summary->app_elf_sha256));
+    }
+    heap_caps_free(summary);
+#endif
+}
 }  // namespace
 
 void start()
@@ -163,6 +184,7 @@ void start()
     if (unasked && had_kept) {
         if (s_kept.crash.magic == MAGIC) {
             tell_crash(s_kept.crash);
+            tell_dump();
         }
         for (int i = 0; i < LINES; ++i) {
             const char *line = s_kept.lines[(s_kept.next + i) % LINES];

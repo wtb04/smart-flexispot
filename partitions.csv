@@ -1,10 +1,13 @@
 # Name,     Type, SubType, Offset,   Size,     Flags
 # nvs and phy_init keep the offsets the single-app-large default used, so
 # what is stored survives every reflash. Two app slots take updates over the
-# air (tools/ota.sh); otadata says which to boot.
+# air (tools/ota.sh); otadata says which to boot. The core dump, at the end,
+# keeps the last crash whole: an update cannot add it, a flash over the cable
+# does.
 nvs,        data, nvs,     0x9000,   0x6000,
 phy_init,   data, phy,     0xf000,   0x1000,
 ota_0,      app,  ota_0,   0x10000,  0x500000,
 ota_1,      app,  ota_1,   0x510000, 0x500000,
 otadata,    data, ota,     0xa10000, 0x2000,
 storage,    data, spiffs,  0xa20000, 0x200000,
+coredump,   data, coredump,0xc20000, 0x80000,
