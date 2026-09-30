@@ -208,6 +208,9 @@ void tick(lv_timer_t *)
     if (skip != nullptr) {
         theme::set_text(lv_obj_get_child(s_skip, 0), skip);
     }
+    for (lv_obj_t *control : {s_row[0], s_row[1], s_row[2], s_row[3], s_row[4], s_skip}) {
+        theme::set_usable(control, media_remote());
+    }
     theme::fill_accent_or(s_lights, s_lights_on, theme::panel_light);
     theme::fill_accent_or(s_screen, s_auto_off, theme::panel_light);
     theme::fill_accent_or(s_subtitles, s_subtitles_shown, theme::panel_light);

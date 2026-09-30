@@ -348,6 +348,7 @@ Slot<PickArgs>       p_pick[media::kPickCount];
 Slot<const void *>   p_pick_art[media::kPickCount];
 Slot<SegmentsArgs>   p_segments;
 Slot<bool>           p_media_seeks;
+Slot<bool>           p_media_remote;
 Slot<std::uint8_t>   p_subtitles;  // 1 for some to show, 2 for shown
 Slot<const void *>   p_still;
 Slot<std::uint8_t>   p_neighbours;  // bit 0 an episode before, bit 1 one after
@@ -883,6 +884,9 @@ void apply_media_updates()
     if (SegmentsArgs segments{}; take(p_segments, segments)) {
         apply_media_segments(segments.items, segments.count);
     }
+    if (bool remote = false; take(p_media_remote, remote)) {
+        apply_media_remote(remote);
+    }
     if (bool seeks = false; take(p_media_seeks, seeks)) {
         apply_media_seeks(seeks);
     }
@@ -1122,6 +1126,12 @@ esp_err_t set_media_neighbours(bool previous, bool next)
 esp_err_t set_cinema_still(const void *pixels)
 {
     put(p_still, pixels);
+    return ESP_OK;
+}
+
+esp_err_t set_media_remote(bool remote)
+{
+    put(p_media_remote, remote);
     return ESP_OK;
 }
 

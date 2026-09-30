@@ -1,5 +1,7 @@
 #include "jellyfin_protocol.h"
 
+#include <cstring>
+
 #include "cJSON.h"
 
 namespace jellyfin {
@@ -64,6 +66,16 @@ NowPlaying read_session(const cJSON *session)
     out.volume          = cJSON_IsNumber(volume) ? volume->valueint : -1;
     const cJSON *shown  = cJSON_GetObjectItemCaseSensitive(state, "SubtitleStreamIndex");
     out.subtitle        = cJSON_IsNumber(shown) ? shown->valueint : -1;
+    out.remote = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(session, "SupportsMediaControl"));
+    const cJSON *command = nullptr;
+    cJSON_ArrayForEach(command, cJSON_GetObjectItemCaseSensitive(session, "SupportedCommands"))
+    {
+        if (cJSON_IsString(command)) {
+            out.takes_volume    = out.takes_volume || std::strcmp(command->valuestring, "SetVolume") == 0;
+            out.takes_subtitles = out.takes_subtitles ||
+                                  std::strcmp(command->valuestring, "SetSubtitleStreamIndex") == 0;
+        }
+    }
     const cJSON *stream = nullptr;
     cJSON_ArrayForEach(stream, cJSON_GetObjectItemCaseSensitive(item, "MediaStreams"))
     {

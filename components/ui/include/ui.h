@@ -227,6 +227,11 @@ esp_err_t set_media_seeks(bool seeks);
  *  offer; its Previous and Next actions start them. */
 esp_err_t set_media_neighbours(bool previous, bool next);
 
+/** Whether the player takes pause, seek and skip from here. Some, such as
+ *  Streamyfin, only report: the card and the cinema view then fade what the
+ *  player would not act on. */
+esp_err_t set_media_remote(bool remote);
+
 /** Whether a video has subtitles to show, and whether they show. */
 esp_err_t set_media_subtitles(bool available, bool shown);
 

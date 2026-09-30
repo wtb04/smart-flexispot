@@ -274,6 +274,9 @@ void apply_pick(int index, const char *name);
 void apply_pick_art(int index, const void *pixels);
 void apply_media_segments(const MediaSegment *segments, int count);
 void apply_media_seeks(bool seeks);
+void apply_media_remote(bool remote);
+/** Whether the player takes pause, seek and skip from here. */
+bool media_remote();
 void apply_media_subtitles(bool available, bool shown);
 void write_clock(lv_obj_t *label, int seconds);
 void apply_playing(bool playing);

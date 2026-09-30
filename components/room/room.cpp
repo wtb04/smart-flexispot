@@ -270,6 +270,7 @@ struct PlayerView {
     std::string episode;       // a Jellyfin episode, whose segments are asked for
     std::string series;        // its series, whose episodes are its neighbours
     std::string still;         // a video's own picture, for the cinema view
+    bool        remote = true;  // takes pause and seek from here; Jellyfin's players need not
 };
 
 bool view_going(const PlayerView &view)
@@ -325,7 +326,8 @@ PlayerView jellyfin_view(const jellyfin::NowPlaying &now)
     view.position_s   = now.position_s;
     view.duration_s   = now.duration_s;
     view.position_key = now.item + ':' + std::to_string(now.position_s) + (now.paused ? "p" : "");
-    view.volume       = now.volume >= 0 ? static_cast<float>(now.volume) / PERCENT_PER_WHOLE : NO_NUMBER;
+    view.volume       = now.volume >= 0 && now.takes_volume ? static_cast<float>(now.volume) / PERCENT_PER_WHOLE : NO_NUMBER;
+    view.remote       = now.remote;
     view.episode      = now.kind == "Episode" ? now.item : "";
     view.series       = now.series_id;
     return view;
@@ -450,6 +452,10 @@ void want_segments(const std::string &episode, const std::string &series, bool v
 void show_media()
 {
     const PlayerView &view = choose_view();
+    static bool       s_remote_shown = true;
+    if (std::exchange(s_remote_shown, view.remote) != view.remote) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_remote(view.remote));
+    }
     want_segments(view.jellyfin ? view.episode : "", view.series, view.jellyfin);
     media::set_still_url(view.jellyfin ? view.still.c_str() : "");
     if (gone_only_briefly(view)) {
@@ -711,7 +717,8 @@ void on_jellyfin(const jellyfin::NowPlaying &now)
     std::lock_guard<std::mutex> hold(s_media_lock);
     s_jellyfin_view = jellyfin_view(now);
     ESP_ERROR_CHECK_WITHOUT_ABORT(
-        ui::set_media_subtitles(now.active && now.subtitle_track >= 0, now.active && now.subtitle >= 0));
+        ui::set_media_subtitles(now.active && now.takes_subtitles && now.subtitle_track >= 0,
+                                now.active && now.subtitle >= 0));
     show_media();
 }
 

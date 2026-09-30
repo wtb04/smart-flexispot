@@ -148,8 +148,28 @@ void test_paths()
 }
 }  // namespace
 
+void test_what_it_takes()
+{
+    const NowPlaying web = now_playing(R"({"MessageType":"Sessions","Data":[
+        {"Id":"web","DeviceId":"mac","SupportsMediaControl":true,
+         "SupportedCommands":["DisplayMessage","SetVolume","SetSubtitleStreamIndex"],
+         "PlayState":{"IsPaused":false},"NowPlayingItem":{"Id":"e1","Name":"One"}}]})",
+                                       "smart-flexispot");
+    check(web.remote && web.takes_volume && web.takes_subtitles,
+          "a player that takes control says so, and which commands");
+
+    const NowPlaying ipad = now_playing(R"({"MessageType":"Sessions","Data":[
+        {"Id":"ipad","DeviceId":"ipad","Client":"Streamyfin","SupportsRemoteControl":false,
+         "SupportsMediaControl":false,"SupportedCommands":[],
+         "PlayState":{"IsPaused":false},"NowPlayingItem":{"Id":"e1","Name":"One"}}]})",
+                                        "smart-flexispot");
+    check(ipad.active && !ipad.remote && !ipad.takes_volume && !ipad.takes_subtitles,
+          "one that only reports is followed, and taken for what it is");
+}
+
 int main()
 {
+    test_what_it_takes();
     test_messages();
     test_now_playing();
     test_trimmer();

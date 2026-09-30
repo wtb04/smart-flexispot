@@ -189,10 +189,12 @@ void add_host()
     s_host             = net::add_host(config);
 }
 
-std::string playing_session()
+// The session to send to, if it takes what is asked of it; a player that only
+// reports would ignore it, and its next report would undo what the card showed.
+std::string playing_session(bool NowPlaying::*takes = &NowPlaying::remote)
 {
     std::lock_guard<std::mutex> hold(s_now_lock);
-    return s_now.active ? s_now.session : "";
+    return s_now.active && s_now.*takes ? s_now.session : "";
 }
 
 // Posted to the player's session. With a key, a newer one of its kind takes
@@ -286,7 +288,7 @@ void play_pause()
     bool       pause = false;
     {
         std::lock_guard<std::mutex> hold(s_now_lock);
-        if (!s_now.active) {
+        if (!s_now.active || !s_now.remote) {
             return;
         }
         pause        = !s_now.paused;
@@ -309,7 +311,7 @@ void seek(int position_s)
 
 void set_volume(int percent)
 {
-    const std::string session = playing_session();
+    const std::string session = playing_session(&NowPlaying::takes_volume);
     if (!session.empty()) {
         command(command_path(session), set_volume_body(percent), "volume", "volume");
     }
@@ -317,9 +319,12 @@ void set_volume(int percent)
 
 void toggle_subtitles()
 {
+    const std::string session = playing_session(&NowPlaying::takes_subtitles);
+    if (session.empty()) {
+        return;
+    }
     const int stream = toggle_subtitle_locally();
-    const std::string session = playing_session();
-    if (stream >= -1 && !session.empty()) {
+    if (stream >= -1) {
         command(command_path(session), set_subtitle_body(stream), "subtitles", "subtitles");
     }
 }

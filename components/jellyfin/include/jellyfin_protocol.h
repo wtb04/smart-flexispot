@@ -26,6 +26,10 @@ struct NowPlaying {
     int         volume     = -1;  // percent, when the player says
     int         subtitle   = -1;  // the subtitle stream shown, -1 for none
     int         subtitle_track = -1;  // the one to show: the default, else the first
+    // What the player takes from here. Some only report, as Streamyfin does.
+    bool        remote          = false;  // pause, seek and play something else
+    bool        takes_volume    = false;
+    bool        takes_subtitles = false;
 };
 
 /** Keeps a Sessions message small as it arrives: the queue's full items run to

@@ -930,6 +930,7 @@ constexpr std::int32_t  EXPAND_CHIP    = theme::chip::size;
 MediaSegment s_segments[kMaxSegments]{};
 int          s_segment_count = 0;
 bool         s_media_seeks   = false;
+bool         s_media_remote  = true;
 lv_obj_t    *s_skip          = nullptr;
 lv_obj_t    *s_expand        = nullptr;  // into the cinema view, for a video
 int          s_skip_to       = -1;    // where skipping the intro seeks to
@@ -1034,6 +1035,9 @@ void media_swiped(lv_dir_t direction)
         }
         return;
     }
+    if (!s_media_remote) {
+        return;
+    }
     // A video goes ten seconds on or back, as its own player does.
     if (s_media_seeks) {
         seek_to(position_now() + (direction == LV_DIR_LEFT ? SEEK_STEP_S : -SEEK_STEP_S));
@@ -1069,8 +1073,8 @@ void media_tapped()
     if (std::exchange(s_media_long, false) || std::exchange(s_media_swiped, false)) {
         return;
     }
-    if (!s_has_track_shown) {
-        return;  // nothing to pause or carry on with
+    if (!s_has_track_shown || !s_media_remote) {
+        return;  // nothing to pause or carry on with, or a player that will not
     }
     cancel_pause_settle();
     apply_playing(!s_playing_shown);
@@ -1314,6 +1318,16 @@ void apply_media_segments(const MediaSegment *segments, int count)
 void apply_media_seeks(bool seeks)
 {
     s_media_seeks = seeks;
+}
+
+void apply_media_remote(bool remote)
+{
+    s_media_remote = remote;
+}
+
+bool media_remote()
+{
+    return s_media_remote;
 }
 
 void apply_pick(int index, const char *name)
