@@ -1,42 +1,48 @@
 #include "http.h"
 
-#include <curl/curl.h>
+#include "net.h"
+
+#include <memory>
+#include <mutex>
 
 namespace live {
 namespace {
-constexpr long TIMEOUT_S = 15;
+constexpr int         TIMEOUT_MS = 15 * 1000;
+constexpr std::size_t MAX_BODY   = 8 * 1024 * 1024;  // a work calendar, a gzipped trace inflated
 
-std::size_t take(char *data, std::size_t size, std::size_t count, void *into)
+// What each host's config points at, kept for as long as net is.
+const char *kept(const std::string &text)
 {
-    static_cast<std::string *>(into)->append(data, size * count);
-    return size * count;
+    static std::mutex                               lock;
+    static std::vector<std::unique_ptr<std::string>> texts;
+    std::lock_guard<std::mutex>                     hold(lock);
+    texts.push_back(std::make_unique<std::string>(text));
+    return texts.back()->c_str();
 }
 }  // namespace
 
-Answer get(const std::string &url, const std::vector<std::string> &headers)
+Answer get(const std::string &url, const std::vector<std::string> &headers, net::Priority priority)
 {
-    Answer answer;
-    CURL  *curl = curl_easy_init();
-    if (curl == nullptr) {
-        return answer;
-    }
-    curl_slist *list = nullptr;
+    std::string lines;
     for (const std::string &header : headers) {
-        list = curl_slist_append(list, header.c_str());
+        lines += header + '\n';
     }
-    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, list);
-    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-    curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");  // the traces come gzipped whatever is asked
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, TIMEOUT_S);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, "smart-flexispot-sim");
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, take);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &answer.body);
-    if (curl_easy_perform(curl) == CURLE_OK) {
-        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &answer.status);
-    }
-    curl_slist_free_all(list);
-    curl_easy_cleanup(curl);
+    net::HostConfig like;
+    like.agent      = "smart-flexispot-sim";
+    like.headers    = kept(lines);
+    like.timeout_ms = TIMEOUT_MS;
+    like.connections = 2;
+
+    net::Request request;
+    request.host     = net::host_for(url, like);
+    request.path     = url;
+    request.priority = priority;
+    request.max_body = MAX_BODY;
+    request.what     = "sim";
+
+    Answer             answer;
+    const net::Fetched got = net::fetch(std::move(request), answer.body);
+    answer.status          = got.outcome == net::Outcome::Answered ? got.status : 0;
     return answer;
 }
 }  // namespace live

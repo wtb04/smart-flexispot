@@ -3,7 +3,7 @@
 #include "feeds.h"
 #include "ui.h"
 
-#include <curl/curl.h>
+#include "net.h"
 
 #include <atomic>
 #include <chrono>
@@ -119,7 +119,7 @@ void lookups()
 
 void init_http()
 {
-    curl_global_init(CURL_GLOBAL_DEFAULT);
+    net::start();
 }
 
 void start()

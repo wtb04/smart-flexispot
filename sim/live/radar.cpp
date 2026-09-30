@@ -129,7 +129,7 @@ bool fetch_details(const char *hex, const char *callsign, radar::Details &out)
     if (want_route) {
         std::snprintf(url, sizeof(url), "%s/v0/aircraft/%s?callsign=%s", radar::LOOKUP_HOST, hex,
                       callsign);
-        const Answer got = get(url);
+        const Answer got = get(url, {}, net::Priority::Tap);
         if (got.status == 200) {
             radar::parse_aircraft(got.body.data(), got.body.size(), out);
             radar::parse_route(got.body.data(), got.body.size(), out);
@@ -143,13 +143,13 @@ bool fetch_details(const char *hex, const char *callsign, radar::Details &out)
     }
     if (want_aircraft) {
         std::snprintf(url, sizeof(url), "%s/v0/aircraft/%s", radar::LOOKUP_HOST, hex);
-        if (const Answer got = get(url); got.status == 200) {
+        if (const Answer got = get(url, {}, net::Priority::Tap); got.status == 200) {
             radar::parse_aircraft(got.body.data(), got.body.size(), out);
         }
     }
     if (want_route) {
         std::snprintf(url, sizeof(url), "%s/v0/callsign/%s", radar::LOOKUP_HOST, callsign);
-        if (const Answer got = get(url); got.status == 200) {
+        if (const Answer got = get(url, {}, net::Priority::Tap); got.status == 200) {
             radar::parse_route(got.body.data(), got.body.size(), out);
         }
     }
@@ -166,7 +166,7 @@ bool fetch_trace(const char *hex)
     char url[128];
     std::snprintf(url, sizeof(url), "%s/data/traces/%s/trace_recent_%s.json", radar::TRACE_HOST, hex + len - 2,
                   hex);
-    const Answer got = get(url);
+    const Answer got = get(url, {}, net::Priority::Tap);
     radar::Trail trace{};
     if (got.status != 200 || radar::parse_trace(got.body.c_str(), got.body.size(), trace, radar::TRAIL_STEP_KM) <= 0) {
         return false;
@@ -185,13 +185,13 @@ std::vector<std::uint16_t> fetch_photo(const char *hex, int &width, int &height)
 #if __APPLE__
     char url[128];
     std::snprintf(url, sizeof(url), "%s/pub/photos/hex/%s", radar::PHOTO_HOST, hex);
-    const Answer lookup = get(url);
+    const Answer lookup = get(url, {}, net::Priority::Tap);
     char         found[sizeof(radar::Details::photo_url)];
     if (lookup.status != 200 ||
         !radar::parse_photo(lookup.body.data(), lookup.body.size(), found, sizeof(found))) {
         return pixels;
     }
-    const Answer image = get(found);
+    const Answer image = get(found, {}, net::Priority::Tap);
     if (image.status != 200) {
         return pixels;
     }

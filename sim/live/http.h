@@ -1,5 +1,7 @@
 #pragma once
 
+#include "net_types.h"
+
 #include <string>
 #include <vector>
 
@@ -9,6 +11,9 @@ struct Answer {
     std::string body;
 };
 
-/** Blocking, on whichever thread asks; `headers` as "Name: value". */
-Answer get(const std::string &url, const std::vector<std::string> &headers = {});
+/** Through net, blocking, on whichever thread asks; `headers` as "Name: value",
+ *  kept for the host from its first request. Only the feeds net_desktop.cpp
+ *  allows are reached. */
+Answer get(const std::string &url, const std::vector<std::string> &headers = {},
+           net::Priority priority = net::Priority::Now);
 }  // namespace live

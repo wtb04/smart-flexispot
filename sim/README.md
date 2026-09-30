@@ -21,6 +21,11 @@ the panel's own parsers: the calendar and the way there with the secrets in
 where the panel has Home Assistant's `zone.home`. The home page's layout comes
 from `components/room`.
 
+They go through the panel's own `net` core, which decides what goes when, with
+curl in place of the ESP client (`live/net_desktop.cpp`). Its list of the hosts
+the simulator may read is the one place that decides what leaves the Mac: any
+other host, and anything but a read, is refused and logged.
+
 Everything else is played, and nothing but those read-only feeds leaves the Mac:
 
 - the desk, in `hardware.cpp`, moving as the box moves it and holding its

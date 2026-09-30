@@ -15,6 +15,6 @@ void set_radar_showing(bool showing);
 /** A plane tapped on the radar: who it is, where it flies, and its photo. */
 void look_up(const char *hex, const char *callsign);
 
-/** Makes sure every fetch uses the one curl setup; before any thread starts. */
+/** Starts net, which every fetch goes through; before any thread starts. */
 void init_http();
 }  // namespace live
