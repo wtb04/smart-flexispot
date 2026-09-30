@@ -11,6 +11,8 @@
 #include "last_words.h"
 #include "board.h"
 #include "logbuf.h"
+#include "app_state.h"
+#include "jobs.h"
 #include "net_stream.h"
 #include "ota.h"
 #include "power.h"
@@ -389,6 +391,37 @@ esp_err_t streams_page(httpd_req_t *req)
     return httpd_resp_sendstr_chunk(req, nullptr);
 }
 
+// Every job the shared workers run, and how each is doing; ?poke=N runs one
+// now, and ?screen=0 or 1 tells everything listening that the screen went dark
+// or lit, without the backlight or Home Assistant hearing of it.
+esp_err_t jobs_page(httpd_req_t *req)
+{
+    if (!ota::authorised(req)) {
+        return refuse(req);
+    }
+    char query[QUERY_MAX] = "", value[8] = "";
+    httpd_req_get_url_query_str(req, query, sizeof(query));
+    if (httpd_query_key_value(query, "poke", value, sizeof(value)) == ESP_OK) {
+        jobs::poke(std::atoi(value));
+    }
+    if (httpd_query_key_value(query, "screen", value, sizeof(value)) == ESP_OK) {
+        app::set(app::Fact::ScreenOn, std::atoi(value) != 0);
+    }
+    httpd_resp_set_type(req, "text/plain");
+    for (int i = 0; i < jobs::count(); ++i) {
+        const jobs::Status status = jobs::status(i);
+        char               due[16];
+        std::snprintf(due, sizeof(due), status.due_in_ms < 0 ? "when poked" : "in %d ms", status.due_in_ms);
+        char line[160];
+        std::snprintf(line, sizeof(line), "%d %-12s %-8s next %-12s ran %lu times, last %d ms, most %d ms%s\n", i,
+                      jobs::name(i), status.running ? "running" : status.waiting ? "waiting" : "idle", due,
+                      static_cast<unsigned long>(status.runs), status.last_ms, status.most_ms,
+                      status.failures > 0 ? ", failing" : "");
+        httpd_resp_sendstr_chunk(req, line);
+    }
+    return httpd_resp_sendstr_chunk(req, nullptr);
+}
+
 // Why this run started and, after one nobody asked for, what the run before
 // left behind: the log's copy is soon pushed out.
 esp_err_t restart_page(httpd_req_t *req)
@@ -464,6 +497,7 @@ esp_err_t start()
         {.uri = "/restart", .method = HTTP_GET, .handler = restart_page, .user_ctx = nullptr},
         {.uri = "/stall", .method = HTTP_GET, .handler = stall_page, .user_ctx = nullptr},
         {.uri = "/streams", .method = HTTP_GET, .handler = streams_page, .user_ctx = nullptr},
+        {.uri = "/jobs", .method = HTTP_GET, .handler = jobs_page, .user_ctx = nullptr},
     };
     for (const httpd_uri_t &page : pages) {
         ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &page), TAG, "page");

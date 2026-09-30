@@ -1,5 +1,7 @@
 #include "wifi.h"
 
+#include "app_state.h"
+
 #include "bsp/esp-bsp.h"
 #include "esp_check.h"
 #include "esp_event.h"
@@ -191,6 +193,7 @@ void on_wifi_event(void *, esp_event_base_t base, std::int32_t id, void *data)
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         const auto *event = static_cast<wifi_event_sta_disconnected_t *>(data);
         s_connected.store(false, std::memory_order_relaxed);
+        app::set(app::Fact::Online, false);
         if (s_events != nullptr) {
             xEventGroupClearBits(s_events, GOT_IP_BIT);
         }
@@ -212,6 +215,7 @@ void on_wifi_event(void *, esp_event_base_t base, std::int32_t id, void *data)
         ESP_LOGI(TAG, "joined '%s', ip " IPSTR, WIFI_SSID, IP2STR(&event->ip_info.ip));
         start_time_sync();
         wake_task();
+        app::set(app::Fact::Online, true);
     }
 }
 
@@ -379,8 +383,7 @@ void recover_when_lost_long(Link &link, TickType_t now)
     }
 }
 
-}  // namespace
-
+// Power saving on while nothing needs the link answering at once, as while the screen is dark.
 void set_power_save(bool save)
 {
     s_save_wanted.store(save, std::memory_order_relaxed);
@@ -388,6 +391,9 @@ void set_power_save(bool save)
         xTaskNotifyGive(s_task);
     }
 }
+
+}  // namespace
+
 
 esp_err_t start()
 {
@@ -419,6 +425,8 @@ esp_err_t start()
     s_task = xTaskCreateStatic(wifi_task, "wifi_sup", TASK_STACK, nullptr, TASK_PRIORITY,
                                s_task_stack, &s_task_ctrl);
     ESP_RETURN_ON_FALSE(s_task != nullptr, ESP_ERR_NO_MEM, TAG, "task");
+    set_power_save(!app::get(app::Fact::ScreenOn));
+    app::watch(app::Fact::ScreenOn, [](bool on) { set_power_save(!on); });
     xTaskNotifyGive(s_task);  // up now, not at its first tick
     return ESP_OK;
 }

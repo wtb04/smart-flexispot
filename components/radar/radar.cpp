@@ -7,6 +7,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "app_state.h"
+#include "jobs.h"
 #include "jpeg.h"
 #include "net.h"
 #include "units.h"
@@ -46,7 +48,7 @@ constexpr int PHOTO_SLOTS   = 6;
 constexpr int PHOTO_ENTRIES = 64;  // what is known of a photo: where it is, or that there is none
 
 constexpr std::int64_t FIRST_FETCH_DELAY_US = 6 * units::kUsPerSecond;
-constexpr TickType_t   HOME_SETTLE_CHECK    = pdMS_TO_TICKS(units::kMsPerSecond);
+constexpr int          HOME_SETTLE_CHECK_MS = units::kMsPerSecond;
 
 // Enough for everything the feed has at its busiest, and some that have just
 // left; one not heard of this long is forgotten, and its trail with it.
@@ -60,7 +62,7 @@ constexpr std::int64_t TRAIL_GAP_US = 3 * units::kUsPerMinute;
 // Measured: three seconds runs into the feed's rate limit and gets 429s.
 constexpr std::int64_t POLL_ACTIVE_US = 5 * units::kUsPerSecond;
 constexpr std::int64_t POLL_IDLE_US   = units::kUsPerMinute;
-constexpr TickType_t   PLANNER_REST   = pdMS_TO_TICKS(units::kMsPerSecond);
+constexpr int          PLANNER_REST_MS = units::kMsPerSecond;
 
 constexpr std::size_t FEED_BODY_MAX    = 640 * units::kBytesPerKiB;  // uncompressed, about 940 bytes an aircraft
 constexpr std::size_t LOOKUP_BODY_MAX  = 16 * units::kBytesPerKiB;
@@ -80,13 +82,7 @@ constexpr int PREFETCH_NEAREST = 20;
 constexpr int CACHE_SIZE       = 48;
 static_assert(PREFETCH_NEAREST < CACHE_SIZE, "the prefetched set has to fit, or it churns");
 
-constexpr std::uint32_t TASK_STACK    = 4096;  // it only plans: net does the fetching
-constexpr UBaseType_t   TASK_PRIORITY = 2;
-constexpr BaseType_t    TASK_CORE     = 0;
-
-StaticTask_t s_task_ctrl;
-StackType_t  s_task_stack[TASK_STACK];
-TaskHandle_t s_task = nullptr;
+jobs::Job s_job = jobs::kNoJob;  // it only plans: net does the fetching
 
 // Everything below the lock is shared between the planner and net's workers.
 SemaphoreHandle_t s_lock = nullptr;
@@ -831,46 +827,54 @@ void ask_feed(int feed, int tried, float lat, float lon)
 }
 
 // Reads the feed when it is due; the rest happens on net's workers.
-[[noreturn]] void planner_task(void *)
+jobs::Result plan()
 {
-    std::int64_t last_fetch = 0;
-    for (;;) {
-        bool         ready = false, active = false;
-        float        lat = 0.0f, lon = 0.0f;
-        std::int64_t home_at = 0;
-        {
-            Lock hold;
-            ready   = s_has_home && s_enabled && s_screen;
-            active  = s_active;
-            lat     = s_home_lat;
-            lon     = s_home_lon;
-            home_at = s_home_at_us;
-        }
-        if (!ready) {
-            ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-            continue;
-        }
-        const std::int64_t now = esp_timer_get_time();
-        if (last_fetch == 0 && now - home_at < FIRST_FETCH_DELAY_US) {
-            ulTaskNotifyTake(pdTRUE, HOME_SETTLE_CHECK);
-            continue;
-        }
-        const std::int64_t due = active ? POLL_ACTIVE_US : POLL_IDLE_US;
-        if (!s_feed_out.load() && (last_fetch == 0 || now - last_fetch >= due)) {
-            last_fetch = now;
-            s_feed_out.store(true);
-            const int feed = s_next_feed;
-            s_next_feed    = (s_next_feed + 1) % FEED_COUNT;
-            ask_feed(feed, 0, lat, lon);
-        }
-        ulTaskNotifyTake(pdTRUE, PLANNER_REST);
+    static std::int64_t last_fetch = 0;
+    bool                ready = false, active = false;
+    float               lat = 0.0f, lon = 0.0f;
+    std::int64_t        home_at = 0;
+    {
+        Lock hold;
+        ready   = s_has_home && s_enabled && s_screen;
+        active  = s_active;
+        lat     = s_home_lat;
+        lon     = s_home_lon;
+        home_at = s_home_at_us;
     }
+    if (!ready) {
+        return jobs::sleep();
+    }
+    const std::int64_t now = esp_timer_get_time();
+    if (last_fetch == 0 && now - home_at < FIRST_FETCH_DELAY_US) {
+        return jobs::again_in(HOME_SETTLE_CHECK_MS);
+    }
+    const std::int64_t due = active ? POLL_ACTIVE_US : POLL_IDLE_US;
+    if (!s_feed_out.load() && (last_fetch == 0 || now - last_fetch >= due)) {
+        last_fetch = now;
+        s_feed_out.store(true);
+        const int feed = s_next_feed;
+        s_next_feed    = (s_next_feed + 1) % FEED_COUNT;
+        ask_feed(feed, 0, lat, lon);
+    }
+    return jobs::again_in(PLANNER_REST_MS);
 }
 
 void wake()
 {
-    if (s_task != nullptr) {
-        xTaskNotifyGive(s_task);
+    jobs::poke(s_job);
+}
+
+// Nothing is fetched while the screen is dark; lit, it fetches at once.
+void set_screen(bool on)
+{
+    bool woke = false;
+    {
+        Lock hold;
+        woke     = on && !s_screen;
+        s_screen = on;
+    }
+    if (woke) {
+        wake();
     }
 }
 
@@ -917,9 +921,13 @@ esp_err_t start(UpdateHandler on_update, DetailsHandler on_details, PhotoHandler
     }
 
     add_hosts();
-    s_task = xTaskCreateStaticPinnedToCore(planner_task, "radar", TASK_STACK, nullptr, TASK_PRIORITY, s_task_stack,
-                                           &s_task_ctrl, TASK_CORE);
-    ESP_RETURN_ON_FALSE(s_task != nullptr, ESP_ERR_NO_MEM, TAG, "task");
+    s_screen = app::get(app::Fact::ScreenOn);
+    app::watch(app::Fact::ScreenOn, set_screen);
+    jobs::Spec spec;
+    spec.name = TAG;
+    spec.run  = plan;
+    s_job     = jobs::add(std::move(spec));
+    ESP_RETURN_ON_FALSE(s_job != jobs::kNoJob, ESP_ERR_NO_MEM, TAG, "job");
     return ESP_OK;
 }
 
@@ -979,21 +987,6 @@ void request_details(const char *hex, const char *callsign)
     ask_trace(hex);
 }
 
-void set_screen(bool on)
-{
-    if (s_lock == nullptr) {
-        return;
-    }
-    bool woke = false;
-    {
-        Lock hold;
-        woke     = on && !s_screen;
-        s_screen = on;
-    }
-    if (woke) {
-        wake();
-    }
-}
 
 void set_enabled(bool enabled)
 {

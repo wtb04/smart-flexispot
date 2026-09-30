@@ -2,13 +2,13 @@
 
 #include "esp_check.h"
 #include "esp_log.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
+#include "jobs.h"
 #include "power.h"
 #include "settings.h"
 #include "ui.h"
 #include "units.h"
 
+#include <atomic>
 #include <cmath>
 #include <cstdlib>
 
@@ -18,7 +18,7 @@ constexpr char TAG[] = "battery";
 
 // Each reading adds its current to the charge counted, so they come often; the
 // rest, the charger and what the screen shows, only every CHECK_EVERY of them.
-constexpr TickType_t POLL_INTERVAL = pdMS_TO_TICKS(units::kMsPerSecond);
+constexpr int POLL_MS     = units::kMsPerSecond;
 constexpr int        CHECK_EVERY   = 30;
 
 constexpr float RESUME_VOLTS = 8.00f;
@@ -31,13 +31,8 @@ constexpr int NEVER_LOGGED_PERCENT = -100;
 
 constexpr float MILLIAMPS_PER_AMP = 1000.0f;
 
-constexpr std::uint32_t TASK_STACK    = 4096;
-constexpr UBaseType_t   TASK_PRIORITY = 2;
-constexpr BaseType_t    TASK_CORE     = 0;
-
-StaticTask_t s_task_ctrl;
-StackType_t  s_task_stack[TASK_STACK];
-TaskHandle_t s_task = nullptr;
+jobs::Job         s_job = jobs::kNoJob;
+std::atomic<bool> s_check_now{true};  // the first pass looks at everything
 
 void log_if_changed(const power::State &state, bool present, bool &was_present, int &logged)
 {
@@ -74,35 +69,49 @@ void steer_charger(const power::State &state, bool &topped_off)
     }
 }
 
-[[noreturn]] void battery_task(void *)
+jobs::Result poll()
 {
-    bool topped_off  = false;
-    bool was_present = false;
-    int  logged      = NEVER_LOGGED_PERCENT;
+    static bool topped_off   = false;
+    static bool was_present  = false;
+    static int  logged       = NEVER_LOGGED_PERCENT;
+    static int  kept_percent = -1;
+    static int  pass         = 0;
+    static bool probing      = false;  // the charger is off while the voltage settles
+    // What was read before the probe: with the charger off, the rail says
+    // nothing about charging.
+    static power::State before{};
 
-    int kept_percent = -1;
-    for (int pass = 0;; ++pass) {
-        power::State state{};
-        const bool   read  = power::read(state) == ESP_OK;
-        // Woken early by refresh(), or at the turn of a round: the rest too.
-        const bool   check = pass % CHECK_EVERY == 0;
-        if (read && state.percent != kept_percent) {
-            kept_percent = state.percent;
-            settings::set(settings::Key::BatteryCharge, power::charge_mah());
+    power::State state{};
+    bool         read = power::read(state) == ESP_OK;
+    if (read && state.percent != kept_percent) {
+        kept_percent = state.percent;
+        settings::set(settings::Key::BatteryCharge, power::charge_mah());
+    }
+    bool present = false;
+    if (probing) {
+        probing = false;
+        ESP_ERROR_CHECK_WITHOUT_ABORT(power::finish_probe(present));
+        state = before;
+        read  = true;
+    } else {
+        // Poked by refresh(), or at the turn of a round: the rest too.
+        const bool check = s_check_now.exchange(false) || ++pass % CHECK_EVERY == 0;
+        if (!read || !check) {
+            return jobs::done();
         }
-        if (read && check) {
-            power::reassert_charging();
-            bool present = false;
-            ESP_ERROR_CHECK_WITHOUT_ABORT(power::probe_pack(present));
-            log_if_changed(state, present, was_present, logged);
-            ESP_ERROR_CHECK_WITHOUT_ABORT(
-                ui::set_battery(state.present, state.percent, state.charging));
-            steer_charger(state, topped_off);
-        }
-        if (ulTaskNotifyTake(pdTRUE, POLL_INTERVAL) != 0) {
-            pass = -1;  // refresh(): check on the next pass
+        power::reassert_charging();
+        if (!power::begin_probe(present)) {
+            probing = true;
+            before  = state;
+            return jobs::again_in(power::kProbeSettleMs);
         }
     }
+    if (read) {
+        log_if_changed(state, present, was_present, logged);
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_battery(state.present, state.percent, state.charging));
+        steer_charger(state, topped_off);
+    }
+    return jobs::done();
 }
 
 }  // namespace
@@ -112,19 +121,20 @@ esp_err_t start()
     power::restore_charge(settings::get(settings::Key::BatteryCharge));
     ESP_RETURN_ON_ERROR(power::init(), TAG, "power monitor");
 
-    // The task switches the charger on or off in its first pass, once it has
-    // looked at the pack.
-    s_task = xTaskCreateStaticPinnedToCore(battery_task, "battery", TASK_STACK, nullptr,
-                                           TASK_PRIORITY, s_task_stack, &s_task_ctrl, TASK_CORE);
-    ESP_RETURN_ON_FALSE(s_task != nullptr, ESP_ERR_NO_MEM, TAG, "task");
+    // The first pass switches the charger on or off, once it has looked at the pack.
+    jobs::Spec spec;
+    spec.name      = TAG;
+    spec.period_ms = POLL_MS;
+    spec.run       = poll;
+    s_job          = jobs::add(std::move(spec));
+    ESP_RETURN_ON_FALSE(s_job != jobs::kNoJob, ESP_ERR_NO_MEM, TAG, "job");
     return ESP_OK;
 }
 
 void refresh()
 {
-    if (s_task != nullptr) {
-        xTaskNotifyGive(s_task);
-    }
+    s_check_now = true;
+    jobs::poke(s_job);
 }
 
 }  // namespace battery

@@ -68,7 +68,6 @@ constexpr int CELLS_IN_SERIES = 2;
 
 constexpr float      PACK_MIN_VOLTS = 6.0f;
 constexpr float      PACK_MAX_VOLTS = 8.8f;
-constexpr TickType_t PROBE_SETTLE   = pdMS_TO_TICKS(250);
 
 // The gap between these two is the hysteresis: without it the pack relaxes a
 // few millivolts, asks for more, and is topped up for ever.
@@ -244,7 +243,10 @@ esp_err_t init()
     ESP_RETURN_ON_ERROR(read(probe), TAG, "first read");
 
     bool present = false;
-    ESP_ERROR_CHECK_WITHOUT_ABORT(probe_pack(present));
+    if (!begin_probe(present)) {
+        vTaskDelay(pdMS_TO_TICKS(kProbeSettleMs));  // at boot, on the task starting the panel
+        ESP_ERROR_CHECK_WITHOUT_ABORT(finish_probe(present));
+    }
     ESP_LOGI(TAG, "%s", present ? "pack present" : "no pack");
     return ESP_OK;
 }
@@ -315,13 +317,12 @@ esp_err_t read(State &out)
     return err;
 }
 
-esp_err_t probe_pack(bool &present)
+bool begin_probe(bool &present)
 {
     State now{};
-    const esp_err_t err = read(now);
-    if (err != ESP_OK) {
+    if (read(now) != ESP_OK) {
         present = s_pack_present.load(std::memory_order_relaxed);
-        return err;
+        return true;
     }
 
     // Current flowing is a pack. Without any, the voltage says nothing until
@@ -330,12 +331,18 @@ esp_err_t probe_pack(bool &present)
     if (std::fabs(now.current_amps) > CURRENT_DEADBAND_A) {
         present = pack_voltage(now.bus_volts);
         s_pack_present.store(present, std::memory_order_relaxed);
-        return ESP_OK;
+        return true;
     }
+    if (apply_charging(false) != ESP_OK) {
+        ESP_LOGW(TAG, "charger would not switch off for the probe");
+        present = s_pack_present.load(std::memory_order_relaxed);
+        return true;
+    }
+    return false;
+}
 
-    ESP_RETURN_ON_ERROR(apply_charging(false), TAG, "charger off for probe");
-    vTaskDelay(PROBE_SETTLE);
-
+esp_err_t finish_probe(bool &present)
+{
     State settled{};
     const esp_err_t settled_err = read(settled);
     present = settled_err == ESP_OK && pack_voltage(settled.bus_volts);

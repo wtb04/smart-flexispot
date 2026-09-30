@@ -1,5 +1,7 @@
 #include "ical.h"
 
+#include "jobs.h"
+
 #include "clock_math.h"
 
 #include "esp_check.h"
@@ -16,7 +18,6 @@
 #include "freertos/task.h"
 #include "net.h"
 #include "units.h"
-#include "wifi.h"
 
 #include <algorithm>
 #include <atomic>
@@ -60,29 +61,22 @@ bool starts_with(const char *text, const char *prefix)
 
 // A timetable is not a live feed; it changes when somebody edits it, which is
 // rarely and never urgently.
-constexpr TickType_t POLL_INTERVAL = pdMS_TO_TICKS(30 * units::kMsPerMinute);
+constexpr int POLL_MS = 30 * units::kMsPerMinute;
 
 // The work calendar is 158 kB, the timetable feeds 22 kB at most. In PSRAM.
 constexpr std::size_t BODY_MAX = 256 * units::kBytesPerKiB;
 
 // A feed that did not come back is usually the network still coming up, or a
 // server hanging up early; neither is worth half an hour of silence.
-constexpr TickType_t RETRY_INTERVAL     = pdMS_TO_TICKS(20 * units::kMsPerSecond);
-constexpr TickType_t MAX_RETRY_INTERVAL = pdMS_TO_TICKS(5 * units::kMsPerMinute);
-constexpr int        MAX_BACKOFF_STEPS  = 4;
+constexpr int RETRY_MS     = 20 * units::kMsPerSecond;
+constexpr int MAX_RETRY_MS = 5 * units::kMsPerMinute;
 
-constexpr TickType_t NOT_READY_WAIT = pdMS_TO_TICKS(2 * units::kMsPerSecond);
+constexpr int NOT_READY_MS = 2 * units::kMsPerSecond;
 
 constexpr std::size_t URL_SIZE         = 256;
 constexpr int         HTTP_TIMEOUT_MS  = 15 * units::kMsPerSecond;
 
-constexpr std::uint32_t TASK_STACK    = 6144;
-constexpr UBaseType_t   TASK_PRIORITY = 3;
-constexpr BaseType_t    TASK_CORE     = 0;
-
-StaticTask_t s_task_ctrl;
-StackType_t  s_task_stack[TASK_STACK];
-TaskHandle_t s_task = nullptr;
+jobs::Job s_job = jobs::kNoJob;
 
 SemaphoreHandle_t s_lock = nullptr;
 StaticSemaphore_t s_lock_ctrl;
@@ -195,29 +189,16 @@ bool fetch_all()
     return all_ok;
 }
 
-// Each failed round waits twice as long as the last, up to five minutes: a
-// host that is down gets a handful of handshakes, not a stream.
-TickType_t wait_after(int failures)
+// A failed round is tried again after RETRY_MS, twice as long each time up to
+// MAX_RETRY_MS: a host that is down gets a handful of handshakes, not a stream.
+jobs::Result poll()
 {
-    if (failures == 0) {
-        return POLL_INTERVAL;
+    // Nothing is fetched until the clock is right, or every event is filed
+    // against 1970 and the page shows the wrong things in the wrong order.
+    if (!rtc::plausible(std::time(nullptr))) {
+        return jobs::again_in(NOT_READY_MS);
     }
-    return std::min<TickType_t>(RETRY_INTERVAL << (failures - 1), MAX_RETRY_INTERVAL);
-}
-
-[[noreturn]] void ical_task(void *)
-{
-    for (;;) {
-        // Nothing is fetched until the clock is right, or every event is filed
-        // against 1970 and the page shows the wrong things in the wrong order.
-        if (!rtc::plausible(std::time(nullptr)) || !wifi::connected()) {
-            ulTaskNotifyTake(pdTRUE, NOT_READY_WAIT);
-            continue;
-        }
-        static int failures = 0;
-        failures = fetch_all() ? 0 : std::min(failures + 1, MAX_BACKOFF_STEPS);
-        ulTaskNotifyTake(pdTRUE, wait_after(failures));
-    }
+    return fetch_all() ? jobs::done() : jobs::failed();
 }
 
 }  // namespace
@@ -229,7 +210,7 @@ const char *feed_name(std::uint8_t feed)
 
 esp_err_t start(UpdateHandler on_update)
 {
-    ESP_RETURN_ON_FALSE(s_task == nullptr, ESP_ERR_INVALID_STATE, TAG, "already started");
+    ESP_RETURN_ON_FALSE(s_job == jobs::kNoJob, ESP_ERR_INVALID_STATE, TAG, "already started");
 
     s_lock = xSemaphoreCreateMutexStatic(&s_lock_ctrl);
     ESP_RETURN_ON_FALSE(s_lock != nullptr, ESP_ERR_NO_MEM, TAG, "lock");
@@ -246,10 +227,16 @@ esp_err_t start(UpdateHandler on_update)
                         ESP_ERR_NO_MEM, TAG, "buffers");
 
     s_on_update = on_update;
-    s_task      = xTaskCreateStaticPinnedToCore(ical_task, "ical", TASK_STACK, nullptr,
-                                                TASK_PRIORITY, s_task_stack, &s_task_ctrl,
-                                                TASK_CORE);
-    ESP_RETURN_ON_FALSE(s_task != nullptr, ESP_ERR_NO_MEM, TAG, "task");
+    jobs::Spec spec;
+    spec.name         = TAG;
+    spec.lane         = jobs::Lane::Slow;
+    spec.period_ms    = POLL_MS;
+    spec.online       = true;
+    spec.retry_ms     = RETRY_MS;
+    spec.max_retry_ms = MAX_RETRY_MS;
+    spec.run          = poll;
+    s_job             = jobs::add(std::move(spec));
+    ESP_RETURN_ON_FALSE(s_job != jobs::kNoJob, ESP_ERR_NO_MEM, TAG, "job");
     return ESP_OK;
 }
 
@@ -289,9 +276,7 @@ int between(std::int64_t from, std::int64_t to, Event *out, int capacity)
 
 void refresh()
 {
-    if (s_task != nullptr) {
-        xTaskNotifyGive(s_task);
-    }
+    jobs::poke(s_job);
 }
 
 }  // namespace ical

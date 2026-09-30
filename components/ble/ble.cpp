@@ -1,5 +1,7 @@
 #include "ble.h"
 
+#include "app_state.h"
+
 #include "ble_secrets.h"
 #include "esp_check.h"
 #include "proxy_link.h"
@@ -314,8 +316,7 @@ void host_task(void *)
     nimble_port_freertos_deinit();
 }
 
-}  // namespace
-
+// Listens for the phone less often while the screen is dark.
 void set_dark(bool dark)
 {
     const std::uint16_t wanted = dark ? DARK_INTERVAL_MS : SCAN_INTERVAL_MS;
@@ -324,8 +325,13 @@ void set_dark(bool dark)
     }
 }
 
+}  // namespace
+
+
 esp_err_t start()
 {
+    set_dark(!app::get(app::Fact::ScreenOn));
+    app::watch(app::Fact::ScreenOn, [](bool on) { set_dark(!on); });
     s_have_irk = parse_irk(BLE_PHONE_IRK, s_irk);
     std::reverse_copy(s_irk, s_irk + IRK_BYTES, s_irk_reversed);
     if (s_have_irk) {

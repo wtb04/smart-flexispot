@@ -70,7 +70,4 @@ void cancel(Host host, const std::string &key);
 HostStatus status(Host host);
 bool       resting(Host host);
 
-/** Dark: background requests wait until it is lit. */
-void set_screen(bool on);
-
 }  // namespace net

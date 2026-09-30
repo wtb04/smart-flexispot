@@ -8,8 +8,7 @@
 #include "media.h"
 #include "esp_heap_caps.h"
 #include "net.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
+#include "jobs.h"
 #include "picks.h"
 #include "room_layout.h"
 #include "segments.h"
@@ -59,14 +58,10 @@ constexpr const char *PICK_URIS[] = {
 static_assert(std::size(PICK_URIS) <= media::kPickCount, "more favourites than the popup holds");
 
 // Titles and covers change now and then, a Daily Mix's among them.
-constexpr TickType_t    PICKS_REFRESH     = pdMS_TO_TICKS(6 * units::kSecondsPerHour * units::kMsPerSecond);
-constexpr TickType_t    PICKS_RETRY       = pdMS_TO_TICKS(30 * units::kMsPerSecond);
+constexpr int           PICKS_REFRESH_MS  = 6 * units::kSecondsPerHour * units::kMsPerSecond;
+constexpr int           PICKS_RETRY_MS    = 30 * units::kMsPerSecond;
 constexpr int           EMBED_TIMEOUT_MS  = 8 * units::kMsPerSecond;
 constexpr std::size_t   EMBED_MAX         = 8 * units::kBytesPerKiB;
-constexpr std::uint32_t PICKS_TASK_STACK  = 8192;  // TLS
-constexpr UBaseType_t   PICKS_TASK_PRIORITY = 2;
-constexpr BaseType_t    PICKS_TASK_CORE     = 0;
-constexpr std::uint32_t SEGMENTS_TASK_STACK = 8192;  // TLS
 
 /** Fraction of full scale, per press. */
 constexpr float VOLUME_STEP = 0.05f;
@@ -523,7 +518,7 @@ std::mutex   s_segments_lock;
 std::string  s_segments_item;  // the episode wanted, empty for none
 std::string  s_segments_series;
 jellyfin::Neighbours s_neighbours;  // the episodes either side, once looked up
-TaskHandle_t s_segments_task = nullptr;
+jobs::Job s_segments_job = jobs::kNoJob;
 
 void show_segments(const std::vector<segments::Segment> &found)
 {
@@ -539,37 +534,35 @@ void show_segments(const std::vector<segments::Segment> &found)
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_segments(shown, count));
 }
 
-[[noreturn]] void segments_task(void *)
+jobs::Result look_up_segments()
 {
-    for (;;) {
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        std::string item;
-        std::string series;
-        {
-            std::lock_guard<std::mutex> hold(s_segments_lock);
-            item   = s_segments_item;
-            series = s_segments_series;
-        }
-        jellyfin::Neighbours around;
-        std::string          answer;
-        if (!item.empty() && !series.empty() &&
-            jellyfin::fetch(jellyfin::neighbours_path(series, item), answer)) {
-            around = jellyfin::neighbours(answer, item);
-        }
-        {
-            std::lock_guard<std::mutex> hold(s_segments_lock);
-            s_neighbours = around;
-        }
-        ESP_ERROR_CHECK_WITHOUT_ABORT(
-            ui::set_media_neighbours(!around.previous.empty(), !around.next.empty()));
-        if (item.empty() || !jellyfin::fetch(segments::path_for(item), answer)) {
-            show_segments({});
-            continue;
-        }
-        const std::vector<segments::Segment> found = segments::parse(answer);
-        ESP_LOGI(TAG, "%u segments for the episode", static_cast<unsigned>(found.size()));
-        show_segments(found);
+    std::string item;
+    std::string series;
+    {
+        std::lock_guard<std::mutex> hold(s_segments_lock);
+        item   = s_segments_item;
+        series = s_segments_series;
     }
+    jellyfin::Neighbours around;
+    std::string          answer;
+    if (!item.empty() && !series.empty() &&
+        jellyfin::fetch(jellyfin::neighbours_path(series, item), answer)) {
+        around = jellyfin::neighbours(answer, item);
+    }
+    {
+        std::lock_guard<std::mutex> hold(s_segments_lock);
+        s_neighbours = around;
+    }
+    ESP_ERROR_CHECK_WITHOUT_ABORT(
+        ui::set_media_neighbours(!around.previous.empty(), !around.next.empty()));
+    if (item.empty() || !jellyfin::fetch(segments::path_for(item), answer)) {
+        show_segments({});
+        return jobs::sleep();
+    }
+    const std::vector<segments::Segment> found = segments::parse(answer);
+    ESP_LOGI(TAG, "%u segments for the episode", static_cast<unsigned>(found.size()));
+    show_segments(found);
+    return jobs::sleep();
 }
 
 /** Asks for a new episode's segments, or drops them when no episode shows. */
@@ -584,41 +577,34 @@ void want_segments(const std::string &episode, const std::string &series, bool v
         s_segments_item   = episode;
         s_segments_series = series;
     }
-    if (s_segments_task == nullptr) {
-        static StaticTask_t task_ctrl;
-        auto *stack = static_cast<StackType_t *>(heap_caps_malloc(
-            SEGMENTS_TASK_STACK * sizeof(StackType_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-        s_segments_task =
-            stack == nullptr ? nullptr
-                             : xTaskCreateStaticPinnedToCore(segments_task, "segments",
-                                                             SEGMENTS_TASK_STACK, nullptr,
-                                                             PICKS_TASK_PRIORITY, stack, &task_ctrl,
-                                                             PICKS_TASK_CORE);
+    if (s_segments_job == jobs::kNoJob) {
+        jobs::Spec spec;
+        spec.name     = "segments";
+        spec.lane     = jobs::Lane::Slow;
+        spec.first_ms = jobs::kNever;
+        spec.run      = look_up_segments;
+        s_segments_job = jobs::add(std::move(spec));
     }
-    if (s_segments_task != nullptr) {
-        xTaskNotifyGive(s_segments_task);
-    }
+    jobs::poke(s_segments_job);
 }
 
 /** Looks each favourite up now and then, and shows what it found. */
-[[noreturn]] void picks_task(void *)
+jobs::Result look_up_picks()
 {
-    for (;;) {
-        bool all = true;
-        for (std::size_t i = 0; i < std::size(PICK_URIS); ++i) {
-            picks::Pick pick{PICK_URIS[i], "", ""};
-            std::string answer;
-            if (fetch_text(picks::embed_url(pick.uri), answer) && picks::take_embed(answer, pick)) {
-                std::lock_guard<std::mutex> hold(s_picks_lock);
-                s_picks[i] = pick;
-            } else {
-                all = false;
-                ESP_LOGW(TAG, "no title for %s yet", PICK_URIS[i]);
-            }
+    bool all = true;
+    for (std::size_t i = 0; i < std::size(PICK_URIS); ++i) {
+        picks::Pick pick{PICK_URIS[i], "", ""};
+        std::string answer;
+        if (fetch_text(picks::embed_url(pick.uri), answer) && picks::take_embed(answer, pick)) {
+            std::lock_guard<std::mutex> hold(s_picks_lock);
+            s_picks[i] = pick;
+        } else {
+            all = false;
+            ESP_LOGW(TAG, "no title for %s yet", PICK_URIS[i]);
         }
-        show_picks();
-        vTaskDelay(all ? PICKS_REFRESH : PICKS_RETRY);
     }
+    show_picks();
+    return all ? jobs::done() : jobs::failed();
 }
 
 /** From the first render, by when the covers can be fetched. */
@@ -635,15 +621,15 @@ void start_picks()
             s_picks.push_back({uri, "", ""});
         }
     }
-    static StaticTask_t task_ctrl;
-    auto *stack = static_cast<StackType_t *>(heap_caps_malloc(
-        PICKS_TASK_STACK * sizeof(StackType_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    if (stack == nullptr ||
-        xTaskCreateStaticPinnedToCore(picks_task, "picks", PICKS_TASK_STACK, nullptr,
-                                      PICKS_TASK_PRIORITY, stack, &task_ctrl,
-                                      PICKS_TASK_CORE) == nullptr) {
-        ESP_LOGE(TAG, "no room for the favourites' lookup");
-    }
+    jobs::Spec spec;
+    spec.name         = "picks";
+    spec.lane         = jobs::Lane::Slow;
+    spec.period_ms    = PICKS_REFRESH_MS;
+    spec.online       = true;
+    spec.retry_ms     = PICKS_RETRY_MS;
+    spec.max_retry_ms = PICKS_RETRY_MS;
+    spec.run          = look_up_picks;
+    jobs::add(std::move(spec));
 }
 
 void on_played(const cJSON *result)

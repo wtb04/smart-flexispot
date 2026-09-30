@@ -43,10 +43,13 @@ esp_err_t read(State &out);
 
 /** Settles the question by switching the charger off for a moment and seeing
  *  whether the voltage holds: a pack does, an empty socket does not. Only
- *  actually needed when the charger is on and no current is flowing, so most
- *  calls are an ordinary reading and interrupt nothing; that one case blocks
- *  for a few hundred milliseconds. */
-esp_err_t probe_pack(bool &present);
+ *  needed when no current is flowing, so most calls answer from an ordinary
+ *  reading and return true. Otherwise the charger is switched off and it
+ *  returns false: finish_probe() answers once kProbeSettleMs have passed. */
+bool      begin_probe(bool &present);
+esp_err_t finish_probe(bool &present);
+
+inline constexpr int kProbeSettleMs = 250;
 
 /** The most recent successful read, without touching the bus. False if there
  *  has not been one. */

@@ -11,9 +11,9 @@
 #include "esp_log.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
+#include "app_state.h"
 #include "ha_ws.h"
+#include "jobs.h"
 #include "jellyfin.h"
 #include "hass.h"
 #include "travel.h"
@@ -36,12 +36,12 @@ namespace network {
 namespace {
 constexpr char TAG[] = "network";
 
-constexpr TickType_t PUBLISH_INTERVAL = pdMS_TO_TICKS(2000);
-
+constexpr int PUBLISH_MS      = 2000;
 constexpr int NETWORK_WAIT_MS = 30 * units::kMsPerSecond;
-
-// Both clients retry on their own, yet once, after the server had been away for
-// minutes, neither came back until a reboot. This is the reboot, for one client.
+// The splash waits on the links, so at startup they are looked at this often
+// rather than at the next publish, for as long as LINKS_WAIT_MS.
+constexpr int LOOK_EVERY_MS = 100;
+constexpr int LINKS_WAIT_MS = 10 * units::kMsPerSecond;
 
 constexpr int         REFUSAL_NOTICE_MS    = 4000;
 constexpr std::size_t REFUSAL_MESSAGE_SIZE = 96;
@@ -53,13 +53,6 @@ constexpr std::int64_t HEAP_BASELINE_AFTER_US = 40 * units::kUsPerSecond;
 
 constexpr std::size_t  LOW_DMA_BYTES        = 24 * units::kBytesPerKiB;
 constexpr std::int64_t LOW_MEMORY_REPEAT_US = 30 * units::kUsPerSecond;
-
-constexpr std::uint32_t TASK_STACK    = 6144;  // measured: uses 3.0 KB
-constexpr UBaseType_t   TASK_PRIORITY = 2;
-constexpr BaseType_t    TASK_CORE     = 0;
-
-StaticTask_t s_task_ctrl;
-StackType_t  s_task_stack[TASK_STACK];
 
 std::atomic<int> s_brightness{0};  // told the real one at boot, before anything is sent
 
@@ -232,17 +225,6 @@ void show_links(const ble::Stats &radio)
     }
 }
 
-// The splash waits on the links, so at startup they are looked at often
-// rather than at the next publish.
-void wait_for_links()
-{
-    constexpr TickType_t LOOK_EVERY = pdMS_TO_TICKS(100);
-    constexpr int        LOOKS      = 100;
-    for (int i = 0; i < LOOKS && !links_up(); ++i) {
-        vTaskDelay(LOOK_EVERY);
-    }
-}
-
 void log_heap_baseline_once()
 {
     static bool settled = false;
@@ -299,52 +281,72 @@ void start_clients()
     ESP_ERROR_CHECK_WITHOUT_ABORT(radar::start(on_radar, on_radar_details, on_radar_photo));
 }
 
-[[noreturn]] void network_task(void *)
+void publish()
 {
-    if (!wifi::wait_for_ip(NETWORK_WAIT_MS)) {
-        ESP_LOGW(TAG, "no address after %d s, starting clients anyway",
-                 NETWORK_WAIT_MS / units::kMsPerSecond);
+    if (wifi::connected()) {
+        ota::confirm();  // reachable for the next update: the firmware stays
     }
-    start_clients();
-    wait_for_links();
+    const ble::Stats                radio = ble::stats();
+    const hass::protocol::Telemetry out   = gather_telemetry(radio);
+    show_links(radio);
+    hass::publish(out);
+    ask_journey();
+    log_heap_baseline_once();
+    log_dma_heap();
+    warn_if_memory_low();
+}
 
-    for (;;) {
-        if (wifi::connected()) {
-            ota::confirm();  // reachable for the next update: the firmware stays
-        }
-        const ble::Stats                radio = ble::stats();
-        const hass::protocol::Telemetry out   = gather_telemetry(radio);
-        show_links(radio);
-        hass::publish(out);
-        ask_journey();
-        log_heap_baseline_once();
-        log_dma_heap();
-        warn_if_memory_low();
-        vTaskDelay(PUBLISH_INTERVAL);
+// Waits for an address, or long enough, to start the clients; then for the
+// links, a while; then publishes now and then.
+jobs::Result tick()
+{
+    enum class Stage { Address, Links, Publishing };
+    static Stage        stage = Stage::Address;
+    static std::int64_t since = esp_timer_get_time();
+    const int           for_ms =
+        static_cast<int>((esp_timer_get_time() - since) / units::kUsPerMs);
+    switch (stage) {
+        case Stage::Address:
+            if (!wifi::connected() && for_ms < NETWORK_WAIT_MS) {
+                return jobs::again_in(LOOK_EVERY_MS);
+            }
+            if (!wifi::connected()) {
+                ESP_LOGW(TAG, "no address after %d s, starting clients anyway",
+                         NETWORK_WAIT_MS / units::kMsPerSecond);
+            }
+            start_clients();
+            stage = Stage::Links;
+            since = esp_timer_get_time();
+            return jobs::again_in(LOOK_EVERY_MS);
+        case Stage::Links:
+            if (!links_up() && for_ms < LINKS_WAIT_MS) {
+                return jobs::again_in(LOOK_EVERY_MS);
+            }
+            stage = Stage::Publishing;
+            break;
+        case Stage::Publishing: break;
     }
+    publish();
+    return jobs::again_in(PUBLISH_MS);
 }
 
 }  // namespace
 
 esp_err_t start()
 {
-    TaskHandle_t task = xTaskCreateStaticPinnedToCore(network_task, "network", TASK_STACK,
-                                                      nullptr, TASK_PRIORITY, s_task_stack,
-                                                      &s_task_ctrl, TASK_CORE);
-    ESP_RETURN_ON_FALSE(task != nullptr, ESP_ERR_NO_MEM, TAG, "task");
+    jobs::Spec spec;
+    spec.name = TAG;
+    spec.run  = tick;
+    ESP_RETURN_ON_FALSE(jobs::add(std::move(spec)) != jobs::kNoJob, ESP_ERR_NO_MEM, TAG, "job");
     return ESP_OK;
 }
 
-// While the screen is dark nothing waits on the network or the radar, and the
-// phone is listened for less often; whoever turned it off, the panel or Home
-// Assistant.
+// Whoever turned it off, the panel or Home Assistant; each part that cares
+// hears it from app.
 void note_screen(bool on)
 {
     s_screen_on.store(on, std::memory_order_relaxed);
-    wifi::set_power_save(!on);
-    radar::set_screen(on);
-    net::set_screen(on);
-    ble::set_dark(!on);
+    app::set(app::Fact::ScreenOn, on);
 }
 
 void note_brightness(int percent)

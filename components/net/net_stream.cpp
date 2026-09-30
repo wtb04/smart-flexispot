@@ -8,7 +8,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
-#include "wifi.h"
+#include "app_state.h"
 
 #include <algorithm>
 #include <array>
@@ -22,7 +22,7 @@ constexpr int           MAX_STREAMS   = 6;
 constexpr std::uint32_t TASK_STACK    = 4096;
 constexpr UBaseType_t   TASK_PRIORITY = 3;
 constexpr BaseType_t    TASK_CORE     = 0;
-constexpr std::int64_t  LOOK_EVERY_US = 1000 * 1000;  // for the network coming and going
+constexpr std::int64_t  LOOK_EVERY_US = 1000 * 1000;  // besides being woken
 constexpr std::int64_t  SOONEST_US    = 10 * 1000;
 constexpr TickType_t    SEND_TIMEOUT  = pdMS_TO_TICKS(5 * 1000);
 
@@ -255,7 +255,7 @@ void act(Entry &e, StreamAction action)
 [[noreturn]] void stream_task(void *)
 {
     for (;;) {
-        const bool   online  = wifi::connected();
+        const bool   online  = app::get(app::Fact::Online);
         std::int64_t now     = now_us();
         std::int64_t soonest = now + LOOK_EVERY_US;
         const int    count   = locked([] { return s_count; });
@@ -294,6 +294,7 @@ esp_err_t start_task()
     }
     s_task = xTaskCreateStaticPinnedToCore(stream_task, "net_streams", TASK_STACK, nullptr, TASK_PRIORITY,
                                            stack, &ctrl, TASK_CORE);
+    app::watch(app::Fact::Online, [](bool) { wake(); });  // back at once when the network is
     return s_task != nullptr ? ESP_OK : ESP_ERR_NO_MEM;
 }
 

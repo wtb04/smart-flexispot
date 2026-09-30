@@ -10,7 +10,7 @@
 #include "net.h"
 #include "travel_secrets.h"
 #include "units.h"
-#include "wifi.h"
+#include "jobs.h"
 
 #ifndef TRAVEL_API_KEY
 #define TRAVEL_API_KEY ""
@@ -37,18 +37,12 @@ constexpr std::int64_t NEAR_REFRESH_US = 3 * units::kUsPerMinute;
 constexpr std::int64_t FAR_REFRESH_US  = 20 * units::kUsPerMinute;
 constexpr std::int64_t NEAR_SECONDS    = 90 * units::kSecondsPerMinute;
 
-constexpr TickType_t CHECK_INTERVAL = pdMS_TO_TICKS(5 * units::kMsPerSecond);
+constexpr int CHECK_MS = 5 * units::kMsPerSecond;
 
 constexpr std::size_t URL_SIZE         = 176;
 constexpr int         HTTP_TIMEOUT_MS  = 15 * units::kMsPerSecond;
 
-constexpr std::uint32_t TASK_STACK    = 5120;
-constexpr UBaseType_t   TASK_PRIORITY = 3;
-constexpr BaseType_t    TASK_CORE     = 0;
-
-StaticTask_t s_task_ctrl;
-StackType_t  s_task_stack[TASK_STACK];
-TaskHandle_t s_task = nullptr;
+jobs::Job s_job = jobs::kNoJob;
 
 SemaphoreHandle_t s_lock = nullptr;
 StaticSemaphore_t s_lock_ctrl;
@@ -128,36 +122,34 @@ bool fetch(std::int64_t arrive_by, Place place)
     return true;
 }
 
-[[noreturn]] void travel_task(void *)
+jobs::Result check()
 {
-    for (;;) {
-        const std::int64_t wanted = s_wanted.load(std::memory_order_relaxed);
-        const Place        place  = s_place.load(std::memory_order_relaxed);
-        const std::int64_t now    = esp_timer_get_time();
+    const std::int64_t wanted = s_wanted.load(std::memory_order_relaxed);
+    const Place        place  = s_place.load(std::memory_order_relaxed);
+    const std::int64_t now    = esp_timer_get_time();
 
-        const auto away = wanted - static_cast<std::int64_t>(std::time(nullptr));
-        const auto due  = away < NEAR_SECONDS ? NEAR_REFRESH_US : FAR_REFRESH_US;
+    const auto away = wanted - static_cast<std::int64_t>(std::time(nullptr));
+    const auto due  = away < NEAR_SECONDS ? NEAR_REFRESH_US : FAR_REFRESH_US;
 
-        const bool changed = wanted != s_asked_for || place != s_asked_place;
-        const bool stale   = wanted != 0 && now - s_asked_at >= due;
+    const bool changed = wanted != s_asked_for || place != s_asked_place;
+    const bool stale   = wanted != 0 && now - s_asked_at >= due;
 
-        if (wanted != 0 && wifi::connected() && (changed || stale)) {
-            s_asked_for   = wanted;
-            s_asked_place = place;
-            s_asked_at    = now;
-            if (fetch(wanted, place) && s_on_update != nullptr) {
-                s_on_update();
-            }
+    if (wanted != 0 && (changed || stale)) {
+        s_asked_for   = wanted;
+        s_asked_place = place;
+        s_asked_at    = now;
+        if (fetch(wanted, place) && s_on_update != nullptr) {
+            s_on_update();
         }
-        ulTaskNotifyTake(pdTRUE, CHECK_INTERVAL);
     }
+    return jobs::done();
 }
 
 }  // namespace
 
 esp_err_t start(UpdateHandler on_update)
 {
-    ESP_RETURN_ON_FALSE(s_task == nullptr, ESP_ERR_INVALID_STATE, TAG, "already started");
+    ESP_RETURN_ON_FALSE(s_job == jobs::kNoJob, ESP_ERR_INVALID_STATE, TAG, "already started");
     if (TRAVEL_HOST[0] == '\0') {
         return ESP_OK;
     }
@@ -171,9 +163,14 @@ esp_err_t start(UpdateHandler on_update)
 
     s_on_update = on_update;
     add_host();
-    s_task = xTaskCreateStaticPinnedToCore(travel_task, "travel", TASK_STACK, nullptr,
-                                           TASK_PRIORITY, s_task_stack, &s_task_ctrl, TASK_CORE);
-    ESP_RETURN_ON_FALSE(s_task != nullptr, ESP_ERR_NO_MEM, TAG, "task");
+    jobs::Spec spec;
+    spec.name      = TAG;
+    spec.lane      = jobs::Lane::Slow;
+    spec.period_ms = CHECK_MS;
+    spec.online    = true;
+    spec.run       = check;
+    s_job          = jobs::add(std::move(spec));
+    ESP_RETURN_ON_FALSE(s_job != jobs::kNoJob, ESP_ERR_NO_MEM, TAG, "job");
     return ESP_OK;
 }
 
@@ -192,9 +189,7 @@ void want(std::int64_t arrive_by, Place place)
     if (s_wanted.exchange(arrive_by, std::memory_order_relaxed) == arrive_by && !moved) {
         return;
     }
-    if (s_task != nullptr) {
-        xTaskNotifyGive(s_task);
-    }
+    jobs::poke(s_job);
 }
 
 int options(Option *out, int capacity)

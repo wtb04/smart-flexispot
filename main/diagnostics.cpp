@@ -15,6 +15,7 @@
 #include "hass.h"
 #include "logbuf.h"
 #include "ical.h"
+#include "jobs.h"
 #include "media.h"
 #include "net_stream.h"
 #include "radar.h"
@@ -35,7 +36,7 @@ namespace diagnostics {
 namespace {
 constexpr char TAG[] = "diag";
 
-constexpr TickType_t TICK = pdMS_TO_TICKS(units::kMsPerSecond);
+constexpr int TICK_MS = units::kMsPerSecond;
 
 constexpr int STRONG_SIGNAL_DBM = -60;
 constexpr int FAIR_SIGNAL_DBM   = -75;
@@ -66,13 +67,7 @@ constexpr std::size_t CALENDAR_TEXT_SIZE  = 48;
 constexpr std::size_t CLOCK_TEXT_SIZE     = 8;
 constexpr std::size_t SYSTEM_TEXT_SIZE    = 40;
 
-constexpr std::uint32_t TASK_STACK    = 3072;  // measured: uses 0.7 KB
-constexpr UBaseType_t   TASK_PRIORITY = 1;
-constexpr BaseType_t    TASK_CORE     = 0;
-
-StaticTask_t s_task_ctrl;
-StackType_t  s_task_stack[TASK_STACK];
-TaskHandle_t s_task = nullptr;
+jobs::Job s_job = jobs::kNoJob;
 
 using ui::Level;
 
@@ -577,7 +572,7 @@ constexpr const char *CALENDAR_TAGS[] = {"ical", "travel"};
 constexpr const char *SYSTEM_TAGS[]   = {
     "panel", "ui",     "shot",   "diag",      "clock",     "settings", "logbuf",   "board",
     "rtc",   "main_task", "cpu_start", "heap_init", "spiram", "esp_psram", "esp_image",
-    "jpeg",  "sound",  "imu",    "BMI270",    "orientation", "focus", "ota",       "remote"};
+    "jpeg",  "sound",  "imu",    "BMI270",    "orientation", "focus", "ota",       "remote",   "jobs"};
 
 struct TagSet {
     Card               card;
@@ -640,15 +635,13 @@ void update()
     update_system();
 }
 
-[[noreturn]] void diagnostics_task(void *)
+jobs::Result tick()
 {
-    for (;;) {
-        ulTaskNotifyTake(pdTRUE, TICK);
-        note_underruns();
-        if (ui::diagnostics_open()) {
-            update();
-        }
+    note_underruns();
+    if (ui::diagnostics_open()) {
+        update();
     }
+    return jobs::done();
 }
 
 }  // namespace
@@ -668,17 +661,18 @@ int card_count()
 
 esp_err_t start()
 {
-    s_task = xTaskCreateStaticPinnedToCore(diagnostics_task, "diag", TASK_STACK, nullptr,
-                                           TASK_PRIORITY, s_task_stack, &s_task_ctrl, TASK_CORE);
-    ESP_RETURN_ON_FALSE(s_task != nullptr, ESP_ERR_NO_MEM, TAG, "task");
+    jobs::Spec spec;
+    spec.name      = TAG;
+    spec.period_ms = TICK_MS;
+    spec.run       = tick;
+    s_job          = jobs::add(std::move(spec));
+    ESP_RETURN_ON_FALSE(s_job != jobs::kNoJob, ESP_ERR_NO_MEM, TAG, "job");
     return ESP_OK;
 }
 
 void refresh()
 {
-    if (s_task != nullptr) {
-        xTaskNotifyGive(s_task);
-    }
+    jobs::poke(s_job);
 }
 
 int route(const char *tag)

@@ -12,7 +12,7 @@
 #include "miniz.h"
 #include "net_core.h"
 #include "units.h"
-#include "wifi.h"
+#include "app_state.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -370,7 +370,7 @@ void log_outcome(const HostConfig &config, const Running &running, const Exchang
         {
             Lock               hold;
             const std::int64_t now = esp_timer_get_time();
-            took = s_core.next(now, wifi::connected(), s_screen_on, running, tells);
+            took = s_core.next(now, app::get(app::Fact::Online), s_screen_on, running, tells);
             busy = s_core.waiting() > 0;
             close_idle(now);
             if (took) {
@@ -395,6 +395,16 @@ void log_outcome(const HostConfig &config, const Running &running, const Exchang
         tell(tells);             // while the answer is still in this worker's buffers
         xSemaphoreGive(s_wake);  // a connection is free: another may go
     }
+}
+
+// Dark, background requests wait until it is lit.
+void set_screen(bool on)
+{
+    {
+        Lock hold;
+        s_screen_on = on;
+    }
+    xSemaphoreGive(s_wake);
 }
 
 }  // namespace
@@ -422,6 +432,8 @@ esp_err_t start()
                                                           stack, ctrl, WORKER_CORE) != nullptr,
                             ESP_ERR_NO_MEM, TAG, "worker task");
     }
+    app::watch(app::Fact::ScreenOn, set_screen);
+    app::watch(app::Fact::Online, [](bool) { xSemaphoreGive(s_wake); });
     return ESP_OK;
 }
 
@@ -602,16 +614,5 @@ bool resting(Host host)
     return status(host).resting;
 }
 
-void set_screen(bool on)
-{
-    if (s_lock == nullptr) {
-        return;
-    }
-    {
-        Lock hold;
-        s_screen_on = on;
-    }
-    xSemaphoreGive(s_wake);
-}
 
 }  // namespace net
