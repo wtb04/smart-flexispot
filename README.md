@@ -15,7 +15,6 @@
   <a href="#a-tour">A tour</a> |
   <a href="#getting-started">Getting started</a> |
   <a href="#try-it-without-the-hardware">Simulator</a> |
-  <a href="#faq-and-troubleshooting">FAQ</a> |
   <a href="docs/how-it-works.md">How it works</a> |
   <a href="CHANGELOG.md">Changelog</a>
 </p>
@@ -50,11 +49,33 @@ Once the screen was there, the extra features kept coming, each one making it a 
 
 ## A tour
 
+### The home page
+
+![The home page with music on the speaker](docs/screenshots/home-music.png)
+
+This is what the panel shows most of the day. The rail on the left is on every page: the clock, whether my phone and Wi-Fi are there, the desk's height as its own display shows it, and Stand and Sit, with the arrow for the other presets. Along the bottom are the pages, Home, Radar, Calendar, Focus and Setup.
+
+The rest is the room. The air across the top, each reading with a dot for how it is doing. The thermostat as a dial to turn, with its mode below. The lights, all of them with a tap, or hold for a picker of each light. And what is playing, the speaker's music here, or a Jellyfin episode as in the picture at the top.
+
 ### The room
 
-![A notice over the cinema view](docs/screenshots/notice.png)
+It is built Home Assistant first. The panel talks to no light or thermostat itself: everything on the home page is one of Home Assistant's own entities, and every tap goes back to Home Assistant over its websocket.
 
-The home page is my Home Assistant: CO2, VOC, humidity and PM2.5 with a dot for how each is doing, the thermostat, the lights, and what is playing. The panel also shows up in Home Assistant itself over MQTT, with its height, presets, screen and battery, so automations can move the desk or send a notice to the screen.
+It works the other way round too. The panel shows up in Home Assistant as a device of its own over MQTT, with the desk's controls, its sensors and its diagnostics, so automations can move the desk, turn the screen off or put a message on it.
+
+| In Home Assistant | Entities |
+|---|---|
+| Controls | Up, Down, Stop, Preset 1 to 6, Screen |
+| Sensors | Height, Active preset, Motion, Presence |
+| Notifications | Screen message |
+| Configuration | Brightness |
+| Diagnostics | Battery, its voltage, current and power, Charging, External power, Desk link, Presence signal, Signal, Uptime, Last update |
+
+### Notices
+
+![A notice from Home Assistant over the home page](docs/screenshots/room-notice.png)
+
+Anything in Home Assistant can put a message on the screen through the panel's *Screen message* entity: the washing machine that is done, a door left open. It slides in over whatever is showing, fullscreen views included, and goes after a while or when tapped.
 
 ### The desk
 
@@ -96,7 +117,9 @@ A focus timer in rounds, 25 minutes on and 5 off by default with a long break af
 
 ### Away from the desk
 
-The panel knows my phone over Bluetooth. When I walk away the screen goes dark and it stops fetching anything only the screen would show, and when I come back it wakes up. Turn it upside down and the picture turns with it.
+The panel knows my phone over Bluetooth, by its identity key, and the phone on the rail shows whether it is there. While it is away, Radar, Calendar and Focus are hidden, leaving Home and Setup, and presets 5 and 6 show for whoever uses the desk then. *Pages while away* in Setup turns that off.
+
+The screen can be switched off from Home Assistant, and a tap wakes it. While it is dark, the panel fetches nothing that only the screen would show. With Orientation on Auto, turning the panel upside down turns the picture with it.
 
 ### Setup and diagnostics
 
@@ -124,54 +147,24 @@ The protocol and pinouts come from [iMicknl/LoctekMotion_IoT](https://github.com
 
 There are two ways to reach the control box. Either the Tab5 is wired to it directly, or a small ESP32 stays at the desk on the wire and the Tab5 talks to that over Bluetooth, so the panel can go anywhere in the room on its battery.
 
-```mermaid
-flowchart TB
-    subgraph one ["Option 1: a cable"]
-        direction LR
-        tab5a["Tab5"] ---|"UART, RJ45 cable"| box1["Control box"]
-    end
-    subgraph two ["Option 2: Bluetooth"]
-        direction LR
-        tab5b["Tab5"] -. "Bluetooth" .- esp["ESP32 companion"]
-        esp ---|"UART, RJ45 cable"| box2["Control box"]
-    end
-    one ~~~ two
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/overview-dark.svg">
+  <img alt="Block diagram: the Tab5's ESP32-P4 and ESP32-C6, and the two links to the control box, a UART cable or Bluetooth to a companion" src="docs/diagrams/overview-light.svg">
+</picture>
 
 > [!WARNING]
 > **The control box talks at 5 V and the Tab5's pins are 3.3 V**, with no level shifter anywhere on the M5-Bus ([measured here](https://github.com/iMicknl/LoctekMotion_IoT/issues/34)). People wire it directly and it works for them, but it is out of spec. A level shifter, or at least a series resistor on RX and the wake line, is cheap insurance.
 
-The pins below are the HS01B-1 / HS13B-1 pinout. **Measure your own first**: the HS13A-1 puts 29 V on pins 7 and 8, and people have killed control boxes by trusting the wrong table.
-
 #### Option 1: a cable to the Tab5
 
-```mermaid
-flowchart LR
-    subgraph tab5 ["Tab5, M5-Bus"]
-        t_tx["pin 14, GPIO37, TX"]
-        t_rx["pin 13, GPIO38, RX"]
-        t_wake["pin 23, GPIO47, wake"]
-        t_gnd["pin 1, 3 or 5, GND"]
-    end
-    subgraph rj45 ["Control box, RJ45"]
-        r6["pin 6"]
-        r5["pin 5"]
-        r4["pin 4, PIN 20"]
-        r7["pin 7, GND"]
-    end
-    t_tx --- r6
-    t_rx --- r5
-    t_wake --- r4
-    t_gnd --- r7
-    linkStyle 0 stroke:#f58a3a,stroke-width:3px
-    linkStyle 1 stroke:#4a90d9,stroke-width:3px
-    linkStyle 2 stroke:#5bb974,stroke-width:3px
-    linkStyle 3 stroke:#888888,stroke-width:3px
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/wiring-1-dark.svg">
+  <img alt="Option 1 wiring: the Tab5's M5-Bus pins to RJ45 pins 4 to 7" src="docs/diagrams/wiring-1-light.svg">
+</picture>
 
 #### Option 2: over Bluetooth, with a companion
 
-The companion is an ESP32 DevKit V1 (30-pin) on a small carrier board with an RJ45 jack. The board takes its power from the desk, shifts the box's 5 V signal down to 3.3 V for the ESP32, and uses the two LEDs in the jack for Bluetooth (`BT`) and the desk link (`LINK`).
+The companion is an ESP32 DevKit V1 (30-pin) on a small carrier board of my own with an RJ45 jack. The board takes its power from the desk, shifts the box's 5 V signal down to 3.3 V for the ESP32, and lights the two LEDs in the jack for Bluetooth (`BT`) and the desk link (`LINK`).
 
 | Top | Bottom |
 |---|---|
@@ -179,39 +172,19 @@ The companion is an ESP32 DevKit V1 (30-pin) on a small carrier board with an RJ
 
 ![The carrier board in 3D, with the DevKit socket and the RJ45 jack](pcb/img/board-3d.png)
 
-```mermaid
-flowchart LR
-    subgraph rj45 ["Control box, RJ45"]
-        p8["pin 8, 5 V"]
-        p7["pin 7, GND"]
-        p6["pin 6, box TX"]
-        p5["pin 5, box RX"]
-        p4["pin 4, wake"]
-    end
-    subgraph board ["Carrier board"]
-        fuse["PTC fuse, diode"]
-        shift["10k / 15k divider, clamp"]
-        rtx["220 Ω"]
-        rwake["220 Ω"]
-    end
-    subgraph esp ["ESP32 DevKit"]
-        vin["VIN"]
-        gnd["GND"]
-        rx["GPIO16, RX2"]
-        tx["GPIO17, TX2"]
-        wake["GPIO23"]
-    end
-    p8 --- fuse --- vin
-    p7 --- gnd
-    p6 --- shift --- rx
-    p5 --- rtx --- tx
-    p4 --- rwake --- wake
-    linkStyle 0,1 stroke:#d9534f,stroke-width:3px
-    linkStyle 2 stroke:#888888,stroke-width:3px
-    linkStyle 3,4 stroke:#4a90d9,stroke-width:3px
-    linkStyle 5,6 stroke:#f58a3a,stroke-width:3px
-    linkStyle 7,8 stroke:#5bb974,stroke-width:3px
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/wiring-2-dark.svg">
+  <img alt="Option 2 wiring: the DevKit's pins, the carrier board's parts and the RJ45 jack" src="docs/diagrams/wiring-2-light.svg">
+</picture>
+
+The two LEDs in the jack say how the companion is doing, so you can tell at a glance without a laptop:
+
+| LED | Solid | Blinking | Off |
+|---|---|---|---|
+| `BT`, yellow | the panel is connected | a short blink every 2 s: running, waiting for the panel | not running |
+| `LINK`, green | the control box answers | fast: bytes arrive but nothing decodes, so a wiring or baud fault | the box is silent |
+
+At start-up each LED blinks twice on its own and then both light together, which shows both work.
 
 <details>
 <summary>The schematic</summary>
@@ -294,41 +267,9 @@ sim/run.sh
 
 The calendar, journey and radar are real, and those are the only things it is allowed to reach, so it can never move a real desk or turn off your lights. All screenshots here are from it. See [sim/README.md](sim/README.md) for the keys.
 
-## FAQ and troubleshooting
+## How it works
 
-**Do I need Home Assistant?**
-
-No. Leave its secrets empty and the home page stays empty, while the desk, calendar and focus timer work without it. The radar does need it: it takes its centre from Home Assistant's home zone.
-
-**The desk does not move on the first tap**
-
-A control box that has been left alone goes completely silent and ignores movement until it is woken. That is what the wake line (RJ45 pin 4) is for, so check it is wired and that the wake GPIO matches where the wire actually is. Driving the wrong pin looks exactly like a box that will not wake.
-
-**Nothing comes back from the control box at all**
-
-The pin labels are from the control panel's side, so the connection is straight, not crossed: box TX goes to your TX. On the companion, try swapping TX and RX before anything else. The box answers every frame it gets, so silence means it is not hearing you.
-
-**The Tab5 will not boot with the desk plugged in**
-
-GPIO37 and 38 are strapping pins on the P4. The control box idles at the safe level, but if the Tab5 ever refuses to boot with the desk attached, unplug it before blaming the firmware.
-
-**Which pin is reset?**
-
-Not M5-Bus pin 6. That is `SOC_RST` and resets the Tab5 itself. The one you want is the control box's PIN 20, RJ45 pin 4.
-
-**An update did not stick**
-
-The panel rolled back because the new firmware did not get back on the network in time. It says so in a notice, and Home Assistant's *Last update* sensor reads *rolled back* until the next one takes. A change to `partitions.csv` always needs the cable.
-
-## Under the hood
-
-- **One network scheduler.** Every request and every live connection (Home Assistant's websocket and MQTT, Jellyfin's websocket) goes through one place that decides what goes first, retries, backs off and waits for Wi-Fi.
-- **Shared workers** for everything periodic, instead of a task each, which freed most of the internal RAM the radio and TLS need.
-- **A watchdog, crash dumps and rollback.** A stuck worker restarts the panel, a crash leaves its dump in flash, and an update that does not reach the network is rolled back.
-- **A display that does not flicker.** The screen is fed by DMA round a ring of frames, so a busy moment no longer shows as a blue flash.
-- **Tested off the device.** The schedulers, the desk protocol and every parser are plain C++, tested on the host under GoogleTest.
-
-The whole story, and how to work on it, is in [docs/how-it-works.md](docs/how-it-works.md).
+How the panel is put together inside, the desk protocol, and how to run the tests, the simulator and the development build are in [docs/how-it-works.md](docs/how-it-works.md).
 
 ## Credits
 
