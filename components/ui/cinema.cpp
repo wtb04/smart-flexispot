@@ -160,7 +160,8 @@ void place_row()
         lv_obj_set_hidden(s_row[i], !shown);
         if (shown) {
             lv_obj_set_pos(s_row[i], x, s_row_y);
-            x += lv_obj_get_width(s_row[i]) + BUTTON_GAP;
+            // The width it was given: laid out it may not be yet, and reads 0.
+            x += lv_obj_get_style_width(s_row[i], LV_PART_MAIN) + BUTTON_GAP;
         }
     }
 }
