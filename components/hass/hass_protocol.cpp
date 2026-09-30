@@ -265,6 +265,11 @@ void add_system_entities(cJSON *cmps, const std::string &device_id, const Topics
     cJSON_AddStringToObject(uptime, "dev_cla", "duration");
     cJSON_AddStringToObject(uptime, "ent_cat", "diagnostic");
 
+    cJSON *update = add_state_entity(cmps, "last_update", "sensor", "Last update", device_id, topics,
+                                     "{{ value_json.last_update }}");
+    cJSON_AddStringToObject(update, "ic", "mdi:update");
+    cJSON_AddStringToObject(update, "ent_cat", "diagnostic");
+
     cJSON *motion = add_state_entity(cmps, "motion", "sensor", "Motion", device_id, topics,
                                      "{{ value_json.motion }}");
     cJSON_AddStringToObject(motion, "ic", "mdi:desk");
@@ -376,6 +381,7 @@ std::string state_document(const Telemetry &t)
     cJSON_AddNumberToObject(root, "rssi", truncated_to_step(t.rssi_dbm, RSSI_STEP_DBM));
     cJSON_AddNumberToObject(root, "uptime_min", t.uptime_s / units::kSecondsPerMinute);
     cJSON_AddNumberToObject(root, "free_heap_kb", t.free_heap / units::kBytesPerKiB);
+    cJSON_AddStringToObject(root, "last_update", t.last_update.c_str());
     if (!t.ip_address.empty()) {
         cJSON_AddStringToObject(root, "ip", t.ip_address.c_str());
     }

@@ -12,6 +12,7 @@
 #include "cJSON.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_app_desc.h"
 #include "esp_timer.h"
 #include "esp_system.h"
 #include "net.h"
@@ -331,6 +332,20 @@ bool desk_moving()
     return std::strcmp(desk::motion(), "idle") != 0;
 }
 
+// Once for each update that did not take; kept until tapped, as it will be
+// read later, if at all.
+void tell_rolled_back()
+{
+    const ota::RolledBack back = ota::rolled_back();
+    if (!back.new_now) {
+        return;
+    }
+    char message[128];
+    std::snprintf(message, sizeof(message), "%s did not start well, so the panel went back to %s", back.version,
+                  esp_app_get_description()->version);
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::notify("Update", "The update did not take", message, ui::Level::Warn, -1));
+}
+
 void show_update(const ota::Status &status)
 {
     const ui::UpdateTarget busy = status.busy == ota::Target::Panel       ? ui::UpdateTarget::Panel
@@ -453,6 +468,7 @@ extern "C" void app_main(void)
         .restart = before_update_restart,
         .relay   = ble::desk::send_update,
     }));
+    tell_rolled_back();
     ESP_ERROR_CHECK_WITHOUT_ABORT(remote::start());
     ESP_ERROR_CHECK(wallclock::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("network"));

@@ -189,6 +189,9 @@ hass::protocol::Telemetry gather_telemetry(const ble::Stats &radio)
     out.brightness     = s_brightness.load(std::memory_order_relaxed);
     out.uptime_s       = static_cast<std::uint32_t>(esp_timer_get_time() / units::kUsPerSecond);
     out.free_heap      = static_cast<std::uint32_t>(esp_get_free_heap_size());
+    if (const ota::RolledBack back = ota::rolled_back(); back.happened) {
+        out.last_update = std::string("rolled back: ") + back.version;
+    }
 
     power::State battery{};
     if (power::read(battery) == ESP_OK && battery.present) {

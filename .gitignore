@@ -1,6 +1,7 @@
 build/
 # The development build with the remote log and screen pages, see tools/remote.py.
 build_remote/
+build_test/
 __pycache__/
 managed_components/
 sdkconfig

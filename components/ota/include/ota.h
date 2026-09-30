@@ -54,4 +54,15 @@ void watch();
 /** It got there: the firmware keeps its place. */
 void confirm();
 
+/** An update the bootloader turned back from, the panel on the firmware before
+ *  it: it did not reach the network in time, or did not start. Stays so
+ *  until the next update takes. */
+struct RolledBack {
+    bool happened = false;
+    bool new_now  = false;  // not told before: once for each image
+    char version[32] = "";  // what it would have been
+    char image[9]    = "";  // its ELF's sha256, the first eight of it in hex
+};
+RolledBack rolled_back();
+
 }  // namespace ota

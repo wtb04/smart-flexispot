@@ -26,6 +26,8 @@
 #endif
 
 #include <algorithm>
+#include <array>
+#include <iterator>
 #include <cstdio>
 #include <cstring>
 
@@ -575,6 +577,38 @@ void watch()
     }
     ESP_LOGW(TAG, "new firmware, on trial until it reaches the network");
     restart_in(PROVE_WITHIN_US, &s_deadline, "ota-trial");
+}
+
+namespace {
+using ImageMark = std::array<char, 9>;
+settings::Record<ImageMark> s_rolled_told{NVS_NAMESPACE, "rolled_told", ImageMark{}};
+}  // namespace
+
+RolledBack rolled_back()
+{
+    static const RolledBack found = [] {
+        RolledBack             out;
+        const esp_partition_t *turned = esp_ota_get_last_invalid_partition();
+        esp_app_desc_t         desc{};
+        if (turned == nullptr || esp_ota_get_partition_description(turned, &desc) != ESP_OK) {
+            return out;
+        }
+        out.happened = true;
+        std::snprintf(out.version, sizeof(out.version), "%s", desc.version);
+        for (int i = 0; i < 4; ++i) {
+            std::snprintf(out.image + 2 * i, 3, "%02x", desc.app_elf_sha256[i]);
+        }
+        ImageMark mark{};
+        std::copy(std::begin(out.image), std::end(out.image), mark.begin());
+        out.new_now = s_rolled_told.get() != mark;
+        if (out.new_now) {
+            s_rolled_told.set(mark);
+            ESP_LOGW(TAG, "update %s (%s) did not take: back on %s", out.version, out.image,
+                     esp_app_get_description()->version);
+        }
+        return out;
+    }();
+    return found;
 }
 
 void confirm()

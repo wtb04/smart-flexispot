@@ -27,6 +27,7 @@ struct Telemetry {
     std::uint32_t uptime_s   = 0;
     std::uint32_t free_heap  = 0;
     std::string   ip_address;
+    std::string   last_update = "installed";  // or "rolled back: <version>"
 };
 
 struct Topics {
