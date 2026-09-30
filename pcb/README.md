@@ -1,6 +1,6 @@
 # Desk companion board
 
-A carrier for an ESP32 DevKit V1 (30-pin) that plugs into a LoctekMotion / Flexispot control box over RJ45. It runs off the desk's 5 V, shifts the box's 5 V signal down for the ESP32, and uses the jack's two LEDs for Bluetooth (`BT`) and the desk link (`LINK`). The firmware is in [`../proxy`](../proxy).
+A carrier for an ESP32 DevKit V1 (30-pin) that plugs into a LoctekMotion / Flexispot control box over RJ45. It runs off the desk's 5 V, shifts the box's 5 V signal down for the ESP32, and uses the jack's two LEDs for Bluetooth (`BT`) and the desk link (`LINK`). What they show is in [the main README](../README.md#option-2-over-bluetooth-with-a-companion). The firmware is in [`../proxy`](../proxy).
 
 | | |
 |---|---|
