@@ -8,6 +8,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "job_core.h"
+#include "watchdog.h"
 
 #include <algorithm>
 
@@ -27,6 +28,10 @@ constexpr UBaseType_t   SLOW_PRIORITY  = 2;
 constexpr BaseType_t    CORE          = 0;  // LVGL has the other
 constexpr std::int64_t  LONGEST_SLEEP = 60 * 1000 * 1000;
 constexpr int           QUICK_MOST_MS = 100;  // a quick job taking longer holds up the rest
+// Past these a job is taken to be stuck: a quick one, or one waiting on a
+// fetch, which net gives up on after a minute.
+constexpr int           QUICK_STUCK_MS = 10 * 1000;
+constexpr int           SLOW_STUCK_MS  = 3 * 60 * 1000;
 
 Core              s_core;
 SemaphoreHandle_t s_lock       = nullptr;
@@ -52,7 +57,9 @@ void wake_all()
 
 [[noreturn]] void worker_task(void *arg)
 {
-    const auto lane = static_cast<Lane>(reinterpret_cast<std::intptr_t>(arg));
+    const auto            lane = static_cast<Lane>(reinterpret_cast<std::intptr_t>(arg));
+    const watchdog::Beat beat = lane == Lane::Quick ? watchdog::add("jobs", QUICK_STUCK_MS)
+                                                    : watchdog::add("jobs_slow", SLOW_STUCK_MS);
     for (;;) {
         Job                     job = kNoJob;
         bool                    got = false;
@@ -72,7 +79,9 @@ void wake_all()
             }
         }
         if (got) {
-            const Result       result  = run ? run() : done();
+            watchdog::busy(beat, what);
+            const Result result = run ? run() : done();
+            watchdog::idle(beat);
             const std::int64_t end     = esp_timer_get_time();
             const int          took_ms = static_cast<int>((end - now) / 1000);
             int                most    = 0;

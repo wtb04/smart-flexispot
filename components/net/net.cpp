@@ -13,6 +13,7 @@
 #include "net_core.h"
 #include "units.h"
 #include "app_state.h"
+#include "watchdog.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -359,6 +360,10 @@ void log_outcome(const HostConfig &config, const Running &running, const Exchang
 {
     auto &worker = *static_cast<Worker *>(arg);
     bool  busy   = false;
+    // A request is given its host's timeout for each of connecting, sending
+    // and reading, and a retry on a fresh connection: far past that is stuck.
+    constexpr int        STUCK_MS = 90 * 1000;
+    const watchdog::Beat beat     = watchdog::add("net", STUCK_MS);
     for (;;) {
         xSemaphoreTake(s_wake, busy ? BUSY_WAIT : IDLE_WAIT);
 
@@ -385,7 +390,10 @@ void log_outcome(const HostConfig &config, const Running &running, const Exchang
             continue;
         }
 
+        const std::string doing = std::string(config.name) + ' ' + running.request.what;
+        watchdog::busy(beat, doing.c_str());
         const Exchange exchange = send(config, *connection, running, worker);
+        watchdog::idle(beat);
         log_outcome(config, running, exchange);
         {
             Lock hold;

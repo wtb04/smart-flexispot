@@ -9,6 +9,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "app_state.h"
+#include "watchdog.h"
 
 #include <algorithm>
 #include <array>
@@ -254,6 +255,9 @@ void act(Entry &e, StreamAction action)
 
 [[noreturn]] void stream_task(void *)
 {
+    // Starting and stopping a client waits on its task; a minute is stuck.
+    constexpr int        STUCK_MS = 60 * 1000;
+    const watchdog::Beat beat     = watchdog::add("net_streams", STUCK_MS);
     for (;;) {
         const bool   online  = app::get(app::Fact::Online);
         std::int64_t now     = now_us();
@@ -270,7 +274,9 @@ void act(Entry &e, StreamAction action)
                 if (action == StreamAction::None) {
                     break;
                 }
+                watchdog::busy(beat, e.name);
                 act(e, action);
+                watchdog::idle(beat);
             }
             soonest = std::min(soonest, locked([&] { return e.core.due(now); }));
         }

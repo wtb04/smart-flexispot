@@ -392,8 +392,9 @@ esp_err_t streams_page(httpd_req_t *req)
 }
 
 // Every job the shared workers run, and how each is doing; ?poke=N runs one
-// now, and ?screen=0 or 1 tells everything listening that the screen went dark
-// or lit, without the backlight or Home Assistant hearing of it.
+// now, ?screen=0 or 1 tells everything listening that the screen went dark or
+// lit, without the backlight or Home Assistant hearing of it, and ?stick=S has
+// a quick job hang for S seconds, for the watchdog to find.
 esp_err_t jobs_page(httpd_req_t *req)
 {
     if (!ota::authorised(req)) {
@@ -406,6 +407,18 @@ esp_err_t jobs_page(httpd_req_t *req)
     }
     if (httpd_query_key_value(query, "screen", value, sizeof(value)) == ESP_OK) {
         app::set(app::Fact::ScreenOn, std::atoi(value) != 0);
+    }
+    if (httpd_query_key_value(query, "stick", value, sizeof(value)) == ESP_OK) {
+        static int stick_s = 0;
+        stick_s            = std::clamp(std::atoi(value), 1, 60);
+        jobs::Spec spec;
+        spec.name     = "stuck on purpose";
+        spec.first_ms = 0;
+        spec.run      = [] {
+            vTaskDelay(pdMS_TO_TICKS(stick_s * 1000));
+            return jobs::sleep();
+        };
+        jobs::add(std::move(spec));
     }
     httpd_resp_set_type(req, "text/plain");
     for (int i = 0; i < jobs::count(); ++i) {
