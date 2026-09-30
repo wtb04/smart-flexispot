@@ -13,7 +13,8 @@ struct Handlers {
     void (*on_screen)(bool on);
 };
 
-/** Safe to call before Wi-Fi is up. `brightness_floor` is the dimmest the
+/** Safe to call before Wi-Fi is up: net connects it when there is a network.
+ *  `brightness_floor` is the dimmest the
  *  panel goes, for Home Assistant's slider. */
 esp_err_t start(const Handlers &handlers, int brightness_floor);
 
@@ -21,9 +22,5 @@ esp_err_t start(const Handlers &handlers, int brightness_floor);
 esp_err_t publish(const protocol::Telemetry &telemetry);
 
 bool connected();
-
-/** For when the client's own retries have got nowhere: alternately nudges it
- *  to retry now, and stops and starts it. Creates it if it never was. */
-esp_err_t restart();
 
 }  // namespace hass

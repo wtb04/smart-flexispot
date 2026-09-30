@@ -10,8 +10,8 @@ namespace hass::ws {
 /** Invoked from the socket task whenever the entity store changes. */
 using UpdateHandler = void (*)(const EntityStore &store);
 
-/** Safe to call before Wi-Fi is up; the client retries on its own. Subscribes
- *  to `entities` and nothing else. */
+/** Safe to call before Wi-Fi is up: net connects it when there is a network,
+ *  and again whenever it drops. Subscribes to `entities` and nothing else. */
 esp_err_t start(UpdateHandler on_update, std::vector<std::string> entities,
                 std::vector<std::string> attributes = {});
 
@@ -21,10 +21,6 @@ bool connected();
 /** Where Home Assistant serves plain HTTP, such as pictures: the websocket's
  *  scheme and host without the path. Empty when none is configured. */
 const char *http_origin();
-
-/** Stops and starts the client, for when its own retries have got nowhere.
- *  Creates it if it never was. */
-esp_err_t restart();
 
 /** Called when a service call did not happen: refused by Home Assistant, or
  *  not sent because the socket was down. From the socket or the caller's task. */

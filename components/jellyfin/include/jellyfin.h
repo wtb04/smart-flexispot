@@ -12,9 +12,13 @@ namespace jellyfin {
 /** Each change in what the followed session plays, from the socket's task. */
 using Handler = void (*)(const NowPlaying &now);
 
-/** Safe before Wi-Fi is up: the client keeps trying on its own. Does nothing
- *  without an address and key in jellyfin_secrets.h. */
+/** Safe before Wi-Fi is up: net connects it when there is a network, and
+ *  again whenever it drops. Does nothing without an address and key in
+ *  jellyfin_secrets.h. */
 esp_err_t start(Handler on_change);
+
+/** True while its sessions are being followed. */
+bool connected();
 
 /** For the session being followed; from any task, returning at once. */
 void play_pause();

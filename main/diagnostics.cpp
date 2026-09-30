@@ -16,6 +16,7 @@
 #include "logbuf.h"
 #include "ical.h"
 #include "media.h"
+#include "net_stream.h"
 #include "radar.h"
 #include "settings.h"
 #include "power.h"
@@ -82,8 +83,8 @@ enum Card : int { WIFI, HASS, PRESENCE, DESK, LINK, POWER, RADAR, CALENDAR, SYST
 enum WifiRow : int { WIFI_NETWORK, WIFI_SIGNAL, WIFI_ADDRESS, WIFI_CHANNEL, WIFI_MAC };
 constexpr const char *WIFI_ROWS[] = {"Network", "Signal", "Address", "Channel", "MAC"};
 
-enum HassRow : int { HASS_BROKER, HASS_SOCKET, HASS_ENTITIES, HASS_ART, HASS_REFUSED };
-constexpr const char *HASS_ROWS[] = {"Broker", "Socket", "Entities", "Cover art", "Last refused"};
+enum HassRow : int { HASS_BROKER, HASS_SOCKET, HASS_JELLYFIN, HASS_ENTITIES, HASS_ART, HASS_REFUSED };
+constexpr const char *HASS_ROWS[] = {"Broker", "Socket", "Jellyfin", "Entities", "Cover art", "Last refused"};
 
 enum PresenceRow : int { PRESENCE_PHONE, PRESENCE_SIGNAL, PRESENCE_KEY, PRESENCE_RADIO };
 constexpr const char *PRESENCE_ROWS[] = {"Phone", "Signal", "Identity key", "Radio"};
@@ -217,12 +218,36 @@ void update_wifi()
     }
 }
 
+// How one of net's live connections is doing, as "again in 8 s, token rejected".
+void stream_row(Card card, int which, const char *name)
+{
+    const net::Stream stream = net::find_stream(name);
+    if (stream == net::kNoStream) {
+        row(card, which, "not set up");
+        return;
+    }
+    const net::StreamStatus status = net::stream_status(stream);
+    char                    text[REFUSAL_TEXT_SIZE];
+    switch (status.state) {
+        case net::StreamState::Ready: row(card, which, "connected", Level::Good); return;
+        case net::StreamState::Connecting:
+        case net::StreamState::Open: row(card, which, "connecting", Level::Warn); return;
+        case net::StreamState::Offline: row(card, which, "no network", Level::Bad); return;
+        case net::StreamState::Waiting:
+            std::snprintf(text, sizeof(text), "again in %d s%s%s", (status.next_in_ms + 999) / 1000,
+                          status.last_error.empty() ? "" : ", ", status.last_error.c_str());
+            row(card, which, text, Level::Bad);
+            return;
+    }
+}
+
 void update_hass()
 {
     const bool broker = hass::connected();
     const bool socket = hass::ws::connected();
-    row(HASS, HASS_BROKER, broker ? "connected" : "offline", broker ? Level::Good : Level::Bad);
-    row(HASS, HASS_SOCKET, socket ? "connected" : "offline", socket ? Level::Good : Level::Bad);
+    stream_row(HASS, HASS_BROKER, "hass");
+    stream_row(HASS, HASS_SOCKET, "ha_ws");
+    stream_row(HASS, HASS_JELLYFIN, "jellyfin");
     summary(HASS,
             broker && socket ? "connected"
             : broker         ? "broker only"
@@ -536,7 +561,8 @@ void update_system()
 
 constexpr const char *WIFI_TAGS[] = {
     "wifi",       "esp_netif_handlers", "esp_netif",  "esp_wifi_remote", "wifi_init",
-    "H_API",      "H_SDIO_DRV",         "transport",  "sdio_wrapper",    "esp_hosted"};
+    "H_API",      "H_SDIO_DRV",         "transport",  "sdio_wrapper",    "esp_hosted",
+    "net"};
 constexpr const char *HASS_TAGS[] = {"hass",        "ha_ws",       "websocket_client", "room",
                                      "jellyfin",
                                      "network",     "mqtt_client", "MQTT_CLIENT",
@@ -551,7 +577,7 @@ constexpr const char *CALENDAR_TAGS[] = {"ical", "travel"};
 constexpr const char *SYSTEM_TAGS[]   = {
     "panel", "ui",     "shot",   "diag",      "clock",     "settings", "logbuf",   "board",
     "rtc",   "main_task", "cpu_start", "heap_init", "spiram", "esp_psram", "esp_image",
-    "jpeg",  "sound",  "imu",    "BMI270",    "orientation", "focus", "ota"};
+    "jpeg",  "sound",  "imu",    "BMI270",    "orientation", "focus", "ota",       "remote"};
 
 struct TagSet {
     Card               card;

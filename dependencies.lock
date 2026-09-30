@@ -487,6 +487,6 @@ direct_dependencies:
 - espressif/libjpeg-turbo
 - espressif/m5stack_tab5
 - idf
-manifest_hash: 81c1dd59ed20a5072322a9c9c82eb97953ba9c77f0f2fb19d02030efce46c286
+manifest_hash: 3e66e2bec5171637ba855f5b2d1d43af5cb141b5374374571899757751b2c951
 target: esp32p4
 version: 2.0.0

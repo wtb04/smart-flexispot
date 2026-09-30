@@ -1,14 +1,12 @@
 #include "jellyfin.h"
 
 #include "esp_check.h"
-#include "esp_crt_bundle.h"
-#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
-#include "esp_websocket_client.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "net.h"
+#include "net_stream.h"
 #include "units.h"
 
 #include <cstdio>
@@ -37,22 +35,14 @@ constexpr char DEVICE_ID[] = "smart-flexispot";  // so its own session is known 
 constexpr int SESSIONS_INTERVAL_MS = 60 * units::kMsPerSecond;
 // The server drops a socket it has not heard from in its keep-alive time, 60 s
 // as it says; half that is what its own clients send at.
-constexpr TickType_t KEEP_ALIVE = pdMS_TO_TICKS(30 * units::kMsPerSecond);
+constexpr int KEEP_ALIVE_MS = 30 * units::kMsPerSecond;
 
 constexpr int         BUFFER_SIZE        = 16 * units::kBytesPerKiB;  // fewer reads for the big ones
 constexpr int         SOCKET_STACK       = 6144;
 constexpr int         NETWORK_TIMEOUT_MS = 10 * units::kMsPerSecond;
-constexpr int         RECONNECT_MS       = 5 * units::kMsPerSecond;
-constexpr TickType_t  SEND_TIMEOUT       = pdMS_TO_TICKS(5 * units::kMsPerSecond);
 constexpr std::size_t MAX_MESSAGE        = 64 * units::kBytesPerKiB;  // once trimmed
 constexpr int         HTTP_TIMEOUT_MS    = 5 * units::kMsPerSecond;
 
-constexpr int WS_OPCODE_CONTINUATION = 0x00;
-constexpr int WS_OPCODE_TEXT         = 0x01;
-
-constexpr std::uint32_t KEEP_ALIVE_STACK    = 3072;
-constexpr UBaseType_t   KEEP_ALIVE_PRIORITY = 3;
-constexpr BaseType_t    KEEP_ALIVE_CORE     = 0;
 constexpr int           COMMAND_DEADLINE_MS = 10 * units::kMsPerSecond;
 constexpr std::size_t   COMMAND_ANSWER_MAX  = 4 * units::kBytesPerKiB;
 constexpr std::size_t   LOOKUP_ANSWER_MAX   = 16 * units::kBytesPerKiB;
@@ -61,11 +51,12 @@ constexpr char HTTPS[] = "https://";
 constexpr char WSS[]   = "wss://";
 
 
-esp_websocket_client_handle_t s_client   = nullptr;
-Handler                       s_on_change = nullptr;
-std::string                   s_rx;
-Trimmer                       s_trim;
-std::int64_t                  s_rx_began_us = 0;  // when the message's first bytes came
+net::Stream  s_stream    = net::kNoStream;
+Handler      s_on_change = nullptr;
+std::string  s_rx;
+Trimmer      s_trim;
+bool         s_rx_dropped  = false;  // the message coming in is over the most
+std::int64_t s_rx_began_us = 0;      // when the message's first bytes came
 
 std::mutex s_now_lock;
 NowPlaying s_now;  // what was last handed on
@@ -135,59 +126,48 @@ int toggle_subtitle_locally()
     return now.subtitle;
 }
 
-bool send_text(const std::string &text)
+// Sessions come in a piece at a time and are trimmed as they come, as a
+// session with its queue runs to more than half a megabyte.
+void take_piece(const net::Fragment &piece)
 {
-    return s_client != nullptr && esp_websocket_client_is_connected(s_client) &&
-           esp_websocket_client_send_text(s_client, text.data(), static_cast<int>(text.size()),
-                                          SEND_TIMEOUT) >= 0;
-}
-
-void handle_data(const esp_websocket_event_data_t *event)
-{
-    if (event->op_code == WS_OPCODE_TEXT) {
-        if (event->payload_offset == 0) {
-            s_rx.clear();
-            s_trim.reset();
-            s_rx_began_us = esp_timer_get_time();
-        }
-    } else if (event->op_code != WS_OPCODE_CONTINUATION || s_rx.empty()) {
-        return;  // binary, ping, pong, close: not ours
-    }
-    s_trim.feed(event->data_ptr, static_cast<std::size_t>(event->data_len), s_rx);
-    if (s_rx.size() > MAX_MESSAGE) {
-        ESP_LOGW(TAG, "message over %u bytes, dropping", static_cast<unsigned>(MAX_MESSAGE));
+    if (piece.first) {
         s_rx.clear();
-        return;
+        s_trim.reset();
+        s_rx_dropped  = false;
+        s_rx_began_us = esp_timer_get_time();
     }
-    if (event->payload_offset + event->data_len < event->payload_len || !event->fin) {
-        return;
+    if (!s_rx_dropped) {
+        s_trim.feed(piece.data, piece.length, s_rx);
+        if (s_rx.size() > MAX_MESSAGE) {
+            ESP_LOGW(TAG, "message over %u bytes, dropping", static_cast<unsigned>(MAX_MESSAGE));
+            s_rx.clear();
+            s_rx_dropped = true;
+        }
     }
-    if (message_type(s_rx) == "Sessions") {
-        take_sessions(s_rx);
+    if (piece.last) {
+        if (!s_rx_dropped && message_type(s_rx) == "Sessions") {
+            take_sessions(s_rx);
+        }
+        s_rx.clear();
     }
-    s_rx.clear();
 }
 
-void on_event(void *, esp_event_base_t, std::int32_t id, void *data)
+void on_open()
 {
-    switch (static_cast<esp_websocket_event_id_t>(id)) {
-        case WEBSOCKET_EVENT_CONNECTED:
-            ESP_LOGI(TAG, "connected, following sessions");
-            s_rx.clear();
-            send_text(sessions_start(SESSIONS_INTERVAL_MS));
-            break;
-        case WEBSOCKET_EVENT_DISCONNECTED:
-        case WEBSOCKET_EVENT_CLOSED:
-            s_rx.clear();
-            s_rx_began_us = 0;
-            take_sessions("");  // nothing known to be playing while away
-            break;
-        case WEBSOCKET_EVENT_DATA:
-            handle_data(static_cast<esp_websocket_event_data_t *>(data));
-            break;
-        default:
-            break;
+    s_rx.clear();
+    if (net::stream_send(s_stream, sessions_start(SESSIONS_INTERVAL_MS))) {
+        ESP_LOGI(TAG, "connected, following sessions");
+        net::stream_ready(s_stream);
+    } else {
+        net::stream_fail(s_stream, "could not ask for sessions");
     }
+}
+
+void on_close()
+{
+    s_rx.clear();
+    s_rx_began_us = 0;
+    take_sessions("");  // nothing known to be playing while away
 }
 
 // Commands and lookups go through net, on one connection kept for the
@@ -243,15 +223,6 @@ void command(const std::string &path, const std::string &body, const char *what,
     net::submit(std::move(request));
 }
 
-// Keeps the socket alive between the server's pushes.
-[[noreturn]] void keep_alive_task(void *)
-{
-    for (;;) {
-        vTaskDelay(KEEP_ALIVE);
-        send_text(keep_alive());
-    }
-}
-
 std::string socket_uri()
 {
     std::string base = JELLYFIN_URL;
@@ -271,30 +242,28 @@ esp_err_t start(Handler on_change)
     s_on_change = on_change;
     add_host();
 
-    static StaticTask_t keep_alive_ctrl;
-    auto *stack = static_cast<StackType_t *>(heap_caps_malloc(
-        KEEP_ALIVE_STACK * sizeof(StackType_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    ESP_RETURN_ON_FALSE(stack != nullptr &&
-                            xTaskCreateStaticPinnedToCore(keep_alive_task, "jellyfin", KEEP_ALIVE_STACK,
-                                                          nullptr, KEEP_ALIVE_PRIORITY, stack,
-                                                          &keep_alive_ctrl, KEEP_ALIVE_CORE) != nullptr,
-                        ESP_ERR_NO_MEM, TAG, "keep-alive task");
+    net::WebsocketConfig config;
+    config.name                 = TAG;
+    config.uri                  = socket_uri();
+    config.task_stack           = SOCKET_STACK;
+    config.buffer_size          = BUFFER_SIZE;
+    config.network_timeout_ms   = NETWORK_TIMEOUT_MS;
+    config.tls_bundle           = true;
+    config.assemble             = false;
+    config.policy.keep_alive_ms = KEEP_ALIVE_MS;
 
-    static std::string uri = socket_uri();
-    esp_websocket_client_config_t cfg{};
-    cfg.uri                    = uri.c_str();
-    cfg.task_stack             = SOCKET_STACK;
-    cfg.buffer_size            = BUFFER_SIZE;
-    cfg.network_timeout_ms     = NETWORK_TIMEOUT_MS;
-    cfg.reconnect_timeout_ms   = RECONNECT_MS;
-    cfg.enable_close_reconnect = true;
-    cfg.crt_bundle_attach      = esp_crt_bundle_attach;
-    s_client = esp_websocket_client_init(&cfg);
-    ESP_RETURN_ON_FALSE(s_client != nullptr, ESP_FAIL, TAG, "init");
-    ESP_RETURN_ON_ERROR(
-        esp_websocket_register_events(s_client, WEBSOCKET_EVENT_ANY, on_event, nullptr), TAG,
-        "events");
-    return esp_websocket_client_start(s_client);
+    net::StreamHandlers on;
+    on.opened     = on_open;
+    on.closed     = on_close;
+    on.fragment   = take_piece;
+    on.keep_alive = [] { return keep_alive(); };
+    s_stream      = net::open_websocket(config, std::move(on));
+    return s_stream != net::kNoStream ? ESP_OK : ESP_FAIL;
+}
+
+bool connected()
+{
+    return net::stream_is_ready(s_stream);
 }
 
 bool fetch(const std::string &path, std::string &out)

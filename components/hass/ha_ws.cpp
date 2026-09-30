@@ -4,11 +4,11 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
-#include "esp_websocket_client.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "net_stream.h"
 #include "units.h"
 
 #include <atomic>
@@ -34,7 +34,6 @@ constexpr int BUFFER_SIZE = 4 * units::kBytesPerKiB;
 constexpr int TASK_STACK  = 6144;  // measured: uses 2.8 KB
 
 constexpr int NETWORK_TIMEOUT_MS = 10 * units::kMsPerSecond;
-constexpr int RECONNECT_MS       = 5 * units::kMsPerSecond;
 constexpr int PING_INTERVAL_S    = 25;
 constexpr int PINGPONG_TIMEOUT_S = 90;
 
@@ -42,15 +41,10 @@ constexpr std::size_t MAX_MESSAGE = 256 * units::kBytesPerKiB;
 
 constexpr int SUBSCRIBE_ID = 2;
 
-constexpr int WS_OPCODE_CONTINUATION = 0x00;
-constexpr int WS_OPCODE_TEXT         = 0x01;
-
-constexpr TickType_t SEND_TIMEOUT       = pdMS_TO_TICKS(5 * units::kMsPerSecond);
-constexpr TickType_t COMMAND_WAIT       = pdMS_TO_TICKS(500);
-constexpr TickType_t RETRY_SEND         = pdMS_TO_TICKS(5 * units::kMsPerSecond);
-constexpr TickType_t RETRY_SUBSCRIBE    = pdMS_TO_TICKS(10 * units::kMsPerSecond);
-constexpr TickType_t RETRY_CLIENT_START = pdMS_TO_TICKS(10 * units::kMsPerSecond);
-constexpr TickType_t RETRY_TOKEN        = pdMS_TO_TICKS(units::kMsPerMinute);
+constexpr TickType_t COMMAND_WAIT    = pdMS_TO_TICKS(500);
+constexpr int        RETRY_SEND_MS   = 5 * units::kMsPerSecond;
+constexpr int        RETRY_REFUSE_MS = 10 * units::kMsPerSecond;
+constexpr int        RETRY_TOKEN_MS  = units::kMsPerMinute;
 
 constexpr std::size_t SUPERVISOR_STACK    = 6144;
 constexpr UBaseType_t SUPERVISOR_PRIORITY = 2;
@@ -68,32 +62,13 @@ constexpr std::size_t REQUEST_SIZE = 384;
 constexpr char SCHEME_SEPARATOR[] = "://";
 constexpr char SECURE_SCHEME[]    = "wss";
 
-esp_websocket_client_handle_t s_client = nullptr;
-std::atomic<bool>             s_connected{false};
+net::Stream s_stream = net::kNoStream;
 
 std::atomic<int> s_next_command_id{SUBSCRIBE_ID + 1};
-
-std::atomic<bool>       s_stop_wanted{false};
-std::atomic<TickType_t> s_start_at{0};  // zero when no start is pending
 
 int next_command_id()
 {
     return s_next_command_id.fetch_add(1, std::memory_order_relaxed);
-}
-
-/** The client's own reconnect only covers the socket; a refusal from the other
- *  end needs the session torn down and begun again, after a pause. */
-void begin_again_in(TickType_t delay, const char *why)
-{
-    ESP_LOGW(TAG, "%s, beginning again in %u s", why,
-             static_cast<unsigned>(pdTICKS_TO_MS(delay) / units::kMsPerSecond));
-    s_connected.store(false, std::memory_order_relaxed);
-    s_stop_wanted.store(true, std::memory_order_relaxed);
-    TickType_t at = xTaskGetTickCount() + delay;
-    if (at == 0) {
-        at = 1;
-    }
-    s_start_at.store(at, std::memory_order_relaxed);
 }
 
 // Sleeps between rounds of its own, and is woken for anything to send.
@@ -228,7 +203,6 @@ bool answer_request(const cJSON *root)
     return true;
 }
 
-std::string    s_rx;
 EntityStore    s_store;
 UpdateHandler  s_on_update  = nullptr;
 RefusalHandler s_on_refusal = nullptr;
@@ -256,11 +230,7 @@ std::vector<std::string> s_entities;
 
 bool send_text(const std::string &text)
 {
-    if (s_client == nullptr || text.empty()) {
-        return false;
-    }
-    return esp_websocket_client_send_text(s_client, text.data(), static_cast<int>(text.size()),
-                                          SEND_TIMEOUT) >= 0;
+    return net::stream_send(s_stream, text);
 }
 
 void subscribe()
@@ -276,9 +246,9 @@ void subscribe()
     fail_awaited();  // numbering starts again
     s_next_command_id.store(SUBSCRIBE_ID + 1, std::memory_order_relaxed);
     if (send_text(subscribe)) {
-        s_connected.store(true, std::memory_order_relaxed);
+        net::stream_ready(s_stream);
     } else {
-        begin_again_in(RETRY_SEND, "could not subscribe");
+        net::stream_fail(s_stream, "could not subscribe", RETRY_SEND_MS);
     }
 }
 
@@ -304,7 +274,7 @@ void check_result(const cJSON *root)
     const char  *why   = cJSON_IsString(msg) ? msg->valuestring : "unknown";
     ESP_LOGW(TAG, "command %d refused: %s", message_id(root), why);
     if (message_id(root) == SUBSCRIBE_ID) {
-        begin_again_in(RETRY_SUBSCRIBE, "subscription refused");
+        net::stream_fail(s_stream, "subscription refused", RETRY_REFUSE_MS);
     } else {
         refused(why);
     }
@@ -321,11 +291,11 @@ void handle_message(const std::string &text)
     switch (classify(root)) {
         case MessageType::AuthRequired:
             if (!send_text(auth_message(HASS_WS_TOKEN))) {
-                begin_again_in(RETRY_SEND, "could not send the token");
+                net::stream_fail(s_stream, "could not send the token", RETRY_SEND_MS);
             }
             break;
         case MessageType::AuthOk:      subscribe(); break;
-        case MessageType::AuthInvalid: begin_again_in(RETRY_TOKEN, "token rejected"); break;
+        case MessageType::AuthInvalid: net::stream_fail(s_stream, "token rejected", RETRY_TOKEN_MS); break;
         case MessageType::Event:       apply_event(root); break;
         case MessageType::Result:
             if (!answer_request(root)) {
@@ -336,70 +306,6 @@ void handle_message(const std::string &text)
     }
 
     cJSON_Delete(root);
-}
-
-void handle_data(const esp_websocket_event_data_t *event)
-{
-    switch (event->op_code) {
-        case WS_OPCODE_TEXT:
-            if (event->payload_offset == 0) {
-                s_rx.clear();
-            }
-            break;
-        case WS_OPCODE_CONTINUATION:
-            if (s_rx.empty()) {
-                return;
-            }
-            break;
-        default:
-            return;  // binary, ping, pong, close: not ours
-    }
-
-    if (event->data_len > 0) {
-        if (s_rx.size() + event->data_len > MAX_MESSAGE) {
-            ESP_LOGW(TAG, "message over %u bytes, dropping",
-                     static_cast<unsigned>(MAX_MESSAGE));
-            s_rx.clear();
-            return;
-        }
-        s_rx.append(event->data_ptr, static_cast<std::size_t>(event->data_len));
-    }
-
-    if (event->payload_offset + event->data_len < event->payload_len) {
-        return;
-    }
-    if (!event->fin) {
-        return;
-    }
-
-    handle_message(s_rx);
-    s_rx.clear();
-}
-
-void on_event(void *, esp_event_base_t, std::int32_t id, void *data)
-{
-    auto *event = static_cast<esp_websocket_event_data_t *>(data);
-
-    switch (static_cast<esp_websocket_event_id_t>(id)) {
-        case WEBSOCKET_EVENT_CONNECTED:
-            ESP_LOGI(TAG, "socket open, waiting for auth_required");
-            s_rx.clear();
-            break;
-        case WEBSOCKET_EVENT_DISCONNECTED:
-        case WEBSOCKET_EVENT_CLOSED:
-            s_rx.clear();
-            fail_awaited();
-            if (s_connected.exchange(false, std::memory_order_relaxed)) {
-                ESP_LOGW(TAG, "%s, client retries on its own",
-                         id == WEBSOCKET_EVENT_CLOSED ? "closed by the server" : "disconnected");
-            }
-            break;
-        case WEBSOCKET_EVENT_DATA:
-            handle_data(event);
-            break;
-        default:
-            break;
-    }
 }
 
 void send_command(const Command &cmd)
@@ -431,21 +337,6 @@ void send_request(const Request &req)
     }
 }
 
-void stop_or_start_if_wanted()
-{
-    if (s_stop_wanted.exchange(false, std::memory_order_relaxed)) {
-        esp_websocket_client_stop(s_client);
-    }
-    const TickType_t start_at = s_start_at.load(std::memory_order_relaxed);
-    if (start_at != 0 && static_cast<std::int32_t>(xTaskGetTickCount() - start_at) >= 0) {
-        s_start_at.store(0, std::memory_order_relaxed);
-        ESP_LOGI(TAG, "connecting again");
-        if (esp_websocket_client_start(s_client) != ESP_OK) {
-            begin_again_in(RETRY_CLIENT_START, "the client would not start");
-        }
-    }
-}
-
 [[noreturn]] void supervisor_task(void *)
 {
     for (;;) {
@@ -456,9 +347,6 @@ void stop_or_start_if_wanted()
         }
         for (Request req; xQueueReceive(s_requests, &req, 0) == pdTRUE;) {
             send_request(req);
-        }
-        if (s_client != nullptr) {
-            stop_or_start_if_wanted();
         }
     }
 }
@@ -475,25 +363,6 @@ esp_err_t start(UpdateHandler on_update, std::vector<std::string> entities,
         return ESP_OK;
     }
     s_on_update = on_update;
-
-    esp_websocket_client_config_t cfg = {};
-    cfg.uri                  = HASS_WS_URI;
-    cfg.task_stack           = TASK_STACK;
-    cfg.buffer_size          = BUFFER_SIZE;
-    cfg.network_timeout_ms   = NETWORK_TIMEOUT_MS;
-    cfg.reconnect_timeout_ms = RECONNECT_MS;
-    cfg.ping_interval_sec    = PING_INTERVAL_S;
-    cfg.pingpong_timeout_sec = PINGPONG_TIMEOUT_S;
-    // Home Assistant closes every socket cleanly when it restarts, and without
-    // this the client treats a clean close as the end and exits for good.
-    cfg.enable_close_reconnect = true;
-
-    s_client = esp_websocket_client_init(&cfg);
-    ESP_RETURN_ON_FALSE(s_client != nullptr, ESP_FAIL, TAG, "init");
-    ESP_RETURN_ON_ERROR(
-        esp_websocket_register_events(s_client, WEBSOCKET_EVENT_ANY, on_event, nullptr), TAG,
-        "events");
-
     static StaticTask_t task_ctrl;
     static StackType_t  task_stack[SUPERVISOR_STACK];
     s_commands = xQueueCreateStatic(COMMAND_QUEUE_LEN, sizeof(Command),
@@ -511,23 +380,27 @@ esp_err_t start(UpdateHandler on_update, std::vector<std::string> entities,
         xTaskCreateStaticPinnedToCore(supervisor_task, "ha_ws_sup", sizeof(task_stack), nullptr,
                                       SUPERVISOR_PRIORITY, task_stack, &task_ctrl, SUPERVISOR_CORE);
 
-    ESP_LOGI(TAG, "connecting to %s", HASS_WS_URI);
-    return esp_websocket_client_start(s_client);
+    net::WebsocketConfig config;
+    config.name               = TAG;
+    config.uri                = HASS_WS_URI;
+    config.task_stack         = TASK_STACK;
+    config.buffer_size        = BUFFER_SIZE;
+    config.network_timeout_ms = NETWORK_TIMEOUT_MS;
+    config.ping_interval_s    = PING_INTERVAL_S;
+    config.pingpong_timeout_s = PINGPONG_TIMEOUT_S;
+    config.max_message        = MAX_MESSAGE;
+
+    net::StreamHandlers on;
+    on.opened  = [] { ESP_LOGI(TAG, "socket open, waiting for auth_required"); };
+    on.closed  = fail_awaited;  // nothing sent before will be answered after
+    on.message = handle_message;
+    s_stream   = net::open_websocket(config, std::move(on));
+    return s_stream != net::kNoStream ? ESP_OK : ESP_FAIL;
 }
 
 bool connected()
 {
-    return s_connected.load(std::memory_order_relaxed);
-}
-
-esp_err_t restart()
-{
-    if (s_client == nullptr) {
-        return std::string(HASS_WS_URI).empty() ? ESP_ERR_INVALID_STATE
-                                                : start(s_on_update, s_entities);
-    }
-    begin_again_in(1, "restart asked for");
-    return ESP_OK;
+    return net::stream_is_ready(s_stream);
 }
 
 const char *http_origin()

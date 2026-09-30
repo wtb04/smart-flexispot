@@ -3,6 +3,7 @@
 #include "esp_check.h"
 #include "esp_log.h"
 #include "mqtt_client.h"
+#include "net_stream.h"
 #include "units.h"
 
 #include <atomic>
@@ -29,12 +30,11 @@ constexpr int RETAIN            = 1;
 constexpr char HA_STATUS_TOPIC[] = "homeassistant/status";
 
 constexpr int KEEPALIVE_S     = 30;
-constexpr int RECONNECT_MS    = 5 * units::kMsPerSecond;
 constexpr int RX_BUFFER_BYTES = 2 * units::kBytesPerKiB;
 constexpr int TX_BUFFER_BYTES = 8 * units::kBytesPerKiB;
 
-esp_mqtt_client_handle_t s_client = nullptr;
-std::atomic<bool>        s_connected{false};
+net::Stream              s_stream = net::kNoStream;
+esp_mqtt_client_handle_t s_client = nullptr;  // the same across reconnects
 Handlers                 s_handlers{};
 protocol::Topics         s_topics;
 std::string              s_last_state;   // network task only
@@ -101,50 +101,33 @@ void dispatch(const std::string &topic, const std::string &payload)
     }
 }
 
-void on_mqtt_event(void *, esp_event_base_t, std::int32_t id, void *data)
+void on_connected()
 {
-    auto *event = static_cast<esp_mqtt_event_handle_t>(data);
+    esp_mqtt_client_publish(s_client, s_topics.availability.c_str(), "online", 0, QOS_AT_LEAST_ONCE, RETAIN);
+    publish_discovery();
+    s_force_publish.store(true, std::memory_order_relaxed);
+    // Connected but not subscribed would hear no command until the next
+    // natural reconnect, possibly days away.
+    if (esp_mqtt_client_subscribe_single(s_client, s_topics.command.c_str(), QOS_AT_LEAST_ONCE) < 0 ||
+        esp_mqtt_client_subscribe_single(s_client, HA_STATUS_TOPIC, QOS_AT_LEAST_ONCE) < 0) {
+        net::stream_fail(s_stream, "subscribing failed");
+        return;
+    }
+    net::stream_ready(s_stream);
+}
 
-    switch (static_cast<esp_mqtt_event_id_t>(id)) {
-        case MQTT_EVENT_CONNECTED:
-            s_connected.store(true, std::memory_order_relaxed);
-            ESP_LOGI(TAG, "connected to broker");
-            esp_mqtt_client_publish(s_client, s_topics.availability.c_str(), "online", 0,
-                                    QOS_AT_LEAST_ONCE, RETAIN);
-            publish_discovery();
-            s_force_publish.store(true, std::memory_order_relaxed);
-            // Connected but not subscribed would hear no command until the next
-            // natural reconnect, possibly days away.
-            if (esp_mqtt_client_subscribe_single(s_client, s_topics.command.c_str(),
-                                                 QOS_AT_LEAST_ONCE) < 0 ||
-                esp_mqtt_client_subscribe_single(s_client, HA_STATUS_TOPIC,
-                                                 QOS_AT_LEAST_ONCE) < 0) {
-                ESP_LOGW(TAG, "subscribing failed, starting the session over");
-                esp_mqtt_client_disconnect(s_client);
-            }
-            break;
-
-        case MQTT_EVENT_DISCONNECTED:
-            s_connected.store(false, std::memory_order_relaxed);
-            ESP_LOGW(TAG, "disconnected, client retries on its own");
-            break;
-
-        case MQTT_EVENT_DATA:
-            if (event->retain) {
-                break;  // stored by the broker and replayed on subscribe, not asked for now
-            }
-            if (event->current_data_offset == 0) {
-                s_inbound.topic.assign(event->topic, event->topic_len);
-                s_inbound.payload.clear();
-            }
-            s_inbound.payload.append(event->data, event->data_len);
-            if (s_inbound.payload.size() >= static_cast<std::size_t>(event->total_data_len)) {
-                dispatch(s_inbound.topic, s_inbound.payload);
-            }
-            break;
-
-        default:
-            break;
+void on_mqtt_event(esp_mqtt_event_handle_t event)
+{
+    if (event->event_id != MQTT_EVENT_DATA || event->retain) {
+        return;  // a retained one was stored by the broker and replayed on subscribe, not asked for now
+    }
+    if (event->current_data_offset == 0) {
+        s_inbound.topic.assign(event->topic, event->topic_len);
+        s_inbound.payload.clear();
+    }
+    s_inbound.payload.append(event->data, event->data_len);
+    if (s_inbound.payload.size() >= static_cast<std::size_t>(event->total_data_len)) {
+        dispatch(s_inbound.topic, s_inbound.payload);
     }
 }
 
@@ -161,11 +144,13 @@ esp_err_t start(const Handlers &handlers, int brightness_floor)
     s_handlers = handlers;
     s_topics   = protocol::topics_for(HASS_DEVICE_ID);
 
-    esp_mqtt_client_config_t cfg = {};
-    cfg.broker.address.uri                  = HASS_MQTT_URI;
-    cfg.credentials.client_id               = HASS_DEVICE_ID "-panel";
-    cfg.credentials.username                = HASS_MQTT_USER;
-    cfg.credentials.authentication.password = HASS_MQTT_PASSWORD;
+    net::MqttConfig config;
+    config.name                                    = TAG;
+    esp_mqtt_client_config_t &cfg                  = config.client;
+    cfg.broker.address.uri                         = HASS_MQTT_URI;
+    cfg.credentials.client_id                      = HASS_DEVICE_ID "-panel";
+    cfg.credentials.username                       = HASS_MQTT_USER;
+    cfg.credentials.authentication.password        = HASS_MQTT_PASSWORD;
 
     cfg.session.last_will.topic  = s_topics.availability.c_str();
     cfg.session.last_will.msg    = "offline";
@@ -173,21 +158,20 @@ esp_err_t start(const Handlers &handlers, int brightness_floor)
     cfg.session.last_will.retain = RETAIN;
     cfg.session.keepalive        = KEEPALIVE_S;
 
-    cfg.network.reconnect_timeout_ms = RECONNECT_MS;
-    cfg.buffer.size                  = RX_BUFFER_BYTES;
-    cfg.buffer.out_size              = TX_BUFFER_BYTES;
+    cfg.buffer.size     = RX_BUFFER_BYTES;
+    cfg.buffer.out_size = TX_BUFFER_BYTES;
 
-    s_client = esp_mqtt_client_init(&cfg);
-    ESP_RETURN_ON_FALSE(s_client != nullptr, ESP_FAIL, TAG, "init");
-    ESP_RETURN_ON_ERROR(
-        esp_mqtt_client_register_event(s_client, MQTT_EVENT_ANY, on_mqtt_event, nullptr), TAG,
-        "register events");
-    return esp_mqtt_client_start(s_client);
+    net::StreamHandlers on;
+    on.opened = on_connected;
+    on.mqtt   = on_mqtt_event;
+    s_stream  = net::open_mqtt(config, std::move(on));
+    s_client  = net::stream_mqtt(s_stream);
+    return s_stream != net::kNoStream ? ESP_OK : ESP_FAIL;
 }
 
 esp_err_t publish(const protocol::Telemetry &telemetry)
 {
-    if (!s_connected.load(std::memory_order_relaxed)) {
+    if (!connected()) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -206,25 +190,7 @@ esp_err_t publish(const protocol::Telemetry &telemetry)
 
 bool connected()
 {
-    return s_connected.load(std::memory_order_relaxed);
-}
-
-esp_err_t restart()
-{
-    if (s_client == nullptr) {
-        return std::string(HASS_MQTT_URI).empty() ? ESP_ERR_INVALID_STATE
-                                                  : start(s_handlers, s_brightness_floor);
-    }
-    // First the cheap nudge, which only helps a client waiting to retry; then
-    // the full stop and start, which can block for as long as a connect takes.
-    static bool nudged = false;
-    nudged = !nudged;
-    if (nudged && esp_mqtt_client_reconnect(s_client) == ESP_OK) {
-        return ESP_OK;
-    }
-    s_connected.store(false, std::memory_order_relaxed);
-    esp_mqtt_client_stop(s_client);  // not running is fine, that is what is being fixed
-    return esp_mqtt_client_start(s_client);
+    return net::stream_is_ready(s_stream);
 }
 
 }  // namespace hass

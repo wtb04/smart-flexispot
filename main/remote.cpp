@@ -11,6 +11,7 @@
 #include "last_words.h"
 #include "board.h"
 #include "logbuf.h"
+#include "net_stream.h"
 #include "ota.h"
 #include "power.h"
 #include "ui.h"
@@ -362,6 +363,32 @@ esp_err_t stall_page(httpd_req_t *req)
     return httpd_resp_sendstr(req, text);
 }
 
+// Every live connection net keeps, and how it is doing; ?restart=N begins
+// that one again, as a drop would.
+esp_err_t streams_page(httpd_req_t *req)
+{
+    if (!ota::authorised(req)) {
+        return refuse(req);
+    }
+    char query[QUERY_MAX] = "", value[8] = "";
+    httpd_req_get_url_query_str(req, query, sizeof(query));
+    if (httpd_query_key_value(query, "restart", value, sizeof(value)) == ESP_OK) {
+        net::stream_restart(std::atoi(value));
+    }
+    httpd_resp_set_type(req, "text/plain");
+    for (int i = 0; i < net::stream_count(); ++i) {
+        const net::StreamStatus status = net::stream_status(i);
+        char line[160];
+        std::snprintf(line, sizeof(line), "%d %-9s %-10s for %d s, next in %d s, ready %lu times, dropped %lu%s%s\n", i,
+                      net::stream_name(i), net::stream_state_name(status.state), status.for_ms / 1000,
+                      status.next_in_ms / 1000, static_cast<unsigned long>(status.readies),
+                      static_cast<unsigned long>(status.drops), status.last_error.empty() ? "" : ", last: ",
+                      status.last_error.c_str());
+        httpd_resp_sendstr_chunk(req, line);
+    }
+    return httpd_resp_sendstr_chunk(req, nullptr);
+}
+
 // Why this run started and, after one nobody asked for, what the run before
 // left behind: the log's copy is soon pushed out.
 esp_err_t restart_page(httpd_req_t *req)
@@ -436,6 +463,7 @@ esp_err_t start()
         {.uri = "/crash", .method = HTTP_GET, .handler = crash_page, .user_ctx = nullptr},
         {.uri = "/restart", .method = HTTP_GET, .handler = restart_page, .user_ctx = nullptr},
         {.uri = "/stall", .method = HTTP_GET, .handler = stall_page, .user_ctx = nullptr},
+        {.uri = "/streams", .method = HTTP_GET, .handler = streams_page, .user_ctx = nullptr},
     };
     for (const httpd_uri_t &page : pages) {
         ESP_RETURN_ON_ERROR(httpd_register_uri_handler(server, &page), TAG, "page");

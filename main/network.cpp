@@ -42,7 +42,6 @@ constexpr int NETWORK_WAIT_MS = 30 * units::kMsPerSecond;
 
 // Both clients retry on their own, yet once, after the server had been away for
 // minutes, neither came back until a reboot. This is the reboot, for one client.
-constexpr std::int64_t LINK_PATIENCE_US = 2 * units::kUsPerMinute;
 
 constexpr int         REFUSAL_NOTICE_MS    = 4000;
 constexpr std::size_t REFUSAL_MESSAGE_SIZE = 96;
@@ -181,39 +180,6 @@ void on_still(const void *pixels)
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_cinema_still(pixels));
 }
 
-void watch_link(bool up, std::int64_t &down_since, const char *what, esp_err_t (*restart)())
-{
-    if (up) {
-        down_since = 0;
-        return;
-    }
-    const std::int64_t now = esp_timer_get_time();
-    if (down_since == 0) {
-        down_since = now;
-        return;
-    }
-    if (now - down_since < LINK_PATIENCE_US) {
-        return;
-    }
-    down_since = now;
-    if (restart() == ESP_OK) {
-        ESP_LOGW(TAG, "%s down for two minutes with Wi-Fi up, restarted its client", what);
-    }
-}
-
-void nudge_links()
-{
-    static std::int64_t broker_down_since = 0;
-    static std::int64_t socket_down_since = 0;
-    if (!wifi::connected()) {
-        broker_down_since = 0;
-        socket_down_since = 0;
-        return;
-    }
-    watch_link(hass::connected(), broker_down_since, "broker", hass::restart);
-    watch_link(hass::ws::connected(), socket_down_since, "socket", hass::ws::restart);
-}
-
 unsigned kib(std::size_t bytes)
 {
     return static_cast<unsigned>(bytes / units::kBytesPerKiB);
@@ -350,7 +316,6 @@ void start_clients()
         const hass::protocol::Telemetry out   = gather_telemetry(radio);
         show_links(radio);
         hass::publish(out);
-        nudge_links();
         ask_journey();
         log_heap_baseline_once();
         log_dma_heap();
