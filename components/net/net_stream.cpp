@@ -298,28 +298,33 @@ esp_err_t start_task()
     return s_task != nullptr ? ESP_OK : ESP_ERR_NO_MEM;
 }
 
-Stream add(Entry *e)
+esp_err_t add(Entry *e, Stream &into)
 {
+    into = kNoStream;
     if (start_task() != ESP_OK) {
         ESP_LOGE(e->name, "no task for streams");
-        return kNoStream;
+        return ESP_ERR_NO_MEM;
     }
-    const Stream stream = locked([&] {
+    // Set under the lock the task takes to find it, so before it can connect.
+    const bool added = locked([&] {
         if (s_count == MAX_STREAMS) {
-            return kNoStream;
+            return false;
         }
+        into               = static_cast<Stream>(s_count);
         s_streams[s_count] = e;
-        return static_cast<Stream>(s_count++);
+        ++s_count;
+        return true;
     });
-    if (stream == kNoStream) {
+    if (!added) {
         ESP_LOGE(e->name, "more streams than there is room for");
+        return ESP_ERR_NO_MEM;
     }
     wake();
-    return stream;
+    return ESP_OK;
 }
 }  // namespace
 
-Stream open_websocket(const WebsocketConfig &config, StreamHandlers handlers)
+esp_err_t open_websocket(Stream &into, const WebsocketConfig &config, StreamHandlers handlers)
 {
     auto *e        = new Entry(config.policy);
     e->name        = config.name;
@@ -348,12 +353,13 @@ Stream open_websocket(const WebsocketConfig &config, StreamHandlers handlers)
     if (e->ws == nullptr ||
         esp_websocket_register_events(e->ws, WEBSOCKET_EVENT_ANY, on_websocket, e) != ESP_OK) {
         ESP_LOGE(config.name, "websocket would not set up");
-        return kNoStream;
+        into = kNoStream;
+        return ESP_FAIL;
     }
-    return add(e);
+    return add(e, into);
 }
 
-Stream open_mqtt(const MqttConfig &config, StreamHandlers handlers)
+esp_err_t open_mqtt(Stream &into, const MqttConfig &config, StreamHandlers handlers)
 {
     auto *e = new Entry(config.policy);
     e->name = config.name;
@@ -365,9 +371,10 @@ Stream open_mqtt(const MqttConfig &config, StreamHandlers handlers)
     e->mqtt = esp_mqtt_client_init(&cfg);
     if (e->mqtt == nullptr || esp_mqtt_client_register_event(e->mqtt, MQTT_EVENT_ANY, on_mqtt, e) != ESP_OK) {
         ESP_LOGE(config.name, "MQTT would not set up");
-        return kNoStream;
+        into = kNoStream;
+        return ESP_FAIL;
     }
-    return add(e);
+    return add(e, into);
 }
 
 bool stream_send(Stream stream, const std::string &text)

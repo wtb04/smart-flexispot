@@ -394,8 +394,7 @@ esp_err_t start(UpdateHandler on_update, std::vector<std::string> entities,
     on.opened  = [] { ESP_LOGI(TAG, "socket open, waiting for auth_required"); };
     on.closed  = fail_awaited;  // nothing sent before will be answered after
     on.message = handle_message;
-    s_stream   = net::open_websocket(config, std::move(on));
-    return s_stream != net::kNoStream ? ESP_OK : ESP_FAIL;
+    return net::open_websocket(s_stream, config, std::move(on));
 }
 
 bool connected()

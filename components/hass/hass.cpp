@@ -33,8 +33,13 @@ constexpr int KEEPALIVE_S     = 30;
 constexpr int RX_BUFFER_BYTES = 2 * units::kBytesPerKiB;
 constexpr int TX_BUFFER_BYTES = 8 * units::kBytesPerKiB;
 
-net::Stream              s_stream = net::kNoStream;
-esp_mqtt_client_handle_t s_client = nullptr;  // the same across reconnects
+net::Stream s_stream = net::kNoStream;
+
+// The same across reconnects; there from before the stream can connect.
+esp_mqtt_client_handle_t client()
+{
+    return net::stream_mqtt(s_stream);
+}
 Handlers                 s_handlers{};
 protocol::Topics         s_topics;
 std::string              s_last_state;   // network task only
@@ -51,7 +56,7 @@ void publish_discovery()
 {
     const std::string payload =
         protocol::discovery_document(HASS_DEVICE_ID, SW_VERSION, s_brightness_floor);
-    esp_mqtt_client_publish(s_client, s_topics.discovery.c_str(), payload.c_str(),
+    esp_mqtt_client_publish(client(), s_topics.discovery.c_str(), payload.c_str(),
                             static_cast<int>(payload.size()), QOS_AT_LEAST_ONCE, RETAIN);
     ESP_LOGI(TAG, "published discovery (%u bytes)", static_cast<unsigned>(payload.size()));
 }
@@ -103,13 +108,13 @@ void dispatch(const std::string &topic, const std::string &payload)
 
 void on_connected()
 {
-    esp_mqtt_client_publish(s_client, s_topics.availability.c_str(), "online", 0, QOS_AT_LEAST_ONCE, RETAIN);
+    esp_mqtt_client_publish(client(), s_topics.availability.c_str(), "online", 0, QOS_AT_LEAST_ONCE, RETAIN);
     publish_discovery();
     s_force_publish.store(true, std::memory_order_relaxed);
     // Connected but not subscribed would hear no command until the next
     // natural reconnect, possibly days away.
-    if (esp_mqtt_client_subscribe_single(s_client, s_topics.command.c_str(), QOS_AT_LEAST_ONCE) < 0 ||
-        esp_mqtt_client_subscribe_single(s_client, HA_STATUS_TOPIC, QOS_AT_LEAST_ONCE) < 0) {
+    if (esp_mqtt_client_subscribe_single(client(), s_topics.command.c_str(), QOS_AT_LEAST_ONCE) < 0 ||
+        esp_mqtt_client_subscribe_single(client(), HA_STATUS_TOPIC, QOS_AT_LEAST_ONCE) < 0) {
         net::stream_fail(s_stream, "subscribing failed");
         return;
     }
@@ -164,9 +169,7 @@ esp_err_t start(const Handlers &handlers, int brightness_floor)
     net::StreamHandlers on;
     on.opened = on_connected;
     on.mqtt   = on_mqtt_event;
-    s_stream  = net::open_mqtt(config, std::move(on));
-    s_client  = net::stream_mqtt(s_stream);
-    return s_stream != net::kNoStream ? ESP_OK : ESP_FAIL;
+    return net::open_mqtt(s_stream, config, std::move(on));
 }
 
 esp_err_t publish(const protocol::Telemetry &telemetry)
@@ -182,7 +185,7 @@ esp_err_t publish(const protocol::Telemetry &telemetry)
     }
     s_last_state = document;
 
-    const int result = esp_mqtt_client_enqueue(s_client, s_topics.state.c_str(), document.c_str(),
+    const int result = esp_mqtt_client_enqueue(client(), s_topics.state.c_str(), document.c_str(),
                                                static_cast<int>(document.size()),
                                                QOS_AT_LEAST_ONCE, RETAIN, true);
     return result >= 0 ? ESP_OK : ESP_FAIL;

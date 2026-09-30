@@ -259,8 +259,7 @@ esp_err_t start(Handler on_change)
     on.closed     = on_close;
     on.fragment   = take_piece;
     on.keep_alive = [] { return keep_alive(); };
-    s_stream      = net::open_websocket(config, std::move(on));
-    return s_stream != net::kNoStream ? ESP_OK : ESP_FAIL;
+    return net::open_websocket(s_stream, config, std::move(on));
 }
 
 bool connected()

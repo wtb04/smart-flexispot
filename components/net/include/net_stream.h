@@ -20,7 +20,7 @@
 //     net::StreamHandlers on;
 //     on.opened  = [] { /* the socket is open: sign in */ };
 //     on.message = [](const std::string &text) { /* ... net::stream_ready(s) once signed in */ };
-//     s = net::open_websocket(config, std::move(on));
+//     net::open_websocket(s_stream, config, std::move(on));
 namespace net {
 
 using Stream                      = int;
@@ -64,9 +64,10 @@ struct MqttConfig {
     StreamPolicy             policy{};
 };
 
-/** Once for each connection; it connects when there is a network. */
-Stream open_websocket(const WebsocketConfig &config, StreamHandlers handlers);
-Stream open_mqtt(const MqttConfig &config, StreamHandlers handlers);
+/** Once for each connection; it connects when there is a network. `into` is
+ *  set before it can, so the handlers may use it from their first call. */
+esp_err_t open_websocket(Stream &into, const WebsocketConfig &config, StreamHandlers handlers);
+esp_err_t open_mqtt(Stream &into, const MqttConfig &config, StreamHandlers handlers);
 
 /** Sent on an open websocket; false when it is not open or the send failed. */
 bool stream_send(Stream stream, const std::string &text);
