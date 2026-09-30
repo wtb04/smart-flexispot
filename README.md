@@ -16,7 +16,8 @@
   <a href="#getting-started">Getting started</a> |
   <a href="#try-it-without-the-hardware">Simulator</a> |
   <a href="#faq-and-troubleshooting">FAQ</a> |
-  <a href="docs/how-it-works.md">How it works</a>
+  <a href="docs/how-it-works.md">How it works</a> |
+  <a href="CHANGELOG.md">Changelog</a>
 </p>
 
 ![The home page](docs/screenshots/home.png)
