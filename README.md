@@ -1,7 +1,7 @@
 <h1 align="center">Smart Flexispot</h1>
 
 <p align="center">
-  A touch screen for my standing desk that ended up running the rest of the room too.
+  A room controller that took the place of my standing desk's keypad.
 </p>
 
 <p align="center">
@@ -21,20 +21,20 @@
 
 ![The home page](docs/screenshots/home.png)
 
-Smart Flexispot is firmware for an [M5Stack Tab5](https://docs.m5stack.com/en/core/Tab5) that sits on my desk and drives the Flexispot under it. It started as a nicer set of buttons for the desk, and now also shows the room from Home Assistant, what is playing on Jellyfin, my timetable with when to leave for it, the planes going over, and a focus timer.
+Smart Flexispot is firmware for an [M5Stack Tab5](https://docs.m5stack.com/en/core/Tab5) that sits on my desk and drives the Flexispot under it. It replaces the desk's own keypad and controls the room from there: the lights and the heating through Home Assistant, and the desk itself. Along the way it also picked up what is playing on Jellyfin, my timetable with when to leave for it, the planes going over, and a focus timer.
 
 > [!NOTE]
 > **This is a showcase, not a product.** It is built around my desk, my room, my Home Assistant, my calendars and my phone, so a lot of it only makes sense in my setup. Treat it as a demo of what a desk panel can do and take whatever ideas or pieces are useful. Getting it running for yourself will mean changing things.
 
 > [!NOTE]
-> **Built with AI.** I came up with what it should do and it runs on my desk every day, but most of the code was written with the help of AI rather than by hand. Read it with that in mind.
+> **Built with AI.** I came up with what it should do and it runs on my desk every day, but most of the code was written with the help of AI rather than by hand. For something this big, that is what made it a project of weeks instead of months. Read the code with that in mind.
 
 I am not affiliated with Flexispot, LoctekMotion or M5Stack.
 
 ## Highlights
 
-- **The desk on a screen.** Height, Stand and Sit, six presets instead of the control box's four, over a cable or over Bluetooth.
-- **The room.** Home Assistant's air, climate and lights, and the panel itself shows up in Home Assistant over MQTT.
+- **The room.** The lights, the heating and the air from Home Assistant, and the panel itself shows up in Home Assistant over MQTT.
+- **The desk.** Height, Stand and Sit, six presets instead of the control box's four, over a cable or over Bluetooth.
 - **Films and series.** Follows what plays on Jellyfin, with a cinema view that has the lights and the desk within reach.
 - **Planes overhead.** A live radar with who is flying, where to, their photo and their trail.
 - **The day.** The next lecture, a countdown, and when to leave to get there on time.
@@ -43,11 +43,17 @@ I am not affiliated with Flexispot, LoctekMotion or M5Stack.
 
 ## Why
 
-The keypad on a Flexispot sits under the edge of the desk, has four presets, and is the only way to reach the desk. I wanted the desk on a screen I could see, with more heights than four, and moveable from Home Assistant, so "sit down for the film" could be one tap.
+I wanted one place to control my room from, mostly the lights and the heating. The spot where the desk's keypad sat, right at the edge of the desk, turned out to be the perfect place for it. Then I found [LoctekMotion_IoT](https://github.com/iMicknl/LoctekMotion_IoT), which works out what the control box and its keypad say to each other, so I could build my own controller and replace the keypad entirely.
 
-Once there was a screen on the desk it made sense to put the rest of what I look up during the day on it too: is the air in the room still fine, when do I need to leave for the next lecture, what is that plane.
+Once the screen was there, the extra features kept coming, each one making it a bit more useful: what is playing, when to leave for the next lecture, what that plane is, a timer for focusing.
 
 ## A tour
+
+### The room
+
+![A notice over the cinema view](docs/screenshots/notice.png)
+
+The home page is my Home Assistant: CO2, VOC, humidity and PM2.5 with a dot for how each is doing, the thermostat, the lights, and what is playing. The panel also shows up in Home Assistant itself over MQTT, with its height, presets, screen and battery, so automations can move the desk or send a notice to the screen.
 
 ### The desk
 
@@ -56,12 +62,6 @@ The rail down the left is always there: the height as the control box reports it
 - **Six presets instead of four.** The control box has four of its own. The panel drives the desk to the other two itself, and learns how far the desk rolls on after the keys are let go, so it stops where you asked.
 - **No cable across the room, if you want.** The desk can be wired straight to the Tab5, or to a small ESP32 left at the desk that the panel talks to over Bluetooth (see [option 2](#option-2-over-bluetooth-with-a-companion)).
 - **Safe by default.** A key that stops changing the height is let go of, a move from Home Assistant stops unless it keeps being asked for, and the byte that would factory-reset the control box is pinned by a test.
-
-### The room
-
-![A notice over the cinema view](docs/screenshots/notice.png)
-
-The home page is my Home Assistant: CO2, VOC, humidity and PM2.5 with a dot for how each is doing, the thermostat, the lights, and what is playing. The panel also shows up in Home Assistant itself over MQTT, with its height, presets, screen and battery, so automations can move the desk or send a notice to the screen.
 
 ### Films and series
 
