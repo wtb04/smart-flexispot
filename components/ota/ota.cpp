@@ -16,7 +16,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "mbedtls/sha256.h"
-#include "nvs.h"
+#include "settings.h"
 
 #if __has_include("ota_secrets.h")
 #include "ota_secrets.h"
@@ -135,26 +135,17 @@ void restart_in(std::int64_t after_us, esp_timer_handle_t *timer, const char *na
     }
 }
 
+// Written at once: the restart that installs it may come straight after.
+settings::Record<std::uint8_t> s_panel_ready{NVS_NAMESPACE, NVS_PANEL_KEY, 0};
+
 void remember_panel_ready(bool ready)
 {
-    nvs_handle_t nvs;
-    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) {
-        return;
-    }
-    nvs_set_u8(nvs, NVS_PANEL_KEY, ready ? 1 : 0);
-    nvs_commit(nvs);
-    nvs_close(nvs);
+    s_panel_ready.set(ready ? 1 : 0, settings::Write::Now);
 }
 
 bool remembered_panel_ready()
 {
-    nvs_handle_t nvs;
-    std::uint8_t ready = 0;
-    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs) == ESP_OK) {
-        nvs_get_u8(nvs, NVS_PANEL_KEY, &ready);
-        nvs_close(nvs);
-    }
-    return ready != 0;
+    return s_panel_ready.get() != 0;
 }
 
 const esp_partition_t *store()

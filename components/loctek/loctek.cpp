@@ -2,7 +2,6 @@
 
 #include "driver/gpio.h"
 #include "driver/uart.h"
-#include "nvs.h"
 #include "soc/soc_caps.h"
 
 #include "esp_check.h"
@@ -11,12 +10,15 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
+#include "settings.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <climits>
 #include <cstdlib>
 #include <cstring>
+#include <iterator>
 
 namespace loctek {
 namespace {
@@ -204,32 +206,23 @@ esp_err_t write_frame(const KeyFrame &frame)
     return uart_wait_tx_done(UART, TX_DONE_TIMEOUT);
 }
 
+using RunOn = std::array<int, DIRECTIONS>;
+settings::Record<RunOn> s_stored_run_on{NVS_NAMESPACE, NVS_RUN_ON, RunOn{}};
+
 void load_run_on()
 {
-    nvs_handle_t handle;
-    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle) != ESP_OK) {
-        return;
+    const RunOn stored = s_stored_run_on.get();
+    for (int i = 0; i < DIRECTIONS; ++i) {
+        d_run_on[i] = std::clamp(stored[i], 0, RUN_ON_MAX_MM);
     }
-    int         stored[DIRECTIONS];
-    std::size_t size = sizeof(stored);
-    if (nvs_get_blob(handle, NVS_RUN_ON, stored, &size) == ESP_OK && size == sizeof(stored)) {
-        for (int i = 0; i < DIRECTIONS; ++i) {
-            d_run_on[i] = std::clamp(stored[i], 0, RUN_ON_MAX_MM);
-        }
-    }
-    nvs_close(handle);
+    ESP_LOGI(TAG, "runs on %d mm up, %d mm down", d_run_on[0], d_run_on[1]);
 }
 
 void save_run_on()
 {
-    nvs_handle_t handle;
-    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle) != ESP_OK) {
-        return;
-    }
-    if (nvs_set_blob(handle, NVS_RUN_ON, d_run_on, sizeof(d_run_on)) == ESP_OK) {
-        nvs_commit(handle);
-    }
-    nvs_close(handle);
+    RunOn run_on;
+    std::copy(std::begin(d_run_on), std::end(d_run_on), run_on.begin());
+    s_stored_run_on.set(run_on);
 }
 
 /** Lets go of the keys: the release frame, repeated, since one can be missed. */

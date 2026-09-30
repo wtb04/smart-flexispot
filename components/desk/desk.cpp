@@ -7,11 +7,14 @@
 #include "freertos/queue.h"
 #include "freertos/task.h"
 #include "loctek.h"
-#include "nvs.h"
-#include "nvs_flash.h"
+#include "settings.h"
 #include "transport.h"
 
+#include <algorithm>
+#include <array>
+#include <iterator>
 #include <atomic>
+#include <cstring>
 #include <cstdlib>
 
 namespace desk {
@@ -92,34 +95,41 @@ int  s_preset_mm[deskproto::kPresetCount] = {-1, -1, -1, -1, -1, -1};
 bool s_presets_dirty                      = false;
 std::atomic<int> s_active_preset{-1};
 
+using Presets = std::array<int, deskproto::kPresetCount>;
+
+// A record from before presets 5 and 6 holds four; those are kept.
+bool accept_presets(const void *bytes, std::size_t size, Presets &out)
+{
+    if (size % sizeof(int) != 0 || size > sizeof(Presets)) {
+        return false;
+    }
+    out.fill(-1);
+    std::memcpy(out.data(), bytes, size);
+    return true;
+}
+
+settings::Record<Presets> s_stored_presets{NVS_NAMESPACE, NVS_PRESETS, [] {
+                                               Presets none;
+                                               none.fill(-1);
+                                               return none;
+                                           }(),
+                                           accept_presets};
+
 void load_presets()
 {
-    nvs_handle_t handle;
-    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle) != ESP_OK) {
-        return;
-    }
-    // A blob from before presets 5 and 6 holds four; those are kept.
-    int         stored[deskproto::kPresetCount];
-    std::size_t size = sizeof(stored);
-    const bool  read = nvs_get_blob(handle, NVS_PRESETS, stored, &size) == ESP_OK &&
-                      size % sizeof(int) == 0 && size <= sizeof(stored);
+    const Presets stored = s_stored_presets.get();
     for (int i = 0; i < deskproto::kPresetCount; ++i) {
-        const bool have = read && static_cast<std::size_t>(i) < size / sizeof(int);
-        s_preset_mm[i]  = have && loctek::in_range(stored[i]) ? stored[i] : -1;
+        s_preset_mm[i] = loctek::in_range(stored[i]) ? stored[i] : -1;
     }
-    nvs_close(handle);
+    ESP_LOGI(TAG, "presets %d, %d, %d, %d, %d, %d mm", s_preset_mm[0], s_preset_mm[1], s_preset_mm[2],
+             s_preset_mm[3], s_preset_mm[4], s_preset_mm[5]);
 }
 
 void save_presets()
 {
-    nvs_handle_t handle;
-    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle) != ESP_OK) {
-        return;
-    }
-    if (nvs_set_blob(handle, NVS_PRESETS, s_preset_mm, sizeof(s_preset_mm)) == ESP_OK) {
-        nvs_commit(handle);
-    }
-    nvs_close(handle);
+    Presets heights;
+    std::copy(std::begin(s_preset_mm), std::end(s_preset_mm), heights.begin());
+    s_stored_presets.set(heights);
 }
 
 void remember_preset(int index, int height_mm)
