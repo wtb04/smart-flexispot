@@ -270,3 +270,12 @@ CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 # the build's ELF; its summary goes in the restart's report.
 CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
 CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+
+# Internal RAM is what the radio and TLS run short of: the Wi-Fi link keeps
+# fewer receive buffers and a smaller block-ack window than it would, and TCP
+# holds at most four segments out of order.
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=10
+CONFIG_ESP_WIFI_RX_BA_WIN=6
+CONFIG_WIFI_RMT_STATIC_RX_BUFFER_NUM=10
+CONFIG_WIFI_RMT_RX_BA_WIN=6
+CONFIG_LWIP_TCP_OOSEQ_MAX_PBUFS=4
