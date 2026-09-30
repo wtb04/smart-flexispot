@@ -2758,4 +2758,16 @@ int bench_radar(char *out, std::size_t size)
 }
 #endif
 
+bool radar_choose(const char *hex)
+{
+    const int at = plot_of(hex);
+    if (at < 0) {
+        return false;
+    }
+    s_following = false;
+    choose(*s_plots[at].aircraft);
+    show_radar(*s_last);
+    return true;
+}
+
 }  // namespace ui

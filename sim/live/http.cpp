@@ -21,14 +21,15 @@ const char *kept(const std::string &text)
 }
 }  // namespace
 
-Answer get(const std::string &url, const std::vector<std::string> &headers, net::Priority priority)
+Answer get(const std::string &url, const std::vector<std::string> &headers, net::Priority priority,
+           const char *agent)
 {
     std::string lines;
     for (const std::string &header : headers) {
         lines += header + '\n';
     }
     net::HostConfig like;
-    like.agent      = "smart-flexispot-sim";
+    like.agent      = agent;
     like.headers    = kept(lines);
     like.timeout_ms = TIMEOUT_MS;
     like.connections = 2;

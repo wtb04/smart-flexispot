@@ -15,6 +15,7 @@
 #include <cctype>
 #include <cstdio>
 #include <ctime>
+#include <cstdlib>
 #include <mutex>
 #include <vector>
 
@@ -51,7 +52,9 @@ bool starts_with(const char *text, const char *prefix)
 int fetch_feed(int index, std::vector<Event> &into)
 {
     const Feed &feed = FEEDS[index];
-    if (feed.url != nullptr && feed.url[0] == '\0') {
+    // SIM_NO_WORK: the timetable alone, for screenshots.
+    const bool skipped = feed.url != nullptr && std::getenv("SIM_NO_WORK") != nullptr;
+    if (skipped || (feed.url != nullptr && feed.url[0] == '\0')) {
         return -1;
     }
     const std::string url = feed.url != nullptr ? std::string(feed.url) : std::string(HOST) + "/" + feed.name;

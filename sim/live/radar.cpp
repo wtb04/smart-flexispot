@@ -30,6 +30,7 @@ constexpr const char  *FEEDS[]        = {"https://api.adsb.lol/v2/point/%.4f/%.4
                                          "https://opendata.adsb.fi/api/v2/lat/%.4f/lon/%.4f/dist/%d"};
 constexpr char         LOOKUP_HOST[]  = "https://api.adsbdb.com";
 constexpr char         PHOTO_HOST[]   = "https://api.planespotters.net";
+constexpr char         PHOTO_AGENT[]  = "smart-flexispot-sim (+https://woutertenbrinke.nl)";  // they ask for a contact
 constexpr char         TRACE_HOST[]   = "https://adsb.lol";
 constexpr int          RANGE_KM       = 250;  // as components/radar asks
 constexpr float        NM_PER_KM      = 0.539957f;
@@ -119,6 +120,27 @@ bool fetch_sky(bool &busy)
     return true;
 }
 
+// SIM_ROUTE="AMS,Amsterdam,JFK,New York": that route, made up, for an
+// aircraft whose own is not on file, for screenshots.
+void fake_route(radar::Details &out)
+{
+    const char *text = std::getenv("SIM_ROUTE");
+    if (text == nullptr || out.has_route) {
+        return;
+    }
+    char from[8], from_city[32], to[8], to_city[32];
+    if (std::sscanf(text, "%7[^,],%31[^,],%7[^,],%31[^,]", from, from_city, to, to_city) != 4) {
+        return;
+    }
+    std::snprintf(out.origin_code, sizeof(out.origin_code), "%s", from);
+    std::snprintf(out.origin_city, sizeof(out.origin_city), "%s", from_city);
+    std::snprintf(out.dest_code, sizeof(out.dest_code), "%s", to);
+    std::snprintf(out.dest_city, sizeof(out.dest_city), "%s", to_city);
+    out.has_origin_at = false;
+    out.has_dest_at   = false;
+    out.has_route     = true;
+}
+
 // As radar.cpp's fetch_details: one request for both halves, and each again on
 // its own when the other was unknown.
 bool fetch_details(const char *hex, const char *callsign, radar::Details &out)
@@ -133,6 +155,7 @@ bool fetch_details(const char *hex, const char *callsign, radar::Details &out)
         if (got.status == 200) {
             radar::parse_aircraft(got.body.data(), got.body.size(), out);
             radar::parse_route(got.body.data(), got.body.size(), out);
+            fake_route(out);
             return true;
         }
         if (got.status != 404) {
@@ -153,6 +176,7 @@ bool fetch_details(const char *hex, const char *callsign, radar::Details &out)
             radar::parse_route(got.body.data(), got.body.size(), out);
         }
     }
+    fake_route(out);
     return out.has_aircraft || out.has_route;
 }
 
@@ -190,13 +214,13 @@ std::vector<std::uint16_t> fetch_photo(const char *hex, int &width, int &height)
 #if __APPLE__
     char url[128];
     std::snprintf(url, sizeof(url), "%s/pub/photos/hex/%s", radar::PHOTO_HOST, hex);
-    const Answer lookup = get(url, {}, net::Priority::Tap);
+    const Answer lookup = get(url, {}, net::Priority::Tap, radar::PHOTO_AGENT);
     char         found[sizeof(radar::Details::photo_url)];
     if (lookup.status != 200 ||
         !radar::parse_photo(lookup.body.data(), lookup.body.size(), found, sizeof(found))) {
         return pixels;
     }
-    const Answer image = get(found, {}, net::Priority::Tap);
+    const Answer image = get(found, {}, net::Priority::Tap, radar::PHOTO_AGENT);
     if (image.status != 200) {
         return pixels;
     }

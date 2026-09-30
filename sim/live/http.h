@@ -12,8 +12,8 @@ struct Answer {
 };
 
 /** Through net, blocking, on whichever thread asks; `headers` as "Name: value",
- *  kept for the host from its first request. Only the feeds net_desktop.cpp
+ *  and `agent` kept for the host from its first request. Only the feeds net_desktop.cpp
  *  allows are reached. */
 Answer get(const std::string &url, const std::vector<std::string> &headers = {},
-           net::Priority priority = net::Priority::Now);
+           net::Priority priority = net::Priority::Now, const char *agent = "smart-flexispot-sim");
 }  // namespace live

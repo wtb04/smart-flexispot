@@ -5,6 +5,8 @@
 #include "live/live.h"
 #include "media_stub.h"
 #include "notices.h"
+#include "radar.h"
+#include "radar_page.h"
 #include "updates.h"
 #include "ui.h"
 #include "ui_internal.h"
@@ -15,6 +17,7 @@
 #include <SDL.h>
 #include <zlib.h>
 
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
@@ -279,7 +282,10 @@ std::uint32_t ticks_past_splash()
 // Assistant answering and music; --tap X,Y taps there, as often as given;
 // --then KEYS presses those after the taps, as a notice over a view they opened;
 // --shot S saves a screenshot after S seconds and quits, to --out FILE if
-// given; --splash plays the splash the panel boots with.
+// given; --splash plays the splash the panel boots with. --pick-above FT
+// chooses the nearest aircraft flying at least that high; --out2 FILE saves a
+// second screenshot a few seconds after the first, after the --tap2 taps, so
+// both show the same aircraft.
 struct Options {
     int         page   = -1;
     int         shot_s = -1;
@@ -287,6 +293,9 @@ struct Options {
     std::string keys;
     std::vector<SDL_Point> taps;
     std::string then;
+    int         pick_ft = -1;
+    std::vector<SDL_Point> taps2;
+    std::string out2;
 };
 
 Options options(int argc, char **argv)
@@ -316,11 +325,49 @@ Options options(int argc, char **argv)
                 o.taps.push_back(at);
             }
             ++i;
+        } else if (name == "--pick-above") {
+            o.pick_ft = std::atoi(value);
+            ++i;
+        } else if (name == "--tap2") {
+            SDL_Point at{};
+            if (std::sscanf(value, "%d,%d", &at.x, &at.y) == 2) {
+                o.taps2.push_back(at);
+            }
+            ++i;
+        } else if (name == "--out2") {
+            o.out2 = value;
+            ++i;
         } else if (name == "--splash") {
             o.splash = true;
         }
     }
     return o;
+}
+
+constexpr float          PICK_WITHIN_NM = 25.0f;
+constexpr std::uint32_t  SECOND_SHOT_MS = 3000;
+
+// An airline's flight, as KLM1411: three letters and a number, in something large.
+bool airliner(const radar::Aircraft &plane)
+{
+    const char *f = plane.flight;
+    return std::isupper(f[0]) && std::isupper(f[1]) && std::isupper(f[2]) && std::isdigit(f[3]) &&
+           plane.category[0] == 'A' && plane.category[1] >= '3' && plane.category[1] <= '5';
+}
+
+bool pick_plane(int above_ft)
+{
+    static radar::Snapshot sky;
+    radar::snapshot(sky);
+    const radar::Aircraft *best = nullptr;
+    for (int i = 0; i < sky.count; ++i) {
+        const radar::Aircraft &plane = sky.list[i];
+        if (!plane.on_ground && airliner(plane) && plane.altitude_ft >= above_ft && plane.distance_nm <= PICK_WITHIN_NM &&
+            (best == nullptr || plane.distance_nm < best->distance_nm)) {
+            best = &plane;
+        }
+    }
+    return best != nullptr && ui::radar_choose(best->hex);
 }
 }  // namespace
 
@@ -385,9 +432,25 @@ int main(int argc, char **argv)
     }
     press_all(opts.then);
 
-    const std::uint32_t shot_at = opts.shot_s >= 0 ? SDL_GetTicks() + opts.shot_s * 1000u : 0;
+    const std::uint32_t shot_at   = opts.shot_s >= 0 ? SDL_GetTicks() + opts.shot_s * 1000u : 0;
+    std::uint32_t       second_at = 0;
+    bool                picked    = opts.pick_ft < 0;
     while (!s_quit) {
-        if (shot_at != 0 && SDL_GetTicks() >= shot_at) {
+        if (!picked) {
+            picked = pick_plane(opts.pick_ft);
+        }
+        if (shot_at != 0 && second_at == 0 && SDL_GetTicks() >= shot_at) {
+            save_screenshot();
+            if (opts.out2.empty()) {
+                break;
+            }
+            s_shot_to = opts.out2;
+            for (const SDL_Point &at : opts.taps2) {
+                tap(at);
+            }
+            second_at = SDL_GetTicks() + SECOND_SHOT_MS;
+        }
+        if (second_at != 0 && SDL_GetTicks() >= second_at) {
             save_screenshot();
             break;
         }

@@ -48,9 +48,10 @@ sim/send.sh notify '{"title":"Hello","message":"Kept until tapped","level":"warn
 
 ## Settings
 
-`SIM_OFFLINE=1` leaves the live feeds off, as CI does for its screenshots. `SIM_NO_PHOTOS=1` leaves out
-the aircraft photos, which belong to their photographers, from screenshots
-that are to be kept.
+`SIM_OFFLINE=1` leaves the live feeds off, as CI does for its screenshots.
+`SIM_NO_PHOTOS=1` leaves out the aircraft photos, `SIM_NO_WORK=1` the work
+calendar, and `SIM_ROUTE="AMS,Amsterdam,JFK,New York"` makes up that route
+for an aircraft whose own is not on file.
 
 `sim/sim.env`, gitignored, is read by `run.sh`:
 
@@ -63,9 +64,21 @@ SIM_ZOOM=0.75      # the window's scale, for a smaller screen
 it starts, `am` for Home Assistant answering and music, `--tap X,Y` taps the
 screen there, as often as given, `--shot S` saves a
 screenshot after S seconds and quits, and `--splash` plays the twelve-second
-splash the panel boots with. Together they take a picture of a state without
+splash the panel boots with. `--pick-above FT` chooses the nearest airliner
+flying at least that high, and `--out2 FILE` saves a second screenshot a few
+seconds after the first, after the `--tap2 X,Y` taps, so both show the same
+moment. Together they take a picture of a state without
 anyone at the keyboard:
 
 ```sh
 sim/run.sh --press amm --page 0 --shot 3   # the home page with a Jellyfin episode on
+```
+
+The README's radar and calendar pictures, over Schiphol:
+
+```sh
+cd sim
+SIM_HOME=52.3105,4.7683 SIM_ROUTE="AMS,Amsterdam,JFK,New York" ./build/sim --page 1 --pick-above 9000 \
+    --shot 20 --out ../docs/screenshots/radar.png --tap2 891,78 --out2 ../docs/screenshots/radar-full.png
+SIM_NO_WORK=1 ./build/sim --page 2 --shot 16 --out ../docs/screenshots/calendar.png
 ```
