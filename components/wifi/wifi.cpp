@@ -90,7 +90,8 @@ constexpr TickType_t BRING_UP_RETRY = pdMS_TO_TICKS(30 * units::kMsPerSecond);
 constexpr TickType_t KICK_AFTER    = pdMS_TO_TICKS(3 * units::kMsPerMinute);
 constexpr TickType_t RESTART_AFTER = pdMS_TO_TICKS(10 * units::kMsPerMinute);
 
-constexpr TickType_t RADIO_POWER_SETTLE = pdMS_TO_TICKS(100);
+constexpr TickType_t RADIO_POWER_OFF    = pdMS_TO_TICKS(1000);
+constexpr TickType_t RADIO_POWER_SETTLE = pdMS_TO_TICKS(300);
 
 constexpr int MAC_LENGTH = 6;
 
@@ -232,6 +233,10 @@ esp_err_t init_nvs()
 /** Powers the radio and starts the driver. Safe to try again after a failure. */
 esp_err_t bring_up()
 {
+    // Off first, for long enough to be off: across a restart it keeps its
+    // power, and has come back unreachable, its reset line doing nothing.
+    ESP_RETURN_ON_ERROR(bsp_feature_enable(BSP_FEATURE_WIFI, false), TAG, "wifi power");
+    vTaskDelay(RADIO_POWER_OFF);
     ESP_RETURN_ON_ERROR(bsp_feature_enable(BSP_FEATURE_WIFI, true), TAG, "wifi power");
     vTaskDelay(RADIO_POWER_SETTLE);
 
