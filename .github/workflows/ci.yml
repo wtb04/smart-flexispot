@@ -87,6 +87,14 @@ jobs:
           . "$IDF_PATH/export.sh"
           idf.py -B ${{ matrix.dir }} ${{ matrix.flags }} build
 
+      # One image for the whole flash, written at 0x0 on a panel fresh from
+      # the box or one that will not boot.
+      - name: Merge the images
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          idf.py -B ${{ matrix.dir }} merge-bin -o smart_flexispot-full.bin
+
       - name: Size in the summary
         shell: bash
         run: |
@@ -103,6 +111,7 @@ jobs:
         with:
           name: firmware-${{ matrix.variant }}
           path: |
+            ${{ matrix.dir }}/smart_flexispot-full.bin
             ${{ matrix.dir }}/smart_flexispot.bin
             ${{ matrix.dir }}/smart_flexispot.elf
             ${{ matrix.dir }}/bootloader/bootloader.bin
@@ -136,3 +145,28 @@ jobs:
         with:
           name: screenshots
           path: sim/build/screenshots/
+
+  # A tag as v1.2.0 puts the release build's images on a GitHub release.
+  release:
+    name: Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [host-tests, firmware]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: firmware-release
+          path: firmware
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd firmware
+          cp smart_flexispot-full.bin "smart_flexispot-${GITHUB_REF_NAME}-full.bin"
+          cp smart_flexispot.bin "smart_flexispot-${GITHUB_REF_NAME}-ota.bin"
+          gh release create "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --generate-notes \
+            "smart_flexispot-${GITHUB_REF_NAME}-full.bin" "smart_flexispot-${GITHUB_REF_NAME}-ota.bin"
