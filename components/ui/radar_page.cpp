@@ -2145,6 +2145,61 @@ lv_point_t pixel_of(const Placed &at)
     return {static_cast<std::int32_t>(std::lround(at.x)), static_cast<std::int32_t>(std::lround(at.y))};
 }
 
+// A chosen aircraft's trail grows back from it along where it flew, rather
+// than showing whole: from nothing when it is chosen, and from what showed
+// when much more of it comes at once, as its past track does. A little more,
+// as each reading adds, just shows.
+constexpr std::uint32_t TRAIL_GROW_MS  = 700;
+constexpr float         TRAIL_JUMP_PX  = 24.0f;
+constexpr std::uint32_t TRAIL_FRAME_MS = 33;
+
+char          s_grown_hex[radar::kHexLen] = {};  // whose trail s_grown_px measures
+float         s_grown_px                  = 0.0f;  // shown, back from the aircraft
+float         s_grow_from_px              = 0.0f;
+std::uint32_t s_grow_at                   = 0;
+bool          s_growing                   = false;
+lv_timer_t   *s_grow_timer                = nullptr;
+bool          s_named[DRAWN_MAX]          = {};  // the labels the last full redraw chose
+
+float ease_out(float t)
+{
+    const float left = 1.0f - t;
+    return 1.0f - left * left * left;
+}
+
+// How much of a trail `length_px` long to draw now, and whether to keep going.
+float trail_reveal(const char *hex, float length_px)
+{
+    if (std::strcmp(hex, s_grown_hex) != 0) {
+        std::snprintf(s_grown_hex, sizeof(s_grown_hex), "%s", hex);
+        s_grown_px = 0.0f;
+        s_growing  = false;
+    }
+    if (!s_growing && length_px - s_grown_px > TRAIL_JUMP_PX) {
+        s_growing      = true;
+        s_grow_from_px = s_grown_px;
+        s_grow_at      = lv_tick_get();
+        if (s_grow_timer != nullptr) {
+            lv_timer_resume(s_grow_timer);
+        }
+    }
+    if (!s_growing) {
+        s_grown_px = length_px;
+        return length_px;
+    }
+    const float t = std::min(static_cast<float>(lv_tick_elaps(s_grow_at)) / TRAIL_GROW_MS, 1.0f);
+    s_growing     = t < 1.0f;
+    s_grown_px    = s_grow_from_px + (length_px - s_grow_from_px) * ease_out(t);
+    return s_grown_px;
+}
+
+float distance(lv_point_t a, lv_point_t b)
+{
+    const auto dx = static_cast<float>(b.x - a.x);
+    const auto dy = static_cast<float>(b.y - a.y);
+    return std::sqrt(dx * dx + dy * dy);
+}
+
 void draw_way(const Plot &plot)
 {
     if (s_frame == nullptr) {
@@ -2155,22 +2210,39 @@ void draw_way(const Plot &plot)
     const std::uint16_t faint    = lv_color_to_u16(lv_color_hex(theme::secondary));
     const lv_point_t    here{plot.x, plot.y};
 
+    // Oldest first, and last the blip itself, which is placed a little
+    // differently, by bearing and distance.
     radar::TrailPoint points[radar::kTrailPoints];
     const int         count = radar::trail(plot.aircraft->hex, points, radar::kTrailPoints);
-    lv_point_t        start = here;  // where the trail begins, oldest
-    if (count > 0) {
-        start = pixel_of(place_at(points[0].lat, points[0].lon, range_km));
-        // The last leg ends on the blip itself, which is placed a little
-        // differently, by bearing and distance.
-        for (int i = 0; i < count; ++i) {
-            const lv_point_t from = pixel_of(place_at(points[i].lat, points[i].lon, range_km));
-            const lv_point_t to   = i + 1 < count
-                                        ? pixel_of(place_at(points[i + 1].lat, points[i + 1].lon, range_km))
-                                        : here;
-            const auto opa = static_cast<lv_opa_t>(
-                TRAIL_OLD_OPA + (TRAIL_NEW_OPA - TRAIL_OLD_OPA) * (i + 1) / count);
-            trail_line(from, to, ink, opa);
+    lv_point_t        at[radar::kTrailPoints + 1];
+    for (int i = 0; i < count; ++i) {
+        at[i] = pixel_of(place_at(points[i].lat, points[i].lon, range_km));
+    }
+    at[count] = here;
+    // As far as it shows: past the scope's edge a longer trail would grow
+    // unseen, and what shows would hurry.
+    float length_px = 0.0f;
+    for (int i = count; i > 0; --i) {
+        length_px += distance(at[i], at[i - 1]);
+        if (!within_scope(at[i - 1].x, at[i - 1].y)) {
+            break;
         }
+    }
+
+    // Back from the aircraft, as far as has grown.
+    const float reveal = trail_reveal(plot.aircraft->hex, length_px);
+    float       drawn  = 0.0f;
+    for (int i = count; i > 0 && drawn < reveal; --i) {
+        const float leg = distance(at[i], at[i - 1]);
+        lv_point_t  to  = at[i - 1];
+        if (drawn + leg > reveal && leg > 0.0f) {
+            const float part = (reveal - drawn) / leg;
+            to = {at[i].x + static_cast<std::int32_t>(std::lround((at[i - 1].x - at[i].x) * part)),
+                  at[i].y + static_cast<std::int32_t>(std::lround((at[i - 1].y - at[i].y) * part))};
+        }
+        const auto opa = static_cast<lv_opa_t>(TRAIL_OLD_OPA + (TRAIL_NEW_OPA - TRAIL_OLD_OPA) * i / count);
+        trail_line(to, at[i], ink, opa);
+        drawn += leg;
     }
 
     const bool route_known = std::strcmp(s_details_hex, plot.aircraft->hex) == 0;
@@ -2178,9 +2250,9 @@ void draw_way(const Plot &plot)
         const Placed dest = place_at(s_details.dest_lat, s_details.dest_lon, range_km);
         route_line(here, dest.x, dest.y, faint);
     }
-    if (route_known && s_details.has_origin_at) {
+    if (route_known && s_details.has_origin_at && !s_growing) {
         const Placed origin = place_at(s_details.origin_lat, s_details.origin_lon, range_km);
-        route_line(start, origin.x, origin.y, faint);
+        route_line(at[0], origin.x, origin.y, faint);
     }
 }
 
@@ -2222,6 +2294,19 @@ const radar::Aircraft *draw_traffic(const bool *named)
         lv_obj_invalidate(s_canvas);
     }
     return chosen;
+}
+
+// Each frame of a trail growing: the air drawn again over the map, which
+// stays. A zoom under way draws every frame itself.
+void grow_tick(lv_timer_t *timer)
+{
+    if (s_scope != nullptr && lv_anim_get(s_scope, zoom_step) == nullptr) {
+        clear_traffic();
+        draw_traffic(s_named);
+    }
+    if (!s_growing) {
+        lv_timer_pause(timer);
+    }
 }
 
 // Everything in the scope is laid out for one frame, so a view of another
@@ -2396,6 +2481,8 @@ void build_radar_page(lv_obj_t *page, std::int32_t width, std::int32_t height)
     build_column(page, 0, height);
     lay_out_page();
     build_full();
+    s_grow_timer = lv_timer_create(grow_tick, TRAIL_FRAME_MS, nullptr);
+    lv_timer_pause(s_grow_timer);
 }
 
 // Keeps what was on show: asking again only blanked the photograph while it
@@ -2436,6 +2523,7 @@ void show_radar(const radar::Snapshot &snapshot)
 
     ink_marker();
     clear_traffic();
+    std::copy(std::begin(named), std::end(named), std::begin(s_named));
     const radar::Aircraft *chosen = draw_traffic(named);
 
     if (chosen != nullptr) {
