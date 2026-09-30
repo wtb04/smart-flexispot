@@ -168,8 +168,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           awk -v tag="$GITHUB_REF_NAME" '$0 ~ "^## " tag "," {on = 1; next} /^## / && on {exit} on' CHANGELOG.md > notes.md
+          title="$GITHUB_REF_NAME: $(grep -m1 . notes.md | sed 's/\.$//')"
           cd firmware
           cp smart_flexispot-full.bin "smart_flexispot-${GITHUB_REF_NAME}-full.bin"
           cp smart_flexispot.bin "smart_flexispot-${GITHUB_REF_NAME}-ota.bin"
-          gh release create "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --notes-file ../notes.md \
+          gh release create "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --title "$title" --notes-file ../notes.md \
             "smart_flexispot-${GITHUB_REF_NAME}-full.bin" "smart_flexispot-${GITHUB_REF_NAME}-ota.bin"
