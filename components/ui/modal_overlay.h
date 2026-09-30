@@ -1,6 +1,7 @@
 #pragma once
 
 #include "lvgl.h"
+#include "views.h"
 
 #include <cstdint>
 
@@ -24,17 +25,18 @@ public:
     /** Appears at once, centred; origin is ignored. */
     void open(lv_obj_t *origin = nullptr);
     void close();
-    bool visible() const { return visible_; }
+    bool visible() const { return detail::view_open(view_); }
 
 private:
     static void scrim_clicked(lv_event_t *event);
     static void close_clicked(lv_event_t *event);
+    void        centre();
 
     lv_obj_t    *scrim_ = nullptr;
     lv_obj_t    *card_  = nullptr;
     std::int32_t width_;
     std::int32_t height_;
-    bool         visible_ = false;
+    detail::ViewId view_ = detail::kNoView;
 };
 
 }  // namespace ui

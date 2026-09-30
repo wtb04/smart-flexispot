@@ -28,6 +28,8 @@ ModalOverlay::ModalOverlay(lv_obj_t *parent, std::int32_t width, std::int32_t he
     lv_obj_set_align(card_, LV_ALIGN_TOP_LEFT);
     theme::style_panel(card_, theme::panel, CARD_RADIUS);
     lv_obj_set_clickable(card_, true);
+
+    view_ = detail::add_view({"popup", detail::ViewKind::Popup, scrim_, [this] { centre(); }, nullptr});
 }
 
 void ModalOverlay::add_close_button()
@@ -63,6 +65,11 @@ void ModalOverlay::close_clicked(lv_event_t *event)
 // every frame, some 70 ms of them here, so a slide could only stutter.
 void ModalOverlay::open(lv_obj_t *)
 {
+    detail::open_view(view_);
+}
+
+void ModalOverlay::centre()
+{
     lv_obj_update_layout(scrim_);
 
     lv_obj_t *parent = lv_obj_get_parent(scrim_);
@@ -73,18 +80,11 @@ void ModalOverlay::open(lv_obj_t *)
 
     lv_obj_set_pos(card_, (lv_obj_get_width(scrim_) - width_) / 2,
                    (lv_obj_get_height(scrim_) - height_) / 2);
-    lv_obj_set_hidden(scrim_, false);
-    lv_obj_move_foreground(scrim_);
-    visible_ = true;
 }
 
 void ModalOverlay::close()
 {
-    if (!visible_) {
-        return;
-    }
-    visible_ = false;
-    lv_obj_set_hidden(scrim_, true);
+    detail::close_view(view_);
 }
 
 void ModalOverlay::scrim_clicked(lv_event_t *event)

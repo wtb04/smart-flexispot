@@ -243,6 +243,7 @@ std::int32_t s_page_h    = 0;
 lv_obj_t    *s_bezel     = nullptr;
 lv_obj_t    *s_column    = nullptr;
 lv_obj_t    *s_full      = nullptr;  // over the whole screen while it is up
+detail::ViewId s_full_view = detail::kNoView;
 lv_obj_t    *s_full_chip = nullptr;  // into it, and out again
 lv_obj_t    *s_full_mark = nullptr;
 lv_obj_t    *s_screw     = nullptr;
@@ -2321,40 +2322,43 @@ void lay_out_full()
 
 bool full_open()
 {
-    return s_full != nullptr && !lv_obj_is_hidden(s_full);
+    return detail::view_open(s_full_view);
 }
 
-// Over the whole screen, the rail and the tabs under it.
 void open_full()
 {
-    const detail::Layout l = detail::layout();
-    if (s_full == nullptr) {
-        s_full = lv_obj_create(lv_screen_active());
-        lv_obj_set_pos(s_full, 0, 0);
-        lv_obj_set_size(s_full, l.screen_w, l.screen_h);
-        theme::style_panel(s_full, theme::background, 0);
-        lv_obj_set_scrollable(s_full, false);  // clickable, so nothing under it is
-    }
-    lv_obj_set_hidden(s_full, false);
-    lv_obj_move_foreground(s_full);
-    lay_out_full();
-    lv_image_set_src(s_full_mark, &icons::collapse_icon);
+    detail::open_view(s_full_view);
 }
 
 void close_full()
 {
-    lay_out_page();
-    lv_obj_set_hidden(s_full, true);
-    lv_image_set_src(s_full_mark, &icons::expand_icon);
+    detail::close_view(s_full_view);
 }
 
 void full_clicked(lv_event_t *)
 {
-    if (full_open()) {
-        close_full();
-    } else {
-        open_full();
-    }
+    detail::toggle_view(s_full_view);
+}
+
+// Over the whole screen, the rail and the tabs under it; the map and the
+// column move onto it while it is up, and back onto the page after.
+void build_full()
+{
+    const detail::Layout l = detail::layout();
+    s_full = lv_obj_create(lv_screen_active());
+    lv_obj_set_pos(s_full, 0, 0);
+    lv_obj_set_size(s_full, l.screen_w, l.screen_h);
+    theme::style_panel(s_full, theme::background, 0);
+    lv_obj_set_scrollable(s_full, false);  // clickable, so nothing under it is
+    s_full_view = detail::add_view({"radar", detail::ViewKind::Fullscreen, s_full,
+                                    [] {
+                                        lay_out_full();
+                                        lv_image_set_src(s_full_mark, &icons::collapse_icon);
+                                    },
+                                    [] {
+                                        lay_out_page();
+                                        lv_image_set_src(s_full_mark, &icons::expand_icon);
+                                    }});
 }
 }  // namespace
 
@@ -2391,6 +2395,7 @@ void build_radar_page(lv_obj_t *page, std::int32_t width, std::int32_t height)
     paint_range_buttons();
     build_column(page, 0, height);
     lay_out_page();
+    build_full();
 }
 
 // Keeps what was on show: asking again only blanked the photograph while it

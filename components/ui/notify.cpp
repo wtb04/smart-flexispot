@@ -121,7 +121,7 @@ void write_notice(const Notice &notice)
 void place_notice()
 {
     const Layout l    = layout();
-    const bool   full = radar_full_open() || focus_full_open() || cinema_open();
+    const bool   full = fullscreen_open();
     lv_obj_set_pos(s_notice_scrim, full || l.rail_right ? 0 : RAIL_W, 0);
     lv_obj_set_size(s_notice_scrim, full ? l.screen_w : l.screen_w - RAIL_W, l.screen_h);
     if (full) {

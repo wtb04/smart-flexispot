@@ -109,6 +109,7 @@ int          s_laid_out = -1;  // how many parts the stops are laid out for
 int s_shown_s = -1;
 
 lv_obj_t *s_full          = nullptr;  // the timer fullscreen
+detail::ViewId s_full_view = detail::kNoView;
 lv_obj_t *s_full_phase    = nullptr;
 lv_obj_t *s_full_under    = nullptr;  // until when, or what a tap does
 lv_obj_t *s_full_round[ROUNDS_MAX] = {};
@@ -298,7 +299,7 @@ void timer_tick(lv_timer_t *)
     if (detail::s_page == detail::FOCUS_PAGE && s_dial.leaves != nullptr) {
         show_second(false);
     }
-    if (s_full != nullptr && !lv_obj_is_hidden(s_full)) {
+    if (detail::view_open(s_full_view)) {
         show_full_second(false);
     }
 }
@@ -736,12 +737,7 @@ void show_full_part()
 
 void open_full()
 {
-    if (s_full == nullptr) {
-        return;
-    }
-    lv_obj_set_hidden(s_full, false);
-    lv_obj_move_foreground(s_full);
-    show_full_part();
+    detail::open_view(s_full_view);
 }
 
 // The dial without its card, larger and on the background: the same ticks and
@@ -763,7 +759,7 @@ void build_full(lv_obj_t *screen)
     theme::make_mark(back, &icons::collapse_icon);
     lv_obj_align(back, LV_ALIGN_TOP_RIGHT, -FULL_PAD, FULL_PAD);
     lv_obj_set_ext_click_area(back, theme::space::s);
-    lv_obj_add_event_cb(back, [](lv_event_t *) { lv_obj_set_hidden(s_full, true); }, LV_EVENT_CLICKED,
+    lv_obj_add_event_cb(back, [](lv_event_t *) { detail::close_view(s_full_view); }, LV_EVENT_CLICKED,
                         nullptr);
 
     s_full_phase = theme::make_eyebrow(s_full, "READY");
@@ -780,7 +776,7 @@ void build_full(lv_obj_t *screen)
     for (lv_obj_t *&dot : s_full_round) {
         dot = make_dot(rounds, theme::panel_light, FULL_DOT);
     }
-    lv_obj_set_hidden(s_full, true);
+    s_full_view = detail::add_view({"focus", detail::ViewKind::Fullscreen, s_full, show_full_part, nullptr});
 }
 
 }  // namespace
@@ -822,7 +818,7 @@ void show_focus(const Focus &focus)
 
 bool focus_full_open()
 {
-    return s_full != nullptr && !lv_obj_is_hidden(s_full);
+    return detail::view_open(s_full_view);
 }
 
 void build_focus_full(lv_obj_t *screen)

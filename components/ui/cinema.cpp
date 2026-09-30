@@ -77,10 +77,11 @@ lv_timer_t   *s_tick    = nullptr;
 std::uint32_t s_woke_at = 0;  // lit for an intro to skip: kept lit a while from then
 bool          s_skip_was_offered = false;
 
+ViewId s_cinema = kNoView;
+
 void close_cinema()
 {
-    lv_obj_set_hidden(s_view, true);
-    lv_timer_pause(s_tick);
+    close_view(s_cinema);
 }
 
 /** The artist line holds the series, then its season and episode. */
@@ -484,6 +485,14 @@ void build_cinema(lv_obj_t *screen)
 
     s_tick = lv_timer_create(tick, TICK_MS, nullptr);
     lv_timer_pause(s_tick);
+    s_cinema = add_view({"cinema", ViewKind::Fullscreen, s_view,
+                         [] {
+                             s_woke_at          = lv_tick_get();
+                             s_skip_was_offered = false;
+                             lv_timer_resume(s_tick);
+                             tick(s_tick);
+                         },
+                         [] { lv_timer_pause(s_tick); }});
 }
 
 bool cinema_has_next()
@@ -529,19 +538,11 @@ void apply_cinema_still(const void *pixels)
 
 bool cinema_open()
 {
-    return s_view != nullptr && !lv_obj_is_hidden(s_view);
+    return view_open(s_cinema);
 }
 
 void open_cinema()
 {
-    if (s_view == nullptr) {
-        return;
-    }
-    lv_obj_set_hidden(s_view, false);
-    lv_obj_move_foreground(s_view);
-    s_woke_at          = lv_tick_get();
-    s_skip_was_offered = false;
-    lv_timer_resume(s_tick);
-    tick(s_tick);
+    open_view(s_cinema);
 }
 }  // namespace ui::detail

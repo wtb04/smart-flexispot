@@ -14,6 +14,7 @@
 #include "esp_lvgl_port.h"
 #include "lvgl.h"
 #include "modal_overlay.h"
+#include "views.h"
 #include "calendar_page.h"
 #include "focus_page.h"
 #include "screenshot.h"
