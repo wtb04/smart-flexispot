@@ -69,6 +69,13 @@ bool parse_aircraft(const char *json, std::size_t length, Details &out);
  *  ordinary answer rather than a failure. */
 bool parse_photo(const char *json, std::size_t length, char *out, std::size_t size);
 
+/** Whether the route fits where the aircraft is: near the great circle from
+ *  one airport to the other, and not past either end. A callsign's route can
+ *  be another day's leg, as airlines give their callsigns to other flights; one
+ *  that does not fit is not to be shown. True when the airports' places are not
+ *  known, as nothing then says it is wrong. */
+bool route_fits(const Details &details, float lat, float lon);
+
 /** Reads an adsb.fi v2 response, which is far too large to hand to a DOM
  *  parser on this part: the allocator keeps anything under sixteen kilobytes
  *  in internal RAM, and a JSON tree of forty kilobytes is thousands of small

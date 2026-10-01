@@ -346,10 +346,35 @@ using DetailsJobPtr = std::shared_ptr<DetailsJob>;
 
 void details_step(const DetailsJobPtr &job);
 
+// A route the database has for the callsign that does not fit where the
+// aircraft is: another of the callsign's days, shown as no route rather than
+// as the wrong one. Under the lock.
+void drop_route_unless_fits(Details &details, const char *hex)
+{
+    for (int i = 0; i < s_count; ++i) {
+        if (std::strcmp(s_list[i].hex, hex) != 0) {
+            continue;
+        }
+        if (!route_fits(details, s_list[i].lat, s_list[i].lon)) {
+            ESP_LOGI(TAG, "%s: %s to %s does not fit where it is, left out", hex, details.origin_code,
+                     details.dest_code);
+            details.has_route     = false;
+            details.has_origin_at = false;
+            details.has_dest_at   = false;
+            details.origin_code[0] = details.origin_city[0] = '\0';
+            details.dest_code[0]   = details.dest_city[0]   = '\0';
+        }
+        return;
+    }
+}
+
 void details_done(const DetailsJobPtr &job)
 {
     {
         Lock        hold;
+        if (!job->failed) {
+            drop_route_unless_fits(job->details, job->hex);
+        }
         CacheEntry &entry = cache_slot(job->hex, job->flight);
         if (job->failed) {
             entry.state = Known::Empty;  // asked again next time rather than known as nothing

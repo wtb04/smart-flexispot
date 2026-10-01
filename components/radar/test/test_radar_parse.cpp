@@ -278,3 +278,32 @@ TEST(RadarParse, route) { check_route(read_file("adsbdb_route.json")); }
 TEST(RadarParse, aircraft) { check_aircraft(read_file("adsbdb_aircraft.json")); }
 TEST(RadarParse, trace) { check_trace(read_file("trace_recent.json")); }
 TEST(RadarParse, photo) { check_photo(read_file("planespotters_photo.json"), read_file("planespotters_none.json")); }
+
+namespace {
+radar::Details route(float from_lat, float from_lon, float to_lat, float to_lon)
+{
+    radar::Details details{};
+    details.has_route     = true;
+    details.has_origin_at = details.has_dest_at = true;
+    details.origin_lat    = from_lat;
+    details.origin_lon    = from_lon;
+    details.dest_lat      = to_lat;
+    details.dest_lon      = to_lon;
+    return details;
+}
+}  // namespace
+
+TEST(RadarParse, route_fits)
+{
+    // RYR2UC over the Ruhr, flying Weeze to Thessaloniki, which the database
+    // has as La Rochelle to Porto, another of the callsign's days.
+    EXPECT_FALSE(radar::route_fits(route(46.18f, -1.20f, 41.25f, -8.68f), 51.46f, 7.03f)) << "another day's route";
+    EXPECT_TRUE(radar::route_fits(route(51.60f, 6.14f, 40.52f, 22.97f), 51.46f, 7.03f)) << "its own, just after leaving";
+    // Amsterdam to New York over the North Atlantic, well off the great circle.
+    EXPECT_TRUE(radar::route_fits(route(52.31f, 4.76f, 40.64f, -73.78f), 55.0f, -20.0f)) << "a long way round";
+    EXPECT_FALSE(radar::route_fits(route(52.31f, 4.76f, 51.47f, -0.45f), 48.0f, 11.0f)) << "past its origin, far";
+    EXPECT_FALSE(radar::route_fits(route(52.31f, 4.76f, 51.47f, -0.45f), 50.0f, -6.0f)) << "past its destination, far";
+    radar::Details unplaced = route(0, 0, 0, 0);
+    unplaced.has_origin_at  = false;
+    EXPECT_TRUE(radar::route_fits(unplaced, 51.46f, 7.03f)) << "nothing to say it is wrong";
+}

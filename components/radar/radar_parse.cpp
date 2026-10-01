@@ -1,5 +1,8 @@
 #include "radar_parse.h"
 
+#include <algorithm>
+#include <cmath>
+
 #include <cstdlib>
 #include <cstring>
 
@@ -536,6 +539,57 @@ int parse(const char *json, std::size_t length, Aircraft *out, int capacity)
         break;
     }
     return stored;
+}
+
+namespace {
+struct Unit {
+    double x, y, z;
+};
+
+Unit unit_at(double lat_deg, double lon_deg)
+{
+    constexpr double DEG_RAD = 3.14159265358979323846 / 180.0;
+    const double     lat     = lat_deg * DEG_RAD;
+    const double     lon     = lon_deg * DEG_RAD;
+    return {std::cos(lat) * std::cos(lon), std::cos(lat) * std::sin(lon), std::sin(lat)};
+}
+
+Unit cross(const Unit &a, const Unit &b)
+{
+    return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
+}
+
+double dot(const Unit &a, const Unit &b)
+{
+    return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+}  // namespace
+
+bool route_fits(const Details &details, float lat, float lon)
+{
+    constexpr double EARTH_KM     = 6371.0;
+    constexpr double SLACK_KM     = 150.0;  // airways are not great circles, and a flight starts and ends off the line
+    constexpr double SLACK_SHARE  = 0.15;   // of a long route's length
+    if (!details.has_route || !details.has_origin_at || !details.has_dest_at) {
+        return true;
+    }
+    const Unit   from   = unit_at(details.origin_lat, details.origin_lon);
+    const Unit   to     = unit_at(details.dest_lat, details.dest_lon);
+    const Unit   here   = unit_at(lat, lon);
+    Unit         normal = cross(from, to);
+    const double length = std::sqrt(dot(normal, normal));
+    if (length < 1e-9) {
+        return true;  // the same airport twice, or the far side of the world
+    }
+    normal = {normal.x / length, normal.y / length, normal.z / length};
+    const double route_km = std::atan2(length, dot(from, to)) * EARTH_KM;
+    const double slack_km = std::max(SLACK_KM, SLACK_SHARE * route_km);
+    const double off      = dot(here, normal);
+    const double off_km   = std::asin(std::clamp(off, -1.0, 1.0)) * EARTH_KM;
+    // Along the route from its origin, of where the aircraft is put on the line.
+    const Unit on{here.x - off * normal.x, here.y - off * normal.y, here.z - off * normal.z};
+    const double along_km = std::atan2(dot(cross(from, on), normal), dot(from, on)) * EARTH_KM;
+    return std::fabs(off_km) <= slack_km && along_km >= -slack_km && along_km <= route_km + slack_km;
 }
 
 }  // namespace radar
