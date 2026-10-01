@@ -520,6 +520,7 @@ lv_obj_t *s_panel_title    = nullptr;
 lv_obj_t *s_panel_artist   = nullptr;
 namespace {
 lv_obj_t *s_panel_play     = nullptr;
+lv_obj_t *s_panel_transport[3] = {};  // previous, play, next
 }  // namespace
 
 lv_obj_t *s_panel_progress = nullptr;
@@ -904,10 +905,23 @@ void pause_settled(lv_timer_t *)
     apply_playing(false);
 }
 namespace {
+bool s_media_remote = true;
+
+// A player that takes no commands is followed, not steered: whatever was
+// tapped, nothing that would play, pause, skip or seek it is sent.
+bool steers(MediaAction action)
+{
+    return s_media_remote || action == MediaAction::VolumeDown || action == MediaAction::VolumeUp ||
+           action == MediaAction::Mute;
+}
+
 void media_action_cb(lv_event_t *e)
 {
     const auto action =
         static_cast<MediaAction>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e)));
+    if (!steers(action)) {
+        return;
+    }
     if (action == MediaAction::PlayPause) {
         cancel_pause_settle();
         apply_playing(!s_playing_shown);
@@ -930,7 +944,6 @@ constexpr std::int32_t  EXPAND_CHIP    = theme::chip::size;
 MediaSegment s_segments[kMaxSegments]{};
 int          s_segment_count = 0;
 bool         s_media_seeks   = false;
-bool         s_media_remote  = true;
 lv_obj_t    *s_skip          = nullptr;
 lv_obj_t    *s_expand        = nullptr;  // into the cinema view, for a video
 int          s_skip_to       = -1;    // where skipping the intro seeks to
@@ -949,6 +962,9 @@ int position_now()
 
 void seek_to(int position_s)
 {
+    if (!s_media_remote) {
+        return;
+    }
     position_s    = std::max(0, s_duration_s > 0 ? std::min(position_s, s_duration_s) : position_s);
     s_position_s  = position_s;
     s_position_at = xTaskGetTickCount();
@@ -1159,17 +1175,20 @@ void build_transport(lv_obj_t *card, std::int32_t inner_w, std::int32_t inner_h)
 
     lv_obj_t *previous =
         media_button(card, LV_SYMBOL_PREV, MediaAction::Previous, TRANSPORT_SIDE_W, TRANSPORT_H);
+    s_panel_transport[0] = previous;
     lv_obj_align(previous, LV_ALIGN_TOP_LEFT, row_x, row_y);
 
     s_panel_play =
         media_button(card, LV_SYMBOL_PLAY, MediaAction::PlayPause, TRANSPORT_PLAY_W, TRANSPORT_H);
     lv_obj_align(s_panel_play, LV_ALIGN_TOP_LEFT, row_x + TRANSPORT_SIDE_W + BUTTON_GAP, row_y);
     theme::fill_accent(s_panel_play);
+    s_panel_transport[1] = s_panel_play;
 
     lv_obj_t *next =
         media_button(card, LV_SYMBOL_NEXT, MediaAction::Next, TRANSPORT_SIDE_W, TRANSPORT_H);
     lv_obj_align(next, LV_ALIGN_TOP_LEFT,
                  row_x + TRANSPORT_SIDE_W + TRANSPORT_PLAY_W + 2 * BUTTON_GAP, row_y);
+    s_panel_transport[2] = next;
 }
 
 void build_media_panel(lv_obj_t *parent)
@@ -1281,6 +1300,9 @@ void media_seek_by(int delta_s)
 
 void media_toggle_play()
 {
+    if (!steers(MediaAction::PlayPause)) {
+        return;
+    }
     cancel_pause_settle();
     apply_playing(!s_playing_shown);
     if (s_handlers.media != nullptr) {
@@ -1295,6 +1317,9 @@ const char *media_skip_text()
 
 void media_skip()
 {
+    if (!s_media_remote) {
+        return;
+    }
     if (s_skip_next) {
         if (s_handlers.media != nullptr) {
             s_handlers.media(MediaAction::Next);
@@ -1323,6 +1348,9 @@ void apply_media_seeks(bool seeks)
 void apply_media_remote(bool remote)
 {
     s_media_remote = remote;
+    for (lv_obj_t *button : s_panel_transport) {
+        theme::set_usable(button, remote);
+    }
 }
 
 bool media_remote()

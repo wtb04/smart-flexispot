@@ -136,7 +136,7 @@ const Key KEYS[] = {
     {SDLK_h, "H", "This list, and away again", toggle_help},
     {SDLK_a, "A", "Home Assistant answering, with states; again, gone", home_assistant::toggle},
     {SDLK_r, "R", "The air: good, some of it not, bad", home_assistant::next_air},
-    {SDLK_m, "M", "What plays: nothing, music, a Jellyfin episode", media_stub::next_scene},
+    {SDLK_m, "M", "What plays: nothing, music, a Jellyfin episode, one only followed", media_stub::next_scene},
     {SDLK_n, "N", "A notice from Home Assistant, another each time", notices::next_example},
     {SDLK_t, "T", "The focus part under way runs out now", hardware::end_focus_part},
     {SDLK_u, "U", "An update: arriving, ready, the companion's, both, none", updates::next},

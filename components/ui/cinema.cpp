@@ -322,6 +322,9 @@ void build_film(std::int32_t width)
 
 void media_action(MediaAction action)
 {
+    if (!media_remote() && action != MediaAction::Subtitles) {
+        return;
+    }
     if (s_handlers.media != nullptr) {
         s_handlers.media(action);
     }

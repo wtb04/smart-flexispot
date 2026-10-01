@@ -55,6 +55,11 @@ bool         s_playing = false;
 int          s_volume  = 35;
 bool         s_muted   = false;
 bool         s_subtitles = false;
+
+bool video()
+{
+    return s_scene == Scene::Episode || s_scene == Scene::Followed;
+}
 double       s_position_s = 0;   // at s_position_at
 std::int64_t s_position_at = 0;  // ms
 std::int64_t s_reported_at = 0;
@@ -106,7 +111,7 @@ void paint(std::vector<std::uint16_t> &into, int w, int h, float hue)
 
 int length_s()
 {
-    return s_scene == Scene::Music ? TRACKS[s_item].length_s : s_scene == Scene::Episode ? EPISODES[s_item].length_s : 0;
+    return s_scene == Scene::Music ? TRACKS[s_item].length_s : video() ? EPISODES[s_item].length_s : 0;
 }
 
 int position_s()
@@ -133,7 +138,7 @@ void show_text()
     if (s_scene == Scene::Music) {
         const Track &t = TRACKS[s_item];
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media("SPOTIFY", t.title, t.artist, state, s_playing, true));
-    } else if (s_scene == Scene::Episode) {
+    } else if (video()) {
         const Episode &e = EPISODES[s_item];
         char           line[96];
         std::snprintf(line, sizeof(line), "%s\nSeason %d, episode %d", SERIES, SEASON, e.number);
@@ -145,8 +150,10 @@ void show_text()
 
 void show_item()
 {
-    const bool video = s_scene == Scene::Episode;
+    const bool video = media_stub::video();
+    const bool followed = s_scene == Scene::Followed;
     show_text();
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_remote(!followed));
     if (s_scene == Scene::Idle) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_album_art(nullptr, false));
     } else {
@@ -164,7 +171,7 @@ void show_item()
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_segments(segments, 2));
         ESP_ERROR_CHECK_WITHOUT_ABORT(
             ui::set_media_neighbours(s_item > 0, s_item + 1 < static_cast<int>(std::size(EPISODES))));
-        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_subtitles(true, s_subtitles));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_subtitles(!followed, s_subtitles));
         paint(s_still, media::kStillW, media::kStillH, EPISODES[s_item].hue + 0.3f);
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_cinema_still(s_still.data()));
     } else {
@@ -173,7 +180,7 @@ void show_item()
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_subtitles(false, false));
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_cinema_still(nullptr));
     }
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_volume(s_muted ? 0 : s_volume));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_volume(followed ? -1 : s_muted ? 0 : s_volume));
     report_progress();
 }
 
@@ -220,17 +227,25 @@ void show(Scene scene)
     s_scene   = scene;
     s_playing = scene != Scene::Idle;
     // An episode starts just before its intro, so Skip intro can be tried.
-    go_to(scene == Scene::Episode ? 1 : 0, scene == Scene::Episode ? INTRO_FROM_S - 5 : 60);
+    const bool episode = scene == Scene::Episode || scene == Scene::Followed;
+    go_to(episode ? 1 : 0, episode ? INTRO_FROM_S - 5 : 60);
 }
 
 void next_scene()
 {
-    show(s_scene == Scene::Idle ? Scene::Music : s_scene == Scene::Music ? Scene::Episode : Scene::Idle);
+    show(s_scene == Scene::Idle      ? Scene::Music
+         : s_scene == Scene::Music   ? Scene::Episode
+         : s_scene == Scene::Episode ? Scene::Followed
+                                     : Scene::Idle);
 }
 
 void on_media(ui::MediaAction action)
 {
     if (s_scene == Scene::Idle) {
+        return;
+    }
+    if (s_scene == Scene::Followed) {
+        std::printf("W (sim) media action %d sent to a player that takes none\n", static_cast<int>(action));
         return;
     }
     const int count = s_scene == Scene::Music ? static_cast<int>(std::size(TRACKS)) : static_cast<int>(std::size(EPISODES));
@@ -258,6 +273,10 @@ void on_media(ui::MediaAction action)
 
 void on_seek(int position)
 {
+    if (s_scene == Scene::Followed) {
+        std::printf("W (sim) seek sent to a player that takes none\n");
+        return;
+    }
     set_position(std::clamp(position, 0, length_s()));
     report_progress();
 }
