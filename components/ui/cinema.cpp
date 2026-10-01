@@ -29,9 +29,9 @@ constexpr std::int32_t LINE_GAP      = 10;
 constexpr std::int32_t TRANSPORT_H   = 88;
 constexpr std::int32_t PLAY_W        = 200;
 constexpr std::int32_t GRID_GAP      = 24;
-constexpr std::int32_t SKIP_W        = 220;  // over the picture's corner, as on a screen
-constexpr std::int32_t SKIP_H        = 64;
-constexpr std::int32_t SKIP_INSET    = 16;
+constexpr std::int32_t SKIP_W        = 290;  // over the picture's corner, as on a screen,
+constexpr std::int32_t SKIP_H        = 84;   // as large as it is to be tapped from the sofa
+constexpr std::int32_t SKIP_INSET    = 20;
 constexpr std::int32_t PAUSED_MARK   = 104;  // the round play mark over a paused picture
 constexpr int          SEEK_STEP_S   = 10;
 constexpr std::int32_t VOLUME_INSET  = 28;   // its speaker and level from its ends
@@ -285,8 +285,7 @@ void build_film(std::int32_t x, std::int32_t y)
     lv_obj_set_hidden(s_paused, true);
 
     // An intro to skip, or an episode to go on to, in the picture's corner.
-    s_skip = button(frame, "Skip intro", SKIP_W, SKIP_H, [](lv_event_t *) { media_skip(); },
-                    fonts::size_28());
+    s_skip = button(frame, "Next episode", SKIP_W, SKIP_H, [](lv_event_t *) { media_skip(); });
     lv_obj_align(s_skip, LV_ALIGN_BOTTOM_RIGHT, -SKIP_INSET, -SKIP_INSET);
     lv_obj_set_hidden(s_skip, true);
 }
