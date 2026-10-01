@@ -30,15 +30,15 @@ constexpr int CODEC_CHANNELS  = 2;  // the codec is stereo; the chime is mono, d
 constexpr int MAX_VOLUME      = 100;
 
 // One soft drop, not a chime: a pure tone that falls quickly from its first
-// pitch to its last, as a drop of water does, and dies away in a moment. It
-// sits where the Tab5's small speaker speaks, over 800 Hz, and quietly.
+// pitch to its last, as a drop of water does, and rings on a little. It sits
+// where the Tab5's small speaker speaks, over 800 Hz, and softly.
 constexpr float FROM_HZ   = 1500.0f;
 constexpr float TO_HZ     = 1000.0f;
 constexpr float GLIDE_S   = 0.025f;  // the pitch falls most of the way in this
 constexpr float ATTACK_S  = 0.005f;
-constexpr float RING_S    = 0.040f;  // the sound falls to 1/e in this
-constexpr int   CHIME_MS  = 220;
-constexpr float PEAK      = 0.12f;   // of full scale
+constexpr float RING_S    = 0.080f;  // the sound falls to 1/e in this
+constexpr int   CHIME_MS  = 400;
+constexpr float PEAK      = 0.20f;   // of full scale
 constexpr float FULL_TURN = 2.0f * static_cast<float>(M_PI);
 
 // Between chimes the amplifier is off and the codec closed, which stops its
