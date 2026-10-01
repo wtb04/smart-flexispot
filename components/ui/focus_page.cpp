@@ -447,18 +447,18 @@ void build_leaves(Face &face, lv_obj_t *card)
 
 void open_full();
 
-// The corners, as the radar's: what to do in three, and the fourth fullscreen.
+// The corners, as the radar's: fullscreen top right, what to do in the other three.
 void build_corners(lv_obj_t *card, std::int32_t inner, std::int32_t inner_h)
 {
     s_reset = theme::make_chip(card, LV_SYMBOL_REFRESH);
     lv_obj_set_pos(s_reset, 0, 0);
     on_click(s_reset, FocusAction::Reset);
     s_skip = theme::make_chip(card, LV_SYMBOL_NEXT);
-    lv_obj_set_pos(s_skip, inner - CHIP, 0);
+    lv_obj_set_pos(s_skip, 0, inner_h - CHIP);
     on_click(s_skip, FocusAction::Skip);
     lv_obj_t *full = theme::make_chip(card, "");
     theme::make_mark(full, &icons::expand_icon);
-    lv_obj_set_pos(full, 0, inner_h - CHIP);
+    lv_obj_set_pos(full, inner - CHIP, 0);
     lv_obj_add_event_cb(full, [](lv_event_t *) { open_full(); }, LV_EVENT_CLICKED, nullptr);
     s_go = theme::make_chip(card, LV_SYMBOL_PLAY);
     theme::fill_accent(s_go, LV_STATE_CHECKED);
