@@ -469,9 +469,12 @@ lv_point_t on_circle(float angle, float radius)
             static_cast<std::int32_t>(s_cy - std::cos(angle) * radius)};
 }
 
+lv_obj_t *s_compass[4] = {};  // N, S, E, W
+
 void compass(lv_obj_t *parent, const char *text, char side)
 {
     lv_obj_t          *label = theme::make_label(parent, text, theme::secondary, marking_font());
+    s_compass[side == 'N' ? 0 : side == 'S' ? 1 : side == 'E' ? 2 : 3] = label;
     const std::int32_t w     = theme::text_width(text, marking_font());
     const std::int32_t h     = marking_font()->line_height;
     const std::int32_t edge  = s_radius + COMPASS_GAP;
@@ -1017,6 +1020,7 @@ void paint_base()
 // during a zoom took 11 ms of it again.
 std::uint32_t *s_ring_at    = nullptr;
 std::uint8_t  *s_ring_opa   = nullptr;
+std::uint16_t *s_ring_under = nullptr;  // what each ring pixel was before the ring, to take the rings out again
 std::size_t    s_ring_count = 0;
 
 template <typename Put>
@@ -1078,15 +1082,18 @@ void work_out_rings()
 {
     heap_caps_free(s_ring_at);
     heap_caps_free(s_ring_opa);
+    heap_caps_free(s_ring_under);
     s_ring_at    = nullptr;
     s_ring_opa   = nullptr;
+    s_ring_under = nullptr;
     s_ring_count = 0;
     std::size_t count = 0;
     auto        tally = [&count](std::size_t, std::uint8_t) { ++count; };
     trace_rings_and_spokes(tally);
     s_ring_at  = static_cast<std::uint32_t *>(heap_caps_malloc(count * sizeof(std::uint32_t), MALLOC_CAP_SPIRAM));
     s_ring_opa = static_cast<std::uint8_t *>(heap_caps_malloc(count, MALLOC_CAP_SPIRAM));
-    if (s_ring_at == nullptr || s_ring_opa == nullptr) {
+    s_ring_under = static_cast<std::uint16_t *>(heap_caps_malloc(count * sizeof(std::uint16_t), MALLOC_CAP_SPIRAM));
+    if (s_ring_at == nullptr || s_ring_opa == nullptr || s_ring_under == nullptr) {
         return;
     }
     auto keep = [](std::size_t at, std::uint8_t opa) {
@@ -1102,6 +1109,7 @@ void draw_rings_and_spokes()
     const std::uint16_t ink = rgb565(theme::secondary);
     for (std::size_t i = 0; i < s_ring_count; ++i) {
         std::uint16_t &pixel = s_ground[s_ring_at[i]];
+        s_ring_under[i]      = pixel;
         pixel                = blend565(pixel, ink, s_ring_opa[i]);
     }
 }
@@ -1286,6 +1294,20 @@ int  s_fast_picture = 0;    // the range of the picture magnified
 int  s_fast_frames  = 0;    // for the bench
 std::int32_t s_fast_shown = -1;  // the magnification last shown, in sixteenths
 
+// The rings and spokes out of the picture, where no air was drawn over them:
+// a zoom draws them where they stay, over the map it magnifies.
+void take_rings_out()
+{
+    if (s_ring_under == nullptr) {
+        return;
+    }
+    for (std::size_t i = 0; i < s_ring_count; ++i) {
+        if (s_air_opa[s_ring_at[i]] == 0) {
+            s_frame[s_ring_at[i]] = s_ring_under[i];
+        }
+    }
+}
+
 void show_magnified(std::int32_t steps)
 {
     s_fast_shown = steps;
@@ -1305,6 +1327,10 @@ void show_magnified(std::int32_t steps)
     frame.cy      = static_cast<float>(s_cy);
     frame.scale   = static_cast<float>(steps) / 16.0f;
     frame.to      = to;
+    frame.ring_at    = s_ring_under != nullptr ? s_ring_at : nullptr;
+    frame.ring_opa   = s_ring_opa;
+    frame.ring_count = s_ring_count;
+    frame.ring_ink   = rgb565(theme::secondary);
     board::zoom_frame(frame);
     ++s_fast_frames;
 }
@@ -1356,11 +1382,13 @@ bool start_fast_zoom(int from_km)
     }
     lv_anim_delete(s_scope, nullptr);
     lv_refr_now(nullptr);  // what waits to be drawn, before LVGL is held off
-    // The controls over the picture are kept as they are now.
-    lv_area_t keep[6];
+    // The controls over the picture, the rings' distances, already the new
+    // ones, and the compass's letters, are kept as they are now.
+    lv_area_t keep[16];
     int       kept = 0;
-    for (lv_obj_t *control : {s_zoom_out, s_zoom_in, s_full_chip, s_full_desk}) {
-        if (control != nullptr && !lv_obj_has_flag(control, LV_OBJ_FLAG_HIDDEN)) {
+    for (lv_obj_t *control : {s_zoom_out, s_zoom_in, s_full_chip, s_full_desk, s_rings[0], s_rings[1], s_rings[2],
+                              s_rings[3], s_compass[0], s_compass[1], s_compass[2], s_compass[3]}) {
+        if (control != nullptr && !lv_obj_has_flag(control, LV_OBJ_FLAG_HIDDEN) && kept < 16) {
             lv_obj_get_coords(control, &keep[kept++]);
         }
     }
@@ -1385,6 +1413,7 @@ bool start_fast_zoom(int from_km)
     }
     s_fast_picture = std::max(from_km, to_km);
     lv_obj_set_hidden(s_marker, true);
+    take_rings_out();
 
     // From the magnification showing the old range to the one showing the new,
     // the first after the one on show, the last as near the new as there is.
@@ -3160,14 +3189,16 @@ int bench_radar_zoom_frame(char *out, std::size_t size)
         return std::snprintf(out, size, "not open\n");
     }
     lv_refr_now(nullptr);
-    lv_area_t keep[6];
+    lv_area_t keep[16];
     int       kept = 0;
-    for (lv_obj_t *control : {s_zoom_out, s_zoom_in, s_full_chip, s_full_desk}) {
-        if (control != nullptr && !lv_obj_has_flag(control, LV_OBJ_FLAG_HIDDEN)) {
+    for (lv_obj_t *control : {s_zoom_out, s_zoom_in, s_full_chip, s_full_desk, s_rings[0], s_rings[1], s_rings[2],
+                              s_rings[3], s_compass[0], s_compass[1], s_compass[2], s_compass[3]}) {
+        if (control != nullptr && !lv_obj_has_flag(control, LV_OBJ_FLAG_HIDDEN) && kept < 16) {
             lv_obj_get_coords(control, &keep[kept++]);
         }
     }
     board::zoom_begin(keep, kept);
+    take_rings_out();
     lv_display_enable_invalidation(lv_display_get_default(), false);
     s_fast_zooming = true;
     s_fast_from = s_fast_picture = RANGES[s_range_step];

@@ -705,7 +705,7 @@ std::uint8_t *copy_shown_frame(int &width, int &height)
 }
 
 namespace {
-constexpr int ZOOM_KEEP_MAX = 8;
+constexpr int ZOOM_KEEP_MAX = 16;
 struct Kept {
     Rect           at;  // on the panel
     std::uint16_t *pixels = nullptr;
@@ -721,6 +721,44 @@ void copy_rows(const std::uint8_t *from, std::size_t from_row, std::uint8_t *to,
     }
 }
 }  // namespace
+
+inline std::uint16_t blend565(std::uint16_t under, std::uint16_t over, std::uint8_t opa)
+{
+    const std::uint32_t r = ((over >> 11) * opa + (under >> 11) * (255 - opa)) / 255;
+    const std::uint32_t g = (((over >> 5) & 0x3f) * opa + ((under >> 5) & 0x3f) * (255 - opa)) / 255;
+    const std::uint32_t b = ((over & 0x1f) * opa + (under & 0x1f) * (255 - opa)) / 255;
+    return static_cast<std::uint16_t>((r << 11) | (g << 5) | b);
+}
+
+// The rings over a zoom's frame, each pixel where it is in the picture, turned
+// onto the panel as the frame is; then out of the cache, for the DMA.
+void lay_rings(const ZoomFrame &f, std::uint8_t *to)
+{
+    if (f.ring_at == nullptr || f.ring_count == 0) {
+        return;
+    }
+    const std::int32_t hres  = lv_display_get_horizontal_resolution(s_disp);
+    const std::int32_t vres  = lv_display_get_vertical_resolution(s_disp);
+    const auto         turn  = lv_display_get_rotation(s_disp);
+    auto              *frame = reinterpret_cast<std::uint16_t *>(to);
+    for (std::size_t i = 0; i < f.ring_count; ++i) {
+        const std::int32_t sx = f.x + static_cast<std::int32_t>(f.ring_at[i] % static_cast<std::uint32_t>(f.w));
+        const std::int32_t sy = f.y + static_cast<std::int32_t>(f.ring_at[i] / static_cast<std::uint32_t>(f.w));
+        if (sx < f.to.x1 || sx > f.to.x2 || sy < f.to.y1 || sy > f.to.y2) {
+            continue;
+        }
+        std::int32_t px = sx, py = sy;
+        switch (turn) {
+            case LV_DISPLAY_ROTATION_90:  px = sy; py = hres - sx - 1; break;
+            case LV_DISPLAY_ROTATION_180: px = hres - sx - 1; py = vres - sy - 1; break;
+            case LV_DISPLAY_ROTATION_270: px = vres - sy - 1; py = sx; break;
+            default: break;
+        }
+        std::uint16_t &pixel = frame[static_cast<std::size_t>(py) * BSP_LCD_H_RES + px];
+        pixel                = blend565(pixel, f.ring_ink, f.ring_opa[i]);
+    }
+    esp_cache_msync(to, FRAME_BYTES, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+}
 
 esp_err_t zoom_begin(const lv_area_t *keep, int count)
 {
@@ -804,6 +842,7 @@ esp_err_t zoom_frame(const ZoomFrame &f)
     const esp_err_t    err     = ppa_do_scale_rotate_mirror(s_ppa, &op);
     s_flush_times.rotate_us += esp_timer_get_time() - turning;
     note_drawn(place.rect);
+    lay_rings(f, s_fbs[s_target]);
 
     constexpr std::size_t PIXEL = sizeof(std::uint16_t);
     for (int i = 0; i < s_kept_count; ++i) {

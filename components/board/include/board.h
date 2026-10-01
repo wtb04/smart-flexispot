@@ -105,6 +105,13 @@ struct ZoomFrame {
     float                cx = 0, cy = 0;     // the point in it that stays put
     float                scale = 1.0f;       // at least 1, in steps of 1/16
     lv_area_t            to{};               // what of the screen it fills, within it
+    // Drawn where they are in the picture, unmagnified, over what is: the
+    // scope's rings, which stay as the map grows under them. Indices into the
+    // picture, each with its opacity, in one colour.
+    const std::uint32_t *ring_at    = nullptr;
+    const std::uint8_t  *ring_opa   = nullptr;
+    std::size_t          ring_count = 0;
+    std::uint16_t        ring_ink   = 0;
 };
 esp_err_t zoom_begin(const lv_area_t *keep, int count);
 esp_err_t zoom_frame(const ZoomFrame &frame);
