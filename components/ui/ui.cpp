@@ -805,6 +805,9 @@ void apply_notice(const Notice &notice)
         drop_oldest(s_notice_queue, s_notice_count);
     }
     s_notice_queue[s_notice_count++] = notice;
+    if (splash_on_screen()) {
+        return;  // shown as the splash leaves, rather than over it
+    }
     if (lv_obj_is_hidden(s_notice_card)) {
         show_next_notice();
     } else {

@@ -335,6 +335,7 @@ void show_settings_cb(lv_event_t *);
 void show_behaviour_cb(lv_event_t *);
 void show_log_cb(lv_event_t *);
 void apply_splash();
+bool splash_on_screen();
 
 /** For updates kept outside ui.cpp's slots: asks the LVGL task to look. */
 void request_apply();
