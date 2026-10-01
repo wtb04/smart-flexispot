@@ -6,15 +6,17 @@
 #include <ctime>
 #include <utility>
 
-// Jellyfin fullscreen, for watching, laid out as the music view is: the picture
-// at the left, and beside it what plays, how far, and the controls under that.
+// Jellyfin fullscreen, for watching, in two columns as wide as the picture is:
+// the picture and what plays beside it, how far along the picture's foot, and
+// under them the controls under the picture and the volume under the words.
 // Ten seconds back or on is a swipe across the picture, as on the card; the
 // lights, the low desk and the screen's timer are quick actions over the view.
 // The screen goes dark once left alone, and lights again when there is an intro
 // to skip or an episode to go on to.
 namespace ui::detail {
 namespace {
-constexpr std::int32_t BLOCK         = media::kLargeArtSize;  // as tall as the music view's cover
+constexpr std::int32_t SIDE_MARGIN   = (720 - media::kLargeArtSize) / 2;  // as the music view's
+constexpr std::int32_t ROW_GAP       = 40;   // between the picture's row and the controls'
 constexpr std::int32_t STILL_W       = media::kStillW;
 constexpr std::int32_t STILL_H       = media::kStillH;
 constexpr std::int32_t STILL_RADIUS  = 22;
@@ -22,13 +24,11 @@ constexpr std::int32_t TEXT_GAP      = 72;
 constexpr lv_opa_t     PAUSED_DIM    = LV_OPA_50;  // as the card's cover
 constexpr std::int32_t PROGRESS_H    = 10;
 constexpr std::int32_t LINE_GAP      = 10;
-constexpr std::int32_t TEXT_TO_BAR   = 48;   // under the episode, when the title leaves room
-// The music view's grid: before, play and after across, and under them the
-// volume as wide as the first two and the subtitles as the last.
+// The music view's buttons: before, play and after under the picture, the
+// volume and the subtitles under the words.
 constexpr std::int32_t TRANSPORT_H   = 88;
 constexpr std::int32_t PLAY_W        = 200;
 constexpr std::int32_t GRID_GAP      = 24;
-constexpr std::int32_t VOLUME_H      = 64;
 constexpr std::int32_t SKIP_W        = 220;  // over the picture's corner, as on a screen
 constexpr std::int32_t SKIP_H        = 64;
 constexpr std::int32_t SKIP_INSET    = 16;
@@ -46,8 +46,7 @@ lv_image_dsc_t s_still_dsc{};
 lv_obj_t     *s_series  = nullptr;
 lv_obj_t     *s_title   = nullptr;
 lv_obj_t     *s_episode = nullptr;
-std::int32_t  s_text_top = 0;  // no higher than the top of the block
-std::int32_t  s_text_end = 0;  // where the words end, over the progress
+std::int32_t  s_text_top = 0;  // level with the top of the picture
 lv_obj_t     *s_bar     = nullptr;
 lv_obj_t     *s_elapsed = nullptr;
 lv_obj_t     *s_total   = nullptr;
@@ -80,8 +79,7 @@ void close_cinema()
     close_view(s_cinema);
 }
 
-// The words sit over the progress, rising for a title of two lines until they
-// meet the top of the block.
+// From the top of the picture down, the episode under a title of one line or two.
 void place_text(const char *title)
 {
     const std::int32_t line_h = lv_font_get_line_height(fonts::size_48());
@@ -89,9 +87,7 @@ void place_text(const char *title)
     lv_text_get_size(&size, title, fonts::size_48(), 0, 0, lv_obj_get_width(s_title), LV_TEXT_FLAG_NONE);
     const std::int32_t title_h  = size.y > line_h ? 2 * line_h : line_h;
     const std::int32_t series_h = lv_font_get_line_height(fonts::size_22());
-    const std::int32_t episode_h = lv_font_get_line_height(fonts::size_28());
-    const std::int32_t text_h   = series_h + LINE_GAP + title_h + LINE_GAP + episode_h;
-    const std::int32_t top      = std::max(s_text_top, s_text_end - TEXT_TO_BAR - text_h);
+    const std::int32_t top      = s_text_top;
     lv_obj_set_y(s_series, top);
     lv_obj_set_y(s_title, top + series_h + LINE_GAP);
     lv_obj_set_y(s_episode, top + series_h + LINE_GAP + title_h + LINE_GAP);
@@ -334,7 +330,7 @@ void build_volume(std::int32_t x, std::int32_t y, std::int32_t w)
 {
     s_volume = lv_obj_create(s_view);
     theme::style_panel(s_volume, theme::panel_light, theme::radius::control);
-    lv_obj_set_size(s_volume, w, VOLUME_H);
+    lv_obj_set_size(s_volume, w, TRANSPORT_H);
     lv_obj_set_pos(s_volume, x, y);
     lv_obj_set_style_pad_all(s_volume, 0, 0);
     lv_obj_set_style_clip_corner(s_volume, true, 0);
@@ -349,7 +345,7 @@ void build_volume(std::int32_t x, std::int32_t y, std::int32_t w)
     theme::style_panel(s_volume_fill, theme::panel_light, 0);
     lv_obj_set_style_bg_color(s_volume_fill,
                               lv_color_mix(lv_color_hex(theme::text), lv_color_hex(theme::panel_light), VOLUME_FILL_MIX), 0);
-    lv_obj_set_size(s_volume_fill, 0, VOLUME_H);
+    lv_obj_set_size(s_volume_fill, 0, TRANSPORT_H);
     lv_obj_set_pos(s_volume_fill, 0, 0);
     lv_obj_set_clickable(s_volume_fill, false);
 
@@ -368,16 +364,11 @@ void preset(int index)
     }
 }
 
-// Under the words, from the bottom of the block up: the volume and the
-// subtitles, the controls, and the progress over them.
-void build_controls(std::int32_t x, std::int32_t bottom, std::int32_t w)
+// How far, along the foot of the picture beside it.
+void build_progress(std::int32_t x, std::int32_t foot, std::int32_t w)
 {
-    const std::int32_t volume_y    = bottom - VOLUME_H;
-    const std::int32_t transport_y = volume_y - GRID_GAP - TRANSPORT_H;
-    const std::int32_t times_y     = transport_y - 2 * GRID_GAP - lv_font_get_line_height(fonts::size_20());
-    const std::int32_t bar_y       = times_y - LINE_GAP - PROGRESS_H;
-    s_text_end                     = bar_y;
-
+    const std::int32_t times_y = foot - lv_font_get_line_height(fonts::size_20());
+    const std::int32_t bar_y   = times_y - LINE_GAP - PROGRESS_H;
     s_bar = lv_bar_create(s_view);
     lv_obj_set_size(s_bar, w, PROGRESS_H);
     lv_obj_set_pos(s_bar, x, bar_y);
@@ -394,28 +385,36 @@ void build_controls(std::int32_t x, std::int32_t bottom, std::int32_t w)
     lv_obj_set_style_text_align(s_total, LV_TEXT_ALIGN_RIGHT, 0);
     lv_obj_set_style_text_align(s_ends, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_hidden(s_ends, true);
+}
 
-    const std::int32_t side_w = (w - PLAY_W - 2 * GRID_GAP) / 2;
-    const std::int32_t play_x = x + side_w + GRID_GAP;
-    const std::int32_t next_x = play_x + PLAY_W + GRID_GAP;
+// Before, play and after under the picture, as wide as it.
+void build_transport(std::int32_t x, std::int32_t y)
+{
+    const std::int32_t side_w = (STILL_W - PLAY_W - 2 * GRID_GAP) / 2;
     s_steer[0] = button(s_view, LV_SYMBOL_PREV, side_w, TRANSPORT_H,
                         [](lv_event_t *) { media_action(MediaAction::Previous); });
-    lv_obj_set_pos(s_steer[0], x, transport_y);
+    lv_obj_set_pos(s_steer[0], x, y);
     s_play = button(s_view, LV_SYMBOL_PLAY, PLAY_W, TRANSPORT_H, [](lv_event_t *) { media_toggle_play(); });
     theme::fill_accent(s_play);
-    lv_obj_set_pos(s_play, play_x, transport_y);
-    s_steer[1] = button(s_view, LV_SYMBOL_NEXT, x + w - next_x, TRANSPORT_H,
+    lv_obj_set_pos(s_play, x + side_w + GRID_GAP, y);
+    s_steer[1] = button(s_view, LV_SYMBOL_NEXT, side_w, TRANSPORT_H,
                         [](lv_event_t *) { media_action(MediaAction::Next); });
-    lv_obj_set_pos(s_steer[1], next_x, transport_y);
+    lv_obj_set_pos(s_steer[1], x + STILL_W - side_w, y);
+}
 
-    build_volume(x, volume_y, next_x - GRID_GAP - x);
-    s_subtitles = button(s_view, "", x + w - next_x, VOLUME_H, [](lv_event_t *) {
+// The volume and the subtitles under the words, the subtitles as wide as a
+// button beside play.
+void build_sound(std::int32_t x, std::int32_t y, std::int32_t w)
+{
+    const std::int32_t side_w = (STILL_W - PLAY_W - 2 * GRID_GAP) / 2;
+    build_volume(x, y, w - side_w - GRID_GAP);
+    s_subtitles = button(s_view, "", side_w, TRANSPORT_H, [](lv_event_t *) {
         s_subtitles_shown = !s_subtitles_shown;  // the next report from the player confirms it
         media_action(MediaAction::Subtitles);
         tick(s_tick);
     });
     mark(s_subtitles, &icons::subtitles_icon);
-    lv_obj_set_pos(s_subtitles, next_x, volume_y);
+    lv_obj_set_pos(s_subtitles, x + w - side_w, y);
 }
 }  // namespace
 
@@ -429,16 +428,18 @@ void build_cinema(lv_obj_t *screen)
     lv_obj_set_scrollable(s_view, false);  // a drag across the picture is a swipe, not a scroll
     lv_obj_set_hidden(s_view, true);
 
-    // As the music view: a block as far in from the sides as from the top, the
-    // picture in the middle of its height at the left, the rest beside it.
-    const std::int32_t top    = (l.screen_h - BLOCK) / 2;
-    const std::int32_t margin = top;
-    build_film(margin, top + (BLOCK - STILL_H) / 2);
-    const std::int32_t x = margin + STILL_W + TEXT_GAP;
-    const std::int32_t w = l.screen_w - x - margin;
-    s_text_top           = top;
-    build_controls(x, top + BLOCK, w);
+    // The two rows in the middle of the height, as far in from the sides as the
+    // music view is.
+    const std::int32_t top   = (l.screen_h - STILL_H - ROW_GAP - TRANSPORT_H) / 2;
+    const std::int32_t row_y = top + STILL_H + ROW_GAP;
+    const std::int32_t x     = SIDE_MARGIN + STILL_W + TEXT_GAP;
+    const std::int32_t w     = l.screen_w - x - SIDE_MARGIN;
+    build_film(SIDE_MARGIN, top);
+    s_text_top = top;
     build_text(x, w);
+    build_progress(x, top + STILL_H, w);
+    build_transport(SIDE_MARGIN, row_y);
+    build_sound(x, row_y, w);
 
     s_tick = lv_timer_create(tick, TICK_MS, nullptr);
     lv_timer_pause(s_tick);
