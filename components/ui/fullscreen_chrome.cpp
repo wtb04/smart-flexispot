@@ -4,9 +4,11 @@
 #include <ctime>
 #include <vector>
 
-// The time beside a fullscreen view's way back, there while its buttons are.
+// What every fullscreen view has over it: Stand and Sit at the left, the time
+// and the way back at the right, there while the screen is being touched.
 namespace ui::detail {
 namespace {
+constexpr std::int32_t  INSET     = 40;
 constexpr std::int32_t  CHIP_GAP  = 20;
 constexpr std::uint32_t TICK_MS   = 1000;
 constexpr time_t        CLOCK_SET = 1'700'000'000;  // any earlier and the clock is not set yet
@@ -59,5 +61,20 @@ lv_obj_t *add_view_clock(ViewId view, lv_obj_t *root, lv_obj_t *chip)
     fade_when_idle(view, label);
     update_view_clocks();
     return label;
+}
+
+lv_obj_t *add_fullscreen_chrome(ViewId view, lv_obj_t *root, lv_event_cb_t on_close)
+{
+    lv_obj_t *close = theme::make_chip(root, "");
+    theme::make_mark(close, &icons::collapse_icon);
+    lv_obj_set_ext_click_area(close, theme::space::s);
+    lv_obj_add_event_cb(close, on_close, LV_EVENT_CLICKED, nullptr);
+    lv_obj_align(close, LV_ALIGN_TOP_RIGHT, -INSET, INSET);
+    lv_obj_t *desk = add_desk_shortcuts(root, INSET, INSET, theme::panel);
+    for (lv_obj_t *control : {close, desk}) {
+        fade_when_idle(view, control);
+    }
+    add_view_clock(view, root, close);
+    return close;
 }
 }  // namespace ui::detail

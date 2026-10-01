@@ -15,7 +15,7 @@ constexpr std::int32_t STILL_H       = media::kStillH;
 constexpr std::int32_t STILL_RADIUS  = 22;
 constexpr std::int32_t TEXT_GAP      = 40;
 constexpr lv_opa_t     PAUSED_DIM    = LV_OPA_50;  // as the card's cover
-constexpr std::int32_t TOP_Y         = 104;  // under the eyebrow and the close button
+constexpr std::int32_t TOP_Y         = 120;  // under the row over every fullscreen view
 constexpr std::int32_t PROGRESS_H    = 10;
 constexpr std::int32_t LINE_GAP      = 12;
 constexpr std::int32_t TRANSPORT_H   = 96;
@@ -31,10 +31,10 @@ constexpr std::int32_t VOLUME_W      = 320;  // the slider
 constexpr std::int32_t VOLUME_INSET  = 28;   // its speaker and level from its ends
 constexpr std::uint8_t VOLUME_FILL_MIX = 64;  // of the text's colour into the bar's
 constexpr std::int32_t EPISODE_W     = 96;   // the episode before, and after
-// The desk and light buttons share the transport row's width with the two
-// square ones, so both rows end in line.
+// The viewing height and the lights share the transport row's width with the
+// two square ones, so both rows end in line; Stand and Sit are over the view.
 constexpr std::int32_t TRANSPORT_W   = 2 * EPISODE_W + 2 * STEP_W + PLAY_W + 4 * BUTTON_GAP;
-constexpr std::int32_t ROOM_W        = (TRANSPORT_W - 2 * ROOM_H - 4 * BUTTON_GAP) / 3;
+constexpr std::int32_t ROOM_W        = (TRANSPORT_W - 2 * ROOM_H - 3 * BUTTON_GAP) / 2;
 constexpr time_t       CLOCK_SET     = 1'700'000'000;  // any earlier and the clock is not set yet
 constexpr std::uint32_t TICK_MS      = 500;
 constexpr std::uint32_t DARK_AFTER_MS = 15 * units::kMsPerSecond;
@@ -53,13 +53,11 @@ lv_obj_t     *s_skip    = nullptr;
 lv_obj_t     *s_paused  = nullptr;  // the play mark over a paused picture
 std::int32_t  s_episode_y[2] = {};  // under a title of one line, and of two
 lv_obj_t     *s_lights  = nullptr;
-lv_obj_t     *s_sit     = nullptr;
 lv_obj_t     *s_volume  = nullptr;  // the slider, filled as far as the level
 lv_obj_t     *s_volume_fill  = nullptr;
 lv_obj_t     *s_volume_level = nullptr;
 bool          s_volume_held  = false;  // a finger on it: what it shows is what it sets
 lv_obj_t     *s_ends    = nullptr;  // when it will end, by the clock
-lv_obj_t     *s_corner  = nullptr;  // CINEMA
 bool          s_auto_off = true;    // the screen goes dark when left alone
 lv_obj_t     *s_screen  = nullptr;  // the button that says so
 lv_obj_t     *s_subtitles = nullptr;
@@ -197,7 +195,6 @@ void tick(lv_timer_t *)
     if (s_media_volume >= 0 && !s_volume_held) {
         show_volume(s_media_volume);
     }
-    theme::fill_accent_or(s_sit, s_preset_active[SIT_PRESET], theme::panel_light);
     theme::fill_accent_or(s_low, s_preset_active[ULTRA_LOW_PRESET], theme::panel_light);
     keep_screen();
 }
@@ -392,12 +389,9 @@ void preset(int index)
 
 void build_room(std::int32_t y)
 {
-    s_sit = button(s_view, preset_name(SIT_PRESET), ROOM_W, ROOM_H,
-                   [](lv_event_t *) { preset(SIT_PRESET); }, fonts::size_28());
-    lv_obj_set_pos(s_sit, PAD, y);
     s_low = button(s_view, preset_name(ULTRA_LOW_PRESET), ROOM_W, ROOM_H,
                    [](lv_event_t *) { preset(ULTRA_LOW_PRESET); }, fonts::size_28());
-    lv_obj_set_pos(s_low, PAD + ROOM_W + BUTTON_GAP, y);
+    lv_obj_set_pos(s_low, PAD, y);
     s_lights = button(s_view, "Lights", ROOM_W, ROOM_H,
                       [](lv_event_t *) {
                           if (s_handlers.lights != nullptr) {
@@ -405,18 +399,18 @@ void build_room(std::int32_t y)
                           }
                       },
                       fonts::size_28());
-    lv_obj_set_pos(s_lights, PAD + 2 * (ROOM_W + BUTTON_GAP), y);
+    lv_obj_set_pos(s_lights, PAD + ROOM_W + BUTTON_GAP, y);
     // The screen going dark by itself, lit while it does.
     s_screen = button(s_view, "", ROOM_H, ROOM_H, [](lv_event_t *) { s_auto_off = !s_auto_off; });
     mark(s_screen, &icons::screen_timer_icon);
-    lv_obj_set_pos(s_screen, PAD + 3 * (ROOM_W + BUTTON_GAP), y);
+    lv_obj_set_pos(s_screen, PAD + 2 * (ROOM_W + BUTTON_GAP), y);
     s_subtitles = button(s_view, "", ROOM_H, ROOM_H, [](lv_event_t *) {
         s_subtitles_shown = !s_subtitles_shown;  // the next report from the player confirms it
         media_action(MediaAction::Subtitles);
         tick(s_tick);
     });
     mark(s_subtitles, &icons::subtitles_icon);
-    lv_obj_set_pos(s_subtitles, PAD + 3 * (ROOM_W + BUTTON_GAP) + ROOM_H + BUTTON_GAP, y);
+    lv_obj_set_pos(s_subtitles, PAD + 2 * (ROOM_W + BUTTON_GAP) + ROOM_H + BUTTON_GAP, y);
 }
 }  // namespace
 
@@ -428,15 +422,6 @@ void build_cinema(lv_obj_t *screen)
     lv_obj_set_pos(s_view, 0, 0);
     theme::style_panel(s_view, theme::background, 0);
     lv_obj_set_hidden(s_view, true);
-
-    s_corner = theme::make_accent_label(s_view, "CINEMA", fonts::size_22());
-    lv_obj_set_pos(s_corner, PAD, PAD);
-    // The way back, the chip the radar's and the focus timer's fullscreen views have.
-    lv_obj_t *close = theme::make_chip(s_view, "");
-    theme::make_mark(close, &icons::collapse_icon);
-    lv_obj_set_ext_click_area(close, theme::space::s);
-    lv_obj_add_event_cb(close, [](lv_event_t *) { close_cinema(); }, LV_EVENT_CLICKED, nullptr);
-    lv_obj_align(close, LV_ALIGN_TOP_RIGHT, -PAD, PAD - LINE_GAP);
 
     build_film(l.screen_w);
     const std::int32_t room_y      = l.screen_h - PAD - ROOM_H;
@@ -455,7 +440,7 @@ void build_cinema(lv_obj_t *screen)
                              update_view_clocks();
                          },
                          [] { lv_timer_pause(s_tick); }});
-    add_view_clock(s_cinema, s_view, close);
+    add_fullscreen_chrome(s_cinema, s_view, [](lv_event_t *) { close_cinema(); });
 }
 
 bool cinema_has_next()

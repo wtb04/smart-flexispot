@@ -241,7 +241,7 @@ void register_desk_control(lv_obj_t *obj);
 
 /** Stand and Sit as two small chips at x, y over a fullscreen view's root,
  *  which covers the rail; lit as the rail's are. */
-inline constexpr int kDeskShortcutButtons = 4;  // over the radar and the focus timer
+inline constexpr int kDeskShortcutButtons = 8;  // over the radar, focus, music and cinema views
 lv_obj_t *add_desk_shortcuts(lv_obj_t *root, std::int32_t x, std::int32_t y,  // what holds them
                              std::uint32_t chip_colour);
 void paint_desk_shortcuts();  // after the preset the desk is at changes
@@ -313,6 +313,8 @@ void refresh_music();  // after what plays changed: its title, cover and times t
 // The time beside a fullscreen view's chip back, faded with its other buttons.
 lv_obj_t *add_view_clock(ViewId view, lv_obj_t *root, lv_obj_t *chip);
 void      update_view_clocks();
+// Stand and Sit, the time and the way back, over a fullscreen view; the chip back.
+lv_obj_t *add_fullscreen_chrome(ViewId view, lv_obj_t *root, lv_event_cb_t on_close);
 void apply_media_neighbours(bool previous, bool next);
 bool cinema_has_next();  // an episode after this one to go on to
 void show_guest_presets();

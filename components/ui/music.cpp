@@ -454,14 +454,6 @@ void build_music(lv_obj_t *screen)
     build_text(x, w);
     paint(pages_palette());
 
-    // The way back, as the other fullscreen views have it, and the desk.
-    lv_obj_t *close = theme::make_chip(s_view, "");
-    theme::make_mark(close, &icons::collapse_icon);
-    lv_obj_set_ext_click_area(close, theme::space::s);
-    lv_obj_add_event_cb(close, [](lv_event_t *) { close_music(); }, LV_EVENT_CLICKED, nullptr);
-    lv_obj_align(close, LV_ALIGN_TOP_RIGHT, -PAD, PAD);
-    lv_obj_t *desk = add_desk_shortcuts(s_view, PAD, PAD, theme::panel);
-
     s_glide = lv_timer_create(glide, GLIDE_MS, nullptr);
     s_check = lv_timer_create(check, CHECK_MS, nullptr);
     lv_timer_pause(s_glide);
@@ -479,10 +471,7 @@ void build_music(lv_obj_t *screen)
                             lv_timer_pause(s_glide);
                             lv_timer_pause(s_check);
                         }});
-    for (lv_obj_t *control : {close, desk}) {
-        fade_when_idle(s_music, control);
-    }
-    add_view_clock(s_music, s_view, close);
+    add_fullscreen_chrome(s_music, s_view, [](lv_event_t *) { close_music(); });
 }
 
 void apply_music_cover(const void *pixels)
