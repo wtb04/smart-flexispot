@@ -38,4 +38,10 @@ bool view_open(ViewId view);
 /** Whether a fullscreen view covers the screen, for what places itself round it. */
 bool fullscreen_open();
 
+/** Fades `obj`, a control over `view`, out once the screen has gone untouched
+ *  for ten seconds while the view is open, and in again at the next touch;
+ *  whole again as the view closes. Faded out, it is hidden, so a tap there goes
+ *  to what is under it. */
+void fade_when_idle(ViewId view, lv_obj_t *obj);
+
 }  // namespace ui::detail

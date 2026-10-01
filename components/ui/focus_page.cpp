@@ -761,6 +761,7 @@ void build_full(lv_obj_t *screen)
     lv_obj_set_ext_click_area(back, theme::space::s);
     lv_obj_add_event_cb(back, [](lv_event_t *) { detail::close_view(s_full_view); }, LV_EVENT_CLICKED,
                         nullptr);
+    lv_obj_t *desk = detail::add_desk_shortcuts(s_full, FULL_PAD, FULL_PAD, theme::panel);
 
     s_full_phase = theme::make_eyebrow(s_full, "READY");
     lv_obj_align(s_full_phase, LV_ALIGN_CENTER, 0, -LEAF_H / 2 - PHASE_ABOVE_LEAVES);
@@ -777,6 +778,9 @@ void build_full(lv_obj_t *screen)
         dot = make_dot(rounds, theme::panel_light, FULL_DOT);
     }
     s_full_view = detail::add_view({"focus", detail::ViewKind::Fullscreen, s_full, show_full_part, nullptr});
+    for (lv_obj_t *control : {desk, back}) {
+        detail::fade_when_idle(s_full_view, control);
+    }
 }
 
 }  // namespace

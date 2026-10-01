@@ -441,4 +441,66 @@ void paint_update_icon(const UpdateState &state)
     }
 }
 
+namespace {
+constexpr std::int32_t SHORTCUT_GAP       = theme::space::s;
+constexpr std::int32_t SHORTCUT_ICON      = 30;  // the desk drawn small in a chip
+constexpr int          SHORTCUT_PRESETS[] = {STAND_PRESET, SIT_PRESET};
+constexpr std::size_t  SHORTCUT_COUNT     = std::size(SHORTCUT_PRESETS);
+constexpr int          SHORTCUT_SETS      = kDeskShortcutButtons / static_cast<int>(SHORTCUT_COUNT);
+
+struct Shortcuts {
+    lv_obj_t *box                   = nullptr;
+    lv_obj_t *chips[SHORTCUT_COUNT] = {};
+    lv_obj_t *marks[SHORTCUT_COUNT] = {};
+};
+Shortcuts s_shortcuts[SHORTCUT_SETS];
+int       s_shortcut_sets = 0;
+}  // namespace
+
+void paint_desk_shortcuts()
+{
+    for (int i = 0; i < s_shortcut_sets; ++i) {
+        for (std::size_t j = 0; j < SHORTCUT_COUNT; ++j) {
+            const bool active = s_preset_active[SHORTCUT_PRESETS[j]];
+            lv_obj_set_state(s_shortcuts[i].chips[j], LV_STATE_CHECKED, active);
+            lv_obj_set_state(s_shortcuts[i].marks[j], LV_STATE_CHECKED, active);
+        }
+    }
+}
+
+lv_obj_t *add_desk_shortcuts(lv_obj_t *root, std::int32_t x, std::int32_t y, std::uint32_t chip_colour)
+{
+    if (s_shortcut_sets == SHORTCUT_SETS) {
+        return nullptr;
+    }
+    Shortcuts &set = s_shortcuts[s_shortcut_sets++];
+    set.box        = lv_obj_create(root);
+    theme::style_panel(set.box, theme::panel, 0);
+    lv_obj_set_style_bg_opa(set.box, LV_OPA_TRANSP, 0);
+    lv_obj_set_size(set.box, static_cast<std::int32_t>(SHORTCUT_COUNT) * (theme::chip::size + SHORTCUT_GAP) - SHORTCUT_GAP,
+                    theme::chip::size);
+    lv_obj_set_pos(set.box, x, y);
+    lv_obj_set_clickable(set.box, false);
+    for (std::size_t i = 0; i < SHORTCUT_COUNT; ++i) {
+        lv_obj_t *chip = theme::make_chip(set.box, "");
+        lv_obj_set_pos(chip, static_cast<std::int32_t>(i) * (theme::chip::size + SHORTCUT_GAP), 0);
+        lv_obj_set_style_bg_color(chip, lv_color_hex(chip_colour), 0);
+        lv_obj_set_ext_click_area(chip, SHORTCUT_GAP / 2);
+        theme::fill_accent(chip, LV_STATE_CHECKED);
+        lv_obj_t *mark = theme::make_mark(chip, SHORTCUT_PRESETS[i] == STAND_PRESET ? &icons::desk_up_icon
+                                                                                  : &icons::desk_down_icon);
+        lv_image_set_scale(mark, LV_SCALE_NONE * SHORTCUT_ICON / DESK_ICON_W);
+        lv_obj_set_style_image_recolor(mark, lv_color_hex(theme::text), LV_STATE_CHECKED);
+        lv_obj_set_style_image_opa(mark, LV_OPA_COVER, LV_STATE_CHECKED);
+        // A tap goes there as one on the rail does; storing a height stays on the rail.
+        lv_obj_add_event_cb(chip, preset_clicked_cb, LV_EVENT_SHORT_CLICKED,
+                            reinterpret_cast<void *>(static_cast<std::intptr_t>(SHORTCUT_PRESETS[i])));
+        register_desk_control(chip);
+        set.chips[i] = chip;
+        set.marks[i] = mark;
+    }
+    paint_desk_shortcuts();
+    return set.box;
+}
+
 }  // namespace ui::detail

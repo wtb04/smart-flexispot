@@ -244,6 +244,8 @@ lv_obj_t    *s_bezel     = nullptr;
 lv_obj_t    *s_column    = nullptr;
 lv_obj_t    *s_full      = nullptr;  // over the whole screen while it is up
 detail::ViewId s_full_view = detail::kNoView;
+lv_obj_t      *s_full_desk = nullptr;  // Stand and Sit, in the corner over the map
+constexpr std::int32_t FULL_DESK_INSET = 32;  // as the chips in the map's other corners
 lv_obj_t    *s_full_chip = nullptr;  // into it, and out again
 lv_obj_t    *s_full_mark = nullptr;
 lv_obj_t    *s_screw     = nullptr;
@@ -2435,15 +2437,21 @@ void build_full()
     lv_obj_set_size(s_full, l.screen_w, l.screen_h);
     theme::style_panel(s_full, theme::background, 0);
     lv_obj_set_scrollable(s_full, false);  // clickable, so nothing under it is
+    // Over the map, which moves onto the view after this as it opens.
+    s_full_desk = detail::add_desk_shortcuts(s_full, FULL_DESK_INSET, FULL_DESK_INSET, theme::background);
     s_full_view = detail::add_view({"radar", detail::ViewKind::Fullscreen, s_full,
                                     [] {
                                         lay_out_full();
+                                        lv_obj_move_foreground(s_full_desk);
                                         lv_image_set_src(s_full_mark, &icons::collapse_icon);
                                     },
                                     [] {
                                         lay_out_page();
                                         lv_image_set_src(s_full_mark, &icons::expand_icon);
                                     }});
+    for (lv_obj_t *control : {s_full_desk, s_full_chip, s_zoom_out, s_zoom_in}) {
+        detail::fade_when_idle(s_full_view, control);
+    }
 }
 }  // namespace
 

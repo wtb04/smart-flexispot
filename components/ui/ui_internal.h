@@ -248,6 +248,13 @@ Layout layout();
 void set_screen_state(bool on);
 void screen_off_cb(lv_event_t *);
 void register_desk_control(lv_obj_t *obj);
+
+/** Stand and Sit as two small chips at x, y over a fullscreen view's root,
+ *  which covers the rail; lit as the rail's are. */
+inline constexpr int kDeskShortcutButtons = 4;  // over the radar and the focus timer
+lv_obj_t *add_desk_shortcuts(lv_obj_t *root, std::int32_t x, std::int32_t y,  // what holds them
+                             std::uint32_t chip_colour);
+void paint_desk_shortcuts();  // after the preset the desk is at changes
 void show_next_notice();
 void paint_notice_corner();  // when the notice on show came, and how many wait
 void create_notice_card();

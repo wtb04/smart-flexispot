@@ -44,7 +44,7 @@ Handlers s_handlers{};
 namespace {
 // The two move buttons and a button per preset, stand and sit among them.
 constexpr int MOVE_BUTTON_COUNT = 2;
-constexpr int DESK_CONTROL_MAX  = MOVE_BUTTON_COUNT + kPresetCount;
+constexpr int DESK_CONTROL_MAX  = MOVE_BUTTON_COUNT + kPresetCount + kDeskShortcutButtons;
 bool          s_desk_available                  = true;
 
 lv_obj_t     *s_desk_controls[DESK_CONTROL_MAX] = {};
@@ -401,6 +401,7 @@ void apply_preset_active(int index, bool active)
         return;
     }
     s_preset_active[index] = active;
+    paint_desk_shortcuts();
     lv_obj_t *button       = s_preset_buttons[index];
     lv_obj_set_state(button, LV_STATE_CHECKED, active);
     for (std::uint32_t i = 0; i < lv_obj_get_child_count(button); ++i) {
