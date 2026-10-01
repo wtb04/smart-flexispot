@@ -13,17 +13,17 @@ namespace {
 constexpr std::int32_t STILL_W       = media::kStillW;
 constexpr std::int32_t STILL_H       = media::kStillH;
 constexpr std::int32_t STILL_RADIUS  = 22;
-constexpr std::int32_t TEXT_GAP      = 40;
+constexpr std::int32_t TEXT_GAP      = 56;
 constexpr lv_opa_t     PAUSED_DIM    = LV_OPA_50;  // as the card's cover
 constexpr std::int32_t PROGRESS_H    = 10;
 constexpr std::int32_t LINE_GAP      = 12;
 constexpr std::int32_t TIMES_GAP     = 8;    // between the progress and its times
 // The controls in five columns: before, back, play, on and after.
-constexpr std::int32_t GRID_GAP      = 20;
-constexpr std::int32_t ROW_GAP       = 24;   // over the transport, under the times
-constexpr std::int32_t TRANSPORT_H   = 96;
-constexpr std::int32_t EPISODE_W     = 120;  // the episode before, and after
-constexpr std::int32_t STEP_W        = 200;
+constexpr std::int32_t GRID_GAP      = 28;
+constexpr std::int32_t ROW_GAP       = 40;   // over the transport, under the times
+constexpr std::int32_t TRANSPORT_H   = 88;
+constexpr std::int32_t EPISODE_W     = 112;  // the episode before, and after
+constexpr std::int32_t STEP_W        = 184;
 constexpr std::int32_t SKIP_W        = 220;  // over the picture's corner, as on a screen
 constexpr std::int32_t SKIP_H        = 64;
 constexpr std::int32_t SKIP_INSET    = 16;

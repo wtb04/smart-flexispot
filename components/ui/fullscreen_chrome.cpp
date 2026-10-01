@@ -9,7 +9,7 @@
 // and the way back at the right, there while the screen is being touched.
 namespace ui::detail {
 namespace {
-constexpr std::int32_t  INSET     = 40;
+constexpr std::int32_t  INSET     = 24;  // near the corners, leaving the middle to the view
 constexpr std::int32_t  CHIP_STEP = theme::space::m;  // between the chips at the left, as Stand and Sit
 constexpr std::int32_t  CHIP_MARK = 30;               // a mark's longer side in a chip, as the desk's
 constexpr std::int32_t  CHIP_GAP  = 20;

@@ -13,18 +13,17 @@ namespace ui::detail {
 namespace {
 constexpr std::int32_t PAD          = 40;
 constexpr std::int32_t COVER        = media::kLargeArtSize;
-constexpr std::int32_t COVER_X      = 80;
 constexpr std::int32_t COVER_RADIUS = 22;  // as the cinema view's still
-constexpr std::int32_t TEXT_GAP     = 80;
+constexpr std::int32_t TEXT_GAP     = 72;
 constexpr std::int32_t LINE_GAP     = 10;
 constexpr std::int32_t TEXT_TO_BAR  = 48;   // under the artist, when the title leaves room
 constexpr std::int32_t PROGRESS_H   = 10;
 // The cinema view's buttons, in a grid: before, play and after across, and
 // under them the volume as wide as the first two and the favourites as the last.
-constexpr std::int32_t TRANSPORT_H  = 96;
-constexpr std::int32_t PLAY_W       = 220;
-constexpr std::int32_t GRID_GAP     = 20;
-constexpr std::int32_t VOLUME_H     = 72;
+constexpr std::int32_t TRANSPORT_H  = 88;
+constexpr std::int32_t PLAY_W       = 200;
+constexpr std::int32_t GRID_GAP     = 24;
+constexpr std::int32_t VOLUME_H     = 64;
 constexpr std::int32_t VOLUME_INSET = 28;   // its speaker and level from its ends
 constexpr std::uint8_t VOLUME_FILL_MIX = 64;  // of the text's colour into the bar's
 constexpr std::int32_t PAUSED_MARK  = 120;
@@ -341,13 +340,13 @@ void volume_touched(lv_event_t *e)
     }
 }
 
-void build_cover(std::int32_t y)
+void build_cover(std::int32_t x, std::int32_t y)
 {
     lv_obj_t *frame = lv_obj_create(s_view);
     lv_obj_set_size(frame, COVER, COVER);
     theme::style_panel(frame, theme::panel, COVER_RADIUS);
     lv_obj_set_style_clip_corner(frame, true, 0);
-    lv_obj_set_pos(frame, COVER_X, y);
+    lv_obj_set_pos(frame, x, y);
     lv_obj_set_scrollable(frame, false);
     // Tapping the record pauses or plays it, as the cinema view's picture does.
     lv_obj_add_event_cb(frame, [](lv_event_t *) { media_toggle_play(); }, LV_EVENT_CLICKED, nullptr);
@@ -456,9 +455,11 @@ void build_music(lv_obj_t *screen)
     lv_obj_set_hidden(s_view, true);
 
     const std::int32_t cover_y = (l.screen_h - COVER) / 2;
-    build_cover(cover_y);
-    const std::int32_t x = COVER_X + COVER + TEXT_GAP;
-    const std::int32_t w = l.screen_w - x - COVER_X;
+    // As far in from the sides as the cover is from the top and the bottom.
+    const std::int32_t margin = cover_y;
+    build_cover(margin, cover_y);
+    const std::int32_t x = margin + COVER + TEXT_GAP;
+    const std::int32_t w = l.screen_w - x - margin;
     s_text_top = cover_y;
     build_controls(x, cover_y + COVER, w);
     build_text(x, w);

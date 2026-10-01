@@ -53,7 +53,7 @@ constexpr std::int32_t RUNNER         = 12;
 constexpr std::int32_t LENGTH_DOT     = 10;
 constexpr std::uint8_t RAIL_AHEAD_INK = 70;  // parts of the ink in 255, the rest the card's
 
-constexpr std::int32_t FULL_PAD          = 40;  // the ring from the screen's top and bottom
+constexpr std::int32_t FULL_PAD          = 64;  // the ring from the screen's top and bottom, clear of the row over it
 constexpr std::int32_t FULL_DOT          = 10;
 constexpr std::int32_t FULL_DOT_GAP      = 12;
 constexpr std::int32_t FULL_ROUNDS_BELOW = 44;  // the rounds under the line under the leaves
