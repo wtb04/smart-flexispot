@@ -229,6 +229,45 @@ void tap(SDL_Point at)
     run_for(300);
 }
 
+// A finger drawn from one point to the other, as quickly as a swipe is.
+void swipe(SDL_Point from, SDL_Point to)
+{
+    constexpr int STEPS = 8;
+    const Uint32  window = SDL_GetWindowID(lv_sdl_window_get_window(lv_display_get_default()));
+    SDL_Event     event{};
+    event.type            = SDL_MOUSEMOTION;
+    event.motion.windowID = window;
+    event.motion.x        = from.x;
+    event.motion.y        = from.y;
+    SDL_PushEvent(&event);
+    event                 = {};
+    event.type            = SDL_MOUSEBUTTONDOWN;
+    event.button.windowID = window;
+    event.button.button   = SDL_BUTTON_LEFT;
+    event.button.x        = from.x;
+    event.button.y        = from.y;
+    SDL_PushEvent(&event);
+    run_for(30);
+    for (int i = 1; i <= STEPS; ++i) {
+        event                 = {};
+        event.type            = SDL_MOUSEMOTION;
+        event.motion.windowID = window;
+        event.motion.state    = SDL_BUTTON_LMASK;
+        event.motion.x        = from.x + (to.x - from.x) * i / STEPS;
+        event.motion.y        = from.y + (to.y - from.y) * i / STEPS;
+        SDL_PushEvent(&event);
+        run_for(15);
+    }
+    event                 = {};
+    event.type            = SDL_MOUSEBUTTONUP;
+    event.button.windowID = window;
+    event.button.button   = SDL_BUTTON_LEFT;
+    event.button.x        = to.x;
+    event.button.y        = to.y;
+    SDL_PushEvent(&event);
+    run_for(300);
+}
+
 int on_event(void *, SDL_Event *event)
 {
     if (event->type == SDL_QUIT) {
@@ -280,6 +319,7 @@ std::uint32_t ticks_past_splash()
 
 // --page N opens page N; --press KEYS presses those keys, as "am" for Home
 // Assistant answering and music; --tap X,Y taps there, as often as given;
+// --swipe X1,Y1,X2,Y2 swipes from one to the other, after the taps;
 // --then KEYS presses those after the taps, as a notice over a view they opened;
 // --shot S saves a screenshot after S seconds and quits, to --out FILE if
 // given; --splash plays the splash the panel boots with. --pick-above FT
@@ -292,6 +332,7 @@ struct Options {
     bool        splash = false;
     std::string keys;
     std::vector<SDL_Point> taps;
+    std::vector<std::pair<SDL_Point, SDL_Point>> swipes;
     std::string then;
     int         pick_ft = -1;
     std::vector<SDL_Point> taps2;
@@ -323,6 +364,12 @@ Options options(int argc, char **argv)
             SDL_Point at{};
             if (std::sscanf(value, "%d,%d", &at.x, &at.y) == 2) {
                 o.taps.push_back(at);
+            }
+            ++i;
+        } else if (name == "--swipe") {
+            SDL_Point from{}, to{};
+            if (std::sscanf(value, "%d,%d,%d,%d", &from.x, &from.y, &to.x, &to.y) == 4) {
+                o.swipes.emplace_back(from, to);
             }
             ++i;
         } else if (name == "--pick-above") {
@@ -429,6 +476,9 @@ int main(int argc, char **argv)
     }
     for (const SDL_Point &at : opts.taps) {
         tap(at);
+    }
+    for (const auto &[from, to] : opts.swipes) {
+        swipe(from, to);
     }
     press_all(opts.then);
 

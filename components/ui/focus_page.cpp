@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <ctime>
 #include <cstdio>
+#include <utility>
 
 // A dial of ticks, one for every minute of the part, round a flip clock's two
 // leaves, its controls in the corners as the radar has its zoom. Beside it the
@@ -74,6 +75,7 @@ Focus s_focus{
 // A clock face: a tick for every minute round two leaves, and the colon that
 // beats between them. The dial has one, and the fullscreen view the same.
 struct Face {
+    lv_obj_t *ring            = nullptr;  // all of it to tap, or swipe on
     lv_obj_t *tick[TICKS_MAX] = {};
     lv_obj_t *leaves          = nullptr;
     lv_obj_t *minutes         = nullptr;
@@ -319,6 +321,33 @@ void on_click(lv_obj_t *obj, FocusAction action)
                         reinterpret_cast<void *>(static_cast<std::intptr_t>(action)));
 }
 
+// A tap starts or pauses the part, a swipe to the left goes on to the next; the
+// release that ends a swipe is not also a tap.
+bool s_swiped = false;
+
+void face_touched(lv_event_t *e)
+{
+    if (lv_event_get_code(e) == LV_EVENT_GESTURE) {
+        s_swiped = true;
+        if (lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_LEFT && detail::s_handlers.focus != nullptr) {
+            detail::s_handlers.focus(FocusAction::Skip);
+        }
+        return;
+    }
+    if (!std::exchange(s_swiped, false) && detail::s_handlers.focus != nullptr) {
+        detail::s_handlers.focus(FocusAction::Toggle);
+    }
+}
+
+void touch_face(lv_obj_t *obj)
+{
+    lv_obj_set_clickable(obj, true);
+    lv_obj_add_event_cb(obj, face_touched, LV_EVENT_CLICKED, nullptr);
+    lv_obj_add_event_cb(obj, face_touched, LV_EVENT_GESTURE, nullptr);
+    // Gestures bubble by default, past here to the screen.
+    lv_obj_set_gesture_bubble(obj, false);
+}
+
 lv_obj_t *clear_box(lv_obj_t *parent)
 {
     lv_obj_t *box = lv_obj_create(parent);
@@ -406,6 +435,12 @@ lv_obj_t *leaf(lv_obj_t *parent)
 
 void build_ticks(Face &face, lv_obj_t *card, std::int32_t ring)
 {
+    face.ring = clear_box(card);
+    lv_obj_set_size(face.ring, ring, ring);
+    lv_obj_center(face.ring);
+    lv_obj_set_style_radius(face.ring, theme::radius::pill, 0);
+    lv_obj_add_flag(face.ring, LV_OBJ_FLAG_ADV_HITTEST);
+    touch_face(face.ring);
     for (lv_obj_t *&tick : face.tick) {
         tick = lv_arc_create(card);
         lv_obj_set_size(tick, ring, ring);
@@ -422,8 +457,8 @@ void build_ticks(Face &face, lv_obj_t *card, std::int32_t ring)
 }
 
 // Minutes and seconds each on a leaf, cut across where a flip clock's leaves
-// fold, with a colon that beats the seconds between them. The clock is a button
-// too: the biggest thing on the page is the obvious one to tap.
+// fold, with a colon that beats the seconds between them. Taken as the ring is,
+// as the obvious thing to tap.
 void build_leaves(Face &face, lv_obj_t *card)
 {
     face.leaves = clear_box(card);
@@ -432,8 +467,7 @@ void build_leaves(Face &face, lv_obj_t *card)
     lv_obj_set_flex_align(face.leaves, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(face.leaves, LEAF_GAP, 0);
     lv_obj_center(face.leaves);
-    lv_obj_set_clickable(face.leaves, true);
-    on_click(face.leaves, FocusAction::Toggle);
+    touch_face(face.leaves);
     face.minutes    = leaf(face.leaves);
     lv_obj_t *colon = clear_box(face.leaves);
     lv_obj_set_size(colon, COLON_DOT, COLON_H);
@@ -693,10 +727,10 @@ void show_full_second(bool force)
     char text[64];
     if (idle || waiting()) {
         if (s_focus.phase == FocusPhase::Work || idle) {
-            std::snprintf(text, sizeof(text), "Tap the time to start round %d",
+            std::snprintf(text, sizeof(text), "Tap to start round %d",
                           idle ? 1 : s_focus.round);
         } else {
-            std::snprintf(text, sizeof(text), "Tap the time to start the break");
+            std::snprintf(text, sizeof(text), "Tap to start the break");
         }
     } else if (paused) {
         std::snprintf(text, sizeof(text), "Paused, %d min left",
@@ -771,6 +805,10 @@ void build_full(lv_obj_t *screen)
     }
     s_full_view = detail::add_view({"focus", detail::ViewKind::Fullscreen, s_full, show_full_part, nullptr});
     detail::add_fullscreen_chrome(s_full_view, s_full, [](lv_event_t *) { detail::close_view(s_full_view); });
+    // What the time says around it goes with the buttons, leaving the ring and the time.
+    for (lv_obj_t *part : {s_full_phase, s_full_under, rounds}) {
+        detail::fade_when_idle(s_full_view, part);
+    }
 }
 
 }  // namespace

@@ -26,15 +26,16 @@ constexpr std::uint32_t IDLE_AFTER_MS = 10 * 1000;
 constexpr std::uint32_t IDLE_FADE_MS  = 300;
 constexpr std::uint32_t IDLE_CHECK_MS = 200;
 
-struct Floating {
-    ViewId    view  = kNoView;
-    lv_obj_t *obj   = nullptr;
-    bool      shown = true;
+// Told as a view's buttons show and fade: the fading ones, and any view's own.
+struct Watcher {
+    ViewId                                view = kNoView;
+    std::function<void(bool, bool)>       changed;  // shown, and whether to animate it
+    bool                                  shown = true;
 };
 
-std::vector<Floating> &floating()
+std::vector<Watcher> &watchers()
 {
-    static std::vector<Floating> list;
+    static std::vector<Watcher> list;
     return list;
 }
 
@@ -45,23 +46,22 @@ void set_layer_opa(void *obj, std::int32_t opa)
     lv_obj_set_style_opa_layered(static_cast<lv_obj_t *>(obj), static_cast<lv_opa_t>(opa), 0);
 }
 
-void fade(Floating &item, bool in, bool animate)
+void fade(lv_obj_t *obj, bool in, bool animate)
 {
-    item.shown = in;
-    lv_anim_delete(item.obj, set_layer_opa);
+    lv_anim_delete(obj, set_layer_opa);
     if (in) {
-        lv_obj_set_hidden(item.obj, false);
+        lv_obj_set_hidden(obj, false);
     }
     if (!animate) {
-        set_layer_opa(item.obj, in ? LV_OPA_COVER : LV_OPA_TRANSP);
-        lv_obj_set_hidden(item.obj, !in);
+        set_layer_opa(obj, in ? LV_OPA_COVER : LV_OPA_TRANSP);
+        lv_obj_set_hidden(obj, !in);
         return;
     }
     lv_anim_t anim;
     lv_anim_init(&anim);
-    lv_anim_set_var(&anim, item.obj);
+    lv_anim_set_var(&anim, obj);
     lv_anim_set_exec_cb(&anim, set_layer_opa);
-    lv_anim_set_values(&anim, lv_obj_get_style_opa_layered(item.obj, LV_PART_MAIN), in ? LV_OPA_COVER : LV_OPA_TRANSP);
+    lv_anim_set_values(&anim, lv_obj_get_style_opa_layered(obj, LV_PART_MAIN), in ? LV_OPA_COVER : LV_OPA_TRANSP);
     lv_anim_set_duration(&anim, IDLE_FADE_MS);
     if (!in) {
         lv_anim_set_completed_cb(&anim, [](lv_anim_t *done) {
@@ -74,11 +74,20 @@ void fade(Floating &item, bool in, bool animate)
 void check_idle(lv_timer_t *)
 {
     const bool touched = lv_display_get_inactive_time(nullptr) < IDLE_AFTER_MS;
-    for (Floating &item : floating()) {
-        if (view_open(item.view) && touched != item.shown) {
-            fade(item, touched, true);
+    for (Watcher &watcher : watchers()) {
+        if (view_open(watcher.view) && touched != watcher.shown) {
+            watcher.shown = touched;
+            watcher.changed(touched, true);
         }
     }
+}
+
+void watch(ViewId view, std::function<void(bool, bool)> changed)
+{
+    if (watchers().empty()) {
+        lv_timer_create(check_idle, IDLE_CHECK_MS, nullptr);
+    }
+    watchers().push_back({view, std::move(changed), true});
 }
 }  // namespace
 
@@ -99,9 +108,10 @@ void close_view(ViewId view)
     }
     entry->open = false;
     lv_obj_set_hidden(entry->spec.root, true);
-    for (Floating &item : floating()) {
-        if (item.view == view && !item.shown) {
-            fade(item, true, false);
+    for (Watcher &watcher : watchers()) {
+        if (watcher.view == view && !watcher.shown) {
+            watcher.shown = true;
+            watcher.changed(true, false);
         }
     }
     if (entry->spec.closed) {
@@ -157,13 +167,14 @@ bool fullscreen_open()
 
 void fade_when_idle(ViewId view, lv_obj_t *obj)
 {
-    if (obj == nullptr) {
-        return;
+    if (obj != nullptr) {
+        watch(view, [obj](bool shown, bool animate) { fade(obj, shown, animate); });
     }
-    if (floating().empty()) {
-        lv_timer_create(check_idle, IDLE_CHECK_MS, nullptr);
-    }
-    floating().push_back({view, obj, true});
+}
+
+void when_buttons_change(ViewId view, std::function<void(bool shown)> changed)
+{
+    watch(view, [changed = std::move(changed)](bool shown, bool) { changed(shown); });
 }
 
 }  // namespace ui::detail

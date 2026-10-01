@@ -44,4 +44,8 @@ bool fullscreen_open();
  *  to what is under it. */
 void fade_when_idle(ViewId view, lv_obj_t *obj);
 
+/** Tells `changed` as the buttons over `view` fade out (false) and come back
+ *  (true), and true as it closes, for what a view does more than fade. */
+void when_buttons_change(ViewId view, std::function<void(bool shown)> changed);
+
 }  // namespace ui::detail
