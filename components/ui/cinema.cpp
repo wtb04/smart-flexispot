@@ -4,36 +4,33 @@
 #include <cstdio>
 #include <ctime>
 
-// Jellyfin fullscreen, for watching: the film and its controls large, the desk
-// and the lights beside them, and nothing else. The screen goes dark once left
+// Jellyfin fullscreen, for watching: the film and its controls large, the
+// lights and the low desk with Stand and Sit over them, and nothing else, as
+// far in from every edge as from the top. The screen goes dark once left
 // alone, and lights again when there is an intro to skip or an episode to go on to.
 namespace ui::detail {
 namespace {
-constexpr std::int32_t PAD           = 40;
 constexpr std::int32_t STILL_W       = media::kStillW;
 constexpr std::int32_t STILL_H       = media::kStillH;
 constexpr std::int32_t STILL_RADIUS  = 22;
 constexpr std::int32_t TEXT_GAP      = 40;
 constexpr lv_opa_t     PAUSED_DIM    = LV_OPA_50;  // as the card's cover
-constexpr std::int32_t TOP_Y         = 120;  // under the row over every fullscreen view
 constexpr std::int32_t PROGRESS_H    = 10;
 constexpr std::int32_t LINE_GAP      = 12;
 constexpr std::int32_t TIMES_GAP     = 8;    // between the progress and its times
-// The controls on one grid of five columns, both rows: before, back, play, on
-// and after, and under them the viewing height over the first two, the lights,
-// the screen and the subtitles.
+// The controls in five columns: before, back, play, on and after.
 constexpr std::int32_t GRID_GAP      = 20;
 constexpr std::int32_t ROW_GAP       = 24;   // over the transport, under the times
 constexpr std::int32_t TRANSPORT_H   = 96;
-constexpr std::int32_t EPISODE_W     = 160;  // the episode before, and after
-constexpr std::int32_t STEP_W        = 240;
+constexpr std::int32_t EPISODE_W     = 120;  // the episode before, and after
+constexpr std::int32_t STEP_W        = 200;
 constexpr std::int32_t SKIP_W        = 220;  // over the picture's corner, as on a screen
 constexpr std::int32_t SKIP_H        = 64;
 constexpr std::int32_t SKIP_INSET    = 16;
 constexpr std::int32_t PAUSED_MARK   = 104;  // the round play mark over a paused picture
-constexpr std::int32_t ROOM_H        = 88;
 constexpr int          SEEK_STEP_S   = 10;
-constexpr std::int32_t VOLUME_H      = 64;   // along the foot of the picture, beside it
+constexpr std::int32_t VOLUME_H      = 64;   // along the foot of the picture, beside it, the
+                                             // screen's timer and the subtitles square after it
 constexpr std::int32_t VOLUME_INSET  = 28;   // its speaker and level from its ends
 constexpr std::uint8_t VOLUME_FILL_MIX = 64;  // of the text's colour into the bar's
 constexpr time_t       CLOCK_SET     = 1'700'000'000;  // any earlier and the clock is not set yet
@@ -53,7 +50,7 @@ lv_obj_t     *s_play    = nullptr;
 lv_obj_t     *s_skip    = nullptr;
 lv_obj_t     *s_paused  = nullptr;  // the play mark over a paused picture
 std::int32_t  s_episode_y[2] = {};  // under a title of one line, and of two
-lv_obj_t     *s_lights  = nullptr;
+lv_obj_t     *s_lights_chip  = nullptr;  // quick actions in the row over the view
 lv_obj_t     *s_volume  = nullptr;  // the slider, filled as far as the level
 lv_obj_t     *s_volume_fill  = nullptr;
 lv_obj_t     *s_volume_level = nullptr;
@@ -66,7 +63,8 @@ bool          s_subtitles_available = false;
 bool          s_subtitles_shown     = false;
 lv_obj_t     *s_row[5]  = {};       // the episode before, back, play, on, the episode after
 bool          s_neighbour[2] = {};  // before, after
-lv_obj_t     *s_low     = nullptr;
+lv_obj_t     *s_low_chip     = nullptr;
+std::int32_t  s_margin  = 0;  // from each edge
 lv_timer_t   *s_tick    = nullptr;
 std::uint32_t s_woke_at = 0;  // lit for an intro to skip: kept lit a while from then
 bool          s_skip_was_offered = false;
@@ -175,7 +173,7 @@ void tick(lv_timer_t *)
     // Faded where there is no episode that side, so the grid stays as it is.
     theme::set_usable(s_row[0], media_remote() && s_neighbour[0]);
     theme::set_usable(s_row[4], media_remote() && s_neighbour[1]);
-    theme::fill_accent_or(s_lights, s_lights_on, theme::panel_light);
+    light_chrome_chip(s_lights_chip, s_lights_on);
     theme::fill_accent_or(s_screen, s_auto_off, theme::panel_light);
     theme::fill_accent_or(s_subtitles, s_subtitles_shown, theme::panel_light);
     theme::set_usable(s_subtitles, s_subtitles_available);
@@ -183,7 +181,7 @@ void tick(lv_timer_t *)
     if (s_media_volume >= 0 && !s_volume_held) {
         show_volume(s_media_volume);
     }
-    theme::fill_accent_or(s_low, s_preset_active[ULTRA_LOW_PRESET], theme::panel_light);
+    light_chrome_chip(s_low_chip, s_preset_active[ULTRA_LOW_PRESET]);
     keep_screen();
 }
 
@@ -218,14 +216,16 @@ lv_obj_t *line(lv_obj_t *parent, std::uint32_t colour, const lv_font_t *font, st
 }
 
 void build_volume(std::int32_t x, std::int32_t y, std::int32_t w);
+void build_settings(std::int32_t x, std::int32_t y);
 
 void build_film(std::int32_t width)
 {
+    const std::int32_t top = s_margin;
     lv_obj_t *frame = lv_obj_create(s_view);
     lv_obj_set_size(frame, STILL_W, STILL_H);
     theme::style_panel(frame, theme::panel, STILL_RADIUS);
     lv_obj_set_style_clip_corner(frame, true, 0);
-    lv_obj_set_pos(frame, PAD, TOP_Y);
+    lv_obj_set_pos(frame, s_margin, top);
     // Tapping the picture pauses or plays, as tapping a video does.
     lv_obj_add_event_cb(frame, [](lv_event_t *) { media_toggle_play(); }, LV_EVENT_CLICKED, nullptr);
     s_still = lv_image_create(frame);
@@ -249,9 +249,9 @@ void build_film(std::int32_t width)
     lv_obj_align(s_skip, LV_ALIGN_BOTTOM_RIGHT, -SKIP_INSET, -SKIP_INSET);
     lv_obj_set_hidden(s_skip, true);
 
-    const std::int32_t x = PAD + STILL_W + TEXT_GAP;
-    const std::int32_t w = width - x - PAD;
-    std::int32_t       y = TOP_Y;
+    const std::int32_t x = s_margin + STILL_W + TEXT_GAP;
+    const std::int32_t w = width - x - s_margin;
+    std::int32_t       y = top;
     s_series = line(s_view, theme::secondary, fonts::size_22(), w, 1);
     lv_obj_set_pos(s_series, x, y);
     y += lv_font_get_line_height(fonts::size_22()) + LINE_GAP;
@@ -262,28 +262,30 @@ void build_film(std::int32_t width)
     s_episode = line(s_view, theme::secondary, fonts::size_22(), w, 1);
     lv_obj_set_pos(s_episode, x, s_episode_y[0]);
 
-    build_volume(x, TOP_Y + STILL_H - VOLUME_H, w);
+    const std::int32_t settings_w = 2 * (VOLUME_H + GRID_GAP);
+    build_volume(x, top + STILL_H - VOLUME_H, w - settings_w);
+    build_settings(x + w - settings_w + GRID_GAP, top + STILL_H - VOLUME_H);
 
     // Across under the picture and its words, as a player's is.
-    const std::int32_t bar_y   = TOP_Y + STILL_H + ROW_GAP - TIMES_GAP;
-    const std::int32_t full_w  = width - 2 * PAD;
+    const std::int32_t bar_y   = top + STILL_H + ROW_GAP - TIMES_GAP;
+    const std::int32_t full_w  = width - 2 * s_margin;
     s_bar = lv_bar_create(s_view);
     lv_obj_set_size(s_bar, full_w, PROGRESS_H);
-    lv_obj_set_pos(s_bar, PAD, bar_y);
+    lv_obj_set_pos(s_bar, s_margin, bar_y);
     theme::style_panel(s_bar, theme::panel_light, PROGRESS_H / 2);
     theme::fill_accent(s_bar, LV_PART_INDICATOR);
     lv_obj_set_style_radius(s_bar, PROGRESS_H / 2, LV_PART_INDICATOR);
     const std::int32_t times_y = bar_y + PROGRESS_H + TIMES_GAP;
     s_elapsed = theme::make_label(s_view, "0:00", theme::secondary, fonts::size_20());
-    lv_obj_set_pos(s_elapsed, PAD, times_y);
+    lv_obj_set_pos(s_elapsed, s_margin, times_y);
     s_total = theme::make_label(s_view, "0:00", theme::secondary, fonts::size_20());
     lv_obj_set_width(s_total, full_w);
     lv_obj_set_style_text_align(s_total, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_obj_set_pos(s_total, PAD, times_y);
+    lv_obj_set_pos(s_total, s_margin, times_y);
     s_ends = theme::make_label(s_view, "", theme::secondary, fonts::size_20());
     lv_obj_set_width(s_ends, full_w);
     lv_obj_set_style_text_align(s_ends, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_pos(s_ends, PAD, times_y);
+    lv_obj_set_pos(s_ends, s_margin, times_y);
     lv_obj_set_hidden(s_ends, true);
 }
 
@@ -361,11 +363,11 @@ struct Columns {
 
 Columns columns()
 {
-    const std::int32_t width = layout().screen_w - 2 * PAD;
+    const std::int32_t width = layout().screen_w - 2 * s_margin;
     const std::int32_t play  = width - 2 * EPISODE_W - 2 * STEP_W - 4 * GRID_GAP;
     const std::int32_t w[5]  = {EPISODE_W, STEP_W, play, STEP_W, EPISODE_W};
     Columns            c{};
-    std::int32_t       x = PAD;
+    std::int32_t       x = s_margin;
     for (int i = 0; i < 5; ++i) {
         c.x[i] = x;
         c.w[i] = w[i];
@@ -403,31 +405,19 @@ void preset(int index)
     }
 }
 
-void build_room(std::int32_t y)
+// After the volume: the screen going dark by itself, lit while it does, and the subtitles.
+void build_settings(std::int32_t x, std::int32_t y)
 {
-    const Columns c = columns();
-    s_low = button(s_view, preset_name(ULTRA_LOW_PRESET), c.w[0] + GRID_GAP + c.w[1], ROOM_H,
-                   [](lv_event_t *) { preset(ULTRA_LOW_PRESET); }, fonts::size_28());
-    lv_obj_set_pos(s_low, c.x[0], y);
-    s_lights = button(s_view, "Lights", c.w[2], ROOM_H,
-                      [](lv_event_t *) {
-                          if (s_handlers.lights != nullptr) {
-                              s_handlers.lights();
-                          }
-                      },
-                      fonts::size_28());
-    lv_obj_set_pos(s_lights, c.x[2], y);
-    // The screen going dark by itself, lit while it does.
-    s_screen = button(s_view, "", c.w[3], ROOM_H, [](lv_event_t *) { s_auto_off = !s_auto_off; });
+    s_screen = button(s_view, "", VOLUME_H, VOLUME_H, [](lv_event_t *) { s_auto_off = !s_auto_off; });
     mark(s_screen, &icons::screen_timer_icon);
-    lv_obj_set_pos(s_screen, c.x[3], y);
-    s_subtitles = button(s_view, "", c.w[4], ROOM_H, [](lv_event_t *) {
+    lv_obj_set_pos(s_screen, x, y);
+    s_subtitles = button(s_view, "", VOLUME_H, VOLUME_H, [](lv_event_t *) {
         s_subtitles_shown = !s_subtitles_shown;  // the next report from the player confirms it
         media_action(MediaAction::Subtitles);
         tick(s_tick);
     });
     mark(s_subtitles, &icons::subtitles_icon);
-    lv_obj_set_pos(s_subtitles, c.x[4], y);
+    lv_obj_set_pos(s_subtitles, x + VOLUME_H + GRID_GAP, y);
 }
 }  // namespace
 
@@ -440,11 +430,13 @@ void build_cinema(lv_obj_t *screen)
     theme::style_panel(s_view, theme::background, 0);
     lv_obj_set_hidden(s_view, true);
 
+    // The picture, the progress and its times under it, and the controls: as far
+    // in from the sides as from the top and the bottom.
+    const std::int32_t content_h = STILL_H + ROW_GAP + PROGRESS_H + TIMES_GAP +
+                                   lv_font_get_line_height(fonts::size_20()) + ROW_GAP + TRANSPORT_H;
+    s_margin = (l.screen_h - content_h) / 2;
     build_film(l.screen_w);
-    const std::int32_t room_y      = l.screen_h - PAD - ROOM_H;
-    const std::int32_t transport_y = room_y - GRID_GAP - TRANSPORT_H;
-    build_transport(transport_y);
-    build_room(room_y);
+    build_transport(l.screen_h - s_margin - TRANSPORT_H);
 
     s_tick = lv_timer_create(tick, TICK_MS, nullptr);
     lv_timer_pause(s_tick);
@@ -457,7 +449,13 @@ void build_cinema(lv_obj_t *screen)
                              update_view_clocks();
                          },
                          [] { lv_timer_pause(s_tick); }});
-    add_fullscreen_chrome(s_cinema, s_view, [](lv_event_t *) { close_cinema(); });
+    Chrome chrome = add_fullscreen_chrome(s_cinema, s_view, [](lv_event_t *) { close_cinema(); });
+    s_low_chip    = add_chrome_chip(chrome, &icons::desk_lowest_icon, [](lv_event_t *) { preset(ULTRA_LOW_PRESET); });
+    s_lights_chip = add_chrome_chip(chrome, &icons::bulb_icon, [](lv_event_t *) {
+        if (s_handlers.lights != nullptr) {
+            s_handlers.lights();
+        }
+    });
 }
 
 bool cinema_has_next()

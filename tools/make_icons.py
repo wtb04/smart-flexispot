@@ -260,6 +260,11 @@ BULB_GLASS = paint([(disc(17, 15, 14.5), True),
                    BULB_W, BULB_H)
 BULB_BASE = paint([(rounded(10, 34.5, 24, 45, 2), True),
                    (stroke(10, 39.8, 24, 39.8, 1.4), False)], BULB_W, BULB_H)
+# The two as one, for a chip that is a single mark.
+BULB = paint([(disc(17, 15, 14.5), True),
+              (polygon((5.2, 21), (28.8, 21), (23.6, 33), (10.4, 33)), True),
+              (rounded(10, 34.5, 24, 45, 2), True),
+              (stroke(10, 39.8, 24, 39.8, 1.4), False)], BULB_W, BULB_H)
 
 
 # A standing desk: its top, the long feet, and legs of three telescoping tubes,
@@ -269,7 +274,7 @@ DESK_W, DESK_H = 58, 56
 LEG_X = (13, 45)
 FOOT_TOP = 50
 TUBES = ((2.1, 0.0), (2.8, 0.3), (3.6, 0.6))  # half-width, and where it starts down the leg
-RAISED_TOP, LOWERED_TOP = 5, 20
+RAISED_TOP, LOWERED_TOP, LOWEST_TOP = 5, 20, 32
 
 
 def desk_layers(top):
@@ -286,6 +291,7 @@ def desk_layers(top):
 
 DESK_UP = paint(desk_layers(RAISED_TOP), DESK_W, DESK_H)
 DESK_DOWN = paint(desk_layers(LOWERED_TOP), DESK_W, DESK_H)
+DESK_LOWEST = paint(desk_layers(LOWEST_TOP), DESK_W, DESK_H)
 
 
 # Ten seconds back or on: a circle turning the one way or the other, its arrow
@@ -398,7 +404,7 @@ out.write_text(f"""#pragma once
 
 namespace ui {{
 namespace icons {{
-{emit("train", TRAIN)}{emit("bus", BUS)}{emit("walk", WALK)}{emit("bike", BIKE)}{emit("no_photo", NO_PHOTO, NO_PHOTO_SIDE)}{emit("wifi", WIFI, STATUS_SIDE)}{emit("wifi_off", WIFI_OFF, STATUS_SIDE)}{emit("phone", PHONE, STATUS_SIDE)}{emit("phone_off", PHONE_OFF, STATUS_SIDE)}{emit("plane", PLANE, PLANE_SIDE)}{emit("plane_large", PLANE_LARGE, PLANE_LARGE_SIDE)}{emit("calendar", CALENDAR, 28)}{emit("desk", DESK, STATUS_SIDE)}{emit("timer", TIMER, 28)}{emit("update_panel", UPDATE_PANEL, STATUS_SIDE)}{emit("update_companion", UPDATE_COMPANION, STATUS_SIDE)}{emit("install_companion", INSTALL_COMPANION, STATUS_SIDE)}{emit("bulb_glass", BULB_GLASS, BULB_W, BULB_H)}{emit("bulb_base", BULB_BASE, BULB_W, BULB_H)}{emit("desk_up", DESK_UP, DESK_W, DESK_H)}{emit("desk_down", DESK_DOWN, DESK_W, DESK_H)}{emit("expand", EXPAND, STATUS_SIDE)}{emit("collapse", COLLAPSE, STATUS_SIDE)}{emit("screen_timer", SCREEN_TIMER, CINEMA_SIDE)}{emit("subtitles", SUBTITLES, CINEMA_SIDE)}{emit("seek_back", SEEK_BACK, SEEK_SIDE)}{emit("seek_on", SEEK_ON, SEEK_SIDE)}{emit("plus", PLUS, MARK_SIDE)}{emit("minus", MINUS, MARK_SIDE)}{emit("times", TIMES, MARK_SIDE)}
+{emit("train", TRAIN)}{emit("bus", BUS)}{emit("walk", WALK)}{emit("bike", BIKE)}{emit("no_photo", NO_PHOTO, NO_PHOTO_SIDE)}{emit("wifi", WIFI, STATUS_SIDE)}{emit("wifi_off", WIFI_OFF, STATUS_SIDE)}{emit("phone", PHONE, STATUS_SIDE)}{emit("phone_off", PHONE_OFF, STATUS_SIDE)}{emit("plane", PLANE, PLANE_SIDE)}{emit("plane_large", PLANE_LARGE, PLANE_LARGE_SIDE)}{emit("calendar", CALENDAR, 28)}{emit("desk", DESK, STATUS_SIDE)}{emit("timer", TIMER, 28)}{emit("update_panel", UPDATE_PANEL, STATUS_SIDE)}{emit("update_companion", UPDATE_COMPANION, STATUS_SIDE)}{emit("install_companion", INSTALL_COMPANION, STATUS_SIDE)}{emit("bulb_glass", BULB_GLASS, BULB_W, BULB_H)}{emit("bulb_base", BULB_BASE, BULB_W, BULB_H)}{emit("desk_up", DESK_UP, DESK_W, DESK_H)}{emit("desk_down", DESK_DOWN, DESK_W, DESK_H)}{emit("desk_lowest", DESK_LOWEST, DESK_W, DESK_H)}{emit("bulb", BULB, BULB_W, BULB_H)}{emit("expand", EXPAND, STATUS_SIDE)}{emit("collapse", COLLAPSE, STATUS_SIDE)}{emit("screen_timer", SCREEN_TIMER, CINEMA_SIDE)}{emit("subtitles", SUBTITLES, CINEMA_SIDE)}{emit("seek_back", SEEK_BACK, SEEK_SIDE)}{emit("seek_on", SEEK_ON, SEEK_SIDE)}{emit("plus", PLUS, MARK_SIDE)}{emit("minus", MINUS, MARK_SIDE)}{emit("times", TIMES, MARK_SIDE)}
 }}  // namespace icons
 }}  // namespace ui
 """)

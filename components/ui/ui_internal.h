@@ -313,12 +313,18 @@ void refresh_music();  // after what plays changed: its title, cover and times t
 // The time beside a fullscreen view's chip back, faded with its other buttons.
 lv_obj_t *add_view_clock(ViewId view, lv_obj_t *root, lv_obj_t *chip);
 void      update_view_clocks();
-// Stand and Sit, the time and the way back, over a fullscreen view.
+// Stand and Sit, the time and the way back, over a fullscreen view, and any
+// quick actions of the view's own after Stand and Sit.
 struct Chrome {
-    lv_obj_t *close;
-    lv_obj_t *desk;  // its chips are its children
+    ViewId       view;
+    lv_obj_t    *root;
+    lv_obj_t    *close;
+    lv_obj_t    *desk;    // its chips are its children
+    std::int32_t next_x;  // where a quick action goes
 };
-Chrome add_fullscreen_chrome(ViewId view, lv_obj_t *root, lv_event_cb_t on_close);
+Chrome    add_fullscreen_chrome(ViewId view, lv_obj_t *root, lv_event_cb_t on_close);
+lv_obj_t *add_chrome_chip(Chrome &chrome, const lv_image_dsc_t *icon, lv_event_cb_t on_click);
+void      light_chrome_chip(lv_obj_t *chip, bool on);  // in the accent while on
 void apply_media_neighbours(bool previous, bool next);
 bool cinema_has_next();  // an episode after this one to go on to
 void show_guest_presets();
