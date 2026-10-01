@@ -117,6 +117,7 @@ lv_obj_t      *s_total   = nullptr;
 lv_obj_t      *s_play    = nullptr;
 lv_obj_t      *s_steer[3] = {};      // before, play, after
 lv_obj_t      *s_picks   = nullptr;
+Chrome         s_chrome{};
 lv_obj_t      *s_volume  = nullptr;
 lv_obj_t      *s_volume_fill  = nullptr;
 lv_obj_t      *s_volume_level = nullptr;
@@ -164,8 +165,17 @@ void paint(const Palette &colours)
         lv_obj_set_style_bg_color(part, colours.surface, 0);
     }
     lv_obj_set_style_bg_color(s_volume_fill, lv_color_mix(lv_color_hex(theme::text), colours.surface, VOLUME_FILL_MIX), 0);
-    // What the accent marks on the pages takes the cover's own instead.
+    // What the accent marks on the pages takes the cover's own instead, the
+    // desk's height that is reached among it.
     lv_obj_set_style_bg_color(s_play, colours.accent, 0);
+    if (s_chrome.close != nullptr) {
+        lv_obj_set_style_bg_color(s_chrome.close, colours.surface, 0);
+        for (std::uint32_t i = 0; s_chrome.desk != nullptr && i < lv_obj_get_child_count(s_chrome.desk); ++i) {
+            lv_obj_t *chip = lv_obj_get_child(s_chrome.desk, static_cast<std::int32_t>(i));
+            lv_obj_set_style_bg_color(chip, colours.surface, 0);
+            lv_obj_set_style_bg_color(chip, colours.accent, LV_STATE_CHECKED);
+        }
+    }
     lv_obj_set_style_bg_color(s_bar, colours.accent, LV_PART_INDICATOR);
     lv_obj_set_style_text_color(s_source, colours.accent, 0);
 }
@@ -471,7 +481,8 @@ void build_music(lv_obj_t *screen)
                             lv_timer_pause(s_glide);
                             lv_timer_pause(s_check);
                         }});
-    add_fullscreen_chrome(s_music, s_view, [](lv_event_t *) { close_music(); });
+    s_chrome = add_fullscreen_chrome(s_music, s_view, [](lv_event_t *) { close_music(); });
+    paint(pages_palette());
 }
 
 void apply_music_cover(const void *pixels)

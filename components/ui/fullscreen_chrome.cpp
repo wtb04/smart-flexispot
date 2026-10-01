@@ -63,7 +63,7 @@ lv_obj_t *add_view_clock(ViewId view, lv_obj_t *root, lv_obj_t *chip)
     return label;
 }
 
-lv_obj_t *add_fullscreen_chrome(ViewId view, lv_obj_t *root, lv_event_cb_t on_close)
+Chrome add_fullscreen_chrome(ViewId view, lv_obj_t *root, lv_event_cb_t on_close)
 {
     lv_obj_t *close = theme::make_chip(root, "");
     theme::make_mark(close, &icons::collapse_icon);
@@ -75,6 +75,6 @@ lv_obj_t *add_fullscreen_chrome(ViewId view, lv_obj_t *root, lv_event_cb_t on_cl
         fade_when_idle(view, control);
     }
     add_view_clock(view, root, close);
-    return close;
+    return {close, desk};
 }
 }  // namespace ui::detail
