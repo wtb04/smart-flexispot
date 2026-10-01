@@ -395,4 +395,9 @@ int bench_radar(char *out, std::size_t size);
  *  too, and whether its feed has answered yet. With the LVGL lock. */
 int bench_radar_open(char *out, std::size_t size);
 
+/** A development build's: the radar left open over the whole screen, running
+ *  as it does, following the nearest aircraft; or, with `open` false, the
+ *  screen put back as it was before. */
+int bench_radar_full(char *out, std::size_t size, bool open);
+
 }  // namespace ui

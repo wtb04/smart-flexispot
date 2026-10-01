@@ -239,6 +239,39 @@ esp_err_t screen_page(httpd_req_t *req)
     heap_caps_free(pixels);
     return err == ESP_OK ? httpd_resp_send_chunk(req, nullptr, 0) : err;
 }
+constexpr std::uint32_t PANEL_LOCK_MS = 1000;
+
+// The frame the panel itself shows, as its DMA reads it: portrait, and after
+// whatever the buffers' bringing up to date did, which /screen does not see.
+esp_err_t panel_page(httpd_req_t *req)
+{
+    if (!ota::authorised(req)) {
+        return refuse(req);
+    }
+    int           width  = 0;
+    int           height = 0;
+    std::uint8_t *pixels = nullptr;
+    if (lvgl_port_lock(PANEL_LOCK_MS)) {
+        pixels = board::copy_shown_frame(width, height);
+        lvgl_port_unlock();
+    }
+    if (pixels == nullptr) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        return httpd_resp_sendstr(req, "the frame could not be had\n");
+    }
+    httpd_resp_set_type(req, "application/octet-stream");
+    char      head[32];
+    const int n   = std::snprintf(head, sizeof(head), "RGB565 %d %d\n", width, height);
+    esp_err_t err = httpd_resp_send_chunk(req, head, n);
+    const std::size_t total = static_cast<std::size_t>(width) * height * sizeof(std::uint16_t);
+    for (std::size_t at = 0; err == ESP_OK && at < total; at += SEND_CHUNK) {
+        err = httpd_resp_send_chunk(req, reinterpret_cast<const char *>(pixels) + at,
+                                    static_cast<ssize_t>(std::min(SEND_CHUNK, total - at)));
+    }
+    heap_caps_free(pixels);
+    return err == ESP_OK ? httpd_resp_send_chunk(req, nullptr, 0) : err;
+}
+
 // Every half minute, in the log: what could run down or pile up over a long
 // run, the heaps, the screen's objects and the slowest frame since the last
 // line, to see which of them a panel gone slow has run out of.
@@ -511,13 +544,16 @@ esp_err_t bench_page(httpd_req_t *req)
     if (!ota::authorised(req)) {
         return refuse(req);
     }
-    static char text[1024];
+    static char text[4096];
     int         n = 0;
     if (lvgl_port_lock(STATS_LOCK_MS)) {
         char query[8] = "";
         httpd_req_get_url_query_str(req, query, sizeof(query));
-        n = std::strcmp(query, "open") == 0 ? ui::bench_radar_open(text, sizeof(text))
-                                            : ui::bench_radar(text, sizeof(text));
+        n = std::strcmp(query, "open") == 0     ? ui::bench_radar_open(text, sizeof(text))
+            : std::strcmp(query, "full") == 0   ? ui::bench_radar_full(text, sizeof(text), true)
+            : std::strcmp(query, "back") == 0   ? ui::bench_radar_full(text, sizeof(text), false)
+            : std::strcmp(query, "rotate") == 0 ? board::bench_rotation(text, sizeof(text))
+                                                : ui::bench_radar(text, sizeof(text));
         lvgl_port_unlock();
     }
     httpd_resp_set_type(req, "text/plain");
@@ -536,6 +572,7 @@ esp_err_t start()
     const httpd_uri_t pages[] = {
         {.uri = "/log", .method = HTTP_GET, .handler = log_page, .user_ctx = nullptr},
         {.uri = "/screen", .method = HTTP_GET, .handler = screen_page, .user_ctx = nullptr},
+        {.uri = "/panel", .method = HTTP_GET, .handler = panel_page, .user_ctx = nullptr},
         {.uri = "/heap", .method = HTTP_GET, .handler = heap_page, .user_ctx = nullptr},
         {.uri = "/power", .method = HTTP_GET, .handler = power_page, .user_ctx = nullptr},
         {.uri = "/bench", .method = HTTP_GET, .handler = bench_page, .user_ctx = nullptr},

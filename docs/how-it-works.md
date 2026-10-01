@@ -66,12 +66,14 @@ adds pages to the panel's web server, all asking for the update key.
 | --- | --- |
 | `/log` | The recent log |
 | `/screen` | A picture of the screen |
+| `/panel` | The frame the panel itself shows, as its buffer holds it |
 | `/heap`, `/power` | Memory, and the pack's draw on battery |
 | `/streams` | Each live connection and how it is doing; `?restart=N` begins one again |
 | `/jobs` | Each shared worker's jobs; `?poke=N` runs one now |
 | `/restart` | Why this run started, and what the last one left behind |
 | `/coredump` | The last crash, whole, for `idf.py coredump-info` with the build's ELF |
-| `/bench`, `/stall`, `/crash` | Timings, a held-off interrupt, a crash on purpose |
+| `/bench` | The fullscreen radar timed: whole frames, a tile, a trail growing, a zoom; `?rotate` the PPA, `?full` and `?back` leave it open and put it back |
+| `/stall`, `/crash` | A held-off interrupt, a crash on purpose |
 
 ## How it is put together
 
@@ -129,6 +131,17 @@ any frame it goes without. The DMA runs round a ring of eight frames by itself
 (`components/esp_lcd`), so an interrupt held off for a while no longer costs a
 frame, and the panel's interrupts run through flash writes. The backlight is
 held dark through a restart, and lit only once there is a drawn frame to show.
+
+PSRAM's bandwidth, which the panel's own reading takes a good share of, is
+what a frame costs: a whole screen is about 88 ms, of which turning it onto
+the portrait panel with the PPA is 42. So as little as possible is drawn
+again. There are three frame buffers, so a frame is drawn while the panel is
+still taking up the last, which it does a frame or two after it is asked to;
+each buffer is brought up to date only where it is behind, by the CPU, which
+copies PSRAM faster than the PPA. The fullscreen radar keeps track of which
+32 px tiles of its picture the planes and the trail were drawn into, puts the
+map back only there, and draws again only the tiles whose pixels changed; a
+trail growing redraws only where it runs.
 
 Anything calling `lv_*` from its own task must sit between `lvgl_port_lock()`
 and `lvgl_port_unlock()`; LVGL's own callbacks already hold it. Updates from

@@ -2,6 +2,7 @@
 
 #include "bsp/esp-bsp.h"
 #include "driver/ppa.h"
+#include "esp_cache.h"
 #include "esp_check.h"
 #include "esp_heap_caps.h"
 #include "esp_lcd_mipi_dsi.h"
@@ -24,7 +25,10 @@
 
 #include <algorithm>
 #include <atomic>
+#include <utility>
 #include <cstdint>
+#include <cstdio>
+#include <cstring>
 
 namespace board {
 namespace {
@@ -91,8 +95,11 @@ esp_err_t power_up_panel()
 #endif
 
 
-constexpr int        MAX_DIRTY     = 16;
-constexpr int        FRAME_BUFFERS = 2;
+constexpr int        MAX_DIRTY     = 64;  // as LV_INV_BUF_SIZE, in the project's CMakeLists.txt
+// Three: a frame is drawn into one while the panel is still taking up the
+// last, which it does a frame or two after it is asked to (see
+// components/esp_lcd), rather than waiting for it as with two.
+constexpr int        FRAME_BUFFERS = 3;
 constexpr std::uint32_t DRAWING_LOCK_MS = 1000;
 constexpr TickType_t SWAP_TIMEOUT  = pdMS_TO_TICKS(100);
 
@@ -103,15 +110,19 @@ struct Rect {
 esp_lcd_panel_handle_t s_panel = nullptr;
 ppa_client_handle_t    s_ppa   = nullptr;
 std::uint8_t          *s_fbs[FRAME_BUFFERS] = {};
-int                    s_back   = 1;  // the panel starts out on the first
 SemaphoreHandle_t      s_swapped = nullptr;
-bool                   s_swap_pending = false;
+// The buffer last handed to the panel, and the one it has been seen to show:
+// until they are the same, the one shown before may still be read.
+std::atomic<int>       s_asked{0};
+std::atomic<int>       s_showing{0};
+int                    s_target = -1;  // the one this frame goes into, once it begins
 
-// What the frame on show changed, and what the one being drawn has changed so far.
-Rect s_shown[MAX_DIRTY];
-int  s_shown_count = 0;
-Rect s_drawn[MAX_DIRTY];
-int  s_drawn_count = 0;
+board::FlushTimes s_flush_times;
+
+// For each buffer, where frames since it was last drawn into changed: what it
+// is behind by. Past MAX_DIRTY, the whole of it.
+Rect s_behind[FRAME_BUFFERS][MAX_DIRTY];
+int  s_behind_count[FRAME_BUFFERS] = {};
 
 constexpr std::uint32_t FRAME_PIXELS = BSP_LCD_H_RES * BSP_LCD_V_RES;
 constexpr std::uint32_t FRAME_BYTES  = FRAME_PIXELS * sizeof(std::uint16_t);  // RGB565
@@ -159,10 +170,11 @@ IRAM_ATTR bool frame_sent(esp_lcd_panel_handle_t, esp_lcd_dpi_panel_event_data_t
 
 std::atomic<std::uint32_t> s_swaps{0};
 
-// The buffer last handed over is the one on show, so the other is free.
+// The buffer last handed over is the one on show, so the one before is free.
 IRAM_ATTR bool frame_done(esp_lcd_panel_handle_t, esp_lcd_dpi_panel_event_data_t *, void *)
 {
     s_swaps.fetch_add(1, std::memory_order_relaxed);
+    s_showing.store(s_asked.load(std::memory_order_relaxed), std::memory_order_relaxed);
     BaseType_t woken = pdFALSE;
     xSemaphoreGiveFromISR(s_swapped, &woken);
     return woken == pdTRUE;
@@ -197,6 +209,9 @@ esp_err_t copy_rect(const std::uint8_t *from, std::uint8_t *to, const Rect &r,
 
 void note(Rect *list, int &count, const Rect &r)
 {
+    if (count == 1 && list[0].w == BSP_LCD_H_RES && list[0].h == BSP_LCD_V_RES) {
+        return;  // behind by the whole of it already
+    }
     if (count < MAX_DIRTY) {
         list[count++] = r;
     } else {
@@ -229,27 +244,55 @@ bool redrawn(lv_display_t *disp, const Rect &r)
     return false;
 }
 
-// The first area of a frame waits for the panel to have let go of the buffer
-// it last showed, which is at most one refresh, then brings it up to date:
-// only where this frame does not draw anew, since a whole screen took 43 ms.
-void prepare_back(lv_display_t *disp)
+// Brings `r` of one buffer up to another, unturned: by the CPU, which moves
+// PSRAM to PSRAM faster than the PPA, a whole frame in 26 ms rather than 43,
+// then out of the cache for the panel's DMA. What the PPA wrote is never
+// stale in the cache, as it drops those lines first.
+void catch_up(const std::uint8_t *from, std::uint8_t *to, const Rect &r)
 {
-    if (!s_swap_pending) {
-        return;
+    constexpr std::size_t PIXEL = sizeof(std::uint16_t);
+    const std::size_t     row   = BSP_LCD_H_RES * PIXEL;
+    for (std::uint32_t y = r.y; y < r.y + r.h; ++y) {
+        const std::size_t at = y * row + r.x * PIXEL;
+        std::memcpy(to + at, from + at, r.w * PIXEL);
     }
-    s_swap_pending = false;
-    if (xSemaphoreTake(s_swapped, SWAP_TIMEOUT) != pdTRUE) {
-        ESP_LOGW(TAG, "panel did not swap buffers");
-    }
-    const std::uint8_t *front = s_fbs[1 - s_back];
-    for (int i = 0; i < s_shown_count; ++i) {
-        const Rect &r = s_shown[i];
-        if (!redrawn(disp, r)) {
-            copy_rect(front, s_fbs[s_back], r, PPA_SRM_ROTATION_ANGLE_0, BSP_LCD_H_RES, BSP_LCD_V_RES,
-                      r.x, r.y, r.x, r.y);
+    const std::size_t first = r.y * row + r.x * PIXEL;
+    const std::size_t last  = (r.y + r.h - 1) * row + (r.x + r.w) * PIXEL;
+    esp_cache_msync(to + first, last - first, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+}
+
+// A buffer neither on show nor asked for, which nothing reads.
+int free_buffer()
+{
+    const int asked   = s_asked.load(std::memory_order_relaxed);
+    const int showing = s_showing.load(std::memory_order_relaxed);
+    for (int i = 0; i < FRAME_BUFFERS; ++i) {
+        if (i != asked && i != showing) {
+            return i;
         }
     }
-    s_shown_count = 0;
+    return -1;
+}
+
+// The first area of a frame picks the buffer to draw into and brings it up to
+// the last frame, only where this frame does not draw anew, since a whole
+// screen took 43 ms.
+void prepare_back(lv_display_t *disp)
+{
+    if (s_target >= 0) {
+        return;
+    }
+    s_target = free_buffer();
+    const std::int64_t  catching = esp_timer_get_time();
+    const std::uint8_t *latest   = s_fbs[s_asked.load(std::memory_order_relaxed)];
+    for (int i = 0; i < s_behind_count[s_target]; ++i) {
+        const Rect &r = s_behind[s_target][i];
+        if (!redrawn(disp, r)) {
+            catch_up(latest, s_fbs[s_target], r);
+        }
+    }
+    s_behind_count[s_target] = 0;
+    s_flush_times.catch_up_us += esp_timer_get_time() - catching;
 }
 
 // Where the area lands on the panel, which is portrait. The PPA turns
@@ -292,19 +335,35 @@ Placement place_on_panel(lv_display_t *disp, const lv_area_t *area)
     return out;
 }
 
-// Handing the driver one of its own buffers makes it the one shown from the
-// next refresh; the one-line area keeps its cache flush to a line. A refresh
-// ending in between is discarded with the stale ones, which costs at most a
-// refresh of waiting rather than drawing into view.
+// Handing the driver one of its own buffers makes it the one shown from a
+// frame or two on; the one-line area keeps its cache flush to a line. Only
+// one is asked for at a time, so a frame done before the panel has taken the
+// last waits for it here: the one shown before is then free, and the third
+// is the next drawn into.
 void show_back_buffer()
 {
-    esp_lcd_panel_draw_bitmap(s_panel, 0, 0, 1, 1, s_fbs[s_back]);
+    const std::int64_t waiting = esp_timer_get_time();
+    while (s_showing.load(std::memory_order_relaxed) != s_asked.load(std::memory_order_relaxed)) {
+        if (xSemaphoreTake(s_swapped, SWAP_TIMEOUT) != pdTRUE) {
+            ESP_LOGW(TAG, "panel did not swap buffers");
+            s_showing.store(s_asked.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        }
+    }
+    s_flush_times.wait_us += esp_timer_get_time() - waiting;
     xSemaphoreTake(s_swapped, 0);
-    s_back         = 1 - s_back;
-    s_swap_pending = true;
-    std::copy(s_drawn, s_drawn + s_drawn_count, s_shown);
-    s_shown_count = s_drawn_count;
-    s_drawn_count = 0;
+    esp_lcd_panel_draw_bitmap(s_panel, 0, 0, 1, 1, s_fbs[s_target]);
+    s_asked.store(s_target, std::memory_order_relaxed);
+    s_target = -1;
+}
+
+// What this frame drew, which every other buffer is now behind by.
+void note_drawn(const Rect &r)
+{
+    for (int i = 0; i < FRAME_BUFFERS; ++i) {
+        if (i != s_target) {
+            note(s_behind[i], s_behind_count[i], r);
+        }
+    }
 }
 
 void flush_rotated(lv_display_t *disp, const lv_area_t *area, std::uint8_t *pixels)
@@ -315,11 +374,16 @@ void flush_rotated(lv_display_t *disp, const lv_area_t *area, std::uint8_t *pixe
     const auto      h     = static_cast<std::uint32_t>(lv_area_get_height(area));
     const Placement place = place_on_panel(disp, area);
 
-    const Rect in{0, 0, w, h};
-    copy_rect(pixels, s_fbs[s_back], in, place.angle, w, h, 0, 0, place.rect.x, place.rect.y);
-    note(s_drawn, s_drawn_count, place.rect);
+    const Rect         in{0, 0, w, h};
+    const std::int64_t turning = esp_timer_get_time();
+    copy_rect(pixels, s_fbs[s_target], in, place.angle, w, h, 0, 0, place.rect.x, place.rect.y);
+    s_flush_times.rotate_us += esp_timer_get_time() - turning;
+    s_flush_times.areas += 1;
+    s_flush_times.pixels += static_cast<std::uint64_t>(w) * h;
+    note_drawn(place.rect);
 
     if (lv_display_flush_is_last(disp)) {
+        s_flush_times.frames += 1;
         show_back_buffer();
     }
     lv_display_flush_ready(disp);
@@ -360,10 +424,16 @@ esp_err_t flush_straight_to_panel(lv_display_t *disp)
     s_panel = port->panel;
     void *fb0 = nullptr;
     void *fb1 = nullptr;
-    ESP_RETURN_ON_ERROR(esp_lcd_dpi_panel_get_frame_buffer(s_panel, FRAME_BUFFERS, &fb0, &fb1), TAG,
+    void *fb2 = nullptr;
+    ESP_RETURN_ON_ERROR(esp_lcd_dpi_panel_get_frame_buffer(s_panel, FRAME_BUFFERS, &fb0, &fb1, &fb2), TAG,
                         "frame buffers");
     s_fbs[0] = static_cast<std::uint8_t *>(fb0);
     s_fbs[1] = static_cast<std::uint8_t *>(fb1);
+    s_fbs[2] = static_cast<std::uint8_t *>(fb2);
+    // The panel starts out on the first; the others hold nothing yet.
+    for (int i = 1; i < FRAME_BUFFERS; ++i) {
+        note(s_behind[i], s_behind_count[i], {0, 0, BSP_LCD_H_RES, BSP_LCD_V_RES});
+    }
 
     static StaticSemaphore_t swapped;
     s_swapped = xSemaphoreCreateBinaryStatic(&swapped);
@@ -396,7 +466,9 @@ esp_err_t start_display(lv_display_t **out_disp)
             .timer_period_ms  = LVGL_TICK_PERIOD_MS,
         },
         .buffer_size   = FRAME_PIXELS,
-        .double_buffer = true,
+        // One: each area is turned onto the panel before LVGL goes on, so a
+        // second never drew while the first was sent, and was 1.8 MB of PSRAM.
+        .double_buffer = false,
         .flags = {
             .buff_dma    = false,
             .buff_spiram = true,
@@ -529,6 +601,86 @@ StallProbe probe_stall(int ms, int core)
     return run.result;
 }
 #endif
+
+int bench_rotation(char *out, std::size_t size)
+{
+    lv_draw_buf_t *buf = lv_display_get_buf_active(s_disp);
+    if (buf == nullptr || s_panel == nullptr) {
+        return std::snprintf(out, size, "no buffer\n");
+    }
+    const std::uint8_t *from = buf->data;
+    std::uint8_t       *to   = s_fbs[free_buffer()];
+    const std::int32_t  hres = lv_display_get_horizontal_resolution(s_disp);
+    const std::int32_t  vres = lv_display_get_vertical_resolution(s_disp);
+    int                 n    = 0;
+    struct Shape {
+        const char  *name;
+        std::int32_t w, h;
+    };
+    const Shape shapes[] = {
+        {"whole", hres, vres}, {"rows of 360", hres, 360}, {"rows of 90", hres, 90}, {"rows of 16", hres, 16},
+        {"columns of 320", 320, vres}, {"columns of 64", 64, vres}, {"tiles of 256", 256, 240},
+        {"tiles of 128", 128, 120}, {"tiles of 64", 64, 60},
+    };
+    for (const Shape &shape : shapes) {
+        const std::int64_t began = esp_timer_get_time();
+        int                ops   = 0;
+        for (std::int32_t y = 0; y < vres; y += shape.h) {
+            for (std::int32_t x = 0; x < hres; x += shape.w) {
+                const lv_area_t area{x, y, std::min(x + shape.w, hres) - 1, std::min(y + shape.h, vres) - 1};
+                const Placement place = place_on_panel(s_disp, &area);
+                const Rect      block{0, 0, static_cast<std::uint32_t>(lv_area_get_width(&area)),
+                                 static_cast<std::uint32_t>(lv_area_get_height(&area))};
+                copy_rect(from, to, block, place.angle, static_cast<std::uint32_t>(hres),
+                          static_cast<std::uint32_t>(vres), static_cast<std::uint32_t>(x),
+                          static_cast<std::uint32_t>(y), place.rect.x, place.rect.y);
+                ++ops;
+            }
+        }
+        n += std::snprintf(out + n, size - n, "turn %-15s %3d ops %5.1f ms\n", shape.name, ops,
+                           static_cast<double>(esp_timer_get_time() - began) / 1000.0);
+    }
+    const std::int64_t began = esp_timer_get_time();
+    copy_rect(from, to, {0, 0, static_cast<std::uint32_t>(vres), static_cast<std::uint32_t>(hres)},
+              PPA_SRM_ROTATION_ANGLE_0, static_cast<std::uint32_t>(vres), static_cast<std::uint32_t>(hres), 0, 0, 0, 0);
+    n += std::snprintf(out + n, size - n, "copy unturned      1 op  %5.1f ms\n",
+                       static_cast<double>(esp_timer_get_time() - began) / 1000.0);
+    const auto timed = [&](const char *name, auto &&work) {
+        const std::int64_t at = esp_timer_get_time();
+        work();
+        n += std::snprintf(out + n, size - n, "%-26s %5.1f ms\n", name,
+                           static_cast<double>(esp_timer_get_time() - at) / 1000.0);
+    };
+    timed("cache write-back of a frame", [&] {
+        esp_cache_msync(const_cast<std::uint8_t *>(from), FRAME_BYTES, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+    });
+    timed("cache invalidate of a frame", [&] { esp_cache_msync(to, FRAME_BYTES, ESP_CACHE_MSYNC_FLAG_DIR_M2C); });
+    timed("cpu copy of a frame", [&] { std::memcpy(to, from, FRAME_BYTES); });
+    timed("cpu fill of a frame", [&] { std::memset(to, 0x22, FRAME_BYTES); });
+    timed("its write-back after", [&] { esp_cache_msync(to, FRAME_BYTES, ESP_CACHE_MSYNC_FLAG_DIR_C2M); });
+    lv_obj_invalidate(lv_display_get_screen_active(s_disp));  // the buffer drawn into is all wrong now
+    lv_obj_invalidate(lv_display_get_layer_top(s_disp));
+    return n;
+}
+
+std::uint8_t *copy_shown_frame(int &width, int &height)
+{
+    auto *copy = static_cast<std::uint8_t *>(heap_caps_malloc(FRAME_BYTES, MALLOC_CAP_SPIRAM));
+    if (copy == nullptr) {
+        return nullptr;
+    }
+    std::uint8_t *shown = s_fbs[s_showing.load(std::memory_order_relaxed)];
+    esp_cache_msync(shown, FRAME_BYTES, ESP_CACHE_MSYNC_FLAG_DIR_M2C);  // as the panel's DMA reads it
+    std::memcpy(copy, shown, FRAME_BYTES);
+    width  = BSP_LCD_H_RES;
+    height = BSP_LCD_V_RES;
+    return copy;
+}
+
+FlushTimes take_flush_times()
+{
+    return std::exchange(s_flush_times, FlushTimes{});
+}
 
 std::uint32_t refreshes()
 {

@@ -70,6 +70,27 @@ LateFrames late_frames();
  *  a moment of blue screen, which the DSI driver reports only on the console. */
 std::uint32_t underruns();
 
+/** Where the time putting LVGL's areas on the panel went since the last call:
+ *  turning them onto it, waiting for the panel to let go of the buffer, and
+ *  bringing that buffer up to date first. For a development build's bench. */
+struct FlushTimes {
+    std::uint32_t frames      = 0;
+    std::uint32_t areas       = 0;
+    std::uint64_t pixels      = 0;
+    std::int64_t  rotate_us   = 0;
+    std::int64_t  wait_us     = 0;
+    std::int64_t  catch_up_us = 0;
+};
+FlushTimes take_flush_times();
+
+/** For the bench: turning a whole frame onto the panel in strips or tiles of
+ *  each size, timed. Under the LVGL lock, into the buffer not on show. */
+int bench_rotation(char *out, std::size_t size);
+
+/** For a development build: a copy of the frame the panel is showing, as it
+ *  holds it, portrait RGB565, to free with heap_caps_free; null without room. */
+std::uint8_t *copy_shown_frame(int &width, int &height);
+
 /** Below this the panel does not get any dimmer, so offering the range is just a
  *  control that appears broken. */
 inline constexpr int kMinBrightness = 20;

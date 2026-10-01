@@ -2,6 +2,10 @@
 
 #include "ui_internal.h"
 
+#if REMOTE_ENABLED
+#include "lvgl_private.h"  // for the bench, the areas waiting to be drawn
+#endif
+
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "map_data.h"
@@ -12,6 +16,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <utility>
 #include <vector>
 #include <iterator>
 
@@ -22,6 +27,13 @@
 namespace ui {
 namespace {
 // A development build logs how long the scope's heavier work takes.
+// Adds how long it lived to `into`, for the bench.
+struct Accrue {
+    std::int64_t      &into;
+    const std::int64_t began = esp_timer_get_time();
+    ~Accrue() { into += esp_timer_get_time() - began; }
+};
+
 struct Timed {
     const char        *what;
     const std::int64_t began = esp_timer_get_time();
@@ -260,6 +272,27 @@ std::uint16_t *s_frame     = nullptr;
 std::uint8_t  *s_land_mask = nullptr;  // borders and provinces, laid over the water once it is in
 std::uint8_t  *s_air_opa   = nullptr;  // the strongest air drawn at each pixel this reading
 std::int32_t   s_ground_w  = 0;
+
+// Where the air has been drawn over the map, a tile at a time: putting the
+// map back under the last reading, and drawing again what either reading drew,
+// is then only there, rather than the whole picture each time, which a trail
+// growing did twenty times a second.
+constexpr std::int32_t    AIR_TILE         = 32;
+constexpr int             AIR_AREAS_MAX    = 40;  // past this, the whole picture: LVGL keeps 64 at most
+std::vector<std::uint8_t> s_air_tiles;            // drawn into since the map was last put back
+std::vector<std::uint8_t> s_last_tiles;           // drawn into the time before
+// What each tile held when it was last drawn, so a plane drawn again where it
+// was is not drawn again on the screen; 0 for not known.
+std::vector<std::uint32_t> s_tile_sums;
+std::int64_t               s_sum_us = 0;  // for the bench: comparing tiles, all told
+// Where the chosen aircraft's way was drawn, so a trail growing puts the map
+// back and draws again only there, and the planes it passes over.
+std::vector<std::uint8_t>  s_way_tiles;
+std::vector<std::uint8_t>  s_maybe_changed;
+bool                       s_marking_way = false;
+std::int32_t              s_tiles_w       = 0;
+std::int32_t              s_tiles_h       = 0;
+bool                      s_air_wholesale = true;  // the map changed: put all of it back, draw all again
 std::int32_t   s_ground_h  = 0;
 std::int32_t   s_corner    = 0;  // fullscreen, the picture's rounded corners
 
@@ -1112,6 +1145,7 @@ void draw_map(float home_lat, float home_lon, float range_km)
         return ms;
     };
     paint_base();
+    s_air_wholesale = true;
     const int painted = lap();
 
     const std::uint16_t land  = land_colour();
@@ -1155,6 +1189,8 @@ float shown_range_km()
 }
 
 void clear_traffic();
+void hide_labels(int first);
+void restore_tiles(const std::vector<std::uint8_t> &tiles);
 void plot_traffic(float range_km);
 void place_blip(Plot &plot, float range_km);
 void raster_blip(const Plot &plot);
@@ -1162,13 +1198,23 @@ void raster_blip(const Plot &plot);
 // Each step of a zoom draws the map again at the range in between, and the
 // planes on it, without their names: stretching the last picture blurred it,
 // spilled it past the scope's edge, and was slower to show.
+bool s_ground_spent = false;  // a zoom drew its planes onto the map itself, which is to be drawn again
+
+// The map at the range in between is drawn into the buffer behind the
+// picture and shown as it is, with the planes drawn onto it: copying it over
+// the picture first, and clearing the air's opacities, was a third of a step.
 void draw_step(float range_km)
 {
     const Timed timed{"zoom step"};
-    if (map_located()) {
+    if (map_located() && s_frame != nullptr && s_canvas != nullptr) {
         draw_map(s_map_lat, s_map_lon, range_km);
+        std::swap(s_ground, s_frame);
+        lv_canvas_set_buffer(s_canvas, s_frame, s_ground_w, s_ground_h, LV_COLOR_FORMAT_RGB565);
+        s_ground_spent = true;
+    } else {
+        clear_traffic();
     }
-    clear_traffic();
+    hide_labels(0);
     plot_traffic(range_km);
     for (int i = 0; i < s_shown; ++i) {
         place_blip(s_plots[i], range_km);
@@ -1204,9 +1250,10 @@ void settle_zoom(bool map_drawn = false)
 {
     const int settled = RANGES[s_range_step];
     s_shown_range     = static_cast<float>(settled);
-    if (map_located() && !map_drawn) {
+    if (map_located() && (!map_drawn || s_ground_spent)) {
         draw_map(s_map_lat, s_map_lon, static_cast<float>(settled));
     }
+    s_ground_spent = false;
     show_radar(*s_last);
 }
 
@@ -1327,6 +1374,15 @@ void build_picture(lv_obj_t *scope, std::int32_t w, std::int32_t h)
         s_row_from == nullptr || s_row_to == nullptr || s_crossings == nullptr || s_crossing_count == nullptr) {
         return;
     }
+    s_tiles_w = (w + AIR_TILE - 1) / AIR_TILE;
+    s_tiles_h = (h + AIR_TILE - 1) / AIR_TILE;
+    s_air_tiles.assign(static_cast<std::size_t>(s_tiles_w) * s_tiles_h, 0);
+    s_last_tiles.assign(s_air_tiles.size(), 0);
+    s_tile_sums.assign(s_air_tiles.size(), 0);
+    s_ground_spent = false;
+    s_way_tiles.assign(s_air_tiles.size(), 0);
+    s_maybe_changed.assign(s_air_tiles.size(), 0);
+    s_air_wholesale = true;
     work_out_rows();
     work_out_rings();
     paint_base();
@@ -1607,6 +1663,18 @@ void place_blip(Plot &plot, float range_km)
     plot.label_w = span;
 }
 
+void mark_air(std::int32_t from, std::int32_t to, std::int32_t y)
+{
+    if (s_air_tiles.empty()) {
+        return;
+    }
+    const std::size_t row = static_cast<std::size_t>(y / AIR_TILE) * s_tiles_w;
+    std::fill(s_air_tiles.begin() + row + from / AIR_TILE, s_air_tiles.begin() + row + to / AIR_TILE + 1, 1);
+    if (s_marking_way) {
+        std::fill(s_way_tiles.begin() + row + from / AIR_TILE, s_way_tiles.begin() + row + to / AIR_TILE + 1, 1);
+    }
+}
+
 void air_pixels(std::int32_t y, std::int32_t from, std::int32_t to, std::uint16_t ink)
 {
     std::int32_t low = 0, high = 0;
@@ -1618,6 +1686,7 @@ void air_pixels(std::int32_t y, std::int32_t from, std::int32_t to, std::uint16_
     if (to < from) {
         return;
     }
+    mark_air(from, to, y);
     const std::size_t row = static_cast<std::size_t>(y) * s_ground_w;
     std::fill(s_frame + row + from, s_frame + row + to + 1, ink);
     std::memset(s_air_opa + row + from, LV_OPA_COVER, static_cast<std::size_t>(to - from + 1));
@@ -1990,10 +2059,13 @@ void plot_traffic(float range_km)
 
 void paint_legend()
 {
+    // Only when the accent changed it: setting the same colour again draws the
+    // whole square round the scope again.
     for (int i = 0; i < LEGEND_STEPS; ++i) {
-        lv_obj_set_style_arc_color(
-            s_legend[i], lv_color_hex(altitude_ink(SCALE_TOP_FT * i / (LEGEND_STEPS - 1))),
-            LV_PART_MAIN);
+        const lv_color_t ink = lv_color_hex(altitude_ink(SCALE_TOP_FT * i / (LEGEND_STEPS - 1)));
+        if (!lv_color_eq(lv_obj_get_style_arc_color(s_legend[i], LV_PART_MAIN), ink)) {
+            lv_obj_set_style_arc_color(s_legend[i], ink, LV_PART_MAIN);
+        }
     }
 }
 
@@ -2075,6 +2147,7 @@ void air_blend(std::int32_t x, std::int32_t y, std::uint16_t ink, lv_opa_t opa)
                 continue;
             }
             const std::size_t at = static_cast<std::size_t>(y + dy) * s_ground_w + x + dx;
+            mark_air(x + dx, x + dx, y + dy);
             if (opa > s_air_opa[at]) {
                 s_frame[at]   = blend565(s_ground[at], ink, opa);
                 s_air_opa[at] = opa;
@@ -2261,11 +2334,149 @@ void draw_way(const Plot &plot)
 void clear_traffic()
 {
     if (s_frame != nullptr) {
-        std::memcpy(s_frame, s_ground, ground_pixels() * RGB565_BYTES_PER_PX);
-        std::memset(s_air_opa, 0, ground_pixels());
+        if (s_air_wholesale || s_air_tiles.empty()) {
+            std::memcpy(s_frame, s_ground, ground_pixels() * RGB565_BYTES_PER_PX);
+            std::memset(s_air_opa, 0, ground_pixels());
+        } else {
+            restore_tiles(s_air_tiles);
+        }
+        s_last_tiles.swap(s_air_tiles);
+        std::fill(s_air_tiles.begin(), s_air_tiles.end(), 0);
+        std::fill(s_way_tiles.begin(), s_way_tiles.end(), 0);
     }
-    for (int i = 0; i < LABEL_MAX; ++i) {
+}
+
+void restore_tiles(const std::vector<std::uint8_t> &tiles)
+{
+    {
+        {
+            for (std::int32_t ty = 0; ty < s_tiles_h; ++ty) {
+                const std::uint8_t *row = tiles.data() + static_cast<std::size_t>(ty) * s_tiles_w;
+                for (std::int32_t tx = 0; tx < s_tiles_w; ++tx) {
+                    if (row[tx] == 0) {
+                        continue;
+                    }
+                    std::int32_t run = tx;  // the tiles side by side, put back a row of pixels at a time
+                    while (run + 1 < s_tiles_w && row[run + 1] != 0) {
+                        ++run;
+                    }
+                    const std::int32_t x    = tx * AIR_TILE;
+                    const std::int32_t span = std::min((run + 1) * AIR_TILE, s_ground_w) - x;
+                    const std::int32_t end  = std::min((ty + 1) * AIR_TILE, s_ground_h);
+                    for (std::int32_t y = ty * AIR_TILE; y < end; ++y) {
+                        const std::size_t at = static_cast<std::size_t>(y) * s_ground_w + x;
+                        std::memcpy(s_frame + at, s_ground + at, static_cast<std::size_t>(span) * RGB565_BYTES_PER_PX);
+                        std::memset(s_air_opa + at, 0, static_cast<std::size_t>(span));
+                    }
+                    tx = run;
+                }
+            }
+        }
+    }
+}
+
+// From `first` on: the names a reading did not use. Each one used is left
+// where it was if it has not moved, so nothing is drawn again for it.
+void hide_labels(int first)
+{
+    for (int i = first; i < LABEL_MAX; ++i) {
         lv_obj_set_hidden(s_blips[i].label, true);
+    }
+}
+
+// What this reading or the last drew, to be drawn again: runs of tiles along
+// a row, run on down while the rows below have the same, or the whole picture
+// when the map changed or the runs would be too many to keep apart.
+std::uint32_t tile_sum(std::int32_t tx, std::int32_t ty)
+{
+    const std::int32_t x    = tx * AIR_TILE;
+    const std::int32_t w    = std::min(AIR_TILE, s_ground_w - x);
+    const std::int32_t end  = std::min((ty + 1) * AIR_TILE, s_ground_h);
+    std::uint32_t      sum  = 2166136261u;  // FNV-1a, over the tile's pixels
+    for (std::int32_t y = ty * AIR_TILE; y < end; ++y) {
+        const std::uint16_t *row = s_frame + static_cast<std::size_t>(y) * s_ground_w + x;
+        for (std::int32_t i = 0; i < w; ++i) {
+            sum = (sum ^ row[i]) * 16777619u;
+        }
+    }
+    return sum == 0 ? 1 : sum;
+}
+
+void invalidate_tiles(std::vector<std::uint8_t> &maybe);
+
+void invalidate_air()
+{
+    if (s_canvas == nullptr) {
+        return;
+    }
+    if (std::exchange(s_air_wholesale, false) || s_air_tiles.empty()) {
+        std::fill(s_tile_sums.begin(), s_tile_sums.end(), 0);
+        lv_obj_invalidate(s_canvas);
+        return;
+    }
+    for (std::size_t at = 0; at < s_air_tiles.size(); ++at) {
+        s_maybe_changed[at] = s_air_tiles[at] | s_last_tiles[at];
+    }
+    invalidate_tiles(s_maybe_changed);
+}
+
+// Of the tiles that may have changed, those that now hold anything else, to be
+// drawn again.
+void invalidate_tiles(std::vector<std::uint8_t> &maybe)
+{
+    const std::int64_t summing = esp_timer_get_time();
+    for (std::size_t at = 0; at < maybe.size(); ++at) {
+        if (maybe[at] == 0) {
+            continue;
+        }
+        const std::uint32_t sum = tile_sum(static_cast<std::int32_t>(at % s_tiles_w),
+                                           static_cast<std::int32_t>(at / s_tiles_w));
+        if (sum == s_tile_sums[at]) {
+            maybe[at] = 0;
+        }
+        s_tile_sums[at] = sum;
+    }
+    s_sum_us += esp_timer_get_time() - summing;
+    struct Run {
+        std::int32_t from, to, top, bottom;
+    };
+    Run  runs[AIR_AREAS_MAX];
+    int  count = 0;
+    const auto dirty = [&maybe](std::int32_t tx, std::int32_t ty) {
+        return maybe[static_cast<std::size_t>(ty) * s_tiles_w + tx] != 0;
+    };
+    for (std::int32_t ty = 0; ty < s_tiles_h; ++ty) {
+        for (std::int32_t tx = 0; tx < s_tiles_w; ++tx) {
+            if (!dirty(tx, ty)) {
+                continue;
+            }
+            const std::int32_t from = tx;
+            while (tx + 1 < s_tiles_w && dirty(tx + 1, ty)) {
+                ++tx;
+            }
+            Run *same = nullptr;
+            for (int i = 0; i < count && same == nullptr; ++i) {
+                if (runs[i].bottom == ty - 1 && runs[i].from == from && runs[i].to == tx) {
+                    same = &runs[i];
+                }
+            }
+            if (same != nullptr) {
+                same->bottom = ty;
+            } else if (count == AIR_AREAS_MAX) {
+                lv_obj_invalidate(s_canvas);
+                return;
+            } else {
+                runs[count++] = {from, tx, ty, ty};
+            }
+        }
+    }
+    lv_area_t at;
+    lv_obj_get_coords(s_canvas, &at);
+    for (int i = 0; i < count; ++i) {
+        const lv_area_t area{at.x1 + runs[i].from * AIR_TILE, at.y1 + runs[i].top * AIR_TILE,
+                             std::min(at.x1 + (runs[i].to + 1) * AIR_TILE, at.x2 + 1) - 1,
+                             std::min(at.y1 + (runs[i].bottom + 1) * AIR_TILE, at.y2 + 1) - 1};
+        lv_obj_invalidate_area(s_canvas, &area);
     }
 }
 
@@ -2275,7 +2486,9 @@ const radar::Aircraft *draw_traffic(const bool *named)
     const radar::Aircraft *chosen   = nullptr;
     int                    labelled = 0;
     if (const int at = s_chosen[0] != '\0' ? plot_of(s_chosen) : -1; at >= 0) {
+        s_marking_way = true;
         draw_way(s_plots[at]);  // under every blip
+        s_marking_way = false;
     }
     for (int i = 0; i < s_shown; ++i) {
         raster_blip(s_plots[i]);
@@ -2292,19 +2505,59 @@ const radar::Aircraft *draw_traffic(const bool *named)
             draw_label(s_blips[labelled++], s_plots[i]);
         }
     }
-    if (s_canvas != nullptr) {
-        lv_obj_invalidate(s_canvas);
-    }
+    hide_labels(labelled);
+    invalidate_air();
     return chosen;
 }
 
 // Each frame of a trail growing: the air drawn again over the map, which
 // stays. A zoom under way draws every frame itself.
+// A frame of the chosen aircraft's trail growing: only the way changes, so
+// only where it was and is now is put back and drawn again, with the planes
+// over it. A trail drawn where a plane is stays under it: the plane's pixels
+// are opaque air, which a trail does not draw over.
+std::int64_t s_way_us = 0;  // for the bench: redrawing ways, all told
+
+void redraw_way()
+{
+    const Accrue accrue{s_way_us};
+    if (s_frame == nullptr || s_air_tiles.empty() || s_air_wholesale) {
+        clear_traffic();
+        draw_traffic(s_named);
+        return;
+    }
+    std::copy(s_way_tiles.begin(), s_way_tiles.end(), s_maybe_changed.begin());
+    restore_tiles(s_way_tiles);
+    std::fill(s_way_tiles.begin(), s_way_tiles.end(), 0);
+    if (const int at = s_chosen[0] != '\0' ? plot_of(s_chosen) : -1; at >= 0) {
+        s_marking_way = true;
+        draw_way(s_plots[at]);
+        s_marking_way = false;
+    }
+    for (int i = 0; i < s_shown; ++i) {
+        const Plot        &plot = s_plots[i];
+        const std::int32_t tx   = std::clamp<std::int32_t>(plot.x / AIR_TILE, 0, s_tiles_w - 1);
+        const std::int32_t ty   = std::clamp<std::int32_t>(plot.y / AIR_TILE, 0, s_tiles_h - 1);
+        bool               near = false;  // a tile put back within a tile of it, which a blip reaches into
+        for (std::int32_t y = std::max<std::int32_t>(ty - 1, 0); y <= std::min<std::int32_t>(ty + 1, s_tiles_h - 1) && !near; ++y) {
+            for (std::int32_t x = std::max<std::int32_t>(tx - 1, 0); x <= std::min<std::int32_t>(tx + 1, s_tiles_w - 1) && !near; ++x) {
+                near = s_maybe_changed[static_cast<std::size_t>(y) * s_tiles_w + x] != 0;
+            }
+        }
+        if (near) {
+            raster_blip(plot);
+        }
+    }
+    for (std::size_t at = 0; at < s_way_tiles.size(); ++at) {
+        s_maybe_changed[at] |= s_way_tiles[at];
+    }
+    invalidate_tiles(s_maybe_changed);
+}
+
 void grow_tick(lv_timer_t *timer)
 {
     if (s_scope != nullptr && lv_anim_get(s_scope, zoom_step) == nullptr) {
-        clear_traffic();
-        draw_traffic(s_named);
+        redraw_way();
     }
     if (!s_growing) {
         lv_timer_pause(timer);
@@ -2513,6 +2766,9 @@ void show_radar(const radar::Snapshot &snapshot)
     if (&snapshot != s_last) {
         *s_last = snapshot;
     }
+    if (s_ground_spent) {
+        return;  // a zoom is drawing it, over a map it draws as it goes; its end shows this
+    }
 
     const float range_km = shown_range_km();
     redraw_map_if_moved(range_km);
@@ -2711,6 +2967,22 @@ bool bench_ready()
 }
 }  // namespace
 
+int bench_radar_full(char *out, std::size_t size, bool open)
+{
+    if (!open) {
+        bench_put_back();
+        return std::snprintf(out, size, "put back\n");
+    }
+    if (!bench_ready()) {
+        return std::snprintf(out, size, "waiting for the feed\n");
+    }
+    open_full();
+    s_following    = true;
+    s_grown_hex[0] = '\0';  // its trail grows in, as when chosen
+    show_radar(*s_last);
+    return std::snprintf(out, size, "open\n");
+}
+
 int bench_radar_open(char *out, std::size_t size)
 {
     return std::snprintf(out, size, bench_ready() ? "ready\n" : "waiting for the feed\n");
@@ -2734,7 +3006,18 @@ int bench_radar(char *out, std::size_t size)
     const int laid_out = static_cast<int>((esp_timer_get_time() - opening) / units::kUsPerMs);
     const int first    = timed_frame();
     n += std::snprintf(out + n, size - n, "opening fullscreen: laid out %d ms, first frame %d ms\n", laid_out, first);
-    n += std::snprintf(out + n, size - n, "whole %d ms\n", whole_frame_ms());
+    board::take_flush_times();
+    const int whole = whole_frame_ms();
+    const board::FlushTimes flushed = board::take_flush_times();
+    const auto per_frame = [&](std::int64_t us) {
+        return static_cast<double>(us) / units::kUsPerMs / std::max<std::uint32_t>(flushed.frames, 1);
+    };
+    n += std::snprintf(out + n, size - n,
+                       "whole %d ms: %u areas, %llu kpx a frame; turning onto the panel %.1f ms, waiting for it "
+                       "%.1f ms, catching up %.1f ms, the rest drawing\n",
+                       whole, static_cast<unsigned>(flushed.areas / std::max<std::uint32_t>(flushed.frames, 1)),
+                       static_cast<unsigned long long>(flushed.pixels / 1000 / std::max<std::uint32_t>(flushed.frames, 1)),
+                       per_frame(flushed.rotate_us), per_frame(flushed.wait_us), per_frame(flushed.catch_up_us));
     const auto line = [&](const char *name, int ms) {
         n += std::snprintf(out + n, size - n, "without %s %d ms\n", name, ms);
     };
@@ -2751,6 +3034,220 @@ int bench_radar(char *out, std::size_t size)
     line("the names", without_ms(labels));
     line("the altitude scale", without_ms({std::begin(s_legend), std::end(s_legend)}));
     line("the whole scope", without_ms({s_scope}));
+
+    const auto average = [](auto &&frame) {
+        constexpr int RUNS  = 8;
+        int           total = 0;
+        for (int i = 0; i < RUNS; ++i) {
+            const std::int64_t began = esp_timer_get_time();
+            frame();
+            lv_refr_now(nullptr);
+            total += static_cast<int>((esp_timer_get_time() - began) / units::kUsPerMs);
+        }
+        return total / RUNS;
+    };
+    lv_refr_now(nullptr);
+    {
+        constexpr int RUNS = 8;
+        std::int64_t  cpu = 0, screen = 0;
+        board::take_flush_times();
+        lv_refr_now(nullptr);
+        std::int64_t restoring = 0, drawing = 0, summing = 0;
+        for (int i = 0; i < RUNS; ++i) {
+            const std::int64_t began = esp_timer_get_time();
+            clear_traffic();
+            const std::int64_t cleared = esp_timer_get_time();
+            const std::int64_t before_sums = s_sum_us;
+            draw_traffic(s_named);
+            const std::int64_t drawn = esp_timer_get_time();
+            restoring += cleared - began;
+            summing += s_sum_us - before_sums;
+            drawing += drawn - cleared - (s_sum_us - before_sums);
+            lv_refr_now(nullptr);
+            cpu += drawn - began;
+            screen += esp_timer_get_time() - drawn;
+        }
+        const board::FlushTimes flushed = board::take_flush_times();
+        const std::uint32_t frames = std::max<std::uint32_t>(flushed.frames, 1);
+        n += std::snprintf(out + n, size - n,
+                           "a trail frame, nothing moved: the air %lld ms, the screen %lld ms, %u areas, %llu kpx; "
+                           "turning %.1f ms, waiting %.1f ms, catching up %.1f ms\n"
+                           "  the air: putting the map back %lld ms, drawing %lld ms, comparing tiles %lld ms\n",
+                           cpu / RUNS / 1000, screen / RUNS / 1000, static_cast<unsigned>(flushed.areas / frames),
+                           static_cast<unsigned long long>(flushed.pixels / 1000 / frames),
+                           static_cast<double>(flushed.rotate_us) / 1000.0 / frames,
+                           static_cast<double>(flushed.wait_us) / 1000.0 / frames,
+                           static_cast<double>(flushed.catch_up_us) / 1000.0 / frames, restoring / RUNS / 1000,
+                           drawing / RUNS / 1000, summing / RUNS / 1000);
+        lv_display_t *disp = lv_display_get_default();
+        clear_traffic();
+        draw_traffic(s_named);
+        n += std::snprintf(out + n, size - n, "its areas:");
+        for (std::uint32_t i = 0; i < disp->inv_p && i < 24; ++i) {
+            const lv_area_t &a = disp->inv_areas[i];
+            n += std::snprintf(out + n, size - n, " %ldx%ld@%ld,%ld%s", static_cast<long>(lv_area_get_width(&a)),
+                               static_cast<long>(lv_area_get_height(&a)), static_cast<long>(a.x1), static_cast<long>(a.y1),
+                               disp->inv_area_joined[i] ? "j" : "");
+        }
+        n += std::snprintf(out + n, size - n, "\n");
+        lv_refr_now(nullptr);
+    }
+    {
+        board::take_flush_times();
+        const int ms = average([] { redraw_way(); });
+        const board::FlushTimes flushed = board::take_flush_times();
+        n += std::snprintf(out + n, size - n, "a growing trail's frame %d ms, %u areas\n", ms,
+                           static_cast<unsigned>(flushed.areas / std::max<std::uint32_t>(flushed.frames, 1)));
+    }
+    n += std::snprintf(out + n, size - n, "a reading shown again %d ms\n", average([] { show_radar(*s_last); }));
+    if (s_chosen[0] != '\0') {
+        // A trail growing in again from nothing, as when an aircraft is chosen.
+        constexpr std::int64_t GIVE_UP_US = 2 * units::kUsPerSecond;
+        struct Frame {
+            std::int64_t start, rendered, done;
+            std::int32_t areas;
+        };
+        static Frame  frames[40];
+        static int    frame_count = 0;
+        static Frame *open_frame  = nullptr;
+        frame_count               = 0;
+        lv_display_t *disp        = lv_display_get_default();
+        const auto    on_refr     = [](lv_event_t *e) {
+            const std::int64_t now = esp_timer_get_time();
+            switch (lv_event_get_code(e)) {
+                case LV_EVENT_REFR_START:
+                    open_frame = frame_count < 40 ? &frames[frame_count++] : nullptr;
+                    if (open_frame != nullptr) {
+                        *open_frame = {now, 0, 0, static_cast<std::int32_t>(lv_display_get_default()->inv_p)};
+                    }
+                    break;
+                case LV_EVENT_RENDER_READY:
+                    if (open_frame != nullptr) {
+                        open_frame->rendered = now;
+                    }
+                    break;
+                case LV_EVENT_REFR_READY:
+                    if (open_frame != nullptr) {
+                        open_frame->done = now;
+                    }
+                    break;
+                default:
+                    break;
+            }
+        };
+        lv_display_add_event_cb(disp, on_refr, LV_EVENT_REFR_START, nullptr);
+        lv_display_add_event_cb(disp, on_refr, LV_EVENT_RENDER_READY, nullptr);
+        lv_display_add_event_cb(disp, on_refr, LV_EVENT_REFR_READY, nullptr);
+        s_grown_hex[0] = '\0';
+        lv_refr_now(nullptr);
+        frame_count = 0;
+        board::take_flush_times();
+        s_way_us = 0;
+        const std::int64_t began = esp_timer_get_time();
+        show_radar(*s_last);
+        while ((s_growing || lv_display_get_default()->inv_p > 0) && esp_timer_get_time() - began < GIVE_UP_US) {
+            lv_timer_handler();
+        }
+        lv_display_remove_event_cb_with_user_data(disp, on_refr, nullptr);
+        n += std::snprintf(out + n, size - n, "  frames (start ms: areas, drawn by, done by):");
+        for (int i = 0; i < frame_count && n < static_cast<int>(size) - 64; ++i) {
+            n += std::snprintf(out + n, size - n, " %lld:%ld,%lld,%lld", (frames[i].start - began) / 1000,
+                               static_cast<long>(frames[i].areas), (frames[i].rendered - frames[i].start) / 1000,
+                               (frames[i].done - frames[i].start) / 1000);
+        }
+        n += std::snprintf(out + n, size - n, "\n");
+        const int took = static_cast<int>((esp_timer_get_time() - began) / units::kUsPerMs);
+        const board::FlushTimes grown = board::take_flush_times();
+        n += std::snprintf(out + n, size - n, "a trail growing in: %u frames in %d ms, %.0f a second\n",
+                           static_cast<unsigned>(grown.frames), took, grown.frames * 1000.0 / std::max(took, 1));
+        n += std::snprintf(out + n, size - n,
+                           "  in all: the way %lld ms, turning %lld ms, waiting %lld ms, catching up %lld ms, %u areas %llu kpx\n",
+                           s_way_us / 1000, grown.rotate_us / 1000, grown.wait_us / 1000, grown.catch_up_us / 1000,
+                           static_cast<unsigned>(grown.areas), static_cast<unsigned long long>(grown.pixels / 1000));
+    }
+    {
+        lv_display_t *disp = lv_display_get_default();
+        show_radar(*s_last);
+        n += std::snprintf(out + n, size - n, "its areas:");
+        for (std::uint32_t i = 0; i < disp->inv_p && i < 24; ++i) {
+            const lv_area_t &a = disp->inv_areas[i];
+            n += std::snprintf(out + n, size - n, " %ldx%ld@%ld,%ld%s", static_cast<long>(lv_area_get_width(&a)),
+                               static_cast<long>(lv_area_get_height(&a)), static_cast<long>(a.x1), static_cast<long>(a.y1),
+                               disp->inv_area_joined[i] ? "j" : "");
+        }
+        n += std::snprintf(out + n, size - n, "\n");
+        lv_refr_now(nullptr);
+    }
+
+    {
+        // One tile of the picture drawn again, as the air's frames are, with
+        // each part of the view taken away in turn: what an area costs.
+        lv_area_t at;
+        lv_obj_get_coords(s_canvas, &at);
+        const lv_area_t tile{at.x1 + 320, at.y1 + 320, at.x1 + 351, at.y1 + 351};
+        const auto tile_ms = [&tile] {
+            constexpr int RUNS  = 8;
+            std::int64_t  total = 0;
+            lv_refr_now(nullptr);
+            for (int i = 0; i < RUNS; ++i) {
+                lv_obj_invalidate_area(s_canvas, &tile);
+                const std::int64_t began = esp_timer_get_time();
+                lv_refr_now(nullptr);
+                total += esp_timer_get_time() - began;
+            }
+            return static_cast<double>(total) / RUNS / 1000.0;
+        };
+        board::take_flush_times();
+        n += std::snprintf(out + n, size - n, "a 32 px tile: %.1f ms", tile_ms());
+        const board::FlushTimes one = board::take_flush_times();
+        n += std::snprintf(out + n, size - n, " (turning %.1f, waiting %.1f, catching up %.1f)\n",
+                           static_cast<double>(one.rotate_us) / 1000.0 / std::max<std::uint32_t>(one.frames, 1),
+                           static_cast<double>(one.wait_us) / 1000.0 / std::max<std::uint32_t>(one.frames, 1),
+                           static_cast<double>(one.catch_up_us) / 1000.0 / std::max<std::uint32_t>(one.frames, 1));
+        const auto tile_without = [&](const char *name, std::vector<lv_obj_t *> parts) {
+            for (lv_obj_t *part : parts) {
+                lv_obj_add_flag(part, LV_OBJ_FLAG_HIDDEN);
+            }
+            n += std::snprintf(out + n, size - n, "  without %s %.1f ms\n", name, tile_ms());
+            for (lv_obj_t *part : parts) {
+                lv_obj_remove_flag(part, LV_OBJ_FLAG_HIDDEN);
+            }
+        };
+        // The same area drawn again through the view's root rather than the
+        // picture, so it is drawn with and without the picture under it.
+        const auto root_ms = [&tile] {
+            constexpr int RUNS  = 8;
+            std::int64_t  total = 0;
+            lv_refr_now(nullptr);
+            for (int i = 0; i < RUNS; ++i) {
+                lv_obj_invalidate_area(s_full, &tile);
+                lv_refr_now(nullptr);  // the wait for the panel is in each, so it is taken out
+                const std::int64_t began = esp_timer_get_time();
+                lv_obj_invalidate_area(s_full, &tile);
+                board::take_flush_times();
+                lv_refr_now(nullptr);
+                const board::FlushTimes one = board::take_flush_times();
+                total += esp_timer_get_time() - began - one.wait_us;
+            }
+            return static_cast<double>(total) / RUNS / 1000.0;
+        };
+        n += std::snprintf(out + n, size - n, "  the tile through the root, less the wait: %.1f ms", root_ms());
+        lv_obj_add_flag(s_canvas, LV_OBJ_FLAG_HIDDEN);
+        n += std::snprintf(out + n, size - n, ", without the picture %.1f ms", root_ms());
+        lv_obj_remove_flag(s_canvas, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_scope, LV_OBJ_FLAG_HIDDEN);
+        n += std::snprintf(out + n, size - n, ", without the scope %.1f ms\n", root_ms());
+        lv_obj_remove_flag(s_scope, LV_OBJ_FLAG_HIDDEN);
+        tile_without("the altitude scale", {std::begin(s_legend), std::end(s_legend)});
+        tile_without("the picture", {s_canvas});
+        std::vector<lv_obj_t *> names;
+        for (int i = 0; i < LABEL_MAX; ++i) {
+            names.push_back(s_blips[i].label);
+        }
+        tile_without("the names", names);
+        tile_without("the column", {s_column});
+        tile_without("the whole scope", {s_scope});
+    }
 
     const int start_step = s_range_step;
     time_zoom(start_step > 0 ? -1 : 1, start_step > 0 ? "in" : "out", out, size, n);

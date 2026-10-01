@@ -32,6 +32,7 @@ else()
     FetchContent_MakeAvailable(lvgl)
 endif()
 target_link_libraries(lvgl PUBLIC PkgConfig::SDL2)
+target_compile_definitions(lvgl PUBLIC LV_INV_BUF_SIZE=64)  # as the firmware's CMakeLists.txt
 
 file(GLOB UI_SOURCES ${ROOT}/components/ui/*.cpp ${ROOT}/components/ui/fonts/*.c
      ${ROOT}/components/ui/fonts/*.cpp)

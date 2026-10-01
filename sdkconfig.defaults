@@ -235,9 +235,10 @@ CONFIG_SPIRAM_XIP_FROM_PSRAM=y
 CONFIG_CACHE_L2_CACHE_256KB=y
 CONFIG_CACHE_L2_CACHE_LINE_128B=y
 
-# Two frame buffers, so a frame is drawn out of sight and shown whole: see
-# board.cpp. With one, the panel shows each new page as a wipe.
-CONFIG_BSP_LCD_DPI_BUFFER_NUMS=2
+# Three frame buffers, so a frame is drawn out of sight and shown whole, and
+# the next drawn while the panel takes it up: see board.cpp. With one, the
+# panel shows each new page as a wipe.
+CONFIG_BSP_LCD_DPI_BUFFER_NUMS=3
 
 # The board package returns its errors rather than asserting, so that a part
 # slow to answer at start-up can be asked again (board.cpp) instead of taking
