@@ -3,9 +3,11 @@
 #include <algorithm>
 #include <cstdio>
 
-// The speaker's music over the whole screen: the cover large, what plays and
-// how far, and its controls, on the cover's own colour. Closed by itself when
-// nothing plays, or a video takes the card, which the cinema view is for.
+// The speaker's music over the whole screen, as the cinema view has a film:
+// the cover large, what plays and how far, its controls, the volume and the
+// favourites, all in the cover's own colours. Closed by itself when nothing
+// plays, or a video takes the card. What plays, its cover and its times change
+// together, as the card's do, and how far it is glides rather than ticks.
 namespace ui::detail {
 namespace {
 constexpr std::int32_t PAD          = 40;
@@ -15,7 +17,9 @@ constexpr std::int32_t COVER_RADIUS = 24;
 constexpr std::int32_t TEXT_GAP     = 64;
 constexpr std::int32_t LINE_GAP     = 12;
 constexpr std::int32_t PROGRESS_H   = 10;
-constexpr std::int32_t TRANSPORT_H  = 88;
+constexpr std::int32_t TRANSPORT_H  = 80;
+constexpr std::int32_t TRANSPORT_GAP = 40;  // between the three, across
+constexpr std::int32_t ROW_GAP      = 24;   // between the rows of controls
 constexpr std::int32_t SIDE_W       = 120;  // the track before and after
 constexpr std::int32_t PLAY_W       = 200;
 constexpr std::int32_t VOLUME_H     = 56;
@@ -23,18 +27,75 @@ constexpr std::int32_t VOLUME_INSET = 24;
 constexpr std::uint8_t VOLUME_FILL_MIX = 64;  // of the text's colour into the bar's
 constexpr std::int32_t PAUSED_MARK  = 120;
 constexpr lv_opa_t     PAUSED_DIM   = LV_OPA_50;
-constexpr std::uint8_t TINT_MIX     = 46;   // of the cover's colour into the background
-constexpr std::uint8_t SURFACE_MIX  = 26;   // of the text's colour into it, for what is on it
-constexpr int          TINT_STEP    = 7;    // every so many pixels of the cover, for its colour
-constexpr std::uint32_t TICK_MS     = 500;
+constexpr std::uint32_t GLIDE_MS    = 33;   // the bar looked at, moved only when its end would move
+constexpr std::uint32_t CHECK_MS    = 500;  // still playing, and still music
 // The card's cover, when there is no large one, grown to the large one's size.
 constexpr std::uint32_t SMALL_SCALE = LV_SCALE_NONE * media::kLargeArtSize / media::kArtSize;
+
+// The cover's colours: its most vivid hue, as dark as the pages for behind,
+// lighter for what is on it, and bright for what the accent marks elsewhere.
+constexpr int      PALETTE_STEP   = 7;   // every so many pixels of the cover
+constexpr int      VIVID_CHROMA   = 24;  // of 255: below it a pixel counts as grey
+constexpr int      VIVID_SHARE    = 8;   // percent of the pixels that must have a colour
+constexpr uint8_t  BACK_S = 70, BACK_V = 24;
+constexpr uint8_t  SURFACE_S = 50, SURFACE_V = 36;
+constexpr uint8_t  ACCENT_S_MIN = 45, ACCENT_S_MAX = 75, ACCENT_V = 96;
+constexpr uint8_t  ACCENT_S_STEP = 5;
+constexpr int      ACCENT_LUMA   = 140;  // of 255: as light as this, to read on the dark
+
+struct Palette {
+    lv_color_t back, surface, accent;
+};
+
+Palette pages_palette()
+{
+    return {lv_color_hex(theme::background), lv_color_hex(theme::panel_light), lv_color_hex(theme::primary)};
+}
+
+// Each pixel weighted by how much colour it has, so a cover's grey and black do
+// not wash its hue out; a cover with little colour keeps the pages' own.
+Palette palette_of(const std::uint16_t *pixels, int count)
+{
+    std::uint64_t r = 0, g = 0, b = 0, weight = 0;
+    int           vivid = 0, seen = 0;
+    for (int i = 0; i < count; i += PALETTE_STEP, ++seen) {
+        const std::uint16_t v  = pixels[i];
+        const int           pr = ((v >> 11) & 0x1f) * 255 / 31;
+        const int           pg = ((v >> 5) & 0x3f) * 255 / 63;
+        const int           pb = (v & 0x1f) * 255 / 31;
+        const int           chroma = std::max({pr, pg, pb}) - std::min({pr, pg, pb});
+        if (chroma < VIVID_CHROMA) {
+            continue;
+        }
+        ++vivid;
+        r += static_cast<std::uint64_t>(pr) * chroma;
+        g += static_cast<std::uint64_t>(pg) * chroma;
+        b += static_cast<std::uint64_t>(pb) * chroma;
+        weight += chroma;
+    }
+    if (seen == 0 || vivid * 100 < seen * VIVID_SHARE) {
+        return pages_palette();
+    }
+    const lv_color_hsv_t hue = lv_color_rgb_to_hsv(static_cast<std::uint8_t>(r / weight),
+                                                   static_cast<std::uint8_t>(g / weight),
+                                                   static_cast<std::uint8_t>(b / weight));
+    // Blue and violet are dark at any brightness: paler until they read.
+    std::uint8_t saturation = std::clamp<std::uint8_t>(hue.s, ACCENT_S_MIN, ACCENT_S_MAX);
+    lv_color_t   accent     = lv_color_hsv_to_rgb(hue.h, saturation, ACCENT_V);
+    while (lv_color_luminance(accent) < ACCENT_LUMA && saturation > ACCENT_S_STEP) {
+        saturation -= ACCENT_S_STEP;
+        accent = lv_color_hsv_to_rgb(hue.h, saturation, ACCENT_V);
+    }
+    return {lv_color_hsv_to_rgb(hue.h, BACK_S, BACK_V), lv_color_hsv_to_rgb(hue.h, SURFACE_S, SURFACE_V), accent};
+}
 
 lv_obj_t      *s_view    = nullptr;
 lv_obj_t      *s_cover   = nullptr;
 lv_obj_t      *s_paused  = nullptr;
 lv_image_dsc_t s_cover_dsc{};
 const void    *s_large   = nullptr;  // the large cover, or null for the card's
+const void    *s_shown   = nullptr;  // the cover on show, and coloured by
+bool           s_cover_new = true;   // a cover came, maybe into the same buffer
 lv_obj_t      *s_source  = nullptr;
 lv_obj_t      *s_title   = nullptr;
 lv_obj_t      *s_artist  = nullptr;
@@ -44,11 +105,16 @@ lv_obj_t      *s_elapsed = nullptr;
 lv_obj_t      *s_total   = nullptr;
 lv_obj_t      *s_play    = nullptr;
 lv_obj_t      *s_steer[3] = {};      // before, play, after
+lv_obj_t      *s_picks   = nullptr;
 lv_obj_t      *s_volume  = nullptr;
 lv_obj_t      *s_volume_fill  = nullptr;
 lv_obj_t      *s_volume_level = nullptr;
 bool           s_volume_held  = false;
-lv_timer_t    *s_tick    = nullptr;
+int            s_duration_shown = -1;
+std::int32_t   s_bar_end      = -1;  // where the bar's end was last drawn, in pixels
+int            s_elapsed_s    = -1;
+lv_timer_t    *s_glide   = nullptr;
+lv_timer_t    *s_check   = nullptr;
 ViewId         s_music   = kNoView;
 
 void close_music()
@@ -65,10 +131,10 @@ lv_obj_t *line(std::uint32_t colour, const lv_font_t *font, std::int32_t w, std:
     return label;
 }
 
-lv_obj_t *button(const char *text, std::int32_t w, lv_event_cb_t on_click)
+lv_obj_t *button(const char *text, std::int32_t w, std::int32_t h, lv_event_cb_t on_click)
 {
     lv_obj_t *b = theme::make_button(s_view, text, theme::panel_light, fonts::size_32());
-    lv_obj_set_size(b, w, TRANSPORT_H);
+    lv_obj_set_size(b, w, h);
     lv_obj_add_event_cb(b, on_click, LV_EVENT_CLICKED, nullptr);
     return b;
 }
@@ -80,39 +146,36 @@ void steer(MediaAction action)
     }
 }
 
-// The cover's colour, from a pixel in so many, mixed into the background: the
-// view takes on the record's colour without its picture behind the text.
-void tint_from(const void *pixels, std::int32_t side)
+void paint(const Palette &colours)
 {
-    lv_color_t ink = lv_color_hex(theme::background);
-    if (pixels != nullptr) {
-        const auto  *px = static_cast<const std::uint16_t *>(pixels);
-        std::uint32_t r = 0, g = 0, b = 0, n = 0;
-        for (std::int32_t i = 0; i < side * side; i += TINT_STEP) {
-            const std::uint16_t v = px[i];
-            r += (v >> 11) & 0x1f;
-            g += (v >> 5) & 0x3f;
-            b += v & 0x1f;
-            ++n;
-        }
-        const lv_color_t average = lv_color_make(static_cast<std::uint8_t>(r * 255 / (31 * n)),
-                                                 static_cast<std::uint8_t>(g * 255 / (63 * n)),
-                                                 static_cast<std::uint8_t>(b * 255 / (31 * n)));
-        ink = lv_color_mix(average, lv_color_hex(theme::background), TINT_MIX);
+    lv_obj_set_style_bg_color(s_view, colours.back, 0);
+    for (lv_obj_t *part : {s_steer[0], s_steer[2], s_picks, s_volume, s_bar}) {
+        lv_obj_set_style_bg_color(part, colours.surface, 0);
     }
-    lv_obj_set_style_bg_color(s_view, ink, 0);
-    // What is on it takes its colour too, lighter, rather than the pages' own.
-    const lv_color_t surface = pixels != nullptr ? lv_color_mix(lv_color_hex(theme::text), ink, SURFACE_MIX)
-                                                 : lv_color_hex(theme::panel_light);
-    for (lv_obj_t *part : {s_steer[0], s_steer[2], s_volume, s_bar}) {
-        lv_obj_set_style_bg_color(part, surface, 0);
-    }
-    lv_obj_set_style_bg_color(s_volume_fill, lv_color_mix(lv_color_hex(theme::text), surface, VOLUME_FILL_MIX), 0);
+    lv_obj_set_style_bg_color(s_volume_fill, lv_color_mix(lv_color_hex(theme::text), colours.surface, VOLUME_FILL_MIX), 0);
+    // What the accent marks on the pages takes the cover's own instead, light
+    // enough that what is on it is in the dark of the background.
+    lv_obj_set_style_bg_color(s_play, colours.accent, 0);
+    lv_obj_set_style_text_color(lv_obj_get_child(s_play, 0), colours.back, 0);
+    lv_obj_set_style_bg_color(s_bar, colours.accent, LV_PART_INDICATOR);
+    lv_obj_set_style_text_color(s_source, colours.accent, 0);
 }
 
-// The large cover when there is one, else the card's grown to its size.
+// The large cover when there is one, else the card's grown to its size, and
+// the view in its colours. Only when it changed: drawing it again is the
+// biggest thing on the screen.
 void show_cover()
 {
+    const void *small = s_media_art != nullptr && !lv_obj_is_hidden(s_media_art)
+                            ? lv_image_get_src(s_media_art)
+                            : nullptr;
+    const void *wanted = s_large != nullptr ? s_large : small;
+    if (wanted == s_shown && !s_cover_new) {
+        return;
+    }
+    s_shown     = wanted;
+    s_cover_new = false;
+    lv_obj_set_hidden(s_cover, wanted == nullptr);
     if (s_large != nullptr) {
         const std::uint32_t bytes = lv_color_format_get_size(LV_COLOR_FORMAT_RGB565);
         s_cover_dsc.header.magic  = LV_IMAGE_HEADER_MAGIC;
@@ -124,20 +187,16 @@ void show_cover()
         s_cover_dsc.data          = static_cast<const std::uint8_t *>(s_large);
         lv_image_set_src(s_cover, &s_cover_dsc);
         lv_image_set_scale(s_cover, LV_SCALE_NONE);
-        lv_obj_set_hidden(s_cover, false);
-        tint_from(s_large, COVER);
-        return;
-    }
-    const void *small = s_media_art != nullptr ? lv_image_get_src(s_media_art) : nullptr;
-    lv_obj_set_hidden(s_cover, small == nullptr);
-    if (small != nullptr) {
+        paint(palette_of(static_cast<const std::uint16_t *>(s_large), COVER * COVER));
+    } else if (small != nullptr) {
         lv_image_set_src(s_cover, small);
         lv_image_set_scale(s_cover, SMALL_SCALE);
         const auto *dsc = static_cast<const lv_image_dsc_t *>(small);
-        tint_from(dsc->data, media::kArtSize);
+        paint(palette_of(reinterpret_cast<const std::uint16_t *>(dsc->data), media::kArtSize * media::kArtSize));
     } else {
-        tint_from(nullptr, 0);
+        paint(pages_palette());
     }
+    lv_obj_invalidate(s_view);
 }
 
 void show_volume(int percent)
@@ -148,33 +207,64 @@ void show_volume(int percent)
     theme::set_text(s_volume_level, text);
 }
 
-void tick(lv_timer_t *)
+// How far it is: the bar drawn again only when its end moves a pixel, the
+// elapsed time only when a second has gone.
+void glide(lv_timer_t *)
+{
+    if (s_duration_s <= 0) {
+        return;
+    }
+    const int          at_ms = media_position_ms_now();
+    const std::int32_t end   = static_cast<std::int32_t>(static_cast<std::int64_t>(at_ms) * lv_obj_get_width(s_bar) /
+                                                         (static_cast<std::int64_t>(s_duration_s) * units::kMsPerSecond));
+    if (end != s_bar_end) {
+        s_bar_end = end;
+        lv_bar_set_value(s_bar, at_ms, LV_ANIM_OFF);
+    }
+    const int at_s = at_ms / units::kMsPerSecond;
+    if (at_s != s_elapsed_s) {
+        s_elapsed_s = at_s;
+        write_clock(s_elapsed, at_s);
+    }
+}
+
+void check(lv_timer_t *)
 {
     if (!s_has_track_shown || media_is_video()) {
         close_music();  // it stopped, or the cinema view is for this
-        return;
     }
-    if (s_large == nullptr && s_media_art != nullptr && lv_image_get_src(s_media_art) != lv_image_get_src(s_cover)) {
-        show_cover();  // the card's cover changed with the track
+}
+}  // namespace
+
+void refresh_music()
+{
+    if (s_view == nullptr || !view_open(s_music)) {
+        return;
     }
     theme::set_text(s_source, lv_label_get_text(s_media_source));
     const char *title = lv_label_get_text(s_media_title);
-    theme::set_text(s_title, title);
-    lv_point_t size{};
-    lv_text_get_size(&size, title, fonts::size_48(), 0, 0, lv_obj_get_width(s_title), LV_TEXT_FLAG_NONE);
-    lv_obj_set_y(s_artist, s_artist_y[size.y > lv_font_get_line_height(fonts::size_48()) ? 1 : 0]);
+    if (std::strcmp(title, lv_label_get_text(s_title)) != 0) {
+        theme::set_text(s_title, title);
+        lv_point_t size{};
+        lv_text_get_size(&size, title, fonts::size_48(), 0, 0, lv_obj_get_width(s_title), LV_TEXT_FLAG_NONE);
+        lv_obj_set_y(s_artist, s_artist_y[size.y > lv_font_get_line_height(fonts::size_48()) ? 1 : 0]);
+    }
     theme::set_text(s_artist, lv_label_get_text(s_media_artist));
+    show_cover();
 
     const bool known = s_duration_s > 0;
     for (lv_obj_t *part : {s_bar, s_elapsed, s_total}) {
         lv_obj_set_hidden(part, !known);
     }
     if (known) {
-        const int at = media_position_now();
-        lv_bar_set_range(s_bar, 0, s_duration_s);
-        lv_bar_set_value(s_bar, std::min(at, s_duration_s), LV_ANIM_OFF);
-        write_clock(s_elapsed, at);
-        write_clock(s_total, s_duration_s);
+        if (s_duration_s != s_duration_shown) {
+            s_duration_shown = s_duration_s;
+            lv_bar_set_range(s_bar, 0, s_duration_s * units::kMsPerSecond);
+            write_clock(s_total, s_duration_s);
+        }
+        s_bar_end   = -1;  // where it is may have jumped
+        s_elapsed_s = -1;
+        glide(nullptr);
     }
 
     theme::set_text(lv_obj_get_child(s_play, 0), s_playing_shown ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
@@ -193,6 +283,7 @@ void tick(lv_timer_t *)
     }
 }
 
+namespace {
 void volume_touched(lv_event_t *e)
 {
     const lv_event_code_t code = lv_event_get_code(e);
@@ -244,7 +335,7 @@ void build_cover(std::int32_t y)
 
 void build_text(std::int32_t x, std::int32_t y, std::int32_t w)
 {
-    s_source = theme::make_accent_label(s_view, "", fonts::size_22());
+    s_source = theme::make_label(s_view, "", theme::primary, fonts::size_22());
     lv_obj_set_pos(s_source, x, y);
     y += lv_font_get_line_height(fonts::size_22()) + LINE_GAP;
     s_title = line(theme::text, fonts::size_48(), w, 2);
@@ -255,43 +346,12 @@ void build_text(std::int32_t x, std::int32_t y, std::int32_t w)
     lv_obj_set_pos(s_artist, x, s_artist_y[0]);
 }
 
-// Under the text, from the bottom of the cover up: the volume, the controls,
-// and the progress over them.
-void build_controls(std::int32_t x, std::int32_t bottom, std::int32_t w)
+void build_volume(std::int32_t x, std::int32_t y, std::int32_t w)
 {
-    const std::int32_t volume_y    = bottom - VOLUME_H;
-    const std::int32_t transport_y = volume_y - BUTTON_GAP - TRANSPORT_H;
-    const std::int32_t times_y     = transport_y - 2 * BUTTON_GAP - lv_font_get_line_height(fonts::size_20());
-    const std::int32_t bar_y       = times_y - LINE_GAP - PROGRESS_H;
-
-    s_bar = lv_bar_create(s_view);
-    lv_obj_set_size(s_bar, w, PROGRESS_H);
-    lv_obj_set_pos(s_bar, x, bar_y);
-    theme::style_panel(s_bar, theme::panel_light, PROGRESS_H / 2);
-    theme::fill_accent(s_bar, LV_PART_INDICATOR);
-    lv_obj_set_style_radius(s_bar, PROGRESS_H / 2, LV_PART_INDICATOR);
-    s_elapsed = theme::make_label(s_view, "0:00", theme::secondary, fonts::size_20());
-    lv_obj_set_pos(s_elapsed, x, times_y);
-    s_total = theme::make_label(s_view, "0:00", theme::secondary, fonts::size_20());
-    lv_obj_set_width(s_total, w);
-    lv_obj_set_style_text_align(s_total, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_obj_set_pos(s_total, x, times_y);
-
-    const std::int32_t row_w = 2 * SIDE_W + PLAY_W + 2 * BUTTON_GAP;
-    const std::int32_t row_x = x + (w - row_w) / 2;
-    s_steer[0] = button(LV_SYMBOL_PREV, SIDE_W, [](lv_event_t *) { steer(MediaAction::Previous); });
-    lv_obj_set_pos(s_steer[0], row_x, transport_y);
-    s_play = button(LV_SYMBOL_PLAY, PLAY_W, [](lv_event_t *) { media_toggle_play(); });
-    theme::fill_accent(s_play);
-    lv_obj_set_pos(s_play, row_x + SIDE_W + BUTTON_GAP, transport_y);
-    s_steer[1] = s_play;
-    s_steer[2] = button(LV_SYMBOL_NEXT, SIDE_W, [](lv_event_t *) { steer(MediaAction::Next); });
-    lv_obj_set_pos(s_steer[2], row_x + SIDE_W + PLAY_W + 2 * BUTTON_GAP, transport_y);
-
     s_volume = lv_obj_create(s_view);
     theme::style_panel(s_volume, theme::panel_light, theme::radius::control);
     lv_obj_set_size(s_volume, w, VOLUME_H);
-    lv_obj_set_pos(s_volume, x, volume_y);
+    lv_obj_set_pos(s_volume, x, y);
     lv_obj_set_style_pad_all(s_volume, 0, 0);
     lv_obj_set_style_clip_corner(s_volume, true, 0);
     lv_obj_set_scrollable(s_volume, false);
@@ -300,8 +360,6 @@ void build_controls(std::int32_t x, std::int32_t bottom, std::int32_t w)
     }
     s_volume_fill = lv_obj_create(s_volume);
     theme::style_panel(s_volume_fill, theme::panel_light, 0);
-    lv_obj_set_style_bg_color(
-        s_volume_fill, lv_color_mix(lv_color_hex(theme::text), lv_color_hex(theme::panel_light), VOLUME_FILL_MIX), 0);
     lv_obj_set_size(s_volume_fill, 0, VOLUME_H);
     lv_obj_set_pos(s_volume_fill, 0, 0);
     lv_obj_set_clickable(s_volume_fill, false);
@@ -311,6 +369,45 @@ void build_controls(std::int32_t x, std::int32_t bottom, std::int32_t w)
     s_volume_level = theme::make_label(s_volume, "", theme::text, fonts::size_28());
     lv_obj_align(s_volume_level, LV_ALIGN_RIGHT_MID, -VOLUME_INSET, 0);
     lv_obj_set_clickable(s_volume_level, false);
+}
+
+// Under the text, from the bottom of the cover up: the volume and the
+// favourites, the controls, and the progress over them.
+void build_controls(std::int32_t x, std::int32_t bottom, std::int32_t w)
+{
+    const std::int32_t volume_y    = bottom - VOLUME_H;
+    const std::int32_t transport_y = volume_y - ROW_GAP - TRANSPORT_H;
+    const std::int32_t times_y     = transport_y - ROW_GAP - lv_font_get_line_height(fonts::size_20());
+    const std::int32_t bar_y       = times_y - LINE_GAP - PROGRESS_H;
+
+    s_bar = lv_bar_create(s_view);
+    lv_obj_set_size(s_bar, w, PROGRESS_H);
+    lv_obj_set_pos(s_bar, x, bar_y);
+    theme::style_panel(s_bar, theme::panel_light, PROGRESS_H / 2);
+    lv_obj_set_style_bg_opa(s_bar, LV_OPA_COVER, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(s_bar, PROGRESS_H / 2, LV_PART_INDICATOR);
+    s_elapsed = theme::make_label(s_view, "0:00", theme::secondary, fonts::size_20());
+    lv_obj_set_pos(s_elapsed, x, times_y);
+    s_total = theme::make_label(s_view, "0:00", theme::secondary, fonts::size_20());
+    lv_obj_set_width(s_total, w);
+    lv_obj_set_style_text_align(s_total, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_pos(s_total, x, times_y);
+
+    const std::int32_t row_w = 2 * SIDE_W + PLAY_W + 2 * TRANSPORT_GAP;
+    const std::int32_t row_x = x + (w - row_w) / 2;
+    s_steer[0] = button(LV_SYMBOL_PREV, SIDE_W, TRANSPORT_H, [](lv_event_t *) { steer(MediaAction::Previous); });
+    lv_obj_set_pos(s_steer[0], row_x, transport_y);
+    s_play = button(LV_SYMBOL_PLAY, PLAY_W, TRANSPORT_H, [](lv_event_t *) { media_toggle_play(); });
+    lv_obj_set_pos(s_play, row_x + SIDE_W + TRANSPORT_GAP, transport_y);
+    s_steer[1] = s_play;
+    s_steer[2] = button(LV_SYMBOL_NEXT, SIDE_W, TRANSPORT_H, [](lv_event_t *) { steer(MediaAction::Next); });
+    lv_obj_set_pos(s_steer[2], row_x + SIDE_W + PLAY_W + 2 * TRANSPORT_GAP, transport_y);
+
+    // The favourites, to play another instead, beside the volume.
+    const std::int32_t picks_w = VOLUME_H + VOLUME_INSET;
+    s_picks = button(LV_SYMBOL_LIST, picks_w, VOLUME_H, [](lv_event_t *) { open_favourites(); });
+    lv_obj_set_pos(s_picks, x + w - picks_w, volume_y);
+    build_volume(x, volume_y, w - picks_w - ROW_GAP);
 }
 }  // namespace
 
@@ -330,6 +427,8 @@ void build_music(lv_obj_t *screen)
     const std::int32_t w = l.screen_w - x - COVER_X;
     build_text(x, cover_y, w);
     build_controls(x, cover_y + COVER, w);
+    paint(pages_palette());
+    add_corner_clock(s_view);
 
     // The way back, as the other fullscreen views have it, and the desk.
     lv_obj_t *close = theme::make_chip(s_view, "");
@@ -339,15 +438,22 @@ void build_music(lv_obj_t *screen)
     lv_obj_align(close, LV_ALIGN_TOP_RIGHT, -PAD, PAD);
     lv_obj_t *desk = add_desk_shortcuts(s_view, PAD, PAD, theme::panel);
 
-    s_tick = lv_timer_create(tick, TICK_MS, nullptr);
-    lv_timer_pause(s_tick);
+    s_glide = lv_timer_create(glide, GLIDE_MS, nullptr);
+    s_check = lv_timer_create(check, CHECK_MS, nullptr);
+    lv_timer_pause(s_glide);
+    lv_timer_pause(s_check);
     s_music = add_view({"music", ViewKind::Fullscreen, s_view,
                         [] {
-                            show_cover();
-                            lv_timer_resume(s_tick);
-                            tick(s_tick);
+                            s_cover_new      = true;  // coloured again, as the accent may have changed
+                            s_duration_shown = -1;
+                            lv_timer_resume(s_glide);
+                            lv_timer_resume(s_check);
+                            refresh_music();
                         },
-                        [] { lv_timer_pause(s_tick); }});
+                        [] {
+                            lv_timer_pause(s_glide);
+                            lv_timer_pause(s_check);
+                        }});
     for (lv_obj_t *control : {close, desk}) {
         fade_when_idle(s_music, control);
     }
@@ -355,10 +461,8 @@ void build_music(lv_obj_t *screen)
 
 void apply_music_cover(const void *pixels)
 {
-    s_large = pixels;
-    if (s_view != nullptr && view_open(s_music)) {
-        show_cover();
-    }
+    s_large     = pixels;
+    s_cover_new = true;
 }
 
 bool music_open()

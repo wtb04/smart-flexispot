@@ -1,6 +1,6 @@
 file(GLOB UI_FONTS "fonts/lv_font_*.c")
 idf_component_register(
-    SRCS "ui.cpp" "rail.cpp" "notify.cpp" "home_page.cpp" "nav.cpp" "diagnostics_page.cpp" "settings_page.cpp" "splash.cpp" "lv_mem_psram.cpp" "radar_page.cpp" "calendar_page.cpp" "focus_page.cpp" "screenshot.cpp" "segment_display.cpp" "speaker_art.cpp" "cinema.cpp" "music.cpp" "modal_overlay.cpp" "views.cpp" "fonts/units_font.cpp" ${UI_FONTS}
+    SRCS "ui.cpp" "rail.cpp" "notify.cpp" "home_page.cpp" "nav.cpp" "diagnostics_page.cpp" "settings_page.cpp" "splash.cpp" "lv_mem_psram.cpp" "radar_page.cpp" "calendar_page.cpp" "focus_page.cpp" "screenshot.cpp" "segment_display.cpp" "speaker_art.cpp" "cinema.cpp" "music.cpp" "corner_clock.cpp" "modal_overlay.cpp" "views.cpp" "fonts/units_font.cpp" ${UI_FONTS}
     INCLUDE_DIRS "include" "fonts"
     REQUIRES esp_app_format esp_driver_ppa lvgl__lvgl espressif__esp_lvgl_port board media radar ical travel deskproto units
 )

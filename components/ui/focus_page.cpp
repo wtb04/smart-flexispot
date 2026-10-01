@@ -777,6 +777,7 @@ void build_full(lv_obj_t *screen)
     for (lv_obj_t *&dot : s_full_round) {
         dot = make_dot(rounds, theme::panel_light, FULL_DOT);
     }
+    detail::add_corner_clock(s_full);
     s_full_view = detail::add_view({"focus", detail::ViewKind::Fullscreen, s_full, show_full_part, nullptr});
     for (lv_obj_t *control : {desk, back}) {
         detail::fade_when_idle(s_full_view, control);

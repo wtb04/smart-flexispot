@@ -25,8 +25,6 @@ constexpr std::int32_t SKIP_W        = 220;  // over the picture's corner, as on
 constexpr std::int32_t SKIP_H        = 64;
 constexpr std::int32_t SKIP_INSET    = 16;
 constexpr std::int32_t PAUSED_MARK   = 104;  // the round play mark over a paused picture
-constexpr std::int32_t CLOCK_W       = 240;  // the corner to tap for the time, and where it shows
-constexpr std::int32_t CLOCK_H       = 140;
 constexpr std::int32_t ROOM_H        = 84;
 constexpr int          SEEK_STEP_S   = 10;
 constexpr std::int32_t VOLUME_W      = 320;  // the slider
@@ -61,9 +59,7 @@ lv_obj_t     *s_volume_fill  = nullptr;
 lv_obj_t     *s_volume_level = nullptr;
 bool          s_volume_held  = false;  // a finger on it: what it shows is what it sets
 lv_obj_t     *s_ends    = nullptr;  // when it will end, by the clock
-lv_obj_t     *s_corner  = nullptr;  // CINEMA, or the time
-bool          s_clock   = false;    // the corner shows the time
-lv_obj_t     *s_time    = nullptr;  // the time, in the corner
+lv_obj_t     *s_corner  = nullptr;  // CINEMA
 bool          s_auto_off = true;    // the screen goes dark when left alone
 lv_obj_t     *s_screen  = nullptr;  // the button that says so
 lv_obj_t     *s_subtitles = nullptr;
@@ -132,26 +128,6 @@ void show_progress()
     }
 }
 
-void show_time()
-{
-    lv_obj_set_hidden(s_time, !s_clock);
-    if (!s_clock) {
-        return;
-    }
-    const time_t now = std::time(nullptr);
-    std::tm      local{};
-    localtime_r(&now, &local);
-    char text[12];
-    std::strftime(text, sizeof(text), "%H:%M", &local);
-    theme::set_text(s_time, now >= CLOCK_SET ? text : "--:--");
-}
-
-void clock_tapped(lv_event_t *)
-{
-    s_clock = !s_clock;
-    show_time();
-}
-
 /** The row closes up round the episode buttons it has to leave out. */
 void place_row()
 {
@@ -217,7 +193,6 @@ void tick(lv_timer_t *)
     theme::fill_accent_or(s_screen, s_auto_off, theme::panel_light);
     theme::fill_accent_or(s_subtitles, s_subtitles_shown, theme::panel_light);
     theme::set_usable(s_subtitles, s_subtitles_available);
-    show_time();
     theme::set_usable(s_volume, s_media_volume >= 0);
     if (s_media_volume >= 0 && !s_volume_held) {
         show_volume(s_media_volume);
@@ -442,22 +417,6 @@ void build_room(std::int32_t y)
     });
     mark(s_subtitles, &icons::subtitles_icon);
     lv_obj_set_pos(s_subtitles, PAD + 3 * (ROOM_W + BUTTON_GAP) + ROOM_H + BUTTON_GAP, y);
-
-
-    // The bottom right corner is only a place to tap: the time shows there, and
-    // goes again on the next tap.
-    const Layout l      = layout();
-    lv_obj_t    *corner = lv_obj_create(s_view);
-    lv_obj_set_size(corner, CLOCK_W, CLOCK_H);
-    lv_obj_set_pos(corner, l.screen_w - CLOCK_W, l.screen_h - CLOCK_H);
-    lv_obj_set_style_bg_opa(corner, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(corner, 0, 0);
-    lv_obj_set_scrollable(corner, false);
-    lv_obj_add_event_cb(corner, clock_tapped, LV_EVENT_CLICKED, nullptr);
-    s_time = theme::make_label(corner, "", theme::text, fonts::size_48());
-    lv_obj_align(s_time, LV_ALIGN_RIGHT_MID, -PAD, 0);
-    lv_obj_set_clickable(s_time, false);
-    lv_obj_set_hidden(s_time, true);
 }
 }  // namespace
 
@@ -470,7 +429,6 @@ void build_cinema(lv_obj_t *screen)
     theme::style_panel(s_view, theme::background, 0);
     lv_obj_set_hidden(s_view, true);
 
-    // CINEMA, or the time while the clock chip is on.
     s_corner = theme::make_accent_label(s_view, "CINEMA", fonts::size_22());
     lv_obj_set_pos(s_corner, PAD, PAD);
     // The way back, the chip the radar's and the focus timer's fullscreen views have.
@@ -485,6 +443,7 @@ void build_cinema(lv_obj_t *screen)
     const std::int32_t transport_y = room_y - BUTTON_GAP * 2 - TRANSPORT_H;
     build_transport(transport_y);
     build_room(room_y);
+    add_corner_clock(s_view);
 
     s_tick = lv_timer_create(tick, TICK_MS, nullptr);
     lv_timer_pause(s_tick);

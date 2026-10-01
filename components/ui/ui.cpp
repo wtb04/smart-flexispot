@@ -446,9 +446,7 @@ void frame_media()
     const bool has_art = s_art_pixels != nullptr && !s_media_idle;
     const bool framed  = has_art || s_art_placeholder || s_media_idle;
     lv_obj_set_hidden(s_media_frame, !framed);
-    lv_obj_set_hidden(s_panel_frame, !framed);
     lv_obj_set_hidden(s_media_art, !has_art);
-    lv_obj_set_hidden(s_panel_art, !has_art);
     show_speaker_face(s_media_idle);
     place_media_text(framed);
 }
@@ -466,8 +464,6 @@ void apply_media(const char *source, const char *title, const char *artist, cons
     theme::set_text(s_media_artist, has_track && artist != nullptr ? artist : "");
     theme::set_text_color(s_media_title, has_track ? theme::text : theme::secondary);
 
-    theme::set_text(s_panel_title, has_track ? title : (state != nullptr ? state : "--"));
-    theme::set_text(s_panel_artist, has_track && artist != nullptr ? artist : "");
     layout_media_text();
     // The first time too: a card that starts idle never changes into it.
     static bool s_framed = false;
@@ -498,6 +494,10 @@ constexpr std::uint32_t ART_WAIT_MS = 3 * units::kMsPerSecond;
 MediaArgs               s_held_media;
 bool                    s_media_held = false;
 lv_timer_t             *s_held_timer = nullptr;
+// And its progress with it, so the title, the cover and how far it is change
+// together, rather than the times running ahead under the last track's title.
+ProgressArgs            s_held_progress{};
+bool                    s_progress_held = false;
 
 void drop_held_media()
 {
@@ -508,17 +508,23 @@ void drop_held_media()
     }
 }
 
+void apply_media_progress(int position_s, int duration_s, bool playing);
+
 void release_held_media()
 {
     if (s_media_held) {
         drop_held_media();
         apply_media_args(s_held_media);
+        if (std::exchange(s_progress_held, false)) {
+            apply_media_progress(s_held_progress.position_s, s_held_progress.duration_s, s_held_progress.playing);
+        }
     }
 }
 
 void held_too_long(lv_timer_t *)
 {
     release_held_media();
+    refresh_music();
 }
 
 bool same_track(const MediaArgs &a, const MediaArgs &b)
@@ -539,39 +545,20 @@ void hold_media(const MediaArgs &media)
 
 void apply_media_progress(int position_s, int duration_s, bool playing)
 {
-    if (s_panel_progress == nullptr) {
-        return;
-    }
     s_position_s    = position_s;
     s_duration_s    = duration_s;
     s_media_playing = playing;
     s_position_at   = xTaskGetTickCount();
-
-    const bool known = duration_s > 0;
-    lv_obj_set_hidden(s_panel_progress, !known);
-    lv_obj_set_hidden(s_panel_elapsed, !known);
-    lv_obj_set_hidden(s_panel_total, !known);
-    if (known) {
-        lv_bar_set_range(s_panel_progress, 0, duration_s * PROGRESS_SCALE);
-        lv_bar_set_value(s_panel_progress, position_s * PROGRESS_SCALE, LV_ANIM_OFF);
-        write_clock(s_panel_elapsed, position_s);
-        write_clock(s_panel_total, duration_s);
-    }
 }
 
 void apply_media_volume(int percent)
 {
-    if (s_panel_volume_pct == nullptr) {
-        return;
-    }
-    write_percent(s_panel_volume_pct, percent);
     s_media_volume = percent;
 }
 
 void place_media_text(bool framed)
 {
     const TextBox card  = framed ? s_card_with_art : s_card_bare;
-    const TextBox panel = framed ? s_panel_with_art : s_panel_bare;
     // Nothing playing leaves the speaker's name and OFF, a short pair, which
     // sits level with the speaker beside it rather than at the top.
     const std::int32_t top = s_media_idle ? idle_media_text_top() : 0;
@@ -579,12 +566,7 @@ void place_media_text(bool framed)
     theme::align(s_media_title, LV_ALIGN_TOP_LEFT, card.x, top + MEDIA_TITLE_Y);
     lv_obj_set_width(s_media_title, card.w);
     lv_obj_set_width(s_media_artist, card.w);
-
-    theme::align(s_panel_title, LV_ALIGN_TOP_LEFT, panel.x, 0);
     s_has_art = framed;
-    lv_obj_set_width(s_panel_title, panel.w);
-    lv_obj_set_width(s_panel_artist, panel.w);
-    lv_obj_set_width(s_panel_progress, panel.w);
     layout_media_text();
 }
 
@@ -603,9 +585,7 @@ void show_art_pixels(const void *pixels)
     dsc.data          = static_cast<const std::uint8_t *>(pixels);
 
     lv_image_set_src(s_media_art, &dsc);
-    lv_image_set_src(s_panel_art, &dsc);
     lv_obj_invalidate(s_media_art);
-    lv_obj_invalidate(s_panel_art);
 }
 
 void apply_album_art(const void *pixels, bool placeholder)
@@ -798,9 +778,6 @@ void apply_card(int card, const char *summary, Level level)
 void apply_media_hold(int preset)
 {
     s_media_hold = preset;
-    if (preset >= 0 && s_media_panel.has_value()) {
-        s_media_panel->close();  // what it controlled is no longer on the card
-    }
 }
 
 void apply_notification_volume(int percent)
@@ -870,7 +847,9 @@ void apply_desk_updates()
 void apply_media_updates()
 {
     static MediaArgs media;  // large for the LVGL task's stack
+    bool music = false;      // what the music view shows changed
     if (take(p_media, media)) {
+        music = true;
         if (media.art_coming) {
             hold_media(media);
         } else if (s_media_held && same_track(media, s_held_media)) {
@@ -878,17 +857,23 @@ void apply_media_updates()
         } else {
             drop_held_media();
             apply_media_args(media);
+            if (std::exchange(s_progress_held, false)) {
+                apply_media_progress(s_held_progress.position_s, s_held_progress.duration_s, s_held_progress.playing);
+            }
         }
     }
     if (ArtArgs art{}; take(p_art, art)) {
         apply_album_art(art.pixels, art.placeholder);
+        apply_music_cover(nullptr);  // the old record's, until this one's large one follows
         release_held_media();
+        music = true;
     }
     if (SegmentsArgs segments{}; take(p_segments, segments)) {
         apply_media_segments(segments.items, segments.count);
     }
     if (bool remote = false; take(p_media_remote, remote)) {
         apply_media_remote(remote);
+        music = true;
     }
     if (bool seeks = false; take(p_media_seeks, seeks)) {
         apply_media_seeks(seeks);
@@ -901,6 +886,7 @@ void apply_media_updates()
     }
     if (const void *large = nullptr; take(p_art_large, large)) {
         apply_music_cover(large);
+        music = true;
     }
     if (std::uint8_t around = 0; take(p_neighbours, around)) {
         apply_media_neighbours((around & 1) != 0, (around & 2) != 0);
@@ -914,13 +900,23 @@ void apply_media_updates()
         }
     }
     if (ProgressArgs progress{}; take(p_progress, progress)) {
-        apply_media_progress(progress.position_s, progress.duration_s, progress.playing);
+        if (s_media_held) {
+            s_held_progress = progress;
+            s_progress_held = true;
+        } else {
+            apply_media_progress(progress.position_s, progress.duration_s, progress.playing);
+        }
+        music = true;
     }
     if (int volume = 0; take(p_media_volume, volume)) {
         apply_media_volume(volume);
+        music = true;
     }
     if (int hold = 0; take(p_media_hold, hold)) {
         apply_media_hold(hold);
+    }
+    if (music) {
+        refresh_music();  // what plays, its cover and its times, all at once
     }
 }
 

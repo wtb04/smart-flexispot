@@ -513,32 +513,7 @@ bool           s_media_long   = false;
 bool           s_media_swiped = false;
 }  // namespace
 
-std::optional<ModalOverlay> s_media_panel;
-lv_obj_t *s_panel_frame    = nullptr;
-lv_obj_t *s_panel_art      = nullptr;
-lv_obj_t *s_panel_title    = nullptr;
-lv_obj_t *s_panel_artist   = nullptr;
-namespace {
-lv_obj_t *s_panel_play     = nullptr;
-lv_obj_t *s_panel_transport[3] = {};  // previous, play, next
-}  // namespace
-
-lv_obj_t *s_panel_progress = nullptr;
-lv_obj_t *s_panel_elapsed  = nullptr;
-lv_obj_t *s_panel_total    = nullptr;
-namespace {
-lv_obj_t *s_panel_quieter  = nullptr;
-lv_obj_t *s_panel_louder   = nullptr;
-lv_obj_t *s_panel_picks    = nullptr;  // the favourites, from what is playing
-}  // namespace
-
-lv_obj_t *s_panel_volume_pct  = nullptr;
-namespace {
-lv_obj_t *s_panel_volume_icon = nullptr;
-}  // namespace
-
 TextBox s_card_with_art{}, s_card_bare{};
-TextBox s_panel_with_art{}, s_panel_bare{};
 bool    s_has_art = false;
 namespace {
 constexpr std::int32_t MEDIA_CARD_PAD   = 18;
@@ -547,29 +522,10 @@ constexpr std::int32_t CARD_ART_RADIUS  = 14;
 constexpr std::int32_t CARD_TITLE_Y     = 28;
 constexpr std::int32_t TITLE_TO_ARTIST  = 6;
 
-constexpr std::int32_t MEDIA_PANEL_W      = 700;
-constexpr std::int32_t MEDIA_PANEL_H      = 408;
-constexpr std::int32_t MEDIA_PANEL_PAD    = theme::space::l;
-constexpr std::int32_t PANEL_ART          = 200;
-constexpr std::int32_t PANEL_ART_RADIUS   = 18;
-constexpr std::int32_t ARTIST_TO_PROGRESS = 20;
-constexpr std::int32_t PROGRESS_H         = 8;
-constexpr std::int32_t PROGRESS_TO_TIMES  = 14;
-constexpr std::int32_t TIMES_TO_VOLUME    = 20;
-constexpr std::int32_t VOLUME_PCT_X       = 34;
-constexpr std::int32_t VOL_W              = 88;
-constexpr std::int32_t VOL_H              = 60;
-constexpr std::int32_t VOL_GAP            = 12;
-constexpr std::int32_t TRANSPORT_H        = 92;
-constexpr std::int32_t TRANSPORT_SIDE_W   = 150;
-constexpr std::int32_t TRANSPORT_PLAY_W   = 200;
-
 constexpr lv_opa_t PAUSED_ART_DIM  = LV_OPA_50;
 constexpr lv_opa_t PLAYING_ART_DIM = LV_OPA_TRANSP;
 
 std::int32_t s_card_inner_h  = 0;
-std::int32_t s_panel_inner_h = 0;
-std::int32_t s_panel_below   = 0;  // what the rows under the artist need
 
 std::int32_t artist_height(const lv_font_t *font, std::int32_t available)
 {
@@ -598,36 +554,11 @@ void layout_card_text(const TextBox &card)
     theme::align(s_media_artist, LV_ALIGN_TOP_LEFT, card.x, artist_y);
 }
 
-void layout_panel_text(const TextBox &panel)
-{
-    std::int32_t y =
-        title_height(lv_label_get_text(s_panel_title), fonts::size_28(), panel.w) + TITLE_TO_ARTIST;
-    const std::int32_t artist_h =
-        artist_height(fonts::size_22(), s_panel_inner_h - s_panel_below - y);
-    lv_obj_set_height(s_panel_artist, artist_h);
-    theme::align(s_panel_artist, LV_ALIGN_TOP_LEFT, panel.x, y);
-
-    y += artist_h + ARTIST_TO_PROGRESS;
-    theme::align(s_panel_progress, LV_ALIGN_TOP_LEFT, panel.x, y);
-
-    y += PROGRESS_TO_TIMES;
-    theme::align(s_panel_elapsed, LV_ALIGN_TOP_LEFT, panel.x, y);
-    theme::align(s_panel_total, LV_ALIGN_TOP_RIGHT, 0, y);
-
-    y += lv_font_get_line_height(fonts::size_16()) + TIMES_TO_VOLUME;
-    const std::int32_t text_dy = (VOL_H - lv_font_get_line_height(fonts::size_20())) / 2;
-    theme::align(s_panel_volume_icon, LV_ALIGN_TOP_LEFT, panel.x, y + text_dy);
-    theme::align(s_panel_volume_pct, LV_ALIGN_TOP_LEFT, panel.x + VOLUME_PCT_X, y + text_dy);
-    theme::align(s_panel_picks, LV_ALIGN_TOP_RIGHT, -2 * (VOL_W + VOL_GAP), y);
-    theme::align(s_panel_quieter, LV_ALIGN_TOP_RIGHT, -(VOL_W + VOL_GAP), y);
-    theme::align(s_panel_louder, LV_ALIGN_TOP_RIGHT, 0, y);
-}
 }  // namespace
 
 void layout_media_text()
 {
     layout_card_text(s_has_art ? s_card_with_art : s_card_bare);
-    layout_panel_text(s_has_art ? s_panel_with_art : s_panel_bare);
 }
 
 int        s_position_s   = 0;
@@ -853,25 +784,6 @@ void write_clock(lv_obj_t *label, int seconds)
                   seconds % SECONDS_PER_MINUTE);
     theme::set_text(label, text);
 }
-namespace {
-constexpr int PROGRESS_TICK_MS = 200;
-
-void progress_tick(lv_timer_t *)
-{
-    if (!s_media_panel.has_value() || !s_media_panel->visible() || s_duration_s <= 0) {
-        return;
-    }
-    int tenths = s_position_s * PROGRESS_SCALE;
-    if (s_media_playing) {
-        const TickType_t since = xTaskGetTickCount() - s_position_at;
-        tenths += static_cast<int>(since * PROGRESS_SCALE / configTICK_RATE_HZ);
-    }
-    const int limit = s_duration_s * PROGRESS_SCALE;
-    tenths          = tenths > limit ? limit : tenths;
-    lv_bar_set_value(s_panel_progress, tenths, LV_ANIM_OFF);
-    write_clock(s_panel_elapsed, tenths / PROGRESS_SCALE);
-}
-}  // namespace
 
 lv_timer_t *s_pause_timer     = nullptr;
 bool        s_playing_shown   = false;
@@ -880,14 +792,11 @@ bool        s_has_track_shown = false;
 void apply_playing(bool playing)
 {
     s_playing_shown = playing;
-    theme::set_text(lv_obj_get_child(s_panel_play, 0), playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
 
     const lv_opa_t dim = s_has_track_shown && !playing ? PAUSED_ART_DIM : PLAYING_ART_DIM;
-    for (lv_obj_t *art : {s_media_art, s_panel_art}) {
-        if (lv_obj_get_style_image_recolor_opa(art, LV_PART_MAIN) != dim) {
-            lv_obj_set_style_image_recolor(art, lv_color_hex(theme::background), 0);
-            lv_obj_set_style_image_recolor_opa(art, dim, 0);
-        }
+    if (lv_obj_get_style_image_recolor_opa(s_media_art, LV_PART_MAIN) != dim) {
+        lv_obj_set_style_image_recolor(s_media_art, lv_color_hex(theme::background), 0);
+        lv_obj_set_style_image_recolor_opa(s_media_art, dim, 0);
     }
 }
 
@@ -913,22 +822,6 @@ bool steers(MediaAction action)
 {
     return s_media_remote || action == MediaAction::VolumeDown || action == MediaAction::VolumeUp ||
            action == MediaAction::Mute;
-}
-
-void media_action_cb(lv_event_t *e)
-{
-    const auto action =
-        static_cast<MediaAction>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e)));
-    if (!steers(action)) {
-        return;
-    }
-    if (action == MediaAction::PlayPause) {
-        cancel_pause_settle();
-        apply_playing(!s_playing_shown);
-    }
-    if (s_handlers.media != nullptr) {
-        s_handlers.media(action);
-    }
 }
 
 // A video's intro and credits, and the button that skips them: into the intro
@@ -1079,9 +972,8 @@ void media_held()
         if (s_handlers.preset != nullptr) {
             s_handlers.preset(s_media_hold, false);
         }
-    } else if (s_media_panel.has_value()) {
-        lv_obj_set_hidden(s_panel_picks, pick_count() == 0);
-        s_media_panel->open(s_media_card);
+    } else {
+        open_music();
     }
 }
 
@@ -1110,113 +1002,6 @@ void media_card_cb(lv_event_t *e)
     } else {
         media_tapped();
     }
-}
-
-lv_obj_t *media_button(lv_obj_t *parent, const char *symbol, MediaAction action, std::int32_t w,
-                       std::int32_t h)
-{
-    lv_obj_t *button = theme::make_button(parent, symbol, theme::panel_light, fonts::size_32());
-    lv_obj_set_size(button, w, h);
-    lv_obj_add_event_cb(button, media_action_cb, LV_EVENT_CLICKED,
-                        reinterpret_cast<void *>(static_cast<std::intptr_t>(action)));
-    return button;
-}
-
-void build_panel_track(lv_obj_t *card, std::int32_t text_x, std::int32_t text_w)
-{
-    s_panel_frame = rounded_frame(card, PANEL_ART, PANEL_ART_RADIUS);
-    lv_obj_align(s_panel_frame, LV_ALIGN_TOP_LEFT, 0, 0);
-    s_panel_art = make_cover(s_panel_frame, PANEL_ART);
-
-    s_panel_title = theme::make_label(card, "--", theme::text, fonts::size_28());
-    two_lines(s_panel_title, fonts::size_28(), text_w);
-    lv_obj_align(s_panel_title, LV_ALIGN_TOP_LEFT, text_x, 0);
-
-    s_panel_artist = theme::make_label(card, "", theme::secondary, fonts::size_22());
-    one_line(s_panel_artist, fonts::size_22(), text_w);
-}
-
-void build_panel_progress(lv_obj_t *card, std::int32_t text_w)
-{
-    s_panel_progress = lv_bar_create(card);
-    lv_obj_set_size(s_panel_progress, text_w, PROGRESS_H);
-    theme::style_panel(s_panel_progress, theme::panel_light, PROGRESS_H / 2);
-    theme::fill_accent(s_panel_progress, LV_PART_INDICATOR);
-    lv_obj_set_style_radius(s_panel_progress, PROGRESS_H / 2, LV_PART_INDICATOR);
-
-    s_panel_elapsed = theme::make_label(card, "0:00", theme::secondary, fonts::size_16());
-    s_panel_total   = theme::make_label(card, "0:00", theme::secondary, fonts::size_16());
-}
-
-void panel_picks_cb(lv_event_t *)
-{
-    s_media_panel->close();
-    open_pick_picker();
-}
-
-void build_panel_volume(lv_obj_t *card)
-{
-    s_panel_volume_icon =
-        theme::make_label(card, LV_SYMBOL_VOLUME_MAX, theme::secondary, fonts::size_20());
-    s_panel_volume_pct = theme::make_label(card, "--", theme::text, fonts::size_20());
-
-    s_panel_picks = theme::make_button(card, LV_SYMBOL_LIST, theme::panel_light, fonts::size_32());
-    lv_obj_set_size(s_panel_picks, VOL_W, VOL_H);
-    lv_obj_add_event_cb(s_panel_picks, panel_picks_cb, LV_EVENT_CLICKED, nullptr);
-
-    s_panel_quieter = media_button(card, LV_SYMBOL_MINUS, MediaAction::VolumeDown, VOL_W, VOL_H);
-    s_panel_louder  = media_button(card, LV_SYMBOL_PLUS, MediaAction::VolumeUp, VOL_W, VOL_H);
-}
-
-void build_transport(lv_obj_t *card, std::int32_t inner_w, std::int32_t inner_h)
-{
-    const std::int32_t row_w = 2 * TRANSPORT_SIDE_W + TRANSPORT_PLAY_W + 2 * BUTTON_GAP;
-    const std::int32_t row_x = (inner_w - row_w) / 2;
-    const std::int32_t row_y = inner_h - TRANSPORT_H;
-
-    lv_obj_t *previous =
-        media_button(card, LV_SYMBOL_PREV, MediaAction::Previous, TRANSPORT_SIDE_W, TRANSPORT_H);
-    s_panel_transport[0] = previous;
-    lv_obj_align(previous, LV_ALIGN_TOP_LEFT, row_x, row_y);
-
-    s_panel_play =
-        media_button(card, LV_SYMBOL_PLAY, MediaAction::PlayPause, TRANSPORT_PLAY_W, TRANSPORT_H);
-    lv_obj_align(s_panel_play, LV_ALIGN_TOP_LEFT, row_x + TRANSPORT_SIDE_W + BUTTON_GAP, row_y);
-    theme::fill_accent(s_panel_play);
-    s_panel_transport[1] = s_panel_play;
-
-    lv_obj_t *next =
-        media_button(card, LV_SYMBOL_NEXT, MediaAction::Next, TRANSPORT_SIDE_W, TRANSPORT_H);
-    lv_obj_align(next, LV_ALIGN_TOP_LEFT,
-                 row_x + TRANSPORT_SIDE_W + TRANSPORT_PLAY_W + 2 * BUTTON_GAP, row_y);
-    s_panel_transport[2] = next;
-}
-
-void build_media_panel(lv_obj_t *parent)
-{
-    s_media_panel.emplace(parent, MEDIA_PANEL_W, MEDIA_PANEL_H);
-    lv_obj_t *card = s_media_panel->content();
-    lv_obj_set_style_pad_all(card, MEDIA_PANEL_PAD, 0);
-
-    const std::int32_t inner_w = MEDIA_PANEL_W - 2 * MEDIA_PANEL_PAD;
-    const std::int32_t inner_h = MEDIA_PANEL_H - 2 * MEDIA_PANEL_PAD;
-    s_panel_inner_h            = inner_h;
-    // The bar sits within PROGRESS_TO_TIMES, which is measured from its top.
-    s_panel_below = ARTIST_TO_PROGRESS + PROGRESS_TO_TIMES +
-                    lv_font_get_line_height(fonts::size_16()) + TIMES_TO_VOLUME + VOL_H +
-                    BUTTON_GAP + TRANSPORT_H;
-
-    s_panel_with_art = {PANEL_ART + MEDIA_PANEL_PAD, inner_w - PANEL_ART - MEDIA_PANEL_PAD};
-    s_panel_bare     = {0, inner_w};
-
-    build_panel_track(card, s_panel_with_art.x, s_panel_with_art.w);
-    build_panel_progress(card, s_panel_with_art.w);
-    build_panel_volume(card);
-    build_transport(card, inner_w, inner_h);
-
-    lv_timer_create(progress_tick, PROGRESS_TICK_MS, nullptr);
-
-    s_media_panel->add_close_button();
 }
 
 // While nothing plays the cover's frame shows the speaker itself.
@@ -1294,6 +1079,21 @@ int media_position_now()
     return position_now();
 }
 
+int media_position_ms_now()
+{
+    std::int64_t at = static_cast<std::int64_t>(s_position_s) * units::kMsPerSecond;
+    if (s_media_playing) {
+        at += static_cast<std::int64_t>(xTaskGetTickCount() - s_position_at) * units::kMsPerSecond / configTICK_RATE_HZ;
+    }
+    const std::int64_t end = static_cast<std::int64_t>(s_duration_s) * units::kMsPerSecond;
+    return static_cast<int>(end > 0 ? std::min(at, end) : at);
+}
+
+void open_favourites()
+{
+    open_pick_picker();
+}
+
 void media_seek_by(int delta_s)
 {
     seek_to(position_now() + delta_s);
@@ -1349,9 +1149,6 @@ void apply_media_seeks(bool seeks)
 void apply_media_remote(bool remote)
 {
     s_media_remote = remote;
-    for (lv_obj_t *button : s_panel_transport) {
-        theme::set_usable(button, remote);
-    }
 }
 
 bool media_remote()
@@ -1424,8 +1221,7 @@ void build_home_page(lv_obj_t *page)
     build_media_card(page, col_x, media_y, col_w, inner_h - media_y);
 
     build_light_picker(page);
-    build_media_panel(page);
-    build_pick_picker(page);
+    build_pick_picker(lv_obj_get_screen(page));  // over the music view too, which is opened from there
 }
 
 }  // namespace ui::detail
