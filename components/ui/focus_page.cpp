@@ -213,7 +213,8 @@ void show_leaves(const Face &face, int seconds, bool paused, bool beat)
     for (lv_obj_t *dot : face.colon) {
         lv_obj_set_style_bg_opa(dot, !s_focus.running || beat ? LV_OPA_COVER : LV_OPA_20, 0);
     }
-    lv_obj_set_style_opa(face.leaves, paused && !beat ? LV_OPA_40 : LV_OPA_COVER, 0);
+    // Paused, faint and still: the face is drawn again only as the seconds change.
+    lv_obj_set_style_opa(face.leaves, paused ? LV_OPA_40 : LV_OPA_COVER, 0);
 }
 
 void show_ticks(const Face &face, int done, bool idle, bool beat)
