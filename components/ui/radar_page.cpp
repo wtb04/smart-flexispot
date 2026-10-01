@@ -1199,6 +1199,7 @@ void raster_blip(const Plot &plot);
 // planes on it, without their names: stretching the last picture blurred it,
 // spilled it past the scope's edge, and was slower to show.
 bool s_ground_spent = false;  // a zoom drew its planes onto the map itself, which is to be drawn again
+bool s_fast_zooming = false;  // the PPA is magnifying the picture, which is to stay as it is meanwhile
 
 // The map at the range in between is drawn into the buffer behind the
 // picture and shown as it is, with the planes drawn onto it: copying it over
@@ -1263,8 +1264,124 @@ void zoom_done(lv_anim_t *)
     settle_zoom(s_shown_range == static_cast<float>(RANGES[s_range_step]));
 }
 
+#ifdef ESP_PLATFORM
+// Fullscreen, a zoom is the picture magnified by the PPA straight onto the
+// panel, frame by frame, with LVGL drawing nothing meanwhile: each frame of it
+// drawn by LVGL was a whole screen, 88 ms, as well as the map drawn again. The
+// picture magnified is the wider of the two ranges, so it only ever grows and
+// is cropped: going out, the new one is drawn first and shown as it would be
+// at the old range; going in, the old one grows to the new. Its end is drawn
+// by LVGL again, sharp, with the names.
+constexpr std::uint32_t FAST_ZOOM_MS = 260;
+int  s_fast_from    = 0;    // the ranges it goes between
+int  s_fast_to      = 0;
+int  s_fast_picture = 0;    // the range of the picture magnified
+int  s_fast_frames  = 0;    // for the bench
+std::int32_t s_fast_shown = -1;  // the magnification last shown, in sixteenths
+
+void fast_zoom_step(void *, std::int32_t value)
+{
+    const float t     = static_cast<float>(value) / static_cast<float>(ZOOM_PROGRESS_FULL);
+    const float range = static_cast<float>(s_fast_from) + static_cast<float>(s_fast_to - s_fast_from) * t;
+    const float scale = static_cast<float>(s_fast_picture) / range;
+    const auto  steps = static_cast<std::int32_t>(scale * 16.0f);
+    if (steps == s_fast_shown) {
+        return;  // as the frame on show already has it
+    }
+    s_fast_shown = steps;
+    lv_area_t picture;
+    lv_obj_get_coords(s_canvas, &picture);
+    lv_area_t to = picture;
+    lv_area_t column;
+    lv_obj_get_coords(s_column, &column);
+    to.x2 = std::min<std::int32_t>(to.x2, column.x1 - 1);  // the column stands as it is
+    board::ZoomFrame frame;
+    frame.picture = s_frame;
+    frame.w       = s_ground_w;
+    frame.h       = s_ground_h;
+    frame.x       = picture.x1;
+    frame.y       = picture.y1;
+    frame.cx      = static_cast<float>(s_cx);
+    frame.cy      = static_cast<float>(s_cy);
+    frame.scale   = static_cast<float>(steps) / 16.0f;
+    frame.to      = to;
+    board::zoom_frame(frame);
+    ++s_fast_frames;
+}
+
+void fast_zoom_done(lv_anim_t *)
+{
+    const bool in = s_fast_to < s_fast_from;
+    if (in) {
+        draw_map(s_map_lat, s_map_lon, static_cast<float>(s_fast_to));
+    }
+    board::zoom_end();
+    s_fast_zooming = false;
+    s_shown_range  = static_cast<float>(s_fast_to);
+    lv_display_t *disp = lv_display_get_default();
+    lv_display_enable_invalidation(disp, true);
+    show_radar(*s_last);
+    lv_obj_invalidate(lv_screen_active());
+}
+
+bool start_fast_zoom(int from_km)
+{
+    const int to_km = RANGES[s_range_step];
+    if (!s_to_edges || !map_located() || s_canvas == nullptr || s_frame == nullptr || from_km == to_km) {
+        return false;
+    }
+    lv_anim_delete(s_scope, nullptr);
+    lv_refr_now(nullptr);  // what waits to be drawn, before LVGL is held off
+    // The controls over the picture are kept as they are now.
+    lv_area_t keep[6];
+    int       kept = 0;
+    for (lv_obj_t *control : {s_zoom_out, s_zoom_in, s_full_chip, s_full_desk}) {
+        if (control != nullptr && !lv_obj_has_flag(control, LV_OBJ_FLAG_HIDDEN)) {
+            lv_obj_get_coords(control, &keep[kept++]);
+        }
+    }
+    board::zoom_begin(keep, kept);
+    lv_display_enable_invalidation(lv_display_get_default(), false);
+    s_fast_zooming = true;
+
+    s_fast_from   = from_km;
+    s_fast_to     = to_km;
+    s_fast_shown  = -1;
+    s_fast_frames = 0;
+    if (to_km > from_km) {
+        // Out: the wider picture first, planes and all, unseen till the zoom shows it.
+        draw_map(s_map_lat, s_map_lon, static_cast<float>(to_km));
+        clear_traffic();
+        hide_labels(0);
+        plot_traffic(static_cast<float>(to_km));
+        for (int i = 0; i < s_shown; ++i) {
+            place_blip(s_plots[i], static_cast<float>(to_km));
+            raster_blip(s_plots[i]);
+        }
+    }
+    s_fast_picture = std::max(from_km, to_km);
+    lv_obj_set_hidden(s_marker, true);
+
+    lv_anim_t anim;
+    lv_anim_init(&anim);
+    lv_anim_set_var(&anim, s_scope);
+    lv_anim_set_values(&anim, 0, ZOOM_PROGRESS_FULL);
+    lv_anim_set_duration(&anim, FAST_ZOOM_MS);
+    lv_anim_set_exec_cb(&anim, fast_zoom_step);
+    lv_anim_set_completed_cb(&anim, fast_zoom_done);
+    lv_anim_set_path_cb(&anim, lv_anim_path_ease_out);
+    lv_anim_start(&anim);
+    return true;
+}
+#endif
+
 void start_zoom(int from_km)
 {
+#ifdef ESP_PLATFORM
+    if (start_fast_zoom(from_km)) {
+        return;
+    }
+#endif
     s_zoom_from = from_km;
     lv_anim_t anim;
     lv_anim_init(&anim);
@@ -2556,7 +2673,7 @@ void redraw_way()
 
 void grow_tick(lv_timer_t *timer)
 {
-    if (s_scope != nullptr && lv_anim_get(s_scope, zoom_step) == nullptr) {
+    if (s_scope != nullptr && lv_anim_get(s_scope, zoom_step) == nullptr && !s_fast_zooming) {
         redraw_way();
     }
     if (!s_growing) {
@@ -2766,7 +2883,7 @@ void show_radar(const radar::Snapshot &snapshot)
     if (&snapshot != s_last) {
         *s_last = snapshot;
     }
-    if (s_ground_spent) {
+    if (s_ground_spent || s_fast_zooming) {
         return;  // a zoom is drawing it, over a map it draws as it goes; its end shows this
     }
 
@@ -2908,9 +3025,19 @@ void time_zoom(int step, const char *name, char *out, std::size_t size, int &n)
     s_zoom_traced  = 0;
     const std::int64_t began = esp_timer_get_time();
     apply_range(from);
-    while (lv_anim_get(s_scope, zoom_step) != nullptr && esp_timer_get_time() - began < GIVE_UP_US) {
+    while (lv_anim_get(s_scope, nullptr) != nullptr && esp_timer_get_time() - began < GIVE_UP_US) {
         lv_timer_handler();
     }
+#ifdef ESP_PLATFORM
+    if (s_fast_frames > 0) {
+        lv_refr_now(nullptr);
+        n += std::snprintf(out + n, size - n, "zoom %s to %d km by the PPA: %d frames and the last drawn in %d ms\n",
+                           name, RANGES[s_range_step], s_fast_frames,
+                           static_cast<int>((esp_timer_get_time() - began) / units::kUsPerMs));
+        s_fast_frames = 0;
+        return;
+    }
+#endif
     lv_refr_now(nullptr);
     const int took = static_cast<int>((esp_timer_get_time() - began) / units::kUsPerMs);
     n += std::snprintf(out + n, size - n, "zoom %s to %d km: %d frames in %d ms, at", name, RANGES[s_range_step],
@@ -2970,6 +3097,14 @@ bool bench_ready()
 int bench_radar_full(char *out, std::size_t size, bool open)
 {
     if (!open) {
+#ifdef ESP_PLATFORM
+        if (s_fast_zooming) {
+            s_fast_zooming = false;
+            board::zoom_end();
+            lv_display_enable_invalidation(lv_display_get_default(), true);
+            lv_obj_invalidate(lv_screen_active());
+        }
+#endif
         bench_put_back();
         return std::snprintf(out, size, "put back\n");
     }
@@ -2981,6 +3116,35 @@ int bench_radar_full(char *out, std::size_t size, bool open)
     s_grown_hex[0] = '\0';  // its trail grows in, as when chosen
     show_radar(*s_last);
     return std::snprintf(out, size, "open\n");
+}
+
+// One frame of a zoom in, magnified by a quarter, held on the panel until
+// bench_radar_full(false) puts the screen back: to see what a zoom shows.
+int bench_radar_zoom_frame(char *out, std::size_t size)
+{
+#ifdef ESP_PLATFORM
+    if (!full_open() || s_frame == nullptr) {
+        return std::snprintf(out, size, "not open\n");
+    }
+    lv_refr_now(nullptr);
+    lv_area_t keep[6];
+    int       kept = 0;
+    for (lv_obj_t *control : {s_zoom_out, s_zoom_in, s_full_chip, s_full_desk}) {
+        if (control != nullptr && !lv_obj_has_flag(control, LV_OBJ_FLAG_HIDDEN)) {
+            lv_obj_get_coords(control, &keep[kept++]);
+        }
+    }
+    board::zoom_begin(keep, kept);
+    lv_display_enable_invalidation(lv_display_get_default(), false);
+    s_fast_zooming = true;
+    s_fast_from = s_fast_picture = RANGES[s_range_step];
+    s_fast_to   = static_cast<int>(static_cast<float>(s_fast_from) / 1.25f);
+    s_fast_shown = -1;
+    fast_zoom_step(nullptr, ZOOM_PROGRESS_FULL);
+    return std::snprintf(out, size, "held\n");
+#else
+    return std::snprintf(out, size, "panel only\n");
+#endif
 }
 
 int bench_radar_open(char *out, std::size_t size)

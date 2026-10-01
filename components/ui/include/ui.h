@@ -399,5 +399,6 @@ int bench_radar_open(char *out, std::size_t size);
  *  as it does, following the nearest aircraft; or, with `open` false, the
  *  screen put back as it was before. */
 int bench_radar_full(char *out, std::size_t size, bool open);
+int bench_radar_zoom_frame(char *out, std::size_t size);  // a zoom's frame, held until put back
 
 }  // namespace ui

@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <atomic>
 #include <utility>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -675,6 +676,133 @@ std::uint8_t *copy_shown_frame(int &width, int &height)
     width  = BSP_LCD_H_RES;
     height = BSP_LCD_V_RES;
     return copy;
+}
+
+namespace {
+constexpr int ZOOM_KEEP_MAX = 8;
+struct Kept {
+    Rect           at;  // on the panel
+    std::uint16_t *pixels = nullptr;
+};
+Kept s_kept[ZOOM_KEEP_MAX];
+int  s_kept_count = 0;
+
+void copy_rows(const std::uint8_t *from, std::size_t from_row, std::uint8_t *to, std::size_t to_row,
+               std::uint32_t rows, std::size_t bytes)
+{
+    for (std::uint32_t i = 0; i < rows; ++i) {
+        std::memcpy(to + i * to_row, from + i * from_row, bytes);
+    }
+}
+}  // namespace
+
+esp_err_t zoom_begin(const lv_area_t *keep, int count)
+{
+    zoom_end();
+    // The frame on show is the one the zoom starts from, and is LVGL's last.
+    while (s_showing.load(std::memory_order_relaxed) != s_asked.load(std::memory_order_relaxed)) {
+        if (xSemaphoreTake(s_swapped, SWAP_TIMEOUT) != pdTRUE) {
+            break;
+        }
+    }
+    const std::uint8_t *shown = s_fbs[s_asked.load(std::memory_order_relaxed)];
+    esp_cache_msync(const_cast<std::uint8_t *>(shown), FRAME_BYTES, ESP_CACHE_MSYNC_FLAG_DIR_M2C);  // as the PPA wrote it
+    constexpr std::size_t PIXEL = sizeof(std::uint16_t);
+    for (int i = 0; i < count && s_kept_count < ZOOM_KEEP_MAX; ++i) {
+        Kept &kept   = s_kept[s_kept_count];
+        kept.at      = place_on_panel(s_disp, &keep[i]).rect;
+        kept.pixels  = static_cast<std::uint16_t *>(
+            heap_caps_malloc(static_cast<std::size_t>(kept.at.w) * kept.at.h * PIXEL, MALLOC_CAP_SPIRAM));
+        if (kept.pixels == nullptr) {
+            continue;
+        }
+        copy_rows(shown + (kept.at.y * BSP_LCD_H_RES + kept.at.x) * PIXEL, BSP_LCD_H_RES * PIXEL,
+                  reinterpret_cast<std::uint8_t *>(kept.pixels), kept.at.w * PIXEL, kept.at.h, kept.at.w * PIXEL);
+        ++s_kept_count;
+    }
+    return ESP_OK;
+}
+
+esp_err_t zoom_frame(const ZoomFrame &f)
+{
+    if (f.picture == nullptr || s_panel == nullptr || f.scale < 1.0f) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    s_target = free_buffer();
+    // The magnification the PPA can do, and the part of the picture that,
+    // magnified so, fills `to` without spilling past it: a pixel or so short at
+    // its right and bottom, where the frame before shows through.
+    const float        scale = std::floor(f.scale * 16.0f) / 16.0f;
+    const std::int32_t to_w  = lv_area_get_width(&f.to);
+    const std::int32_t to_h  = lv_area_get_height(&f.to);
+    const auto         in_w  = static_cast<std::int32_t>(static_cast<float>(to_w) / scale);
+    const auto         in_h  = static_cast<std::int32_t>(static_cast<float>(to_h) / scale);
+    const std::int32_t in_x  = std::clamp<std::int32_t>(
+        static_cast<std::int32_t>(std::lround(f.cx + (static_cast<float>(f.to.x1 - f.x) - f.cx) / scale)), 0, f.w - in_w);
+    const std::int32_t in_y  = std::clamp<std::int32_t>(
+        static_cast<std::int32_t>(std::lround(f.cy + (static_cast<float>(f.to.y1 - f.y) - f.cy) / scale)), 0, f.h - in_h);
+    const auto out_w = static_cast<std::int32_t>(static_cast<float>(in_w) * scale);
+    const auto out_h = static_cast<std::int32_t>(static_cast<float>(in_h) * scale);
+    const lv_area_t out_area{f.to.x1, f.to.y1, f.to.x1 + out_w - 1, f.to.y1 + out_h - 1};
+    const Placement place = place_on_panel(s_disp, &out_area);
+
+    const std::uint8_t *latest = s_fbs[s_asked.load(std::memory_order_relaxed)];
+    const std::int64_t  catching = esp_timer_get_time();
+    for (int i = 0; i < s_behind_count[s_target]; ++i) {
+        if (!inside(s_behind[s_target][i], place.rect)) {
+            catch_up(latest, s_fbs[s_target], s_behind[s_target][i]);
+        }
+    }
+    s_behind_count[s_target] = 0;
+    s_flush_times.catch_up_us += esp_timer_get_time() - catching;
+
+    ppa_srm_oper_config_t op{};
+    op.in.buffer          = f.picture;
+    op.in.pic_w           = static_cast<std::uint32_t>(f.w);
+    op.in.pic_h           = static_cast<std::uint32_t>(f.h);
+    op.in.block_w         = static_cast<std::uint32_t>(in_w);
+    op.in.block_h         = static_cast<std::uint32_t>(in_h);
+    op.in.block_offset_x  = static_cast<std::uint32_t>(in_x);
+    op.in.block_offset_y  = static_cast<std::uint32_t>(in_y);
+    op.in.srm_cm          = PPA_SRM_COLOR_MODE_RGB565;
+    op.out.buffer         = s_fbs[s_target];
+    op.out.buffer_size    = FRAME_BYTES;
+    op.out.pic_w          = BSP_LCD_H_RES;
+    op.out.pic_h          = BSP_LCD_V_RES;
+    op.out.block_offset_x = place.rect.x;
+    op.out.block_offset_y = place.rect.y;
+    op.out.srm_cm         = PPA_SRM_COLOR_MODE_RGB565;
+    op.rotation_angle     = place.angle;
+    op.scale_x            = scale;
+    op.scale_y            = scale;
+    op.mode               = PPA_TRANS_MODE_BLOCKING;
+    const std::int64_t turning = esp_timer_get_time();
+    const esp_err_t    err     = ppa_do_scale_rotate_mirror(s_ppa, &op);
+    s_flush_times.rotate_us += esp_timer_get_time() - turning;
+    note_drawn(place.rect);
+
+    constexpr std::size_t PIXEL = sizeof(std::uint16_t);
+    for (int i = 0; i < s_kept_count; ++i) {
+        const Kept &kept = s_kept[i];
+        std::uint8_t *at = s_fbs[s_target] + (kept.at.y * BSP_LCD_H_RES + kept.at.x) * PIXEL;
+        copy_rows(reinterpret_cast<const std::uint8_t *>(kept.pixels), kept.at.w * PIXEL, at, BSP_LCD_H_RES * PIXEL,
+                  kept.at.h, kept.at.w * PIXEL);
+        esp_cache_msync(at, ((kept.at.h - 1) * BSP_LCD_H_RES + kept.at.w) * PIXEL,
+                        ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+        note_drawn(kept.at);
+    }
+    s_flush_times.frames += 1;
+    show_back_buffer();
+    return err;
+}
+
+void zoom_end()
+{
+    for (int i = 0; i < s_kept_count; ++i) {
+        heap_caps_free(s_kept[i].pixels);
+        s_kept[i].pixels = nullptr;
+    }
+    s_kept_count = 0;
 }
 
 FlushTimes take_flush_times()

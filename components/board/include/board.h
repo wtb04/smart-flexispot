@@ -1,5 +1,7 @@
 #pragma once
 
+#include "lvgl.h"
+
 #include "esp_err.h"
 
 #include <cstdint>
@@ -90,6 +92,23 @@ int bench_rotation(char *out, std::size_t size);
 /** For a development build: a copy of the frame the panel is showing, as it
  *  holds it, portrait RGB565, to free with heap_caps_free; null without room. */
 std::uint8_t *copy_shown_frame(int &width, int &height);
+
+/** A zoom drawn past LVGL, which is to draw nothing until zoom_end(): each
+ *  frame is the picture LVGL shows, magnified by the PPA as it turns it onto
+ *  the panel, where a whole frame drawn by LVGL was 88 ms. zoom_begin() keeps
+ *  `keep`, the controls over the picture, as the frame on show has them, and
+ *  each frame puts them back over it. Areas are in LVGL's screen coordinates. */
+struct ZoomFrame {
+    const std::uint16_t *picture = nullptr;  // RGB565, as LVGL shows it
+    std::int32_t         w = 0, h = 0;
+    std::int32_t         x = 0, y = 0;       // its top left on the screen
+    float                cx = 0, cy = 0;     // the point in it that stays put
+    float                scale = 1.0f;       // at least 1, in steps of 1/16
+    lv_area_t            to{};               // what of the screen it fills, within it
+};
+esp_err_t zoom_begin(const lv_area_t *keep, int count);
+esp_err_t zoom_frame(const ZoomFrame &frame);
+void      zoom_end();
 
 /** Below this the panel does not get any dimmer, so offering the range is just a
  *  control that appears broken. */
