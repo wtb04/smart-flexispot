@@ -203,6 +203,10 @@ esp_err_t set_media_hold_preset(int preset);
 /** RGB565, media::kArtSize square. Null hides the art; the buffer must live until it is replaced. */
 esp_err_t set_album_art(const void *pixels, bool placeholder);
 
+/** The same cover at media::kLargeArtSize, for the music view, or null for
+ *  none; the buffer must live until it is replaced. */
+esp_err_t set_album_art_large(const void *pixels);
+
 /** The position is carried forward while playing; a duration of zero hides the bar. */
 esp_err_t set_media_progress(int position_s, int duration_s, bool playing);
 

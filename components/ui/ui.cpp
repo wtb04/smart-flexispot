@@ -178,6 +178,7 @@ bool build_next_part()
             }
             create_drawer(scr);  // after the content, so it overlays it when open
             build_cinema(scr);
+            build_music(scr);
             build_focus_full(scr);
             lv_obj_move_foreground(s_rail);  // and under the rail, which it slides out from
             create_notice_card();
@@ -351,6 +352,7 @@ Slot<bool>           p_media_seeks;
 Slot<bool>           p_media_remote;
 Slot<std::uint8_t>   p_subtitles;  // 1 for some to show, 2 for shown
 Slot<const void *>   p_still;
+Slot<const void *>   p_art_large;
 Slot<std::uint8_t>   p_neighbours;  // bit 0 an episode before, bit 1 one after
 Slot<PillArgs>       p_pill[kPillCount];
 Slot<LightsArgs>     p_lights;
@@ -897,6 +899,9 @@ void apply_media_updates()
     if (const void *still = nullptr; take(p_still, still)) {
         apply_cinema_still(still);
     }
+    if (const void *large = nullptr; take(p_art_large, large)) {
+        apply_music_cover(large);
+    }
     if (std::uint8_t around = 0; take(p_neighbours, around)) {
         apply_media_neighbours((around & 1) != 0, (around & 2) != 0);
     }
@@ -1121,6 +1126,12 @@ esp_err_t set_media_segments(const MediaSegment *segments, int count)
 esp_err_t set_media_neighbours(bool previous, bool next)
 {
     put(p_neighbours, static_cast<std::uint8_t>((previous ? 1 : 0) | (next ? 2 : 0)));
+    return ESP_OK;
+}
+
+esp_err_t set_album_art_large(const void *pixels)
+{
+    put(p_art_large, pixels);
     return ESP_OK;
 }
 

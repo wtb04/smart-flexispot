@@ -945,7 +945,7 @@ MediaSegment s_segments[kMaxSegments]{};
 int          s_segment_count = 0;
 bool         s_media_seeks   = false;
 lv_obj_t    *s_skip          = nullptr;
-lv_obj_t    *s_expand        = nullptr;  // into the cinema view, for a video
+lv_obj_t    *s_expand        = nullptr;  // into the cinema view for a video, the music view else
 int          s_skip_to       = -1;    // where skipping the intro seeks to
 bool         s_skip_next     = false; // skipping starts the next episode instead
 const char  *s_skip_text     = nullptr;
@@ -1007,7 +1007,7 @@ void skip_check(lv_timer_t *)
     s_skip_next = next;
     s_skip_text = text;
     lv_obj_set_hidden(s_skip, text == nullptr);
-    lv_obj_set_hidden(s_expand, !(s_media_seeks && s_has_track_shown));
+    lv_obj_set_hidden(s_expand, !s_has_track_shown);
     if (text != nullptr) {
         theme::set_text(lv_obj_get_child(s_skip, 0), text);
     }
@@ -1036,7 +1036,8 @@ void build_skip_button(lv_obj_t *card)
     s_expand = theme::make_chip(card, "");
     theme::make_mark(s_expand, &icons::expand_icon);
     lv_obj_align(s_expand, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
-    lv_obj_add_event_cb(s_expand, [](lv_event_t *) { open_cinema(); }, LV_EVENT_CLICKED, nullptr);
+    lv_obj_add_event_cb(
+        s_expand, [](lv_event_t *) { media_is_video() ? open_cinema() : open_music(); }, LV_EVENT_CLICKED, nullptr);
     lv_obj_set_hidden(s_expand, true);
 }
 

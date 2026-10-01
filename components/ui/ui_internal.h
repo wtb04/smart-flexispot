@@ -311,6 +311,10 @@ void build_cinema(lv_obj_t *screen);
 void open_cinema();
 bool cinema_open();
 void apply_cinema_still(const void *pixels);
+void build_music(lv_obj_t *screen);
+void open_music();
+bool music_open();
+void apply_music_cover(const void *pixels);  // media::kLargeArtSize square, or null
 void apply_media_neighbours(bool previous, bool next);
 bool cinema_has_next();  // an episode after this one to go on to
 void show_guest_presets();

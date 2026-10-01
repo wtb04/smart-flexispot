@@ -158,9 +158,10 @@ void on_radar_photo(const char *hex, const void *pixels, int width, int height)
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_radar_photo(hex, pixels, width, height));
 }
 
-void on_album_art(media::Art state, const void *pixels)
+void on_album_art(media::Art state, const void *pixels, const void *large)
 {
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_album_art(pixels, state == media::Art::Failed));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_album_art_large(large));
 }
 
 void on_pick_art(int index, const void *pixels)

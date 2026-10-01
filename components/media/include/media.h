@@ -5,8 +5,10 @@
 #include <cstdint>
 
 namespace media {
-/** Pixels. Sized for the largest place it is shown, so nothing scales up. */
-inline constexpr int kArtSize = 200;
+/** Pixels. Sized for the largest place it is shown, so nothing scales up: the
+ *  card's, and the music view's over the whole screen. */
+inline constexpr int kArtSize      = 200;
+inline constexpr int kLargeArtSize = 440;
 
 /** A video's own still, wide, for the cinema view. */
 inline constexpr int kStillW = 480;
@@ -26,7 +28,8 @@ enum class Art : std::uint8_t {
     Failed,  // there was a cover and it could not be had
 };
 
-using ArtHandler = void (*)(Art state, const void *pixels);
+/** With the cover at kLargeArtSize too, from the same picture, or null. */
+using ArtHandler = void (*)(Art state, const void *pixels, const void *large);
 
 /** A favourite's cover, kPickArtSize squared of RGB565, or null for none; from
  *  the fetch task. The buffer is that favourite's own, rewritten in place. */

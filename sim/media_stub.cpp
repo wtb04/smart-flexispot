@@ -65,6 +65,7 @@ std::int64_t s_position_at = 0;  // ms
 std::int64_t s_reported_at = 0;
 
 std::vector<std::uint16_t> s_art;    // shown cover
+std::vector<std::uint16_t> s_large;  // the same, large, for the music view
 std::vector<std::uint16_t> s_still;  // cinema's still
 std::vector<std::uint16_t> s_pick_art[media::kPickCount];
 
@@ -156,9 +157,12 @@ void show_item()
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_remote(!followed));
     if (s_scene == Scene::Idle) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_album_art(nullptr, false));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_album_art_large(nullptr));
     } else {
         paint(s_art, media::kArtSize, media::kArtSize, video ? EPISODES[s_item].hue : TRACKS[s_item].hue);
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_album_art(s_art.data(), false));
+        paint(s_large, media::kLargeArtSize, media::kLargeArtSize, video ? EPISODES[s_item].hue : TRACKS[s_item].hue);
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_album_art_large(s_large.data()));
     }
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_hold_preset(video ? JELLYFIN_PRESET : -1));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_seeks(video));

@@ -67,7 +67,8 @@ PickArtHandler s_on_pick_art = nullptr;
 StillHandler   s_on_still    = nullptr;
 
 std::uint8_t  *s_body = nullptr;  // the cover as downloaded
-std::uint16_t *s_art[ART_BUFFERS] = {};
+std::uint16_t *s_art[ART_BUFFERS]   = {};
+std::uint16_t *s_large[ART_BUFFERS] = {};  // the same covers, at kLargeArtSize
 int            s_next             = 0;
 
 char              s_wanted[PATH_SIZE] = {};
@@ -127,11 +128,12 @@ std::size_t download(const char *url)
     return got.length;
 }
 
-/** Where a decoded cover goes, and how big. */
+/** Where a decoded cover goes, and how big; and a second size of it, if any. */
 struct Target {
     std::uint16_t *pixels;
     int            w;
     int            h;
+    const Target  *also = nullptr;
 };
 
 /** The part of the picture kept: as much of its middle as has the target's
@@ -184,12 +186,14 @@ bool s_last_hardware = false;
 
 void take_cover(const jpeg::Picture &picture, void *target)
 {
-    const Target to   = *static_cast<const Target *>(target);
-    const Crop   from = middle(picture.width, picture.height, to);
-    if (picture.grey) {
-        shrink_grey(static_cast<const std::uint8_t *>(picture.pixels), from, picture.stride, to);
-    } else {
-        shrink(static_cast<const std::uint16_t *>(picture.pixels), from, picture.stride, to);
+    const Target to = *static_cast<const Target *>(target);
+    for (const Target *size = &to; size != nullptr; size = size->also) {
+        const Crop from = middle(picture.width, picture.height, *size);
+        if (picture.grey) {
+            shrink_grey(static_cast<const std::uint8_t *>(picture.pixels), from, picture.stride, *size);
+        } else {
+            shrink(static_cast<const std::uint16_t *>(picture.pixels), from, picture.stride, *size);
+        }
     }
     s_last_hardware = picture.hardware;
     ESP_LOGI(TAG, "cover %dx%d%s%s -> %dx%d, stack left %u", picture.width, picture.height,
@@ -218,13 +222,15 @@ bool fetch_playing(const char *path)
     char       url[URL_SIZE];
     const bool whole = std::strncmp(path, "http", std::strlen("http")) == 0;
     std::snprintf(url, sizeof(url), "%s%s", whole ? "" : s_origin, path);
-    std::uint16_t *art = s_art[s_next];
-    if (!fetch(url, {art, kArtSize, kArtSize})) {
+    std::uint16_t *art   = s_art[s_next];
+    std::uint16_t *large = s_large[s_next];
+    const Target   big{large, kLargeArtSize, kLargeArtSize};
+    if (!fetch(url, {art, kArtSize, kArtSize, large != nullptr ? &big : nullptr})) {
         return false;
     }
     s_next = (s_next + 1) % ART_BUFFERS;
     if (s_on_art != nullptr) {
-        s_on_art(Art::Ready, art);
+        s_on_art(Art::Ready, art, large);
     }
     return true;
 }
@@ -239,7 +245,7 @@ void clear_art()
     std::strcpy(s_loaded, "");
     record(false, false, false, true, -1);
     if (s_on_art != nullptr) {
-        s_on_art(Art::None, nullptr);
+        s_on_art(Art::None, nullptr, nullptr);
     }
 }
 
@@ -284,7 +290,7 @@ void refresh_playing(Playing &playing)
         copy_path(playing.failed, wanted);
         playing.retry_wait = RETRY_FIRST_US;
         if (s_on_art != nullptr) {
-            s_on_art(Art::Failed, nullptr);
+            s_on_art(Art::Failed, nullptr, nullptr);
         }
     } else {
         playing.retry_wait = std::min(playing.retry_wait * 2, RETRY_MAX_US);
@@ -369,6 +375,11 @@ esp_err_t start(const char *origin, ArtHandler on_art, PickArtHandler on_pick_ar
         buffer = static_cast<std::uint16_t *>(
             heap_caps_malloc(kArtSize * kArtSize * sizeof(std::uint16_t), MALLOC_CAP_SPIRAM));
         ESP_RETURN_ON_FALSE(buffer != nullptr, ESP_ERR_NO_MEM, TAG, "art buffer");
+    }
+    // Without room for them, the music view shows the card's cover instead.
+    for (auto &buffer : s_large) {
+        buffer = static_cast<std::uint16_t *>(
+            heap_caps_malloc(kLargeArtSize * kLargeArtSize * sizeof(std::uint16_t), MALLOC_CAP_SPIRAM));
     }
 
     s_picks = static_cast<PickCover *>(
