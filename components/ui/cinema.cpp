@@ -8,7 +8,7 @@
 
 // Jellyfin fullscreen, for watching, in two columns as wide as the picture is:
 // the picture and what plays beside it, how far along the picture's foot, and
-// under them the controls under the picture and the volume under the words.
+// under them the volume under the picture and the controls under the words.
 // Ten seconds back or on is a swipe across the picture, as on the card; the
 // lights, the low desk and the screen's timer are quick actions over the view.
 // The screen goes dark once left alone, and lights again when there is an intro
@@ -24,8 +24,8 @@ constexpr std::int32_t TEXT_GAP      = 72;
 constexpr lv_opa_t     PAUSED_DIM    = LV_OPA_50;  // as the card's cover
 constexpr std::int32_t PROGRESS_H    = 10;
 constexpr std::int32_t LINE_GAP      = 10;
-// The music view's buttons: before, play and after under the picture, the
-// volume and the subtitles under the words.
+// The music view's buttons: the volume and the subtitles under the picture,
+// before, play and after under the words.
 constexpr std::int32_t TRANSPORT_H   = 88;
 constexpr std::int32_t PLAY_W        = 200;
 constexpr std::int32_t GRID_GAP      = 24;
@@ -387,10 +387,15 @@ void build_progress(std::int32_t x, std::int32_t foot, std::int32_t w)
     lv_obj_set_hidden(s_ends, true);
 }
 
-// Before, play and after under the picture, as wide as it.
-void build_transport(std::int32_t x, std::int32_t y)
+std::int32_t side_width(std::int32_t w)
 {
-    const std::int32_t side_w = (STILL_W - PLAY_W - 2 * GRID_GAP) / 2;
+    return (w - PLAY_W - 2 * GRID_GAP) / 2;
+}
+
+// Before, play and after under the words, as wide as they are.
+void build_transport(std::int32_t x, std::int32_t y, std::int32_t w)
+{
+    const std::int32_t side_w = side_width(w);
     s_steer[0] = button(s_view, LV_SYMBOL_PREV, side_w, TRANSPORT_H,
                         [](lv_event_t *) { media_action(MediaAction::Previous); });
     lv_obj_set_pos(s_steer[0], x, y);
@@ -399,14 +404,14 @@ void build_transport(std::int32_t x, std::int32_t y)
     lv_obj_set_pos(s_play, x + side_w + GRID_GAP, y);
     s_steer[1] = button(s_view, LV_SYMBOL_NEXT, side_w, TRANSPORT_H,
                         [](lv_event_t *) { media_action(MediaAction::Next); });
-    lv_obj_set_pos(s_steer[1], x + STILL_W - side_w, y);
+    lv_obj_set_pos(s_steer[1], x + w - side_w, y);
 }
 
-// The volume and the subtitles under the words, the subtitles as wide as a
+// The volume and the subtitles under the picture, the subtitles as wide as a
 // button beside play.
 void build_sound(std::int32_t x, std::int32_t y, std::int32_t w)
 {
-    const std::int32_t side_w = (STILL_W - PLAY_W - 2 * GRID_GAP) / 2;
+    const std::int32_t side_w = side_width(w);
     build_volume(x, y, w - side_w - GRID_GAP);
     s_subtitles = button(s_view, "", side_w, TRANSPORT_H, [](lv_event_t *) {
         s_subtitles_shown = !s_subtitles_shown;  // the next report from the player confirms it
@@ -438,8 +443,8 @@ void build_cinema(lv_obj_t *screen)
     s_text_top = top;
     build_text(x, w);
     build_progress(x, top + STILL_H, w);
-    build_transport(SIDE_MARGIN, row_y);
-    build_sound(x, row_y, w);
+    build_sound(SIDE_MARGIN, row_y, STILL_W);
+    build_transport(x, row_y, w);
 
     s_tick = lv_timer_create(tick, TICK_MS, nullptr);
     lv_timer_pause(s_tick);
