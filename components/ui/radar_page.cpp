@@ -1272,22 +1272,22 @@ void zoom_done(lv_anim_t *)
 // is cropped: going out, the new one is drawn first and shown as it would be
 // at the old range; going in, the old one grows to the new. Its end is drawn
 // by LVGL again, sharp, with the names.
-constexpr std::uint32_t FAST_ZOOM_MS = 260;
+// One frame for each magnification the PPA has, a sixteenth apart, as fast as
+// they come, so each frame moves as far as the last; past this many, every
+// other one.
+constexpr int FAST_ZOOM_FRAMES_MAX = 10;
+lv_timer_t   *s_fast_timer  = nullptr;
+std::int32_t  s_fast_step   = 0;   // the magnification shown next, in sixteenths
+std::int32_t  s_fast_end    = 0;   // and the last
+std::int32_t  s_fast_stride = 1;
 int  s_fast_from    = 0;    // the ranges it goes between
 int  s_fast_to      = 0;
 int  s_fast_picture = 0;    // the range of the picture magnified
 int  s_fast_frames  = 0;    // for the bench
 std::int32_t s_fast_shown = -1;  // the magnification last shown, in sixteenths
 
-void fast_zoom_step(void *, std::int32_t value)
+void show_magnified(std::int32_t steps)
 {
-    const float t     = static_cast<float>(value) / static_cast<float>(ZOOM_PROGRESS_FULL);
-    const float range = static_cast<float>(s_fast_from) + static_cast<float>(s_fast_to - s_fast_from) * t;
-    const float scale = static_cast<float>(s_fast_picture) / range;
-    const auto  steps = static_cast<std::int32_t>(scale * 16.0f);
-    if (steps == s_fast_shown) {
-        return;  // as the frame on show already has it
-    }
     s_fast_shown = steps;
     lv_area_t picture;
     lv_obj_get_coords(s_canvas, &picture);
@@ -1309,7 +1309,22 @@ void fast_zoom_step(void *, std::int32_t value)
     ++s_fast_frames;
 }
 
-void fast_zoom_done(lv_anim_t *)
+void fast_zoom_done();
+
+void fast_zoom_tick(lv_timer_t *)
+{
+    show_magnified(s_fast_step);
+    const bool last = s_fast_step == s_fast_end;
+    const std::int32_t way = s_fast_end > s_fast_step ? s_fast_stride : -s_fast_stride;
+    s_fast_step = (way > 0 ? std::min(s_fast_step + way, s_fast_end) : std::max(s_fast_step + way, s_fast_end));
+    if (last) {
+        lv_timer_delete(s_fast_timer);
+        s_fast_timer = nullptr;
+        fast_zoom_done();
+    }
+}
+
+void fast_zoom_done()
 {
     const bool in = s_fast_to < s_fast_from;
     if (in) {
@@ -1326,6 +1341,15 @@ void fast_zoom_done(lv_anim_t *)
 
 bool start_fast_zoom(int from_km)
 {
+    if (s_fast_zooming) {
+        // A tap during one: that one ends where it was going, and this goes on from there.
+        if (s_fast_timer != nullptr) {
+            lv_timer_delete(s_fast_timer);
+            s_fast_timer = nullptr;
+        }
+        fast_zoom_done();
+        from_km = s_fast_to;
+    }
     const int to_km = RANGES[s_range_step];
     if (!s_to_edges || !map_located() || s_canvas == nullptr || s_frame == nullptr || from_km == to_km) {
         return false;
@@ -1362,15 +1386,18 @@ bool start_fast_zoom(int from_km)
     s_fast_picture = std::max(from_km, to_km);
     lv_obj_set_hidden(s_marker, true);
 
-    lv_anim_t anim;
-    lv_anim_init(&anim);
-    lv_anim_set_var(&anim, s_scope);
-    lv_anim_set_values(&anim, 0, ZOOM_PROGRESS_FULL);
-    lv_anim_set_duration(&anim, FAST_ZOOM_MS);
-    lv_anim_set_exec_cb(&anim, fast_zoom_step);
-    lv_anim_set_completed_cb(&anim, fast_zoom_done);
-    lv_anim_set_path_cb(&anim, lv_anim_path_ease_out);
-    lv_anim_start(&anim);
+    // From the magnification showing the old range to the one showing the new,
+    // the first after the one on show, the last as near the new as there is.
+    const auto sixteenths = [](float scale) { return static_cast<std::int32_t>(std::lround(scale * 16.0f)); };
+    const std::int32_t from = sixteenths(static_cast<float>(s_fast_picture) / static_cast<float>(from_km));
+    s_fast_end              = sixteenths(static_cast<float>(s_fast_picture) / static_cast<float>(to_km));
+    const std::int32_t span = std::abs(s_fast_end - from);
+    s_fast_stride           = std::max<std::int32_t>(1, (span + FAST_ZOOM_FRAMES_MAX - 1) / FAST_ZOOM_FRAMES_MAX);
+    s_fast_step             = to_km > from_km ? from : from + (s_fast_end > from ? s_fast_stride : -s_fast_stride);
+    if (s_fast_timer != nullptr) {
+        lv_timer_delete(s_fast_timer);
+    }
+    s_fast_timer = lv_timer_create(fast_zoom_tick, 1, nullptr);
     return true;
 }
 #endif
@@ -3023,16 +3050,22 @@ void time_zoom(int step, const char *name, char *out, std::size_t size, int &n)
     const int from = static_cast<int>(std::lround(shown_range_km()));
     s_range_step   = next;
     s_zoom_traced  = 0;
+    board::take_flush_times();
     const std::int64_t began = esp_timer_get_time();
     apply_range(from);
-    while (lv_anim_get(s_scope, nullptr) != nullptr && esp_timer_get_time() - began < GIVE_UP_US) {
+    while ((lv_anim_get(s_scope, nullptr) != nullptr || s_fast_zooming) && esp_timer_get_time() - began < GIVE_UP_US) {
         lv_timer_handler();
     }
 #ifdef ESP_PLATFORM
     if (s_fast_frames > 0) {
+        const board::FlushTimes zoomed = board::take_flush_times();
+        const std::int64_t      moved  = esp_timer_get_time() - began;
         lv_refr_now(nullptr);
-        n += std::snprintf(out + n, size - n, "zoom %s to %d km by the PPA: %d frames and the last drawn in %d ms\n",
-                           name, RANGES[s_range_step], s_fast_frames,
+        n += std::snprintf(out + n, size - n,
+                           "zoom %s to %d km by the PPA: %d frames in %lld ms (magnifying %lld, waiting %lld, "
+                           "catching up %lld), and the last drawn by %d ms\n",
+                           name, RANGES[s_range_step], s_fast_frames, moved / 1000, zoomed.rotate_us / 1000,
+                           zoomed.wait_us / 1000, zoomed.catch_up_us / 1000,
                            static_cast<int>((esp_timer_get_time() - began) / units::kUsPerMs));
         s_fast_frames = 0;
         return;
@@ -3139,8 +3172,7 @@ int bench_radar_zoom_frame(char *out, std::size_t size)
     s_fast_zooming = true;
     s_fast_from = s_fast_picture = RANGES[s_range_step];
     s_fast_to   = static_cast<int>(static_cast<float>(s_fast_from) / 1.25f);
-    s_fast_shown = -1;
-    fast_zoom_step(nullptr, ZOOM_PROGRESS_FULL);
+    show_magnified(static_cast<std::int32_t>(std::lround(1.25f * 16.0f)));
     return std::snprintf(out, size, "held\n");
 #else
     return std::snprintf(out, size, "panel only\n");

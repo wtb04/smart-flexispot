@@ -262,6 +262,32 @@ void catch_up(const std::uint8_t *from, std::uint8_t *to, const Rect &r)
     esp_cache_msync(to + first, last - first, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
 }
 
+// `r` brought up to date but for where `drawn` is about to cover it: the
+// parts above and below it, and either side of it between.
+void catch_up_around(const std::uint8_t *from, std::uint8_t *to, const Rect &r, const Rect &drawn)
+{
+    const std::uint32_t r_right = r.x + r.w, r_bottom = r.y + r.h;
+    const std::uint32_t d_right = drawn.x + drawn.w, d_bottom = drawn.y + drawn.h;
+    if (r.x >= d_right || drawn.x >= r_right || r.y >= d_bottom || drawn.y >= r_bottom) {
+        catch_up(from, to, r);  // apart from it altogether
+        return;
+    }
+    const std::uint32_t top    = std::max(r.y, drawn.y);
+    const std::uint32_t bottom = std::min(r_bottom, d_bottom);
+    if (r.y < top) {
+        catch_up(from, to, {r.x, r.y, r.w, top - r.y});
+    }
+    if (bottom < r_bottom) {
+        catch_up(from, to, {r.x, bottom, r.w, r_bottom - bottom});
+    }
+    if (r.x < drawn.x) {
+        catch_up(from, to, {r.x, top, drawn.x - r.x, bottom - top});
+    }
+    if (d_right < r_right) {
+        catch_up(from, to, {d_right, top, r_right - d_right, bottom - top});
+    }
+}
+
 // A buffer neither on show nor asked for, which nothing reads.
 int free_buffer()
 {
@@ -749,9 +775,7 @@ esp_err_t zoom_frame(const ZoomFrame &f)
     const std::uint8_t *latest = s_fbs[s_asked.load(std::memory_order_relaxed)];
     const std::int64_t  catching = esp_timer_get_time();
     for (int i = 0; i < s_behind_count[s_target]; ++i) {
-        if (!inside(s_behind[s_target][i], place.rect)) {
-            catch_up(latest, s_fbs[s_target], s_behind[s_target][i]);
-        }
+        catch_up_around(latest, s_fbs[s_target], s_behind[s_target][i], place.rect);
     }
     s_behind_count[s_target] = 0;
     s_flush_times.catch_up_us += esp_timer_get_time() - catching;
