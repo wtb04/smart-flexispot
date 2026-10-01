@@ -442,7 +442,7 @@ void paint_update_icon(const UpdateState &state)
 }
 
 namespace {
-constexpr std::int32_t SHORTCUT_GAP       = theme::space::s;
+constexpr std::int32_t SHORTCUT_GAP       = theme::space::m;
 constexpr std::int32_t SHORTCUT_ICON      = 30;  // the desk drawn small in a chip
 constexpr int          SHORTCUT_PRESETS[] = {STAND_PRESET, SIT_PRESET};
 constexpr std::size_t  SHORTCUT_COUNT     = std::size(SHORTCUT_PRESETS);

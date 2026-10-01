@@ -443,7 +443,6 @@ void build_cinema(lv_obj_t *screen)
     const std::int32_t transport_y = room_y - BUTTON_GAP * 2 - TRANSPORT_H;
     build_transport(transport_y);
     build_room(room_y);
-    add_corner_clock(s_view);
 
     s_tick = lv_timer_create(tick, TICK_MS, nullptr);
     lv_timer_pause(s_tick);
@@ -453,8 +452,10 @@ void build_cinema(lv_obj_t *screen)
                              s_skip_was_offered = false;
                              lv_timer_resume(s_tick);
                              tick(s_tick);
+                             update_view_clocks();
                          },
                          [] { lv_timer_pause(s_tick); }});
+    add_view_clock(s_cinema, s_view, close);
 }
 
 bool cinema_has_next()

@@ -1,7 +1,7 @@
 #include "ui_internal.h"
 
 #include <algorithm>
-#include <cstdio>
+#include <cstring>
 
 // The speaker's music over the whole screen, as the cinema view has a film:
 // the cover large, what plays and how far, its controls, the volume and the
@@ -13,18 +13,20 @@ namespace {
 constexpr std::int32_t PAD          = 40;
 constexpr std::int32_t COVER        = media::kLargeArtSize;
 constexpr std::int32_t COVER_X      = 80;
-constexpr std::int32_t COVER_RADIUS = 24;
-constexpr std::int32_t TEXT_GAP     = 64;
-constexpr std::int32_t LINE_GAP     = 12;
-constexpr std::int32_t PROGRESS_H   = 10;
-constexpr std::int32_t TRANSPORT_H  = 80;
-constexpr std::int32_t TRANSPORT_GAP = 40;  // between the three, across
-constexpr std::int32_t ROW_GAP      = 24;   // between the rows of controls
-constexpr std::int32_t SIDE_W       = 120;  // the track before and after
-constexpr std::int32_t PLAY_W       = 200;
-constexpr std::int32_t VOLUME_H     = 56;
-constexpr std::int32_t VOLUME_INSET = 24;
-constexpr std::uint8_t VOLUME_FILL_MIX = 64;  // of the text's colour into the bar's
+constexpr std::int32_t COVER_RADIUS = 28;
+constexpr std::int32_t TEXT_GAP     = 80;
+constexpr std::int32_t LINE_GAP     = 10;
+constexpr std::int32_t TEXT_TO_BAR  = 48;   // under the artist, when the title leaves room
+constexpr std::int32_t PROGRESS_H   = 6;
+constexpr std::int32_t PLAY_D       = 112;  // round, in the cover's colour
+constexpr std::int32_t SIDE_D       = 96;   // the track before and after, a bare mark to tap
+constexpr std::int32_t TRANSPORT_GAP = 48;  // between the three, across
+constexpr std::int32_t ROW_GAP      = 28;   // between the rows of controls
+constexpr std::int32_t VOLUME_H     = 56;   // to touch: the line in it is thin
+constexpr std::int32_t KNOB_D       = 22;
+constexpr std::int32_t SPEAKER_W    = 56;   // the mark before the line
+constexpr std::int32_t PICKS_D      = 64;
+constexpr std::uint8_t PRESSED_MIX  = 40;   // of the text's colour into the surface, under a finger
 constexpr std::int32_t PAUSED_MARK  = 120;
 constexpr lv_opa_t     PAUSED_DIM   = LV_OPA_50;
 constexpr std::uint32_t GLIDE_MS    = 33;   // the bar looked at, moved only when its end would move
@@ -99,7 +101,8 @@ bool           s_cover_new = true;   // a cover came, maybe into the same buffer
 lv_obj_t      *s_source  = nullptr;
 lv_obj_t      *s_title   = nullptr;
 lv_obj_t      *s_artist  = nullptr;
-std::int32_t   s_artist_y[2] = {};  // under a title of one line, and of two
+std::int32_t   s_text_top = 0;     // no higher than the cover
+std::int32_t   s_text_end = 0;     // where the text ends, over the progress
 lv_obj_t      *s_bar     = nullptr;
 lv_obj_t      *s_elapsed = nullptr;
 lv_obj_t      *s_total   = nullptr;
@@ -107,8 +110,9 @@ lv_obj_t      *s_play    = nullptr;
 lv_obj_t      *s_steer[3] = {};      // before, play, after
 lv_obj_t      *s_picks   = nullptr;
 lv_obj_t      *s_volume  = nullptr;
+lv_obj_t      *s_volume_line  = nullptr;
 lv_obj_t      *s_volume_fill  = nullptr;
-lv_obj_t      *s_volume_level = nullptr;
+lv_obj_t      *s_volume_knob  = nullptr;
 bool           s_volume_held  = false;
 int            s_duration_shown = -1;
 std::int32_t   s_bar_end      = -1;  // where the bar's end was last drawn, in pixels
@@ -131,10 +135,15 @@ lv_obj_t *line(std::uint32_t colour, const lv_font_t *font, std::int32_t w, std:
     return label;
 }
 
-lv_obj_t *button(const char *text, std::int32_t w, std::int32_t h, lv_event_cb_t on_click)
+// Round; with nothing behind the mark but while a finger is on it, unless filled.
+lv_obj_t *button(const char *text, std::int32_t d, const lv_font_t *font, bool filled, lv_event_cb_t on_click)
 {
-    lv_obj_t *b = theme::make_button(s_view, text, theme::panel_light, fonts::size_32());
-    lv_obj_set_size(b, w, h);
+    lv_obj_t *b = theme::make_button(s_view, text, theme::panel_light, font);
+    lv_obj_set_size(b, d, d);
+    lv_obj_set_style_radius(b, theme::radius::pill, 0);
+    if (!filled) {
+        lv_obj_set_style_bg_opa(b, LV_OPA_TRANSP, 0);
+    }
     lv_obj_add_event_cb(b, on_click, LV_EVENT_CLICKED, nullptr);
     return b;
 }
@@ -149,10 +158,14 @@ void steer(MediaAction action)
 void paint(const Palette &colours)
 {
     lv_obj_set_style_bg_color(s_view, colours.back, 0);
-    for (lv_obj_t *part : {s_steer[0], s_steer[2], s_picks, s_volume, s_bar}) {
-        lv_obj_set_style_bg_color(part, colours.surface, 0);
+    lv_obj_set_style_bg_color(s_volume_line, colours.surface, 0);
+    lv_obj_set_style_bg_color(s_bar, colours.surface, 0);
+    const lv_color_t pressed = lv_color_mix(lv_color_hex(theme::text), colours.surface, PRESSED_MIX);
+    for (lv_obj_t *bare : {s_steer[0], s_steer[2], s_picks}) {
+        lv_obj_set_style_bg_color(bare, colours.surface, LV_STATE_PRESSED);
+        lv_obj_set_style_bg_opa(bare, LV_OPA_COVER, LV_STATE_PRESSED);
     }
-    lv_obj_set_style_bg_color(s_volume_fill, lv_color_mix(lv_color_hex(theme::text), colours.surface, VOLUME_FILL_MIX), 0);
+    lv_obj_set_style_bg_color(s_play, pressed, LV_STATE_PRESSED);
     // What the accent marks on the pages takes the cover's own instead, light
     // enough that what is on it is in the dark of the background.
     lv_obj_set_style_bg_color(s_play, colours.accent, 0);
@@ -201,10 +214,9 @@ void show_cover()
 
 void show_volume(int percent)
 {
-    lv_obj_set_width(s_volume_fill, lv_obj_get_width(s_volume) * percent / 100);
-    char text[12];
-    std::snprintf(text, sizeof(text), "%d", percent);
-    theme::set_text(s_volume_level, text);
+    const std::int32_t at = lv_obj_get_width(s_volume_line) * percent / 100;
+    lv_obj_set_width(s_volume_fill, at);
+    lv_obj_set_x(s_volume_knob, lv_obj_get_x(s_volume_line) + at - KNOB_D / 2);
 }
 
 // How far it is: the bar drawn again only when its end moves a pixel, the
@@ -234,6 +246,23 @@ void check(lv_timer_t *)
         close_music();  // it stopped, or the cinema view is for this
     }
 }
+
+// The text sits over the progress, as one with it, rising for a title of two
+// lines until it meets the top of the cover.
+void place_text(const char *title)
+{
+    const std::int32_t line_h = lv_font_get_line_height(fonts::size_48());
+    lv_point_t         size{};
+    lv_text_get_size(&size, title, fonts::size_48(), 0, 0, lv_obj_get_width(s_title), LV_TEXT_FLAG_NONE);
+    const std::int32_t title_h = size.y > line_h ? 2 * line_h : line_h;
+    const std::int32_t source_h = lv_font_get_line_height(fonts::size_22());
+    const std::int32_t artist_h = lv_font_get_line_height(fonts::size_28());
+    const std::int32_t text_h   = source_h + LINE_GAP + title_h + LINE_GAP + artist_h;
+    const std::int32_t top      = std::max(s_text_top, s_text_end - TEXT_TO_BAR - text_h);
+    lv_obj_set_y(s_source, top);
+    lv_obj_set_y(s_title, top + source_h + LINE_GAP);
+    lv_obj_set_y(s_artist, top + source_h + LINE_GAP + title_h + LINE_GAP);
+}
 }  // namespace
 
 void refresh_music()
@@ -245,9 +274,7 @@ void refresh_music()
     const char *title = lv_label_get_text(s_media_title);
     if (std::strcmp(title, lv_label_get_text(s_title)) != 0) {
         theme::set_text(s_title, title);
-        lv_point_t size{};
-        lv_text_get_size(&size, title, fonts::size_48(), 0, 0, lv_obj_get_width(s_title), LV_TEXT_FLAG_NONE);
-        lv_obj_set_y(s_artist, s_artist_y[size.y > lv_font_get_line_height(fonts::size_48()) ? 1 : 0]);
+        place_text(title);
     }
     theme::set_text(s_artist, lv_label_get_text(s_media_artist));
     show_cover();
@@ -294,7 +321,7 @@ void volume_touched(lv_event_t *e)
     lv_point_t at{};
     lv_indev_get_point(lv_indev_active(), &at);
     lv_area_t bar{};
-    lv_obj_get_coords(s_volume, &bar);
+    lv_obj_get_coords(s_volume_line, &bar);
     const int percent = std::clamp(static_cast<int>((at.x - bar.x1) * 100 / lv_area_get_width(&bar)), 0, 100);
     s_volume_held     = true;
     if (percent == s_media_volume) {
@@ -333,42 +360,51 @@ void build_cover(std::int32_t y)
     lv_obj_set_hidden(s_paused, true);
 }
 
-void build_text(std::int32_t x, std::int32_t y, std::int32_t w)
+// Between the top of the cover and the progress: s_text_top to s_text_end.
+void build_text(std::int32_t x, std::int32_t w)
 {
     s_source = theme::make_label(s_view, "", theme::primary, fonts::size_22());
-    lv_obj_set_pos(s_source, x, y);
-    y += lv_font_get_line_height(fonts::size_22()) + LINE_GAP;
-    s_title = line(theme::text, fonts::size_48(), w, 2);
-    lv_obj_set_pos(s_title, x, y);
-    s_artist_y[0] = y + lv_font_get_line_height(fonts::size_48()) + LINE_GAP;
-    s_artist_y[1] = y + 2 * lv_font_get_line_height(fonts::size_48()) + LINE_GAP;
-    s_artist      = line(theme::secondary, fonts::size_28(), w, 1);
-    lv_obj_set_pos(s_artist, x, s_artist_y[0]);
+    s_title  = line(theme::text, fonts::size_48(), w, 2);
+    s_artist = line(theme::secondary, fonts::size_28(), w, 1);
+    for (lv_obj_t *part : {s_source, s_title, s_artist}) {
+        lv_obj_set_x(part, x);
+    }
+    place_text("");
 }
 
+lv_obj_t *round_part(lv_obj_t *parent, std::int32_t w, std::int32_t h, std::uint32_t colour)
+{
+    lv_obj_t *part = lv_obj_create(parent);
+    theme::style_panel(part, colour, theme::radius::pill);
+    lv_obj_set_size(part, w, h);
+    lv_obj_set_clickable(part, false);
+    lv_obj_set_scrollable(part, false);
+    return part;
+}
+
+// A thin line to slide along, its mark before it; the whole height is to touch.
 void build_volume(std::int32_t x, std::int32_t y, std::int32_t w)
 {
     s_volume = lv_obj_create(s_view);
-    theme::style_panel(s_volume, theme::panel_light, theme::radius::control);
     lv_obj_set_size(s_volume, w, VOLUME_H);
     lv_obj_set_pos(s_volume, x, y);
+    lv_obj_set_style_bg_opa(s_volume, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(s_volume, 0, 0);
     lv_obj_set_style_pad_all(s_volume, 0, 0);
-    lv_obj_set_style_clip_corner(s_volume, true, 0);
     lv_obj_set_scrollable(s_volume, false);
     for (lv_event_code_t code : {LV_EVENT_PRESSED, LV_EVENT_PRESSING, LV_EVENT_RELEASED, LV_EVENT_PRESS_LOST}) {
         lv_obj_add_event_cb(s_volume, volume_touched, code, nullptr);
     }
-    s_volume_fill = lv_obj_create(s_volume);
-    theme::style_panel(s_volume_fill, theme::panel_light, 0);
-    lv_obj_set_size(s_volume_fill, 0, VOLUME_H);
-    lv_obj_set_pos(s_volume_fill, 0, 0);
-    lv_obj_set_clickable(s_volume_fill, false);
-    lv_obj_t *speaker = theme::make_label(s_volume, LV_SYMBOL_VOLUME_MAX, theme::text, fonts::size_28());
-    lv_obj_align(speaker, LV_ALIGN_LEFT_MID, VOLUME_INSET, 0);
+    lv_obj_t *speaker = theme::make_label(s_volume, LV_SYMBOL_VOLUME_MAX, theme::secondary, fonts::size_28());
+    lv_obj_align(speaker, LV_ALIGN_LEFT_MID, 0, 0);
     lv_obj_set_clickable(speaker, false);
-    s_volume_level = theme::make_label(s_volume, "", theme::text, fonts::size_28());
-    lv_obj_align(s_volume_level, LV_ALIGN_RIGHT_MID, -VOLUME_INSET, 0);
-    lv_obj_set_clickable(s_volume_level, false);
+    const std::int32_t line_w = w - SPEAKER_W - KNOB_D / 2;
+    s_volume_line = round_part(s_volume, line_w, PROGRESS_H, theme::panel_light);
+    lv_obj_align(s_volume_line, LV_ALIGN_LEFT_MID, SPEAKER_W, 0);
+    s_volume_fill = round_part(s_volume, 0, PROGRESS_H, theme::text);
+    lv_obj_align(s_volume_fill, LV_ALIGN_LEFT_MID, SPEAKER_W, 0);
+    s_volume_knob = round_part(s_volume, KNOB_D, KNOB_D, theme::text);
+    lv_obj_align(s_volume_knob, LV_ALIGN_LEFT_MID, SPEAKER_W - KNOB_D / 2, 0);
 }
 
 // Under the text, from the bottom of the cover up: the volume and the
@@ -376,16 +412,17 @@ void build_volume(std::int32_t x, std::int32_t y, std::int32_t w)
 void build_controls(std::int32_t x, std::int32_t bottom, std::int32_t w)
 {
     const std::int32_t volume_y    = bottom - VOLUME_H;
-    const std::int32_t transport_y = volume_y - ROW_GAP - TRANSPORT_H;
+    const std::int32_t transport_y = volume_y - ROW_GAP - PLAY_D;
     const std::int32_t times_y     = transport_y - ROW_GAP - lv_font_get_line_height(fonts::size_20());
     const std::int32_t bar_y       = times_y - LINE_GAP - PROGRESS_H;
+    s_text_end                     = bar_y;
 
     s_bar = lv_bar_create(s_view);
     lv_obj_set_size(s_bar, w, PROGRESS_H);
     lv_obj_set_pos(s_bar, x, bar_y);
-    theme::style_panel(s_bar, theme::panel_light, PROGRESS_H / 2);
+    theme::style_panel(s_bar, theme::panel_light, theme::radius::pill);
     lv_obj_set_style_bg_opa(s_bar, LV_OPA_COVER, LV_PART_INDICATOR);
-    lv_obj_set_style_radius(s_bar, PROGRESS_H / 2, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(s_bar, theme::radius::pill, LV_PART_INDICATOR);
     s_elapsed = theme::make_label(s_view, "0:00", theme::secondary, fonts::size_20());
     lv_obj_set_pos(s_elapsed, x, times_y);
     s_total = theme::make_label(s_view, "0:00", theme::secondary, fonts::size_20());
@@ -393,21 +430,21 @@ void build_controls(std::int32_t x, std::int32_t bottom, std::int32_t w)
     lv_obj_set_style_text_align(s_total, LV_TEXT_ALIGN_RIGHT, 0);
     lv_obj_set_pos(s_total, x, times_y);
 
-    const std::int32_t row_w = 2 * SIDE_W + PLAY_W + 2 * TRANSPORT_GAP;
-    const std::int32_t row_x = x + (w - row_w) / 2;
-    s_steer[0] = button(LV_SYMBOL_PREV, SIDE_W, TRANSPORT_H, [](lv_event_t *) { steer(MediaAction::Previous); });
-    lv_obj_set_pos(s_steer[0], row_x, transport_y);
-    s_play = button(LV_SYMBOL_PLAY, PLAY_W, TRANSPORT_H, [](lv_event_t *) { media_toggle_play(); });
-    lv_obj_set_pos(s_play, row_x + SIDE_W + TRANSPORT_GAP, transport_y);
+    const std::int32_t middle = x + w / 2;
+    const std::int32_t side_y = transport_y + (PLAY_D - SIDE_D) / 2;
+    s_play = button(LV_SYMBOL_PLAY, PLAY_D, fonts::size_48(), true, [](lv_event_t *) { media_toggle_play(); });
+    lv_obj_set_pos(s_play, middle - PLAY_D / 2, transport_y);
+    s_steer[0] = button(LV_SYMBOL_PREV, SIDE_D, fonts::size_48(), false,
+                        [](lv_event_t *) { steer(MediaAction::Previous); });
+    lv_obj_set_pos(s_steer[0], middle - PLAY_D / 2 - TRANSPORT_GAP - SIDE_D, side_y);
     s_steer[1] = s_play;
-    s_steer[2] = button(LV_SYMBOL_NEXT, SIDE_W, TRANSPORT_H, [](lv_event_t *) { steer(MediaAction::Next); });
-    lv_obj_set_pos(s_steer[2], row_x + SIDE_W + PLAY_W + 2 * TRANSPORT_GAP, transport_y);
+    s_steer[2] = button(LV_SYMBOL_NEXT, SIDE_D, fonts::size_48(), false, [](lv_event_t *) { steer(MediaAction::Next); });
+    lv_obj_set_pos(s_steer[2], middle + PLAY_D / 2 + TRANSPORT_GAP, side_y);
 
-    // The favourites, to play another instead, beside the volume.
-    const std::int32_t picks_w = VOLUME_H + VOLUME_INSET;
-    s_picks = button(LV_SYMBOL_LIST, picks_w, VOLUME_H, [](lv_event_t *) { open_favourites(); });
-    lv_obj_set_pos(s_picks, x + w - picks_w, volume_y);
-    build_volume(x, volume_y, w - picks_w - ROW_GAP);
+    // The favourites, to play another instead, at the volume's end.
+    s_picks = button(LV_SYMBOL_LIST, PICKS_D, fonts::size_28(), false, [](lv_event_t *) { open_favourites(); });
+    lv_obj_set_pos(s_picks, x + w - PICKS_D, volume_y + (VOLUME_H - PICKS_D) / 2);
+    build_volume(x, volume_y, w - PICKS_D - BUTTON_GAP);
 }
 }  // namespace
 
@@ -425,10 +462,10 @@ void build_music(lv_obj_t *screen)
     build_cover(cover_y);
     const std::int32_t x = COVER_X + COVER + TEXT_GAP;
     const std::int32_t w = l.screen_w - x - COVER_X;
-    build_text(x, cover_y, w);
+    s_text_top = cover_y;
     build_controls(x, cover_y + COVER, w);
+    build_text(x, w);
     paint(pages_palette());
-    add_corner_clock(s_view);
 
     // The way back, as the other fullscreen views have it, and the desk.
     lv_obj_t *close = theme::make_chip(s_view, "");
@@ -449,6 +486,7 @@ void build_music(lv_obj_t *screen)
                             lv_timer_resume(s_glide);
                             lv_timer_resume(s_check);
                             refresh_music();
+                            update_view_clocks();
                         },
                         [] {
                             lv_timer_pause(s_glide);
@@ -457,6 +495,7 @@ void build_music(lv_obj_t *screen)
     for (lv_obj_t *control : {close, desk}) {
         fade_when_idle(s_music, control);
     }
+    add_view_clock(s_music, s_view, close);
 }
 
 void apply_music_cover(const void *pixels)

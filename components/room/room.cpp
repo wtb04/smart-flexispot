@@ -394,16 +394,29 @@ void show_media_text(const std::string &source, const std::string &title,
     }
 }
 
+// A new track comes with the last one's position until the speaker reports
+// afresh, seconds later: until then it is taken as at its start, so the times
+// change with the title rather than after it.
 void show_media_position(const PlayerView &view, bool playing)
 {
-    if (view.position_key == s_position_stamp && view.duration_s == s_position_duration &&
-        playing == s_position_playing) {
+    static std::string s_track;
+    static std::string s_seen_key;   // the position's stamp the last time round
+    static std::string s_stale_key;  // the last track's, while the new one still has it
+    const std::string  track = view.title.empty() ? "" : view.title + '\n' + view.artist;
+    if (track != s_track) {
+        s_stale_key = s_track.empty() || track.empty() ? "" : s_seen_key;
+        s_track     = track;
+    }
+    s_seen_key       = view.position_key;
+    const bool stale = !s_stale_key.empty() && view.position_key == s_stale_key;
+    const std::string stamp = stale ? "start of " + track : view.position_key;
+    if (stamp == s_position_stamp && view.duration_s == s_position_duration && playing == s_position_playing) {
         return;
     }
-    s_position_stamp    = view.position_key;
+    s_position_stamp    = stamp;
     s_position_duration = view.duration_s;
     s_position_playing  = playing;
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_progress(view.position_s, view.duration_s, playing));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_progress(stale ? 0 : view.position_s, view.duration_s, playing));
 }
 
 void show_media_volume(const PlayerView &view)

@@ -310,7 +310,9 @@ void apply_music_cover(const void *pixels);  // media::kLargeArtSize square, or 
 void refresh_music();  // after what plays changed: its title, cover and times together
 /** The time in a fullscreen view's bottom right corner, shown or put away by a
  *  tap there, as the last tap left it in any of them. */
-void add_corner_clock(lv_obj_t *root);
+// The time beside a fullscreen view's chip back, faded with its other buttons.
+lv_obj_t *add_view_clock(ViewId view, lv_obj_t *root, lv_obj_t *chip);
+void      update_view_clocks();
 void apply_media_neighbours(bool previous, bool next);
 bool cinema_has_next();  // an episode after this one to go on to
 void show_guest_presets();

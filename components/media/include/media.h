@@ -8,7 +8,7 @@ namespace media {
 /** Pixels. Sized for the largest place it is shown, so nothing scales up: the
  *  card's, and the music view's over the whole screen. */
 inline constexpr int kArtSize      = 200;
-inline constexpr int kLargeArtSize = 440;
+inline constexpr int kLargeArtSize = 480;
 
 /** A video's own still, wide, for the cinema view. */
 inline constexpr int kStillW = 480;
