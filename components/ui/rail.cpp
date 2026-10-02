@@ -23,7 +23,9 @@ constexpr std::int32_t DOCK_INNER_W  = DOCK_W - 2 * DOCK_PAD;  // Stand and Sit 
 constexpr std::int32_t DOCK_GAP      = 12;
 constexpr std::int32_t DOCK_DESK_ICON = 46;
 constexpr std::int32_t FOCUS_H     = 72;
-constexpr std::int32_t FOCUS_APART = 16;  // from the tabs under it
+constexpr std::int32_t FOCUS_APART = 16;  // from the tabs over it
+// Home under Stand and Sit, apart from them: the height and the two, then a gap.
+constexpr std::int32_t HOME_Y = 3 * (DOCK_W - 2 * DOCK_PAD) + 2 * DOCK_GAP + 2 * DOCK_GAP;
 
 constexpr std::int32_t SHEET_PAD     = 28;
 constexpr std::int32_t SHEET_GAP     = 24;  // from the dock
@@ -248,13 +250,13 @@ void paint_focus_button()
     lv_obj_set_style_opa(s_focus_left, focus_paused(focus) ? LV_OPA_50 : LV_OPA_COVER, 0);
 }
 
-// Over the pages' tabs, a little apart from them, being no page itself.
+// Under the pages' tabs, a little apart from them, being no page itself.
 void build_focus_button(lv_obj_t *tabs)
 {
     s_focus_button = lv_button_create(tabs);
     theme::style_button(s_focus_button, theme::panel_light);
     lv_obj_set_size(s_focus_button, DOCK_INNER_W, FOCUS_H);
-    lv_obj_set_style_margin_bottom(s_focus_button, FOCUS_APART, 0);
+    lv_obj_set_style_margin_top(s_focus_button, FOCUS_APART, 0);
     theme::fill_accent(s_focus_button, LV_STATE_CHECKED);
     // On the accent while its card is out, as the height is, the timer on it in the text's colour.
     lv_obj_add_event_cb(s_focus_button, [](lv_event_t *) {
@@ -360,9 +362,15 @@ lv_obj_t *dock_tabs()
     return s_tabs;
 }
 
+// Home under the desk, where a hand finds it first; the other pages stand up
+// from the foot, the timer lowest of all, being no page.
 void dock_tabs_done()
 {
-    build_focus_button(s_tabs);  // last in a column that stands up from the foot, so on top
+    lv_obj_t *home = lv_obj_get_child(s_tabs, 0);  // the first made, Home
+    lv_obj_set_parent(home, s_rail);
+    lv_obj_align(home, LV_ALIGN_TOP_MID, 0, HOME_Y);
+    build_focus_button(s_tabs);
+    lv_obj_move_to_index(s_focus_button, 0);  // first in a column that stands up from the foot, so lowest
 }
 
 void create_dock(lv_obj_t *parent)

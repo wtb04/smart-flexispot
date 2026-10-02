@@ -580,13 +580,10 @@ void paint_lights_slot()
     for (const bool lit : lights.light_on) {
         on += lit ? 1 : 0;
     }
-    char text[16] = "";
-    if (lights.on && on > 0) {
-        std::snprintf(text, sizeof(text), "%d", on);
-    }
+    char text[16];
+    std::snprintf(text, sizeof(text), "%d", lights.on ? on : 0);
     // On in the accent, rather than the whole slot filled with it.
     theme::set_text(s_lights_text, text);
-    lv_obj_set_hidden(s_lights_text, text[0] == '\0');  // the bulb alone, in the middle, while all are off
     theme::set_text_color(s_lights_text, lights.on ? theme::primary : theme::secondary);
     for (std::uint32_t i = 0; i < lv_obj_get_child_count(s_lights_bulb); ++i) {
         lv_obj_set_style_image_recolor(lv_obj_get_child(s_lights_bulb, static_cast<std::int32_t>(i)),
