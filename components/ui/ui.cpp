@@ -3,6 +3,7 @@
 #include "focus_page.h"
 #include "diagnostics_model.h"
 #include "home_model.h"
+#include "radar_model.h"
 #include "room_model.h"
 #include "settings_model.h"
 #include "status_model.h"
@@ -763,17 +764,17 @@ void apply_page_updates()
         settings_take_update(update);
     }
     if (bool calendar = false; take(p_calendar, calendar)) {
-        show_calendar();
+        publish(Topic::Calendar);
     }
     if (bool radar = false; take(p_radar, radar)) {
-        refresh_radar();
+        publish(Topic::Radar);
     }
     static DetailsArgs details;
     if (take(p_details, details)) {
-        show_radar_details(details.hex, details.details);
+        radar_take_details(details.hex, details.details);
     }
     if (PhotoArgs photo{}; take(p_photo, photo)) {
-        show_radar_photo(photo.hex, photo.pixels, photo.width, photo.height);
+        radar_take_photo(photo.hex, photo.pixels, photo.width, photo.height);
     }
 }
 

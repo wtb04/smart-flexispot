@@ -24,6 +24,9 @@ enum class Topic : std::uint8_t {
     Settings,  // the choices and the notification volume: see settings_model.h
     Update,    // firmware on its way or waiting: see settings_model.h
     Diagnostics,  // the panel's own report and its glances: see diagnostics_model.h
+    Calendar,  // the calendar fetched again: the ical component has it
+    Radar,     // the traffic fetched again: the radar component has it
+    Lookup,    // a tapped aircraft's details or photo: see radar_model.h
     Count,
 };
 

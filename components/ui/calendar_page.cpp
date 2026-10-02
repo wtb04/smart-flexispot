@@ -1,6 +1,7 @@
 #include "calendar_page.h"
 
 #include "ui_internal.h"
+#include "topics.h"
 
 #include "fonts/units_font.h"
 #include "ical.h"
@@ -1870,7 +1871,7 @@ void build_calendar_page(lv_obj_t *page, std::int32_t width, std::int32_t height
     show_view();
 
     lv_timer_create([](lv_timer_t *) { show_calendar(); }, REFRESH_MS, nullptr);
-    show_calendar();
+    detail::subscribe(detail::Topic::Calendar, detail::kNoView, show_calendar);
 }
 
 }  // namespace ui

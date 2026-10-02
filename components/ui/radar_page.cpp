@@ -1,6 +1,8 @@
 #include "radar_page.h"
 
 #include "ui_internal.h"
+#include "radar_model.h"
+#include "topics.h"
 
 #if REMOTE_ENABLED
 #include "lvgl_private.h"  // for the bench, the areas waiting to be drawn
@@ -2924,6 +2926,21 @@ void build_radar_page(lv_obj_t *page, std::int32_t width, std::int32_t height)
     build_full();
     s_grow_timer = lv_timer_create(grow_tick, TRAIL_FRAME_MS, nullptr);
     lv_timer_pause(s_grow_timer);
+    detail::subscribe(detail::Topic::Radar, detail::kNoView, refresh_radar);
+    // What was looked up for an aircraft, each part once as it comes.
+    detail::subscribe(detail::Topic::Lookup, detail::kNoView, [] {
+        static std::uint32_t      s_details_shown = 0;
+        static std::uint32_t      s_photo_shown   = 0;
+        const detail::RadarLookup &lookup         = detail::radar_lookup();
+        if (lookup.details_stamp != s_details_shown) {
+            s_details_shown = lookup.details_stamp;
+            show_radar_details(lookup.details_hex, lookup.details);
+        }
+        if (lookup.photo_stamp != s_photo_shown) {
+            s_photo_shown = lookup.photo_stamp;
+            show_radar_photo(lookup.photo_hex, lookup.photo, lookup.photo_width, lookup.photo_height);
+        }
+    });
 }
 
 // Keeps what was on show: asking again only blanked the photograph while it
