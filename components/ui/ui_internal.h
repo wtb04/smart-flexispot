@@ -20,7 +20,6 @@
 #include "focus_page.h"
 #include "screenshot.h"
 #include "radar_page.h"
-#include "segment_display.h"
 #include "icons.h"
 #include "theme.h"
 #include "units.h"
@@ -79,7 +78,7 @@ constexpr const char *PRESET_NAMES[kPresetCount] = {
     "Preset 1", "Ultra low", "Stand", "Sit", "Sit 2", "Stand 2",
 };
 
-constexpr std::int32_t DRAWER_W  = 600;  // the desk's fold-out beside the dock
+constexpr std::int32_t DRAWER_W  = 520;  // the desk's fold-out beside the dock
 
 constexpr int   DIAL_SCALE     = 10;
 constexpr float DEFAULT_STEP_C = 0.5f;
@@ -151,7 +150,6 @@ extern Orientation s_orientation;
 extern Handlers s_handlers;
 extern bool s_notice_lit_screen;
 extern int s_initial_brightness;
-extern std::optional<SegmentDisplay> s_height;
 extern lv_obj_t *s_rail;
 extern lv_obj_t *s_content;
 extern lv_obj_t *s_side_buttons[CHOICE_COUNT];
@@ -268,6 +266,8 @@ lv_obj_t *add_chrome_chip(Chrome &chrome, const lv_image_dsc_t *icon, lv_event_c
 void      light_chrome_chip(lv_obj_t *chip, bool on);  // in the accent while on
 void show_guest_presets();
 void select_page(int index);
+/** Setup from the top row's status, and back to where it was opened from. */
+void toggle_setup();
 /** The owner's pages come and go with their phone, and with the setting that hides them. */
 void follow_pages();
 /** The Focus tab's icon in `ink` while the timer runs, faded while paused; a

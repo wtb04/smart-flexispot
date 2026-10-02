@@ -11,15 +11,15 @@
 #include <cstdio>
 #include <utility>
 
-// The dock at the panel's side: the tabs, and at its foot Stand and Sit and the
-// height, which folds the rest of the desk out beside it: its height in the
-// segment digits, every preset, and up and down to hold.
+// The dock at the panel's side: at its head the desk's height, which folds the
+// rest of the desk out beside it, then Stand and Sit; the tabs stand up from
+// its foot, Home lowest.
 namespace ui::detail {
 namespace {
 constexpr std::int32_t DOCK_PAD      = 12;
 constexpr std::int32_t DOCK_INNER_W  = DOCK_W - 2 * DOCK_PAD;  // Stand and Sit are as tall, square to the finger
 constexpr std::int32_t DOCK_GAP      = 12;
-constexpr std::int32_t DOCK_HEIGHT_H = 48;  // the height under them
+constexpr std::int32_t DOCK_HEIGHT_H = 56;
 constexpr std::int32_t DOCK_DESK_ICON = 46;
 
 constexpr std::int32_t SHEET_PAD     = 28;
@@ -28,15 +28,17 @@ constexpr std::int32_t SHEET_BTN_GAP = 20;
 constexpr std::int32_t SHEET_INNER_W = DRAWER_W - 2 * SHEET_PAD;
 constexpr std::int32_t SHEET_COLS    = 2;
 constexpr std::int32_t SHEET_BTN_W   = (SHEET_INNER_W - (SHEET_COLS - 1) * SHEET_BTN_GAP) / SHEET_COLS;
-constexpr std::int32_t SHEET_BTN_H   = 76;  // until those showing share the height
-// All of it shown: from the dock, past the gap and the ring of background round it.
-constexpr std::int32_t SHEET_FULL    = SHEET_GAP + DRAWER_W + GAP;
-constexpr std::uint32_t SHEET_MS     = 220;
+constexpr std::int32_t SHEET_BTN_H   = 112;
+// All of it shown, across: from the dock, past the gap and the ring of background round it.
+constexpr std::int32_t SHEET_FULL_W  = SHEET_GAP + DRAWER_W + GAP;
+constexpr int          SHEET_WHOLE   = 1000;  // how much shows, in thousandths
+constexpr std::uint32_t SHEET_OPEN_MS  = 240;
+constexpr std::uint32_t SHEET_CLOSE_MS = 180;
 // Folded out, it goes again once left alone this long.
 constexpr std::uint32_t SHEET_IDLE_MS = 20 * 1000;
 
-// Every preset in the fold-out, Stand and Sit first as the dock has them.
-constexpr int SHEET_PRESETS[] = {STAND_PRESET, SIT_PRESET, ULTRA_LOW_PRESET, 0, 4, 5};
+// The presets the dock has no room for.
+constexpr int SHEET_PRESETS[] = {ULTRA_LOW_PRESET, 0, 4, 5};
 // Presets 5 and 6 are for whoever uses the desk while the phone is away.
 constexpr int GUEST_PRESETS[] = {4, 5};
 
@@ -193,34 +195,30 @@ Shortcuts *add_shortcuts(lv_obj_t *root, bool column, std::int32_t side, std::in
     return &set;
 }
 
-lv_obj_t *s_tabs        = nullptr;  // the dock's column of tabs
-lv_obj_t *s_dock_height = nullptr;  // the height, small, under Stand and Sit
-lv_obj_t *s_height_button = nullptr;  // around it: folds the desk out
-lv_obj_t *s_sheet_grid  = nullptr;  // the presets
-lv_obj_t *s_sheet_moves = nullptr;  // up and down
-lv_obj_t *s_sheet_readout = nullptr;  // the height, at the foot by the dock's
-lv_obj_t *s_sheet_scrim = nullptr;  // under the fold-out: a tap anywhere else folds it away
-lv_obj_t *s_sheet_frame = nullptr;  // what of the fold-out shows, from the dock out
-lv_obj_t *s_sheet       = nullptr;
-bool      s_sheet_open  = false;
-std::int32_t s_sheet_shown = 0;
-lv_timer_t *s_sheet_idle = nullptr;
+lv_obj_t   *s_tabs          = nullptr;  // the dock's column of tabs
+lv_obj_t   *s_dock_height   = nullptr;  // the height, at the dock's head
+lv_obj_t   *s_height_button = nullptr;  // around it: folds the desk out
+lv_obj_t   *s_sheet_scrim   = nullptr;  // under the fold-out: a tap anywhere else folds it away
+lv_obj_t   *s_sheet_frame   = nullptr;  // what of the fold-out shows, from the height out
+lv_obj_t   *s_sheet         = nullptr;
+bool        s_sheet_open    = false;
+int         s_sheet_shown   = 0;  // in thousandths
+std::int32_t s_sheet_full_h = 0;  // all of it shown, down, ring and all
+std::int32_t s_shown_w      = 0;  // what the frame shows now
+std::int32_t s_shown_h      = 0;
+lv_timer_t *s_sheet_idle    = nullptr;
 
 void build_dock_desk(lv_obj_t *dock)
 {
-    lv_obj_t *foot = lv_obj_create(dock);
-    lv_obj_remove_style_all(foot);
-    lv_obj_set_size(foot, DOCK_INNER_W, LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(foot, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(foot, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_row(foot, DOCK_GAP, 0);
-    lv_obj_align(foot, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_set_clickable(foot, false);
+    lv_obj_t *head = lv_obj_create(dock);
+    lv_obj_remove_style_all(head);
+    lv_obj_set_size(head, DOCK_INNER_W, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(head, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(head, DOCK_GAP, 0);
+    lv_obj_align(head, LV_ALIGN_TOP_MID, 0, 0);
+    lv_obj_set_clickable(head, false);
 
-    add_shortcuts(foot, true, DOCK_INNER_W, theme::radius::control, DOCK_DESK_ICON, theme::panel_light);
-
-    // The height, as the dock has room for it; a tap folds the rest of the desk out.
-    lv_obj_t *height = lv_button_create(foot);
+    lv_obj_t *height = lv_button_create(head);
     s_height_button  = height;
     lv_obj_remove_style_all(height);
     lv_obj_set_size(height, DOCK_INNER_W, DOCK_HEIGHT_H);
@@ -230,8 +228,10 @@ void build_dock_desk(lv_obj_t *dock)
         lv_obj_set_style_bg_opa(height, LV_OPA_COVER, state);
     }
     lv_obj_add_event_cb(height, [](lv_event_t *) { open_desk_sheet(!s_sheet_open); }, LV_EVENT_CLICKED, nullptr);
-    s_dock_height = theme::make_label(height, "--", theme::primary, fonts::size_22());
+    s_dock_height = theme::make_label(height, "--", theme::primary, fonts::size_28());
     lv_obj_center(s_dock_height);
+
+    add_shortcuts(head, true, DOCK_INNER_W, theme::radius::control, DOCK_DESK_ICON, theme::panel_light);
 }
 
 void show_dock_height(int tenths)
@@ -250,55 +250,53 @@ std::int32_t sheet_edge()
     return l.rail_right ? l.rail_x : l.rail_x + DOCK_W;
 }
 
-// The fold-out stays where it ends up, and what shows of it grows from the
-// dock: only the strip newly shown or hidden is drawn again, where sliding the
-// whole card drew all of it and what it passed over on every frame.
-void place_sheet(std::int32_t shown)
+// What a frame shows of the dock's side of the screen, `w` across and `h` down.
+lv_area_t shown_area(std::int32_t w, std::int32_t h)
 {
-    const Layout       l    = layout();
     const std::int32_t edge = sheet_edge();
-    lv_display_t      *disp = lv_display_get_default();
+    return layout().rail_right ? lv_area_t{edge - w, 0, edge - 1, h - 1} : lv_area_t{edge, 0, edge + w - 1, h - 1};
+}
+
+// The fold-out stays where it ends up, and what shows of it grows from the
+// corner by the height, across and down: only what is newly shown or hidden
+// is drawn again, where sliding the card drew all of it and what it passed
+// over on every frame.
+void place_sheet(int shown)
+{
+    const bool         right = layout().rail_right;
+    const std::int32_t w     = SHEET_FULL_W * shown / SHEET_WHOLE;
+    const std::int32_t h     = s_sheet_full_h * shown / SHEET_WHOLE;
+    lv_display_t      *disp  = lv_display_get_default();
     lv_display_enable_invalidation(disp, false);
     lv_obj_set_hidden(s_sheet_frame, shown <= 0);
-    lv_obj_set_width(s_sheet_frame, std::max<std::int32_t>(shown, 1));
-    lv_obj_set_x(s_sheet_frame, l.rail_right ? edge - shown : edge);
-    lv_obj_set_x(s_sheet, l.rail_right ? shown - SHEET_GAP - DRAWER_W : SHEET_GAP);
+    lv_obj_set_size(s_sheet_frame, std::max<std::int32_t>(w, 1), std::max<std::int32_t>(h, 1));
+    lv_obj_set_x(s_sheet_frame, right ? sheet_edge() - w : sheet_edge());
+    lv_obj_set_x(s_sheet, right ? w - SHEET_GAP - DRAWER_W : SHEET_GAP);
     lv_obj_update_layout(s_sheet_frame);  // moved now, while that draws nothing again
     lv_display_enable_invalidation(disp, true);
 
-    const std::int32_t from = std::min(shown, s_sheet_shown);
-    const std::int32_t to   = std::max(shown, s_sheet_shown);
-    s_sheet_shown           = shown;
-    if (to > from) {
-        const lv_area_t strip = l.rail_right ? lv_area_t{edge - to, 0, edge - from - 1, l.screen_h - 1}
-                                             : lv_area_t{edge + from, 0, edge + to - 1, l.screen_h - 1};
-        lv_obj_invalidate_area(lv_screen_active(), &strip);
+    // One of the two holds the other: what lies in the larger alone changed.
+    const std::int32_t big_w = std::max(w, s_shown_w), big_h = std::max(h, s_shown_h);
+    const std::int32_t small_w = std::min(w, s_shown_w), small_h = std::min(h, s_shown_h);
+    s_sheet_shown = shown;
+    s_shown_w     = w;
+    s_shown_h     = h;
+    const lv_area_t big   = shown_area(big_w, big_h);
+    const lv_area_t small = shown_area(small_w, small_h);
+    lv_obj_t       *scr   = lv_screen_active();
+    if (big_w > small_w && big_h > 0) {
+        const lv_area_t across = right ? lv_area_t{big.x1, 0, small.x1 - 1, big.y2} : lv_area_t{small.x2 + 1, 0, big.x2, big.y2};
+        lv_obj_invalidate_area(scr, &across);
+    }
+    if (big_h > small_h && small_w > 0) {
+        const lv_area_t down{small.x1, small_h, small.x2, big.y2};
+        lv_obj_invalidate_area(scr, &down);
     }
 }
 
 void sheet_shown_cb(void *, std::int32_t value)
 {
     place_sheet(value);
-}
-
-void build_sheet_readout(lv_obj_t *sheet)
-{
-    s_sheet_readout = lv_obj_create(sheet);
-    lv_obj_remove_style_all(s_sheet_readout);
-    lv_obj_set_size(s_sheet_readout, SHEET_INNER_W, LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(s_sheet_readout, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(s_sheet_readout, theme::space::s, 0);
-    lv_obj_set_clickable(s_sheet_readout, false);
-    theme::make_label(s_sheet_readout, "DESK HEIGHT", theme::secondary, &lv_font_montserrat_18);
-    lv_obj_t *readout = lv_obj_create(s_sheet_readout);
-    lv_obj_remove_style_all(readout);
-    lv_obj_set_size(readout, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(readout, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(readout, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
-    lv_obj_set_style_pad_column(readout, BUTTON_GAP, 0);
-    s_height.emplace(readout);
-    s_height->set_tenths(-1);
-    theme::make_label(readout, "CM", theme::secondary, fonts::size_22());
 }
 
 void add_sheet_preset(lv_obj_t *grid, int index)
@@ -314,24 +312,19 @@ void add_sheet_preset(lv_obj_t *grid, int index)
     bind_preset(btn, index);
     register_desk_control(btn);
 }
-// The rows of buttons showing share what the fold-out has over its height.
+
+// As tall as the rows of buttons showing.
 void fit_sheet()
 {
     int showing = 0;
     for (const int index : SHEET_PRESETS) {
         showing += lv_obj_is_hidden(s_preset_buttons[index]) ? 0 : 1;
     }
-    const int rows = (showing + SHEET_COLS - 1) / SHEET_COLS + 1;
-    lv_obj_update_layout(s_sheet);
-    const std::int32_t room = lv_obj_get_content_height(s_sheet) - lv_obj_get_height(s_sheet_readout);
-    const std::int32_t height = room / rows - SHEET_BTN_GAP;
-    for (const int index : SHEET_PRESETS) {
-        lv_obj_set_height(s_preset_buttons[index], height);
-    }
-    lv_obj_set_height(s_sheet_moves, height);
-    for (std::uint32_t i = 0; i < lv_obj_get_child_count(s_sheet_moves); ++i) {
-        lv_obj_set_height(lv_obj_get_child(s_sheet_moves, static_cast<std::int32_t>(i)), height);
-    }
+    const int          rows = (showing + SHEET_COLS - 1) / SHEET_COLS + 1;
+    const std::int32_t h    = 2 * SHEET_PAD + rows * SHEET_BTN_H + (rows - 1) * SHEET_BTN_GAP;
+    lv_obj_set_height(s_sheet, h);
+    s_sheet_full_h = GAP + h + GAP;
+    place_sheet(s_sheet_shown);
 }
 }  // namespace
 
@@ -385,15 +378,15 @@ void create_dock(lv_obj_t *parent)
     lv_obj_set_style_pad_all(dock, DOCK_PAD, 0);
     lv_obj_set_scrollable(dock, false);
 
+    build_dock_desk(dock);
     s_tabs = lv_obj_create(dock);
     lv_obj_remove_style_all(s_tabs);
     lv_obj_set_size(s_tabs, DOCK_INNER_W, LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(s_tabs, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_flow(s_tabs, LV_FLEX_FLOW_COLUMN_REVERSE);
     lv_obj_set_style_pad_row(s_tabs, BUTTON_GAP / 2, 0);
-    lv_obj_align(s_tabs, LV_ALIGN_TOP_MID, 0, 0);
+    lv_obj_align(s_tabs, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_obj_set_clickable(s_tabs, false);
 
-    build_dock_desk(dock);
     subscribe(Topic::Desk, kNoView, [] {
         paint_presets();
         paint_desk_shortcuts();
@@ -401,9 +394,6 @@ void create_dock(lv_obj_t *parent)
         const int  height         = desk_state().height_mm;
         if (std::exchange(s_height_shown, height) != height) {
             show_dock_height(height);
-            if (s_height.has_value()) {
-                s_height->set_tenths(height);
-            }
         }
     });
 }
@@ -436,8 +426,8 @@ void open_desk_sheet(bool open)
     lv_anim_init(&anim);
     lv_anim_set_var(&anim, s_sheet_frame);
     lv_anim_set_exec_cb(&anim, sheet_shown_cb);
-    lv_anim_set_values(&anim, s_sheet_shown, open ? SHEET_FULL : 0);
-    lv_anim_set_duration(&anim, SHEET_MS);
+    lv_anim_set_values(&anim, s_sheet_shown, open ? SHEET_WHOLE : 0);
+    lv_anim_set_duration(&anim, open ? SHEET_OPEN_MS : SHEET_CLOSE_MS);
     lv_anim_set_path_cb(&anim, open ? lv_anim_path_ease_out : lv_anim_path_ease_in);
     lv_anim_start(&anim);
 }
@@ -453,12 +443,11 @@ void create_desk_sheet(lv_obj_t *parent)
 
     s_sheet_frame = lv_obj_create(parent);
     lv_obj_remove_style_all(s_sheet_frame);
-    lv_obj_set_size(s_sheet_frame, 1, l.screen_h);
     lv_obj_set_clickable(s_sheet_frame, false);  // taps on its ring go to the scrim
     lv_obj_set_scrollable(s_sheet_frame, false);
 
     s_sheet = lv_obj_create(s_sheet_frame);
-    lv_obj_set_size(s_sheet, DRAWER_W, l.screen_h - 2 * GAP);
+    lv_obj_set_width(s_sheet, DRAWER_W);
     lv_obj_set_y(s_sheet, GAP);
     theme::style_panel(s_sheet, theme::panel, theme::radius::card);
     // It lies over the page, so a ring of background sets it apart.
@@ -467,37 +456,21 @@ void create_desk_sheet(lv_obj_t *parent)
     lv_obj_set_style_outline_opa(s_sheet, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_all(s_sheet, SHEET_PAD, 0);
     lv_obj_set_scrollable(s_sheet, false);
-    lv_obj_set_flex_flow(s_sheet, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_flow(s_sheet, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_style_pad_row(s_sheet, SHEET_BTN_GAP, 0);
+    lv_obj_set_style_pad_column(s_sheet, SHEET_BTN_GAP, 0);
     // A press on it keeps it out as long as it is being used.
     lv_obj_add_event_cb(s_sheet, [](lv_event_t *) { lv_timer_reset(s_sheet_idle); }, LV_EVENT_PRESSED, nullptr);
 
-    lv_obj_t *moves = lv_obj_create(s_sheet);
-    s_sheet_moves   = moves;
-    lv_obj_remove_style_all(moves);
-    lv_obj_set_size(moves, SHEET_INNER_W, SHEET_BTN_H);
-    lv_obj_set_flex_flow(moves, LV_FLEX_FLOW_ROW);
-    lv_obj_set_style_pad_column(moves, SHEET_BTN_GAP, 0);
-    lv_obj_set_clickable(moves, false);
-    create_move_button(moves, LV_SYMBOL_UP, Move::Up, SHEET_BTN_W, SHEET_BTN_H);
-    create_move_button(moves, LV_SYMBOL_DOWN, Move::Down, SHEET_BTN_W, SHEET_BTN_H);
-
-    lv_obj_t *grid = lv_obj_create(s_sheet);
-    s_sheet_grid   = grid;
-    lv_obj_remove_style_all(grid);
-    lv_obj_set_size(grid, SHEET_INNER_W, LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
-    lv_obj_set_style_pad_row(grid, SHEET_BTN_GAP, 0);
-    lv_obj_set_style_pad_column(grid, SHEET_BTN_GAP, 0);
-    lv_obj_set_clickable(grid, false);
+    // Up and down first, level with the height they change.
+    create_move_button(s_sheet, LV_SYMBOL_UP, Move::Up, SHEET_BTN_W, SHEET_BTN_H);
+    create_move_button(s_sheet, LV_SYMBOL_DOWN, Move::Down, SHEET_BTN_W, SHEET_BTN_H);
     for (const int index : SHEET_PRESETS) {
-        add_sheet_preset(grid, index);
+        add_sheet_preset(s_sheet, index);
     }
-    build_sheet_readout(s_sheet);
 
     s_sheet_idle = lv_timer_create([](lv_timer_t *) { open_desk_sheet(false); }, SHEET_IDLE_MS, nullptr);
     lv_timer_pause(s_sheet_idle);
-    place_sheet(0);
     show_guest_presets();
     paint_presets();
 }
@@ -508,9 +481,9 @@ void place_for_side()
     const Layout l = layout();
     lv_obj_set_x(s_rail, l.rail_x);
     lv_obj_set_pos(s_content, l.content_x, l.content_y);
-    s_sheet_shown = 0;  // drawn again whole where it now goes
+    s_shown_w = s_shown_h = 0;  // drawn again whole where it now goes
     lv_obj_invalidate(lv_screen_active());
-    place_sheet(s_sheet_open ? SHEET_FULL : 0);
+    place_sheet(s_sheet_open ? SHEET_WHOLE : 0);
     place_top_bar();
     place_notice();
 }
@@ -547,28 +520,32 @@ void apply_rail_side(bool right)
 
 namespace ui {
 namespace {
-constexpr int BENCH_STEPS = 12;  // as many frames as a slide gets at its best
+constexpr std::int64_t BENCH_GIVE_UP_US = 2'000'000;
 
-// The fold-out slid out and back in by hand, each frame drawn at once: the
-// average and the slowest, in microseconds.
-void time_slide(int &average_us, int &slowest_us)
+// The fold-out coming or going as it does, each frame drawn as soon as its
+// animation has moved on.
+int time_fold(bool open, char *out, std::size_t size)
 {
     using namespace detail;
-    std::int64_t total = 0;
-    std::int64_t worst = 0;
-    for (int pass = 0; pass < 2; ++pass) {
-        for (int i = 1; i <= BENCH_STEPS; ++i) {
-            const int at = pass == 0 ? i : BENCH_STEPS - i;
-            place_sheet(SHEET_FULL * at / BENCH_STEPS);
-            const std::int64_t began = esp_timer_get_time();
-            lv_refr_now(nullptr);
-            const std::int64_t took = esp_timer_get_time() - began;
-            total += took;
-            worst = std::max(worst, took);
-        }
+    open_desk_sheet(open);
+    const std::int64_t began  = esp_timer_get_time();
+    std::int64_t       drawn  = 0;
+    std::int64_t       worst  = 0;
+    int                frames = 0;
+    while (lv_anim_get(s_sheet_frame, nullptr) != nullptr && esp_timer_get_time() - began < BENCH_GIVE_UP_US) {
+        lv_anim_refr_now();
+        const std::int64_t start = esp_timer_get_time();
+        lv_refr_now(nullptr);
+        const std::int64_t took = esp_timer_get_time() - start;
+        drawn += took;
+        worst = std::max(worst, took);
+        ++frames;
     }
-    average_us = static_cast<int>(total / (2 * BENCH_STEPS));
-    slowest_us = static_cast<int>(worst);
+    const std::int64_t all = esp_timer_get_time() - began;
+    return std::snprintf(out, size, "%-8s %2d frames in %3d ms, %4.1f fps; %5.1f ms a frame, %5.1f at most\n",
+                         open ? "opening" : "closing", frames, static_cast<int>(all / 1000),
+                         all > 0 ? frames * 1e6 / static_cast<double>(all) : 0.0,
+                         frames > 0 ? drawn / 1000.0 / frames : 0.0, worst / 1000.0);
 }
 }  // namespace
 
@@ -580,36 +557,12 @@ int bench_sheet(char *out, std::size_t size)
     }
     const int page = s_page;
     open_desk_sheet(false);
-    lv_anim_delete(s_sheet, nullptr);
-    select_page(HOME_PAGE);
-    lv_obj_set_hidden(s_sheet_scrim, false);
-    lv_obj_move_foreground(s_sheet_scrim);
-    lv_obj_move_foreground(s_sheet_frame);
-    lv_obj_move_foreground(s_rail);
-    lv_refr_now(nullptr);
-
-    int n = 0;
-    const auto line = [&](const char *what) {
-        int average = 0;
-        int slowest = 0;
-        time_slide(average, slowest);
-        n += std::snprintf(out + n, size - n, "%-22s %5.1f ms a frame, %5.1f at most\n", what, average / 1000.0,
-                           slowest / 1000.0);
-    };
-    line("as it is");
-    for (std::uint32_t i = 0; i < lv_obj_get_child_count(s_sheet); ++i) {
-        lv_obj_set_hidden(lv_obj_get_child(s_sheet, static_cast<std::int32_t>(i)), true);
-    }
-    line("its contents hidden");
-    for (std::uint32_t i = 0; i < lv_obj_get_child_count(s_sheet); ++i) {
-        lv_obj_set_hidden(lv_obj_get_child(s_sheet, static_cast<std::int32_t>(i)), false);
-    }
-    lv_obj_set_hidden(s_content, true);
-    line("no page under it");
-    lv_obj_set_hidden(s_content, false);
-
-    lv_obj_set_hidden(s_sheet_scrim, true);
+    lv_anim_delete(s_sheet_frame, nullptr);
     place_sheet(0);
+    select_page(HOME_PAGE);
+    lv_refr_now(nullptr);
+    int n = time_fold(true, out, size);
+    n += time_fold(false, out + n, size - n);
     select_page(page);
     return n;
 }

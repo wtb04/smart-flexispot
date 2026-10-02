@@ -53,7 +53,7 @@ Once the screen was there, the extra features kept coming, each one making it a 
 
 ![The home page with music on the speaker](docs/screenshots/home-music.png)
 
-This is what the panel shows most of the day. The dock at the right is on every page: the pages, Home, Radar, Calendar, Focus and Setup, and at its foot Stand and Sit with the desk's height under them. Along the top are the time, whether my phone and Wi-Fi are there, the battery while it is unplugged, and the focus timer while it runs, the same row the fullscreen views have.
+This is what the panel shows most of the day. The dock at the right is on every page: the desk's height at its head with Stand and Sit under it, and the pages standing up from its foot, Home lowest, then Radar, Calendar and Focus. Along the top are the time, whether my phone and Wi-Fi are there, the battery while it is unplugged, and the focus timer while it runs, the same row the fullscreen views have. A tap on the time opens Setup.
 
 The rest is the room. The air across the top, each reading with a dot for how it is doing. The thermostat as a dial to turn, with its mode below. The lights, all of them with a tap, or hold for a picker of each light. And what is playing, the speaker's music here, or a Jellyfin episode as in the picture at the top.
 
@@ -79,7 +79,7 @@ Anything in Home Assistant can put a message on the screen through the panel's *
 
 ### The desk
 
-Stand and Sit are always in the dock, with the height as the control box reports it under them. Tap the height and the rest of the desk folds out: the height in big digits as its own display shows it, every preset, and up and down to hold. Tap a preset to go there, tap it again to stop, hold it to save the current height.
+Stand and Sit are always in the dock, under the height as the control box reports it. Tap the height and the rest of the desk folds out beside it: up and down to hold, and the other presets. It folds away again by itself after a while. Tap a preset to go there, tap it again to stop, hold it to save the current height.
 
 - **Six presets instead of four.** The control box has four of its own. The panel drives the desk to the other two itself, and learns how far the desk rolls on after the keys are let go, so it stops where you asked.
 - **No cable across the room, if you want.** The desk can be wired straight to the Tab5, or to a small ESP32 left at the desk that the panel talks to over Bluetooth (see [option 2](#option-2-over-bluetooth-with-a-companion)).

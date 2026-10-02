@@ -192,7 +192,12 @@ constexpr std::int32_t UPDATE_BAR_H     = 3;
 constexpr std::int32_t UPDATE_BAR_GAP   = 4;
 constexpr std::int32_t PERCENT_ALL      = 100;
 
+constexpr std::int32_t STATUS_PAD = 16;  // inside the status, which opens Setup
+constexpr std::int32_t SETUP_DOT  = 10;  // an update waiting there
+
 lv_obj_t *s_top_bar     = nullptr;
+lv_obj_t *s_status      = nullptr;
+lv_obj_t *s_setup_dot   = nullptr;
 Clock    *s_top         = nullptr;
 lv_obj_t *s_wifi_icon   = nullptr;
 lv_obj_t *s_phone_icon  = nullptr;
@@ -267,10 +272,43 @@ void create_top_bar(lv_obj_t *parent)
     s_top = &s_clocks.back();
     build_badge(*s_top, s_top_bar);
     build_update(s_top_bar);
-    build_power(*s_top, s_top_bar);
-    s_phone_icon = make_status_icon(s_top_bar, &icons::phone_off_icon);
-    s_wifi_icon  = make_status_icon(s_top_bar, &icons::wifi_off_icon);
-    s_top->label = theme::make_label(s_top_bar, "", theme::text, fonts::size_28());
+
+    // The battery, the phone, Wi-Fi and the time are where Setup opens.
+    s_status = lv_button_create(s_top_bar);
+    lv_obj_remove_style_all(s_status);
+    lv_obj_set_size(s_status, LV_SIZE_CONTENT, TOP_H);
+    lv_obj_set_flex_flow(s_status, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(s_status, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_hor(s_status, STATUS_PAD, 0);
+    lv_obj_set_style_pad_column(s_status, STATUS_GAP, 0);
+    lv_obj_set_style_radius(s_status, theme::radius::pill, 0);
+    for (const lv_state_t state : {LV_STATE_PRESSED, LV_STATE_CHECKED}) {
+        lv_obj_set_style_bg_color(s_status, lv_color_hex(theme::panel_light), state);
+        lv_obj_set_style_bg_opa(s_status, LV_OPA_COVER, state);
+    }
+    lv_obj_add_event_cb(s_status, [](lv_event_t *) { toggle_setup(); }, LV_EVENT_CLICKED, nullptr);
+    theme::make_label(s_status, LV_SYMBOL_SETTINGS, theme::secondary, fonts::size_22());
+    build_power(*s_top, s_status);
+    s_phone_icon = make_status_icon(s_status, &icons::phone_off_icon);
+    s_wifi_icon  = make_status_icon(s_status, &icons::wifi_off_icon);
+    s_top->label = theme::make_label(s_status, "", theme::text, fonts::size_28());
+    std::int32_t widest = 0;  // so the status keeps its width as the minutes go by
+    for (char d = '0'; d <= '9'; ++d) {
+        const char text[] = {d, d, ':', d, d, '\0'};
+        lv_point_t size{};
+        lv_text_get_size(&size, text, fonts::size_28(), 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+        widest = std::max(widest, size.x);
+    }
+    lv_obj_set_width(s_top->label, widest);
+    lv_obj_set_style_text_align(s_top->label, LV_TEXT_ALIGN_RIGHT, 0);
+    s_setup_dot = lv_obj_create(s_status);
+    theme::style_panel(s_setup_dot, theme::panel, SETUP_DOT / 2);
+    theme::fill_accent(s_setup_dot);
+    lv_obj_set_size(s_setup_dot, SETUP_DOT, SETUP_DOT);
+    lv_obj_set_clickable(s_setup_dot, false);
+    lv_obj_set_ignore_layout(s_setup_dot, true);
+    lv_obj_align(s_setup_dot, LV_ALIGN_TOP_RIGHT, STATUS_PAD / 2, 0);
+    lv_obj_set_hidden(s_setup_dot, true);
     place_top_bar();
 
     subscribe(Topic::Status, kNoView, paint_status);
@@ -279,7 +317,10 @@ void create_top_bar(lv_obj_t *parent)
         show_top_focus();
     });
     subscribe(Topic::Focus, kNoView, show_top_focus);
-    subscribe(Topic::Page, kNoView, show_top_focus);
+    subscribe(Topic::Page, kNoView, [] {
+        show_top_focus();
+        lv_obj_set_state(s_status, LV_STATE_CHECKED, s_page == SETUP_PAGE);
+    });
     subscribe(Topic::Update, kNoView, [] {
         if (settings_state().update_known) {
             paint_update_icon(settings_state().update);
@@ -292,7 +333,14 @@ void place_top_bar()
 {
     const Layout l = layout();
     lv_obj_set_pos(s_top_bar, l.content_x, TOP_Y);
-    lv_obj_set_width(s_top_bar, l.content_w - theme::space::s);
+    lv_obj_set_width(s_top_bar, l.content_w);
+}
+
+void paint_setup_dot(bool ready)
+{
+    if (s_setup_dot != nullptr) {
+        lv_obj_set_hidden(s_setup_dot, !ready);
+    }
 }
 
 const lv_image_dsc_t *update_icon(const UpdateState &state)

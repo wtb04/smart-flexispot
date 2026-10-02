@@ -112,7 +112,6 @@ void register_desk_control(lv_obj_t *obj)
 }
 int               s_initial_brightness = DEFAULT_BRIGHTNESS_PERCENT;
 
-std::optional<SegmentDisplay> s_height;
 lv_obj_t *s_rail          = nullptr;  // the dock
 lv_obj_t *s_content       = nullptr;
 lv_obj_t *s_side_buttons[CHOICE_COUNT]      = {};
