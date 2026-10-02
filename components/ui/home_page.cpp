@@ -551,6 +551,7 @@ constexpr std::int32_t MEDIA_CARD_PAD   = 18;
 constexpr std::int32_t CARD_ART_TRIM    = 61;  // how much shorter than the card its cover is
 constexpr std::int32_t CARD_ART_RADIUS  = 14;
 constexpr std::int32_t CARD_TITLE_Y     = 28;
+constexpr std::int32_t POSTER_TEXT_GAP  = 24;  // between a poster and the text beside it
 constexpr std::int32_t TITLE_TO_ARTIST  = 6;
 
 constexpr lv_opa_t PAUSED_ART_DIM  = LV_OPA_50;
@@ -918,15 +919,20 @@ void paint_media_card()
     const bool framed  = has_art || media.placeholder || idle;
     lv_obj_set_hidden(s_media_art, !has_art);
     // A poster is shown whole: the frame as narrow as it is, the text closer.
+    // A poster stands the card's whole height, as narrow as that leaves it, and
+    // its text further from it, so the card is filled as a square cover fills it.
+    const bool         poster  = has_art && media.art_width < media::kArtSize;
+    const std::int32_t frame_h = poster ? s_card_inner_h : s_card_art;
     const std::int32_t frame_w =
-        has_art ? std::max<std::int32_t>(1, s_card_art * media.art_width / media::kArtSize) : s_card_art;
+        has_art ? std::max<std::int32_t>(1, frame_h * media.art_width / media::kArtSize) : s_card_art;
     const bool reshaped = frame_w != s_frame_w;
     if (reshaped) {
         s_frame_w = frame_w;
-        lv_obj_set_width(s_media_frame, frame_w);
-        lv_obj_set_width(s_media_art, frame_w);
+        lv_obj_set_size(s_media_frame, frame_w, frame_h);
+        lv_obj_set_size(s_media_art, frame_w, frame_h);
         lv_obj_center(s_media_art);
-        s_card_with_art = {frame_w + MEDIA_CARD_PAD, s_card_inner_w - frame_w - MEDIA_CARD_PAD};
+        const std::int32_t gap = poster ? POSTER_TEXT_GAP : MEDIA_CARD_PAD;
+        s_card_with_art        = {frame_w + gap, s_card_inner_w - frame_w - gap};
     }
     if (!s_card_laid || idle != s_media_idle || framed != s_framed || reshaped) {
         s_card_laid  = true;
