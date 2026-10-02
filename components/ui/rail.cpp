@@ -20,7 +20,6 @@ namespace {
 constexpr std::int32_t DOCK_PAD      = 12;
 constexpr std::int32_t DOCK_INNER_W  = DOCK_W - 2 * DOCK_PAD;  // Stand and Sit are as tall, square to the finger
 constexpr std::int32_t DOCK_GAP      = 12;
-constexpr std::int32_t DOCK_HEIGHT_H = 56;
 constexpr std::int32_t DOCK_DESK_ICON = 46;
 
 constexpr std::int32_t SHEET_PAD     = 28;
@@ -193,6 +192,7 @@ Shortcuts *add_shortcuts(lv_obj_t *root, bool column, std::int32_t side, std::in
 
 lv_obj_t   *s_tabs          = nullptr;  // the dock's column of tabs
 lv_obj_t   *s_dock_height   = nullptr;  // the height, at the dock's head
+lv_obj_t   *s_dock_unit     = nullptr;  // cm, under it
 lv_obj_t   *s_height_button = nullptr;  // around it: folds the desk out
 Popout      s_desk;                     // the rest of the desk, folded out beside the height
 lv_obj_t   *s_sheet         = nullptr;  // its card
@@ -207,18 +207,17 @@ void build_dock_desk(lv_obj_t *dock)
     lv_obj_align(head, LV_ALIGN_TOP_MID, 0, 0);
     lv_obj_set_clickable(head, false);
 
+    // As big as Stand and Sit under it, being as much a button.
     lv_obj_t *height = lv_button_create(head);
     s_height_button  = height;
-    lv_obj_remove_style_all(height);
-    lv_obj_set_size(height, DOCK_INNER_W, DOCK_HEIGHT_H);
-    lv_obj_set_style_radius(height, theme::radius::control, 0);
-    for (const lv_state_t state : {LV_STATE_PRESSED, LV_STATE_CHECKED}) {
-        lv_obj_set_style_bg_color(height, lv_color_hex(theme::panel_light), state);
-        lv_obj_set_style_bg_opa(height, LV_OPA_COVER, state);
-    }
+    theme::style_button(height, theme::panel_light);
+    lv_obj_set_size(height, DOCK_INNER_W, DOCK_INNER_W);
+    theme::fill_accent(height, LV_STATE_CHECKED);
+    lv_obj_set_flex_flow(height, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(height, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_add_event_cb(height, [](lv_event_t *) { open_desk_sheet(!s_desk.open); }, LV_EVENT_CLICKED, nullptr);
     s_dock_height = theme::make_label(height, "--", theme::primary, fonts::size_28());
-    lv_obj_center(s_dock_height);
+    s_dock_unit   = theme::make_label(height, "cm", theme::secondary, theme::type_label());
 
     add_shortcuts(head, true, DOCK_INNER_W, theme::radius::control, DOCK_DESK_ICON, theme::panel_light);
 }
@@ -346,6 +345,11 @@ void create_desk_sheet(lv_obj_t *parent)
     s_sheet       = build_popout(s_desk, parent, DRAWER_W, SHEET_GAP, GAP, SHEET_IDLE_MS);
     s_desk.button = s_height_button;
     s_desk.above  = s_rail;
+    // On the accent while out, the height on it in the text's colour.
+    s_desk.lit = [](bool open) {
+        theme::set_text_color(s_dock_height, open ? theme::text : theme::primary);
+        theme::set_text_color(s_dock_unit, open ? theme::text : theme::secondary);
+    };
     lv_obj_set_style_pad_all(s_sheet, SHEET_PAD, 0);
     lv_obj_set_flex_flow(s_sheet, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_style_pad_row(s_sheet, SHEET_BTN_GAP, 0);

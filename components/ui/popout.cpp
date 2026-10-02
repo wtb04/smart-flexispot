@@ -134,6 +134,9 @@ void open_popout(Popout &p, bool open)
     if (p.button != nullptr) {
         lv_obj_set_state(p.button, LV_STATE_CHECKED, open);
     }
+    if (p.lit != nullptr) {
+        p.lit(open);
+    }
     // The scrim is clear and what stays over it lies beside the card, so none
     // of them changes a pixel by coming or going; drawn again, they would cost
     // the whole screen.

@@ -45,8 +45,8 @@ constexpr std::int32_t GAP        = 16;
 // The frame: a dock at one side with the tabs and the desk, a row along the
 // top with the time and what goes on elsewhere, and the page in the rest.
 constexpr std::int32_t DOCK_W      = 112;
-constexpr std::int32_t TOP_Y       = 8;    // the top row
-constexpr std::int32_t TOP_H       = 44;
+constexpr std::int32_t TOP_Y       = 6;    // the top row
+constexpr std::int32_t TOP_H       = 48;
 constexpr std::int32_t CONTENT_Y   = 60;   // the page under it
 
 constexpr std::int32_t PANEL_PAD  = 16;

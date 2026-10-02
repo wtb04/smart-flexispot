@@ -18,6 +18,7 @@ struct Popout {
     lv_obj_t    *card     = nullptr;
     lv_obj_t    *button   = nullptr;  // what opens it, lit while it is out
     lv_obj_t    *above    = nullptr;  // kept over the scrim while it is out, to be used meanwhile
+    void (*lit)(bool open) = nullptr;  // told as it comes and goes, to paint its button
     lv_timer_t  *idle     = nullptr;
     std::int32_t x        = 0;  // the corner it unfolds from
     std::int32_t y        = 0;

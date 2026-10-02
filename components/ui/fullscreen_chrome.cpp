@@ -34,7 +34,6 @@ constexpr std::int32_t  CELL_H     = 16;
 constexpr std::int32_t  CELL_LINE  = 2;
 constexpr std::int32_t  CELL_NUB_W = 3;    // and the nub at its end
 constexpr std::int32_t  CELL_NUB_H = 6;
-constexpr std::int32_t  CELL_GAP   = 8;    // between it and its percent
 constexpr int           LOW_PERCENT = 20;
 constexpr time_t        CLOCK_SET = 1'700'000'000;  // any earlier and the clock is not set yet
 
@@ -47,7 +46,6 @@ struct Clock {
     lv_obj_t *power = nullptr;  // fades with the buttons; what is in it shows only unplugged
     lv_obj_t *cell  = nullptr;
     lv_obj_t *fill  = nullptr;
-    lv_obj_t *percent = nullptr;
 };
 std::deque<Clock> s_clocks;  // a deque, so what follows each keeps its place
 
@@ -63,23 +61,18 @@ void place(const Clock &clock)
     }
 }
 
-// How full the pack is, while the panel runs on it.
+// How full the pack is, while the panel runs on it: the cell filled as far,
+// amber once low.
 void show_power(const Clock &clock)
 {
     const StatusState &status = status_state();
     lv_obj_set_hidden(clock.cell, !status.on_battery);
-    lv_obj_set_hidden(clock.percent, !status.on_battery);
     if (!status.on_battery) {
         return;
     }
-    const int      percent = std::clamp(status.battery_percent, 0, 100);
-    const std::uint32_t ink = percent <= LOW_PERCENT ? theme::amber : theme::text;
+    const int percent = std::clamp(status.battery_percent, 0, 100);
     lv_obj_set_width(clock.fill, std::max<std::int32_t>(1, (CELL_W - 4 * CELL_LINE) * percent / 100));
-    theme::set_bg_color(clock.fill, ink);
-    char text[8];
-    std::snprintf(text, sizeof(text), "%d%%", percent);
-    theme::set_text(clock.percent, text);
-    theme::set_text_color(clock.percent, ink);
+    theme::set_bg_color(clock.fill, percent <= LOW_PERCENT ? theme::amber : theme::text);
 }
 
 void build_power(Clock &clock, lv_obj_t *root)
@@ -87,9 +80,6 @@ void build_power(Clock &clock, lv_obj_t *root)
     clock.power = lv_obj_create(root);
     lv_obj_remove_style_all(clock.power);
     lv_obj_set_size(clock.power, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(clock.power, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(clock.power, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(clock.power, CELL_GAP, 0);
     lv_obj_set_clickable(clock.power, false);
 
     clock.cell = lv_obj_create(clock.power);
@@ -112,12 +102,6 @@ void build_power(Clock &clock, lv_obj_t *root)
     theme::style_panel(clock.fill, theme::text, 1);
     lv_obj_set_size(clock.fill, 1, CELL_H - 4 * CELL_LINE);
     lv_obj_set_pos(clock.fill, 2 * CELL_LINE, 2 * CELL_LINE);
-
-    clock.percent = theme::make_label(clock.power, "", theme::text, fonts::size_22());
-    lv_point_t widest{};
-    lv_text_get_size(&widest, "100%", fonts::size_22(), 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-    lv_obj_set_width(clock.percent, widest.x);  // one width, whatever its digits say
-    lv_obj_set_style_text_align(clock.percent, LV_TEXT_ALIGN_RIGHT, 0);
 }
 
 void tell_time(const Clock &clock)
@@ -187,6 +171,9 @@ void build_badge(Clock &clock, lv_obj_t *root, lv_event_cb_t on_click)
 
 namespace {
 constexpr std::int32_t STATUS_GAP       = 20;  // between what the top row holds
+constexpr std::int32_t SLOT_W           = 40;  // each of the status's marks, centred in one as wide
+constexpr std::int32_t SLOT_GAP         = 8;
+constexpr std::int32_t TAP_MARGIN       = 12;  // round the badge and the status, to be hit easily
 constexpr std::int32_t UPDATE_ICON_SIDE = 28;
 constexpr std::int32_t UPDATE_BAR_H     = 3;
 constexpr std::int32_t UPDATE_BAR_GAP   = 4;
@@ -201,6 +188,9 @@ lv_obj_t *s_setup_dot   = nullptr;
 Clock    *s_top         = nullptr;
 lv_obj_t *s_wifi_icon   = nullptr;
 lv_obj_t *s_phone_icon  = nullptr;
+lv_obj_t *s_slots[4]    = {};       // the battery, the phone, Wi-Fi and the time, from the page out
+lv_obj_t *s_idle_mark   = nullptr;  // the timer drawn in the badge while it is idle
+std::int32_t s_badge_w  = 0;        // the badge's width while the timer runs
 lv_obj_t *s_update_box  = nullptr;  // while an update arrives, for whichever board
 lv_obj_t *s_update_icon = nullptr;
 lv_obj_t *s_update_bar  = nullptr;  // how far it is, under the icon
@@ -247,6 +237,7 @@ void paint_status()
         lv_image_set_src(s_wifi_icon, status.wifi ? &icons::wifi_icon : &icons::wifi_off_icon);
     }
     show_power(*s_top);
+    lv_obj_set_hidden(s_slots[0], !status.on_battery);
     show_top_focus();
 }
 
@@ -255,18 +246,42 @@ void paint_status()
 void show_top_focus()
 {
     show_focus(*s_top);
-    const Focus &focus = focus_state();
-    const bool   away  = s_presence_gate && !status_state().present;
+    const bool away = s_presence_gate && !status_state().present;
+    const bool idle = focus_idle(focus_state());
+    // Idle, only the timer drawn, as round as the row is tall.
     lv_obj_set_hidden(s_top->badge, away);
-    if (!away && focus_idle(focus)) {
-        char text[16];
-        std::snprintf(text, sizeof(text), "%02d:00", focus.work_min);
-        theme::set_text(s_top->left, text);
-        theme::set_text_color(s_top->left, theme::secondary);
-        theme::set_bg_color(s_top->dot, theme::secondary);
-    } else {
-        theme::set_text_color(s_top->left, theme::text);
+    lv_obj_set_hidden(s_idle_mark, !idle);
+    lv_obj_set_hidden(s_top->dot, idle);
+    lv_obj_set_hidden(s_top->left, idle);
+    lv_obj_set_width(s_top->badge, idle ? TOP_H : s_badge_w);
+    lv_obj_set_style_pad_hor(s_top->badge, idle ? 0 : BADGE_PAD, 0);
+}
+
+lv_obj_t *make_slot(lv_obj_t *parent, std::int32_t w)
+{
+    lv_obj_t *slot = lv_obj_create(parent);
+    lv_obj_remove_style_all(slot);
+    lv_obj_set_size(slot, w, TOP_H);
+    lv_obj_set_clickable(slot, false);
+    lv_obj_set_scrollable(slot, false);
+    return slot;
+}
+
+// The status against the dock, the time at its edge, and the badge beside it.
+void arrange_top()
+{
+    const bool right = layout().rail_right;
+    lv_obj_set_flex_align(s_top_bar, right ? LV_FLEX_ALIGN_END : LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_t *const row[] = {s_top->badge, s_update_box, s_status};
+    for (int i = 0; i < 3; ++i) {
+        lv_obj_move_to_index(row[right ? i : 2 - i], i);
     }
+    for (int i = 0; i < 4; ++i) {
+        lv_obj_move_to_index(s_slots[right ? i : 3 - i], i);
+    }
+    lv_obj_set_style_text_align(s_top->label, right ? LV_TEXT_ALIGN_RIGHT : LV_TEXT_ALIGN_LEFT, 0);
+    lv_obj_align(s_setup_dot, right ? LV_ALIGN_TOP_RIGHT : LV_ALIGN_TOP_LEFT, right ? STATUS_PAD / 2 : -STATUS_PAD / 2, 0);
 }
 }  // namespace
 
@@ -286,6 +301,12 @@ void create_top_bar(lv_obj_t *parent)
     build_badge(*s_top, s_top_bar, [](lv_event_t *) { toggle_focus_popout(s_top->badge, s_top_bar); });
     lv_obj_set_style_bg_color(s_top->badge, lv_color_hex(theme::panel_light), LV_STATE_CHECKED);
     lv_obj_set_style_bg_color(s_top->badge, lv_color_hex(theme::panel_light), LV_STATE_PRESSED);
+    lv_obj_set_height(s_top->badge, TOP_H);
+    lv_obj_set_flex_align(s_top->badge, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_ext_click_area(s_top->badge, TAP_MARGIN);
+    s_badge_w   = lv_obj_get_style_width(s_top->badge, LV_PART_MAIN);
+    s_idle_mark = make_status_icon(s_top->badge, &icons::timer_icon);
+    lv_obj_set_style_image_recolor(s_idle_mark, lv_color_hex(theme::secondary), 0);
     build_update(s_top_bar);
 
     // The battery, the phone, Wi-Fi and the time are where Setup opens.
@@ -295,18 +316,24 @@ void create_top_bar(lv_obj_t *parent)
     lv_obj_set_flex_flow(s_status, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(s_status, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_hor(s_status, STATUS_PAD, 0);
-    lv_obj_set_style_pad_column(s_status, STATUS_GAP, 0);
+    lv_obj_set_style_pad_column(s_status, SLOT_GAP, 0);
+    lv_obj_set_ext_click_area(s_status, TAP_MARGIN);
     lv_obj_set_style_radius(s_status, theme::radius::pill, 0);
     for (const lv_state_t state : {LV_STATE_PRESSED, LV_STATE_CHECKED}) {
         lv_obj_set_style_bg_color(s_status, lv_color_hex(theme::panel_light), state);
         lv_obj_set_style_bg_opa(s_status, LV_OPA_COVER, state);
     }
     lv_obj_add_event_cb(s_status, [](lv_event_t *) { toggle_setup(); }, LV_EVENT_CLICKED, nullptr);
-    theme::make_label(s_status, LV_SYMBOL_SETTINGS, theme::secondary, fonts::size_22());
-    build_power(*s_top, s_status);
-    s_phone_icon = make_status_icon(s_status, &icons::phone_off_icon);
-    s_wifi_icon  = make_status_icon(s_status, &icons::wifi_off_icon);
-    s_top->label = theme::make_label(s_status, "", theme::text, fonts::size_28());
+    for (lv_obj_t *&slot : s_slots) {
+        slot = make_slot(s_status, SLOT_W);
+    }
+    build_power(*s_top, s_slots[0]);
+    lv_obj_center(s_top->power);
+    s_phone_icon = make_status_icon(s_slots[1], &icons::phone_off_icon);
+    s_wifi_icon  = make_status_icon(s_slots[2], &icons::wifi_off_icon);
+    lv_obj_center(s_phone_icon);
+    lv_obj_center(s_wifi_icon);
+    s_top->label = theme::make_label(s_slots[3], "00:00", theme::text, fonts::size_28());
     std::int32_t widest = 0;  // so the status keeps its width as the minutes go by
     for (char d = '0'; d <= '9'; ++d) {
         const char text[] = {d, d, ':', d, d, '\0'};
@@ -314,8 +341,11 @@ void create_top_bar(lv_obj_t *parent)
         lv_text_get_size(&size, text, fonts::size_28(), 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
         widest = std::max(widest, size.x);
     }
+    lv_obj_set_width(s_slots[3], widest);
+    theme::center_ink(s_top->label);  // level with the marks, by the digits rather than the line
     lv_obj_set_width(s_top->label, widest);
-    lv_obj_set_style_text_align(s_top->label, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_x(s_top->label, 0);
+    lv_obj_set_align(s_top->label, LV_ALIGN_LEFT_MID);
     s_setup_dot = lv_obj_create(s_status);
     theme::style_panel(s_setup_dot, theme::panel, SETUP_DOT / 2);
     theme::fill_accent(s_setup_dot);
@@ -349,6 +379,7 @@ void place_top_bar()
     const Layout l = layout();
     lv_obj_set_pos(s_top_bar, l.content_x, TOP_Y);
     lv_obj_set_width(s_top_bar, l.content_w);
+    arrange_top();
 }
 
 void paint_setup_dot(bool ready)

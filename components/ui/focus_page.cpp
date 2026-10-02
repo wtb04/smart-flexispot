@@ -573,8 +573,9 @@ void toggle_focus_popout(lv_obj_t *badge, lv_obj_t *above)
         lv_area_t at;
         lv_obj_update_layout(badge);
         lv_obj_get_coords(badge, &at);
-        // Its right edge under the badge's, just below the row.
-        detail::place_popout(s_pop, at.x2 + 1 + detail::GAP, at.y2 + 1, true);
+        // Under the badge, its edge level with the badge's on the dock's side.
+        const bool right = detail::layout().rail_right;
+        detail::place_popout(s_pop, right ? at.x2 + 1 + detail::GAP : at.x1 - detail::GAP, at.y2 + 1, right);
         s_pop.button = badge;
         s_pop.above  = above;
         show_pop_part();
