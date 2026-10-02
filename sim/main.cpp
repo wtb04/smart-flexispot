@@ -360,6 +360,8 @@ Options options(int argc, char **argv)
         } else if (name == "--then") {
             o.then = value;
             ++i;
+        } else if (name == "--wait" && i + 1 < argc) {
+            o.taps.push_back({-1, std::atoi(argv[++i])});  // a pause between taps, in ms
         } else if (name == "--tap") {
             SDL_Point at{};
             if (std::sscanf(value, "%d,%d", &at.x, &at.y) == 2) {
@@ -475,7 +477,11 @@ int main(int argc, char **argv)
         run_for(50);
     }
     for (const SDL_Point &at : opts.taps) {
-        tap(at);
+        if (at.x < 0) {
+            run_for(static_cast<std::uint32_t>(at.y));
+        } else {
+            tap(at);
+        }
     }
     for (const auto &[from, to] : opts.swipes) {
         swipe(from, to);

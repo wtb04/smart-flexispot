@@ -14,7 +14,6 @@
 #include <array>
 #include <iterator>
 #include <atomic>
-#include <utility>
 #include <cstring>
 #include <cstdlib>
 
@@ -190,15 +189,6 @@ int motion_now()
 
 int s_travel_index = -1;  // which of the panel's presets is being travelled to
 
-// The box takes any key pressed while the desk moves as a stop, so one of its
-// presets tapped again at once, as a stop and then a start, only stopped it
-// twice. Its presets are pressed at once while the desk is still, or to stop
-// the one it is on its way to; asked for while it still moves otherwise, the
-// travel under way is stopped and the preset pressed once the desk is still.
-int  s_box_travel  = -1;     // the box's preset it was last sent to, while on its way
-int  s_held_preset = -1;     // to press once the desk is still
-bool s_moving      = false;  // as the supervisor last saw it
-
 // Presets 5 and 6 are the panel's own, since the control box has four. Whichever
 // board holds the wire steers the desk there on each height the box reports.
 bool travel_to(int height_mm)
@@ -245,43 +235,9 @@ void run_preset(const PresetCommand &cmd)
             return;
         }
         s_travel_index = cmd.index;
-    } else if (!s_moving) {
-        s_link->preset(cmd.index);
-        s_box_travel = cmd.index;
-    } else if (s_held_preset == cmd.index) {
-        s_held_preset = -1;  // tapped again before it was pressed: never mind it
-        return;
-    } else if (s_box_travel == cmd.index) {
-        s_link->preset(cmd.index);  // the tap that stops it, as on the box
-        s_box_travel = -1;
-        return;
     } else {
-        if (s_box_travel >= 0) {
-            s_link->preset(s_box_travel);  // stops the travel under way
-            s_box_travel = -1;
-        } else if (s_link->travelling()) {
-            let_go();
-        }
-        s_held_preset = cmd.index;
-        return;
+        s_link->preset(cmd.index);
     }
-    clear_active();
-    s_commanded_from = height;
-    s_commanded_at   = now;
-}
-
-// The preset held while the desk was moving, now that it is still.
-void press_held_preset(int height, TickType_t now)
-{
-    if (s_moving) {
-        return;
-    }
-    s_box_travel = -1;
-    if (s_held_preset < 0) {
-        return;
-    }
-    s_box_travel = std::exchange(s_held_preset, -1);
-    s_link->preset(s_box_travel);
     clear_active();
     s_commanded_from = height;
     s_commanded_at   = now;
@@ -418,8 +374,6 @@ void wake_if_never_heard(Watch &watch, const char *status, TickType_t now)
         let_go_of_stale_network_hold(now);
         const bool moving = command_in_flight(height, now) || motion_now() != 0 ||
                             s_link->travelling() || now - watch.settled_since < STILL_TIME;
-        s_moving          = moving;
-        press_held_preset(height, now);
         publish_active(height, link_up, moving);
 
         show_status(watch, status);
