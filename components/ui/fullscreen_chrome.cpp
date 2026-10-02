@@ -256,7 +256,7 @@ void create_top_bar(lv_obj_t *parent)
 {
     s_top_bar = lv_obj_create(parent);
     lv_obj_remove_style_all(s_top_bar);
-    lv_obj_set_height(s_top_bar, theme::chip::size);
+    lv_obj_set_height(s_top_bar, TOP_H);
     lv_obj_set_flex_flow(s_top_bar, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(s_top_bar, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(s_top_bar, STATUS_GAP, 0);
@@ -291,7 +291,7 @@ void create_top_bar(lv_obj_t *parent)
 void place_top_bar()
 {
     const Layout l = layout();
-    lv_obj_set_pos(s_top_bar, l.content_x, TOP_INSET);
+    lv_obj_set_pos(s_top_bar, l.content_x, TOP_Y);
     lv_obj_set_width(s_top_bar, l.content_w - theme::space::s);
 }
 

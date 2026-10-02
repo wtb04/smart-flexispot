@@ -79,6 +79,6 @@ The README's radar and calendar pictures, over Schiphol:
 ```sh
 cd sim
 SIM_HOME=52.3105,4.7683 SIM_ROUTE="AMS,Amsterdam,JFK,New York" ./build/sim --page 1 --pick-above 9000 \
-    --shot 20 --out ../docs/screenshots/radar.png --tap2 780,158 --out2 ../docs/screenshots/radar-full.png
+    --shot 20 --out ../docs/screenshots/radar.png --tap2 764,122 --out2 ../docs/screenshots/radar-full.png
 SIM_NO_WORK=1 ./build/sim --page 2 --shot 16 --out ../docs/screenshots/calendar.png
 ```

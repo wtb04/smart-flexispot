@@ -406,5 +406,7 @@ int bench_radar_open(char *out, std::size_t size);
  *  screen put back as it was before. */
 int bench_radar_full(char *out, std::size_t size, bool open);
 int bench_radar_zoom_frame(char *out, std::size_t size);  // a zoom's frame, held until put back
+/** A development build's: what each frame of the desk's fold-out sliding costs. */
+int bench_sheet(char *out, std::size_t size);
 
 }  // namespace ui

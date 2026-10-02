@@ -45,9 +45,10 @@ constexpr std::uint32_t LOCK_TIMEOUT_MS = 500;
 constexpr std::int32_t GAP        = 16;
 // The frame: a dock at one side with the tabs and the desk, a row along the
 // top with the time and what goes on elsewhere, and the page in the rest.
-constexpr std::int32_t DOCK_W      = 96;
-constexpr std::int32_t TOP_INSET   = 24;   // the top row's chips from the top, as over the fullscreen views
-constexpr std::int32_t CONTENT_Y   = 96;   // the page under that row
+constexpr std::int32_t DOCK_W      = 112;
+constexpr std::int32_t TOP_Y       = 8;    // the top row
+constexpr std::int32_t TOP_H       = 44;
+constexpr std::int32_t CONTENT_Y   = 60;   // the page under it
 
 constexpr std::int32_t PANEL_PAD  = 16;
 constexpr std::int32_t BUTTON_GAP = 16;
@@ -78,7 +79,7 @@ constexpr const char *PRESET_NAMES[kPresetCount] = {
     "Preset 1", "Ultra low", "Stand", "Sit", "Sit 2", "Stand 2",
 };
 
-constexpr std::int32_t DRAWER_W  = 520;  // the desk's fold-out beside the dock
+constexpr std::int32_t DRAWER_W  = 600;  // the desk's fold-out beside the dock
 
 constexpr int   DIAL_SCALE     = 10;
 constexpr float DEFAULT_STEP_C = 0.5f;

@@ -34,7 +34,7 @@ constexpr NavItem NAV_ITEMS[PAGE_COUNT] = {
     [SETUP_PAGE]    = {LV_SYMBOL_SETTINGS, "Setup", false},
 };
 
-constexpr std::int32_t TAB_H    = 64;
+constexpr std::int32_t TAB_H    = 72;
 constexpr std::int32_t PAGE_PAD = 20;
 
 }  // namespace
@@ -118,6 +118,7 @@ void select_page(int index)
 namespace {
 void nav_event_cb(lv_event_t *e)
 {
+    open_desk_sheet(false);
     select_page(static_cast<int>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e))));
 }
 }  // namespace
