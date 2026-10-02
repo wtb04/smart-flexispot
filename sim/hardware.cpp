@@ -32,10 +32,11 @@ focus::State s_focus;
 focus::Plan  s_plan;
 
 struct Battery {
-    bool present, charging;
+    bool present, charging, on_battery;
     int  percent;
 };
-constexpr Battery BATTERIES[] = {{true, true, 100}, {true, false, 64}, {true, false, 12}, {false, false, 0}};
+// Plugged in and charging, unplugged, unplugged and low, and no pack at all.
+constexpr Battery BATTERIES[] = {{true, true, false, 100}, {true, false, true, 64}, {true, false, true, 12}, {false, false, false, 0}};
 int  s_battery = 0;
 bool s_phone   = true;
 bool s_wifi    = true;
@@ -134,7 +135,7 @@ void start()
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_height(s_height_mm));
     show_presets();
     const Battery &b = BATTERIES[s_battery];
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_battery(b.present, b.percent, b.charging));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_battery(b.present, b.percent, b.charging, b.on_battery));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_presence(true, s_phone, true));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_links(s_wifi, s_wifi && s_hass));
     show_focus();
@@ -219,7 +220,7 @@ void next_battery()
 {
     s_battery = (s_battery + 1) % static_cast<int>(std::size(BATTERIES));
     const Battery &b = BATTERIES[s_battery];
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_battery(b.present, b.percent, b.charging));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_battery(b.present, b.percent, b.charging, b.on_battery));
 }
 
 void toggle_phone()

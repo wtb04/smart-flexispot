@@ -335,7 +335,8 @@ esp_err_t set_links(bool wifi, bool mqtt);
 /** Once the phone has been recognised at least once, this also gates which pages appear. */
 esp_err_t set_presence(bool has_key, bool present, bool ever_seen);
 
-esp_err_t set_battery(bool present, int percent, bool charging);
+/** The pack: there, how full, charging, and whether the panel runs on it, unplugged. */
+esp_err_t set_battery(bool present, int percent, bool charging, bool on_battery);
 
 /** Before init(): the diagnostics view's cards, in order, kept by pointer. */
 void set_cards(const Card *cards, int count);

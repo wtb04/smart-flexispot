@@ -250,6 +250,7 @@ bool music_open();
 struct ViewClock {
     lv_obj_t *label;
     lv_obj_t *badge;  // null without one
+    lv_obj_t *power;  // the battery, shown while unplugged
 };
 ViewClock add_view_clock(ViewId view, lv_obj_t *root, lv_obj_t *chip, bool focus_badge = true);
 // Stand and Sit, the time and the way back, over a fullscreen view, and any

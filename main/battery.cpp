@@ -108,7 +108,7 @@ jobs::Result poll()
     }
     if (read) {
         log_if_changed(state, present, was_present, logged);
-        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_battery(state.present, state.percent, state.charging));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_battery(state.present, state.percent, state.charging, state.on_battery));
         steer_charger(state, topped_off);
     }
     return jobs::done();

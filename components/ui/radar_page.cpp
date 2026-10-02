@@ -263,6 +263,7 @@ constexpr std::int32_t FULL_DESK_INSET = 32;  // as the chips in the map's other
 lv_obj_t    *s_full_chip = nullptr;  // into it, and out again
 lv_obj_t    *s_full_clock = nullptr;
 lv_obj_t    *s_full_badge = nullptr;  // the focus timer beside the time
+lv_obj_t    *s_full_power = nullptr;  // the battery beside it, unplugged
 lv_obj_t    *s_full_mark = nullptr;
 lv_obj_t    *s_screw     = nullptr;
 
@@ -1390,7 +1391,7 @@ bool start_fast_zoom(int from_km)
     // ones, and the compass's letters, are kept as they are now.
     lv_area_t keep[16];
     int       kept = 0;
-    for (lv_obj_t *control : {s_zoom_out, s_zoom_in, s_full_chip, s_full_desk, s_full_clock, s_full_badge, s_rings[0],
+    for (lv_obj_t *control : {s_zoom_out, s_zoom_in, s_full_chip, s_full_desk, s_full_clock, s_full_badge, s_full_power, s_rings[0],
                               s_rings[1], s_rings[2], s_rings[3], s_compass[0], s_compass[1], s_compass[2], s_compass[3]}) {
         if (control != nullptr && !lv_obj_has_flag(control, LV_OBJ_FLAG_HIDDEN) && kept < 16) {
             lv_obj_get_coords(control, &keep[kept++]);
@@ -2875,6 +2876,7 @@ void build_full()
                                         lv_obj_move_foreground(s_full_desk);
                                         lv_obj_move_foreground(s_full_clock);
                                         lv_obj_move_foreground(s_full_badge);
+                                        lv_obj_move_foreground(s_full_power);
                                         lv_image_set_src(s_full_mark, &icons::collapse_icon);
                                     },
                                     [] {
@@ -2887,6 +2889,7 @@ void build_full()
     const detail::ViewClock clock = detail::add_view_clock(s_full_view, s_full, s_full_chip);
     s_full_clock                  = clock.label;
     s_full_badge                  = clock.badge;
+    s_full_power                  = clock.power;
 }
 }  // namespace
 
@@ -3215,7 +3218,7 @@ int bench_radar_zoom_frame(char *out, std::size_t size)
     lv_refr_now(nullptr);
     lv_area_t keep[16];
     int       kept = 0;
-    for (lv_obj_t *control : {s_zoom_out, s_zoom_in, s_full_chip, s_full_desk, s_full_clock, s_full_badge, s_rings[0],
+    for (lv_obj_t *control : {s_zoom_out, s_zoom_in, s_full_chip, s_full_desk, s_full_clock, s_full_badge, s_full_power, s_rings[0],
                               s_rings[1], s_rings[2], s_rings[3], s_compass[0], s_compass[1], s_compass[2], s_compass[3]}) {
         if (control != nullptr && !lv_obj_has_flag(control, LV_OBJ_FLAG_HIDDEN) && kept < 16) {
             lv_obj_get_coords(control, &keep[kept++]);

@@ -294,6 +294,12 @@ struct ProgressArgs {
     int  duration_s;
     bool playing;
 };
+struct BatteryArgs {
+    bool present;
+    int  percent;
+    bool charging;
+    bool on_battery;
+};
 struct ArtArgs {
     const void *pixels;
     bool        placeholder;
@@ -394,6 +400,7 @@ Slot<bool>           p_setting[SETTING_COUNT];
 Slot<bool>           p_calendar;
 Slot<Focus>          p_focus;
 Slot<UpdateState>    p_update;
+Slot<BatteryArgs>    p_battery;
 Slot<bool>           p_radar;
 Slot<DetailsArgs>    p_details;
 Slot<PhotoArgs>      p_photo;
@@ -575,6 +582,9 @@ void apply_settings_and_presence()
     }
     if (bool screen = false; take(p_screen, screen)) {
         apply_screen(screen);
+    }
+    if (BatteryArgs battery{}; take(p_battery, battery)) {
+        status_take_battery(battery.present, battery.percent, battery.charging, battery.on_battery);
     }
 }
 
@@ -992,11 +1002,9 @@ esp_err_t set_links(bool wifi, bool mqtt)
     return ESP_OK;
 }
 
-esp_err_t set_battery(bool present, int percent, bool charging)
+esp_err_t set_battery(bool present, int percent, bool charging, bool on_battery)
 {
-    (void)present;
-    (void)percent;
-    (void)charging;
+    put(p_battery, BatteryArgs{present, percent, charging, on_battery});
     return ESP_OK;
 }
 
