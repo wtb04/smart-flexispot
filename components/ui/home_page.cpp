@@ -502,8 +502,6 @@ void build_light_picker(lv_obj_t *parent)
 }  // namespace
 
 lv_obj_t *s_media_card   = nullptr;
-int       s_media_hold   = -1;  // a preset, or -1 for the media panel
-bool      s_media_off    = true;  // nothing to control, so holding does nothing
 lv_obj_t *s_media_frame  = nullptr;
 lv_obj_t *s_media_art    = nullptr;
 lv_obj_t *s_media_source = nullptr;
@@ -620,6 +618,7 @@ struct PickView {
     lv_image_dsc_t dsc;
     std::uint16_t *rounded;  // the cover with its corners already in the card's colour
     bool           named;
+    std::uint32_t  arts_shown;  // the model's count of its covers when last drawn
 };
 PickView                    s_pick_views[media::kPickCount]{};
 std::optional<ModalOverlay> s_pick_picker;
@@ -726,6 +725,8 @@ void fit_pick_picker(int count)
                           grid_h + PICKER_HEADER_H + 2 * PICKER_PAD);
 }
 
+void paint_picks();
+
 void build_pick_picker(lv_obj_t *parent)
 {
     s_pick_picker.emplace(parent, PICK_MIN_W, PICKER_HEADER_H);
@@ -748,22 +749,56 @@ void build_pick_picker(lv_obj_t *parent)
 
     for (int i = 0; i < media::kPickCount; ++i) {
         build_pick(grid, i);
+        s_pick_views[i].arts_shown = UINT32_MAX;
     }
     s_pick_picker->add_close_button();
+    subscribe(Topic::Picks, kNoView, paint_picks);
 }
 
-int pick_count()
+// The favourites as the media model has them: those named, with their covers.
+void paint_picks()
 {
-    int count = 0;
-    for (const PickView &view : s_pick_views) {
-        count += view.named ? 1 : 0;
+    for (int index = 0; index < media::kPickCount; ++index) {
+        PickView   &view = s_pick_views[index];
+        const Pick &pick = media_pick(index);
+        if (view.root == nullptr) {
+            continue;
+        }
+        view.named = pick.name[0] != '\0';
+        theme::set_text(view.name, pick.name);
+        lv_obj_set_hidden(view.root, !view.named);
+        if (pick.arts == view.arts_shown) {
+            continue;
+        }
+        view.arts_shown = pick.arts;
+        if (pick.art != nullptr && view.rounded == nullptr) {
+            view.rounded = static_cast<std::uint16_t *>(heap_caps_malloc(
+                media::kPickArtSize * media::kPickArtSize * sizeof(std::uint16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+        }
+        lv_obj_set_hidden(view.art, pick.art == nullptr || view.rounded == nullptr);
+        if (pick.art == nullptr || view.rounded == nullptr) {
+            continue;
+        }
+        // Rounded once here rather than clipped on every frame, which in software
+        // costs more than the rest of the popup.
+        round_corners(static_cast<const std::uint16_t *>(pick.art), view.rounded, media::kPickArtSize,
+                      PICK_ART_RADIUS, theme::panel);
+        const std::uint32_t bytes = lv_color_format_get_size(LV_COLOR_FORMAT_RGB565);
+        view.dsc.header.magic     = LV_IMAGE_HEADER_MAGIC;
+        view.dsc.header.cf        = LV_COLOR_FORMAT_RGB565;
+        view.dsc.header.w         = media::kPickArtSize;
+        view.dsc.header.h         = media::kPickArtSize;
+        view.dsc.header.stride    = media::kPickArtSize * bytes;
+        view.dsc.data_size        = media::kPickArtSize * media::kPickArtSize * bytes;
+        view.dsc.data             = reinterpret_cast<const std::uint8_t *>(view.rounded);
+        lv_image_set_src(view.art, &view.dsc);
+        lv_obj_invalidate(view.art);
     }
-    return count;
 }
 
 void open_pick_picker()
 {
-    const int count = pick_count();
+    const int count = media_pick_count();
     if (count == 0 || !s_pick_picker.has_value()) {
         return;
     }
@@ -784,42 +819,90 @@ void write_clock(lv_obj_t *label, int seconds)
     theme::set_text(label, text);
 }
 
-lv_timer_t *s_pause_timer     = nullptr;
+// ---- The card, as the media model has it. ----
+namespace {
+bool          s_media_idle  = true;     // nothing plays: the speaker in the frame, the text level with it
+bool          s_framed      = false;    // the frame shown, so the text beside it
+bool          s_card_laid   = false;    // laid out at least once
+std::uint32_t s_card_covers = UINT32_MAX;  // the model's count of covers when last drawn
 
-void apply_playing(bool playing)
+void place_media_text(bool framed)
 {
-    media_state().playing = playing;
-    publish(Topic::Media);
+    const TextBox card = framed ? s_card_with_art : s_card_bare;
+    // Nothing playing leaves the speaker's name and OFF, a short pair, which
+    // sits level with the speaker beside it rather than at the top.
+    const std::int32_t top = s_media_idle ? idle_media_text_top() : 0;
+    theme::align(s_media_source, LV_ALIGN_TOP_LEFT, card.x, top);
+    theme::align(s_media_title, LV_ALIGN_TOP_LEFT, card.x, top + CARD_TITLE_Y);
+    lv_obj_set_width(s_media_title, card.w);
+    lv_obj_set_width(s_media_artist, card.w);
+    s_has_art = framed;
+    layout_media_text();
+}
 
-    const lv_opa_t dim = media_state().has_track && !playing ? PAUSED_ART_DIM : PLAYING_ART_DIM;
+void show_art_pixels(const void *pixels)
+{
+    // Two descriptors in turn, so the one on screen is never rewritten under it.
+    lv_image_dsc_t     &dsc   = s_art_dsc[s_art_slot];
+    const std::uint32_t bytes = lv_color_format_get_size(LV_COLOR_FORMAT_RGB565);
+    s_art_slot                = 1 - s_art_slot;
+    dsc.header.magic          = LV_IMAGE_HEADER_MAGIC;
+    dsc.header.cf             = LV_COLOR_FORMAT_RGB565;
+    dsc.header.w              = media::kArtSize;
+    dsc.header.h              = media::kArtSize;
+    dsc.header.stride         = media::kArtSize * bytes;
+    dsc.data_size             = media::kArtSize * media::kArtSize * bytes;
+    dsc.data                  = static_cast<const std::uint8_t *>(pixels);
+    lv_image_set_src(s_media_art, &dsc);
+    lv_obj_invalidate(s_media_art);
+}
+
+// What plays, its cover or the speaker, and dimmed while it is paused.
+void paint_media_card()
+{
+    if (s_media_card == nullptr) {
+        return;
+    }
+    const MediaState &media = media_state();
+    const char       *title = media.has_track ? media.title : media.state;
+    bool              moved = false;
+    if (std::strcmp(lv_label_get_text(s_media_source), media.source) != 0 ||
+        std::strcmp(lv_label_get_text(s_media_title), title) != 0 ||
+        std::strcmp(lv_label_get_text(s_media_artist), media.artist) != 0) {
+        theme::set_text(s_media_source, media.source);
+        theme::set_text(s_media_title, title);
+        theme::set_text(s_media_artist, media.artist);
+        theme::set_text_color(s_media_title, media.has_track ? theme::text : theme::secondary);
+        moved = true;
+    }
+    if (media.art != nullptr && media.covers != s_card_covers) {
+        show_art_pixels(media.art);
+    }
+    s_card_covers      = media.covers;
+    const bool idle    = !media.has_track;
+    const bool has_art = media.art != nullptr && !idle;
+    const bool framed  = has_art || media.placeholder || idle;
+    lv_obj_set_hidden(s_media_art, !has_art);
+    if (!s_card_laid || idle != s_media_idle || framed != s_framed) {
+        s_card_laid  = true;
+        s_media_idle = idle;
+        s_framed     = framed;
+        lv_obj_set_hidden(s_media_frame, !framed);
+        show_speaker_face(idle);
+        place_media_text(framed);
+    } else if (moved) {
+        layout_media_text();
+    }
+
+    const lv_opa_t dim = media.has_track && !media.playing ? PAUSED_ART_DIM : PLAYING_ART_DIM;
     if (lv_obj_get_style_image_recolor_opa(s_media_art, LV_PART_MAIN) != dim) {
         lv_obj_set_style_image_recolor(s_media_art, lv_color_hex(theme::background), 0);
         lv_obj_set_style_image_recolor_opa(s_media_art, dim, 0);
     }
 }
+}  // namespace
 
-void cancel_pause_settle()
-{
-    if (s_pause_timer != nullptr) {
-        lv_timer_delete(s_pause_timer);
-        s_pause_timer = nullptr;
-    }
-}
-
-void pause_settled(lv_timer_t *)
-{
-    cancel_pause_settle();
-    apply_playing(false);
-}
 namespace {
-
-// A player that takes no commands is followed, not steered: whatever was
-// tapped, nothing that would play, pause, skip or seek it is sent.
-bool steers(MediaAction action)
-{
-    return media_state().remote || action == MediaAction::VolumeDown || action == MediaAction::VolumeUp ||
-           action == MediaAction::Mute;
-}
 
 // A video's intro and credits, and the button that skips them: into the intro
 // it skips to the intro's end, into the credits on to the next episode, which
@@ -831,79 +914,23 @@ constexpr std::int32_t  SKIP_H         = 40;
 constexpr std::int32_t  SKIP_PAD       = 16;
 constexpr std::int32_t  EXPAND_CHIP    = theme::chip::size;
 
-MediaSegment s_segments[kMaxSegments]{};
-int          s_segment_count = 0;
 lv_obj_t    *s_skip          = nullptr;
 lv_obj_t    *s_expand        = nullptr;  // into the cinema view for a video, the music view else
-int          s_skip_to       = -1;    // where skipping the intro seeks to
-bool         s_skip_next     = false; // skipping starts the next episode instead
-const char  *s_skip_text     = nullptr;
-
-int position_now()
-{
-    return media_position_now();
-}
-
-void seek_to(int position_s)
-{
-    if (!media_state().remote) {
-        return;
-    }
-    position_s    = std::max(0, media_state().duration_s > 0 ? std::min(position_s, media_state().duration_s) : position_s);
-    media_state().position_s  = position_s;
-    media_state().position_at = xTaskGetTickCount();
-    publish(Topic::Media);
-    if (s_handlers.seek != nullptr) {
-        s_handlers.seek(position_s);
-    }
-}
 
 void skip_check(lv_timer_t *)
 {
-    const char *text = nullptr;
-    int         to   = -1;
-    bool        next = false;
-    if (media_state().video && media_state().has_track && media_state().duration_s > 0) {
-        const int at            = position_now();
-        bool      credits_known = false;
-        for (int i = 0; i < s_segment_count; ++i) {
-            const MediaSegment &segment = s_segments[i];
-            const bool          intro   = segment.kind == MediaSegment::Kind::Intro;
-            credits_known               = credits_known || !intro;
-            if (at >= segment.start_s && at < segment.end_s) {
-                if (intro) {
-                    text = "Skip intro";
-                    to   = segment.end_s;
-                } else {
-                    next = true;
-                }
-            }
-        }
-        next = next || (!credits_known && media_state().duration_s > NEXT_UP_TAIL_S &&
-                        at >= media_state().duration_s - NEXT_UP_TAIL_S);
-        // Seeking to the end only stops the player there; the episode after
-        // is started instead, and without one there is nothing to go on to.
-        next = next && cinema_has_next();
-        if (next) {
-            text = "Next episode";
-        }
-    }
-    s_skip_to   = to;
-    s_skip_next = next;
-    s_skip_text = text;
-    lv_obj_set_hidden(s_skip, text == nullptr);
+    const MediaSkip offer = media_skip_offer();
+    lv_obj_set_hidden(s_skip, offer.text == nullptr);
     lv_obj_set_hidden(s_expand, !media_state().has_track);
-    if (text != nullptr) {
-        theme::set_text(lv_obj_get_child(s_skip, 0), text);
+    if (offer.text != nullptr) {
+        theme::set_text(lv_obj_get_child(s_skip, 0), offer.text);
     }
 }
 
 void skip_clicked_cb(lv_event_t *)
 {
-    if (s_skip_to >= 0 || s_skip_next) {
-        media_skip();
-        lv_obj_set_hidden(s_skip, true);
-    }
+    media_skip();
+    lv_obj_set_hidden(s_skip, true);
 }
 
 void build_skip_button(lv_obj_t *card)
@@ -942,12 +969,10 @@ void media_swiped(lv_dir_t direction)
     }
     // A video goes ten seconds on or back, as its own player does.
     if (media_state().video) {
-        seek_to(position_now() + (direction == LV_DIR_LEFT ? SEEK_STEP_S : -SEEK_STEP_S));
+        media_seek_by(direction == LV_DIR_LEFT ? SEEK_STEP_S : -SEEK_STEP_S);
         return;
     }
-    if (s_handlers.media != nullptr) {
-        s_handlers.media(direction == LV_DIR_LEFT ? MediaAction::Next : MediaAction::Previous);
-    }
+    media_action(direction == LV_DIR_LEFT ? MediaAction::Next : MediaAction::Previous);
 }
 
 void media_held()
@@ -957,12 +982,12 @@ void media_held()
         open_pick_picker();
         return;
     }
-    if (s_media_off) {
+    if (!media_state().controllable) {
         return;
     }
-    if (s_media_hold >= 0) {
+    if (media_state().hold_preset >= 0) {
         if (s_handlers.preset != nullptr) {
-            s_handlers.preset(s_media_hold, false);
+            s_handlers.preset(media_state().hold_preset, false);
         }
     } else {
         open_music();
@@ -974,14 +999,10 @@ void media_tapped()
     if (std::exchange(s_media_long, false) || std::exchange(s_media_swiped, false)) {
         return;
     }
-    if (!media_state().has_track || !media_state().remote) {
-        return;  // nothing to pause or carry on with, or a player that will not
+    if (!media_state().has_track) {
+        return;  // nothing to pause or carry on with
     }
-    cancel_pause_settle();
-    apply_playing(!media_state().playing);
-    if (s_handlers.media != nullptr) {
-        s_handlers.media(MediaAction::PlayPause);
-    }
+    media_toggle_play();
 }
 
 void media_card_cb(lv_event_t *e)
@@ -1047,6 +1068,7 @@ void build_media_card(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int
     s_media_artist = theme::make_label(s_media_card, "", theme::secondary, fonts::size_16());
     one_line(s_media_artist, fonts::size_16(), text_w);
     build_skip_button(s_media_card);
+    subscribe(Topic::Media, kNoView, paint_media_card);
 }
 
 constexpr int LIGHTS_SHARE_NUM = 5;
@@ -1068,107 +1090,6 @@ void show_speaker_face(bool shown)
 void open_favourites()
 {
     open_pick_picker();
-}
-
-void media_seek_by(int delta_s)
-{
-    seek_to(position_now() + delta_s);
-}
-
-void media_toggle_play()
-{
-    if (!steers(MediaAction::PlayPause)) {
-        return;
-    }
-    cancel_pause_settle();
-    apply_playing(!media_state().playing);
-    if (s_handlers.media != nullptr) {
-        s_handlers.media(MediaAction::PlayPause);
-    }
-}
-
-const char *media_skip_text()
-{
-    return s_skip_text;
-}
-
-void media_skip()
-{
-    if (!media_state().remote) {
-        return;
-    }
-    if (s_skip_next) {
-        if (s_handlers.media != nullptr) {
-            s_handlers.media(MediaAction::Next);
-        }
-    } else if (s_skip_to >= 0) {
-        seek_to(s_skip_to);
-    }
-}
-
-void apply_media_segments(const MediaSegment *segments, int count)
-{
-    s_segment_count = count;
-    std::copy(segments, segments + count, s_segments);
-}
-
-void apply_media_seeks(bool seeks)
-{
-    media_state().video = seeks;
-    publish(Topic::Media);
-}
-
-void apply_media_remote(bool remote)
-{
-    media_state().remote = remote;
-    publish(Topic::Media);
-}
-
-bool media_remote()
-{
-    return media_state().remote;
-}
-
-void apply_pick(int index, const char *name)
-{
-    PickView &view = s_pick_views[index];
-    if (view.root == nullptr) {
-        return;
-    }
-    view.named = name != nullptr && name[0] != '\0';
-    theme::set_text(view.name, view.named ? name : "");
-    lv_obj_set_hidden(view.root, !view.named);
-}
-
-void apply_pick_art(int index, const void *pixels)
-{
-    PickView &view = s_pick_views[index];
-    if (view.art == nullptr) {
-        return;
-    }
-    if (pixels != nullptr && view.rounded == nullptr) {
-        view.rounded = static_cast<std::uint16_t *>(heap_caps_malloc(
-            media::kPickArtSize * media::kPickArtSize * sizeof(std::uint16_t),
-            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    }
-    lv_obj_set_hidden(view.art, pixels == nullptr || view.rounded == nullptr);
-    if (pixels == nullptr || view.rounded == nullptr) {
-        return;
-    }
-    // Rounded once here rather than clipped on every frame, which in software
-    // costs more than the rest of the popup.
-    round_corners(static_cast<const std::uint16_t *>(pixels), view.rounded, media::kPickArtSize,
-                  PICK_ART_RADIUS, theme::panel);
-    const std::uint32_t bytes = lv_color_format_get_size(LV_COLOR_FORMAT_RGB565);
-    view.dsc.header.magic     = LV_IMAGE_HEADER_MAGIC;
-    view.dsc.header.cf        = LV_COLOR_FORMAT_RGB565;
-    view.dsc.header.w         = media::kPickArtSize;
-    view.dsc.header.h         = media::kPickArtSize;
-    view.dsc.header.stride    = media::kPickArtSize * bytes;
-    view.dsc.data_size        = media::kPickArtSize * media::kPickArtSize * bytes;
-    view.dsc.data             = reinterpret_cast<const std::uint8_t *>(view.rounded);
-    lv_image_set_src(view.art, &view.dsc);
-    lv_obj_invalidate(view.art);
 }
 
 void build_home_page(lv_obj_t *page)

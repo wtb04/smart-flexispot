@@ -66,9 +66,7 @@ lv_obj_t     *s_volume_level = nullptr;
 bool          s_volume_held  = false;  // a finger on it: what it shows is what it sets
 lv_obj_t     *s_ends    = nullptr;  // when it will end, by the clock
 lv_obj_t     *s_subtitles = nullptr;
-bool          s_subtitles_available = false;
-bool          s_subtitles_shown     = false;
-bool          s_neighbour[2] = {};  // before, after
+std::uint32_t s_stills_shown = UINT32_MAX;  // the model's count of stills when last drawn
 bool          s_auto_off = true;    // the screen goes dark when left alone
 lv_obj_t     *s_low_chip    = nullptr;  // quick actions in the row over the view
 lv_obj_t     *s_lights_chip = nullptr;
@@ -147,7 +145,7 @@ void show_progress()
 
 void keep_screen()
 {
-    const bool offered = media_skip_text() != nullptr;
+    const bool offered = media_skip_offer().text != nullptr;
     if (offered && !s_skip_was_offered) {
         s_woke_at = lv_tick_get();
         set_screen_state(true);
@@ -166,6 +164,24 @@ void show_volume(int percent)
     char text[12];
     std::snprintf(text, sizeof(text), "%d", percent);
     theme::set_text(s_volume_level, text);
+}
+
+void show_still(const void *pixels)
+{
+    lv_obj_set_hidden(s_still, pixels == nullptr);
+    if (pixels == nullptr) {
+        return;
+    }
+    const std::uint32_t bytes = lv_color_format_get_size(LV_COLOR_FORMAT_RGB565);
+    s_still_dsc.header.magic  = LV_IMAGE_HEADER_MAGIC;
+    s_still_dsc.header.cf     = LV_COLOR_FORMAT_RGB565;
+    s_still_dsc.header.w      = STILL_W;
+    s_still_dsc.header.h      = STILL_H;
+    s_still_dsc.header.stride = STILL_W * bytes;
+    s_still_dsc.data_size     = STILL_W * STILL_H * bytes;
+    s_still_dsc.data          = static_cast<const std::uint8_t *>(pixels);
+    lv_image_set_src(s_still, &s_still_dsc);
+    lv_obj_invalidate(s_still);
 }
 
 // What plays, as the model has it, as it changes.
@@ -189,6 +205,19 @@ void show_media()
     if (media_state().volume >= 0 && !s_volume_held) {
         show_volume(media_state().volume);
     }
+    const MediaState &media = media_state();
+    for (lv_obj_t *control : {s_play, s_skip}) {
+        theme::set_usable(control, media.remote);
+    }
+    // Faded where there is no episode that side, so the grid stays as it is.
+    theme::set_usable(s_steer[0], media.remote && media.before);
+    theme::set_usable(s_steer[1], media.remote && media.after);
+    theme::fill_accent_or(s_subtitles, media.subtitles_shown, theme::panel_light);
+    theme::set_usable(s_subtitles, media.subtitles_available);
+    if (media.stills != s_stills_shown) {
+        s_stills_shown = media.stills;
+        show_still(media.still);
+    }
 }
 
 // What goes on with the time: how far, the intro or credits to skip, and the
@@ -196,19 +225,11 @@ void show_media()
 void tick(lv_timer_t *)
 {
     show_progress();
-    const char *skip = media_skip_text();
+    const char *skip = media_skip_offer().text;
     lv_obj_set_hidden(s_skip, skip == nullptr);
     if (skip != nullptr) {
         theme::set_text(lv_obj_get_child(s_skip, 0), skip);
     }
-    for (lv_obj_t *control : {s_play, s_skip}) {
-        theme::set_usable(control, media_remote());
-    }
-    // Faded where there is no episode that side, so the grid stays as it is.
-    theme::set_usable(s_steer[0], media_remote() && s_neighbour[0]);
-    theme::set_usable(s_steer[1], media_remote() && s_neighbour[1]);
-    theme::fill_accent_or(s_subtitles, s_subtitles_shown, theme::panel_light);
-    theme::set_usable(s_subtitles, s_subtitles_available);
     light_chrome_chip(s_screen_chip, s_auto_off);
     keep_screen();
 }
@@ -241,16 +262,6 @@ lv_obj_t *line(lv_obj_t *parent, std::uint32_t colour, const lv_font_t *font, st
     lv_obj_set_height(label, lines * lv_font_get_line_height(font));
     lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_DOTS);
     return label;
-}
-
-void media_action(MediaAction action)
-{
-    if (!media_remote() && action != MediaAction::Subtitles) {
-        return;
-    }
-    if (s_handlers.media != nullptr) {
-        s_handlers.media(action);
-    }
 }
 
 // A tap on the picture pauses or plays, as tapping a video does; a swipe across
@@ -327,14 +338,9 @@ void volume_touched(lv_event_t *e)
     lv_obj_get_coords(s_volume, &bar);
     const int percent = std::clamp(static_cast<int>((at.x - bar.x1) * 100 / lv_area_get_width(&bar)), 0, 100);
     s_volume_held = true;
-    if (percent == media_state().volume) {
-        return;
-    }
-    media_state().volume = percent;
-    publish(Topic::Media);
-    show_volume(percent);
-    if (s_handlers.media_volume != nullptr) {
-        s_handlers.media_volume(percent);
+    if (percent != media_state().volume) {
+        media_set_volume(percent);
+        show_volume(percent);
     }
 }
 
@@ -426,9 +432,7 @@ void build_sound(std::int32_t x, std::int32_t y, std::int32_t w)
     const std::int32_t side_w = side_width(w);
     build_volume(x, y, w - side_w - GRID_GAP);
     s_subtitles = button(s_view, "", side_w, TRANSPORT_H, [](lv_event_t *) {
-        s_subtitles_shown = !s_subtitles_shown;  // the next report from the player confirms it
-        media_action(MediaAction::Subtitles);
-        tick(s_tick);
+        media_toggle_subtitles();
     });
     mark(s_subtitles, &icons::subtitles_icon);
     lv_obj_set_pos(s_subtitles, x + w - side_w, y);
@@ -484,44 +488,6 @@ void build_cinema(lv_obj_t *screen)
         s_auto_off = !s_auto_off;
         tick(s_tick);
     });
-}
-
-bool cinema_has_next()
-{
-    return s_neighbour[1];
-}
-
-void apply_media_neighbours(bool previous, bool next)
-{
-    s_neighbour[0] = previous;
-    s_neighbour[1] = next;
-}
-
-void apply_media_subtitles(bool available, bool shown)
-{
-    s_subtitles_available = available;
-    s_subtitles_shown     = shown;
-}
-
-void apply_cinema_still(const void *pixels)
-{
-    if (s_still == nullptr) {
-        return;
-    }
-    lv_obj_set_hidden(s_still, pixels == nullptr);
-    if (pixels == nullptr) {
-        return;
-    }
-    const std::uint32_t bytes = lv_color_format_get_size(LV_COLOR_FORMAT_RGB565);
-    s_still_dsc.header.magic  = LV_IMAGE_HEADER_MAGIC;
-    s_still_dsc.header.cf     = LV_COLOR_FORMAT_RGB565;
-    s_still_dsc.header.w      = STILL_W;
-    s_still_dsc.header.h      = STILL_H;
-    s_still_dsc.header.stride = STILL_W * bytes;
-    s_still_dsc.data_size     = STILL_W * STILL_H * bytes;
-    s_still_dsc.data          = static_cast<const std::uint8_t *>(pixels);
-    lv_image_set_src(s_still, &s_still_dsc);
-    lv_obj_invalidate(s_still);
 }
 
 bool cinema_open()

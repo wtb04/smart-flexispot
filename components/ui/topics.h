@@ -16,6 +16,7 @@ enum class Topic : std::uint8_t {
     Second,  // the clock went on a second
     Focus,   // the focus timer: see focus_model.h
     Media,   // what plays: see media_model.h
+    Picks,   // the favourites: see media_model.h
     Desk,    // its height, presets and whether it answers: see room_model.h
     Lights,  // which are on: see room_model.h
     Status,  // the phone, the network, the time and the screen: see status_model.h

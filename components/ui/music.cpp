@@ -150,13 +150,6 @@ lv_obj_t *button(const char *text, std::int32_t w, std::int32_t h, lv_event_cb_t
     return b;
 }
 
-void steer(MediaAction action)
-{
-    if (media_remote() && s_handlers.media != nullptr) {
-        s_handlers.media(action);
-    }
-}
-
 void paint(const Palette &colours)
 {
     lv_obj_set_style_bg_color(s_view, colours.back, 0);
@@ -211,10 +204,17 @@ void show_cover()
         lv_image_set_scale(s_cover, LV_SCALE_NONE);
         paint(palette_of(static_cast<const std::uint16_t *>(large), COVER * COVER));
     } else if (small != nullptr) {
-        lv_image_set_src(s_cover, small);
+        const std::uint32_t bytes = lv_color_format_get_size(LV_COLOR_FORMAT_RGB565);
+        s_cover_dsc.header.magic  = LV_IMAGE_HEADER_MAGIC;
+        s_cover_dsc.header.cf     = LV_COLOR_FORMAT_RGB565;
+        s_cover_dsc.header.w      = media::kArtSize;
+        s_cover_dsc.header.h      = media::kArtSize;
+        s_cover_dsc.header.stride = media::kArtSize * bytes;
+        s_cover_dsc.data_size     = media::kArtSize * media::kArtSize * bytes;
+        s_cover_dsc.data          = static_cast<const std::uint8_t *>(small);
+        lv_image_set_src(s_cover, &s_cover_dsc);
         lv_image_set_scale(s_cover, SMALL_SCALE);
-        const auto *dsc = static_cast<const lv_image_dsc_t *>(small);
-        paint(palette_of(reinterpret_cast<const std::uint16_t *>(dsc->data), media::kArtSize * media::kArtSize));
+        paint(palette_of(static_cast<const std::uint16_t *>(small), media::kArtSize * media::kArtSize));
     } else {
         paint(pages_palette());
     }
@@ -306,7 +306,7 @@ void show_media()
         lv_obj_set_style_image_recolor_opa(s_cover, dim, 0);
     }
     for (lv_obj_t *control : s_steer) {
-        theme::set_usable(control, media_remote());
+        theme::set_usable(control, media_state().remote);
     }
     theme::set_usable(s_volume, media_state().volume >= 0);
     if (media_state().volume >= 0 && !s_volume_held) {
@@ -327,14 +327,9 @@ void volume_touched(lv_event_t *e)
     lv_obj_get_coords(s_volume, &bar);
     const int percent = std::clamp(static_cast<int>((at.x - bar.x1) * 100 / lv_area_get_width(&bar)), 0, 100);
     s_volume_held     = true;
-    if (percent == media_state().volume) {
-        return;
-    }
-    media_state().volume = percent;
-    publish(Topic::Media);
-    show_volume(percent);
-    if (s_handlers.media_volume != nullptr) {
-        s_handlers.media_volume(percent);
+    if (percent != media_state().volume) {
+        media_set_volume(percent);
+        show_volume(percent);
     }
 }
 
@@ -427,12 +422,12 @@ void build_controls(std::int32_t x, std::int32_t bottom, std::int32_t w)
     const std::int32_t side_w = (w - PLAY_W - 2 * GRID_GAP) / 2;
     const std::int32_t play_x = x + side_w + GRID_GAP;
     const std::int32_t next_x = play_x + PLAY_W + GRID_GAP;
-    s_steer[0] = button(LV_SYMBOL_PREV, side_w, TRANSPORT_H, [](lv_event_t *) { steer(MediaAction::Previous); });
+    s_steer[0] = button(LV_SYMBOL_PREV, side_w, TRANSPORT_H, [](lv_event_t *) { media_action(MediaAction::Previous); });
     lv_obj_set_pos(s_steer[0], x, transport_y);
     s_play = button(LV_SYMBOL_PLAY, PLAY_W, TRANSPORT_H, [](lv_event_t *) { media_toggle_play(); });
     lv_obj_set_pos(s_play, play_x, transport_y);
     s_steer[1] = s_play;
-    s_steer[2] = button(LV_SYMBOL_NEXT, side_w, TRANSPORT_H, [](lv_event_t *) { steer(MediaAction::Next); });
+    s_steer[2] = button(LV_SYMBOL_NEXT, side_w, TRANSPORT_H, [](lv_event_t *) { media_action(MediaAction::Next); });
     lv_obj_set_pos(s_steer[2], next_x, transport_y);
 
     // The favourites, to play another instead, under the next track.

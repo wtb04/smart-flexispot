@@ -183,18 +183,6 @@ extern lv_obj_t *s_lights_state;
 extern lv_obj_t *s_bulbs[kLightCount];
 extern LightButton s_lights[kLightCount];
 extern lv_obj_t *s_media_card;
-extern int s_media_hold;
-extern bool s_media_off;
-extern lv_obj_t *s_media_frame;
-extern lv_obj_t *s_media_art;
-extern lv_obj_t *s_media_source;
-extern lv_obj_t *s_media_title;
-extern lv_obj_t *s_media_artist;
-extern lv_image_dsc_t s_art_dsc[2];
-extern int s_art_slot;
-extern TextBox s_card_with_art, s_card_bare;
-extern bool s_has_art;
-extern lv_timer_t *s_pause_timer;
 extern int s_page;
 extern std::atomic<bool> s_setup_visible;
 extern bool s_presence_gate;
@@ -257,18 +245,7 @@ void show_speaker_face(bool shown);
 std::int32_t idle_media_text_top();
 /** The HK Citation One the card shows then, `side` square, painted once. */
 const lv_image_dsc_t *speaker_picture(std::int32_t side);
-void apply_pick(int index, const char *name);
-void apply_pick_art(int index, const void *pixels);
-void apply_media_segments(const MediaSegment *segments, int count);
-void apply_media_seeks(bool seeks);
-void apply_media_remote(bool remote);
-/** Whether the player takes pause, seek and skip from here. */
-bool media_remote();
-void apply_media_subtitles(bool available, bool shown);
 void write_clock(lv_obj_t *label, int seconds);
-void apply_playing(bool playing);
-void cancel_pause_settle();
-void pause_settled(lv_timer_t *);
 void build_home_page(lv_obj_t *page);
 
 // The presets the rail's Stand and Sit buttons send the desk to.
@@ -276,23 +253,16 @@ constexpr int STAND_PRESET     = 2;
 constexpr int SIT_PRESET       = 3;
 constexpr int ULTRA_LOW_PRESET = 1;  // Preset 2, as the cinema view sends the desk down
 
-// What plays on the media card, for the cinema view to show and control too.
-void        open_favourites();        // the favourites' picker, when there are any
-void        media_seek_by(int delta_s);
-void        media_toggle_play();
-const char *media_skip_text();     // what the skip button offers, null for nothing
-void        media_skip();
+// The favourites' picker, when there are any, as the music view opens it.
+void open_favourites();
 
 // Jellyfin fullscreen: the film, its controls, the desk and the lights.
 void build_cinema(lv_obj_t *screen);
 void open_cinema();
 bool cinema_open();
-void apply_cinema_still(const void *pixels);
 void build_music(lv_obj_t *screen);
 void open_music();
 bool music_open();
-/** The time in a fullscreen view's bottom right corner, shown or put away by a
- *  tap there, as the last tap left it in any of them. */
 // The time beside a fullscreen view's chip back, faded with its other buttons,
 // and the focus timer beside it while it runs, unless the view is the timer's.
 struct ViewClock {
@@ -313,8 +283,6 @@ struct Chrome {
 Chrome    add_fullscreen_chrome(ViewId view, lv_obj_t *root, lv_event_cb_t on_close, bool focus_badge = true);
 lv_obj_t *add_chrome_chip(Chrome &chrome, const lv_image_dsc_t *icon, lv_event_cb_t on_click);
 void      light_chrome_chip(lv_obj_t *chip, bool on);  // in the accent while on
-void apply_media_neighbours(bool previous, bool next);
-bool cinema_has_next();  // an episode after this one to go on to
 void show_guest_presets();
 void select_page(int index);
 /** The Focus tab's caption in place of its name, and its icon in `ink`, faded

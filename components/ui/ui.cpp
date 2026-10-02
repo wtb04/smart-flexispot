@@ -434,70 +434,10 @@ void apply_desk_available(bool available)
     publish(Topic::Desk);
 }
 
-// The card's frame holds the cover, a blank where one would not come, or,
-// while nothing plays, the speaker.
-bool        s_media_idle      = true;
-const void *s_art_pixels      = nullptr;
-bool        s_art_placeholder = false;
-
-void place_media_text(bool framed);
-
-void frame_media()
-{
-    if (s_media_art == nullptr) {
-        return;
-    }
-    const bool has_art = s_art_pixels != nullptr && !s_media_idle;
-    const bool framed  = has_art || s_art_placeholder || s_media_idle;
-    lv_obj_set_hidden(s_media_frame, !framed);
-    lv_obj_set_hidden(s_media_art, !has_art);
-    show_speaker_face(s_media_idle);
-    place_media_text(framed);
-    media_state().art = has_art ? lv_image_get_src(s_media_art) : nullptr;
-    publish(Topic::Media);
-}
-
-void apply_media(const char *source, const char *title, const char *artist, const char *state,
-                 bool playing, bool controllable)
-{
-    if (s_media_card == nullptr) {
-        return;
-    }
-    const bool has_track = title != nullptr && title[0] != '\0';
-    s_media_off = !controllable;
-    theme::set_text(s_media_source, source != nullptr && source[0] != '\0' ? source : "SPEAKER");
-    theme::set_text(s_media_title, has_track ? title : (state != nullptr ? state : "--"));
-    theme::set_text(s_media_artist, has_track && artist != nullptr ? artist : "");
-    theme::set_text_color(s_media_title, has_track ? theme::text : theme::secondary);
-    MediaState &media = media_state();
-    std::snprintf(media.source, sizeof(media.source), "%s", lv_label_get_text(s_media_source));
-    std::snprintf(media.title, sizeof(media.title), "%s", has_track ? title : "");
-    std::snprintf(media.artist, sizeof(media.artist), "%s", lv_label_get_text(s_media_artist));
-    publish(Topic::Media);
-
-    layout_media_text();
-    // The first time too: a card that starts idle never changes into it.
-    static bool s_framed = false;
-    if (!std::exchange(s_framed, true) || s_media_idle == has_track) {
-        s_media_idle = !has_track;
-        frame_media();
-    }
-
-    media_state().has_track = has_track;
-    if (playing || !has_track) {
-        cancel_pause_settle();
-        apply_playing(playing);
-    } else if (!media_state().playing) {
-        apply_playing(false);
-    } else if (s_pause_timer == nullptr) {
-        s_pause_timer = lv_timer_create(pause_settled, PAUSE_SETTLE_MS, nullptr);
-    }
-}
-
 void apply_media_args(const MediaArgs &media)
 {
-    apply_media(media.source.get(), media.title.get(), media.artist.get(), media.state.get(),
-                media.playing, media.controllable);
+    media_take_track(media.source.get(), media.title.get(), media.artist.get(), media.state.get(),
+                     media.playing, media.controllable);
 }
 
 // A new track's text waits here for its cover, or for this long when that is slow.
@@ -519,15 +459,13 @@ void drop_held_media()
     }
 }
 
-void apply_media_progress(int position_s, int duration_s, bool playing);
-
 void release_held_media()
 {
     if (s_media_held) {
         drop_held_media();
         apply_media_args(s_held_media);
         if (std::exchange(s_progress_held, false)) {
-            apply_media_progress(s_held_progress.position_s, s_held_progress.duration_s, s_held_progress.playing);
+            media_take_progress(s_held_progress.position_s, s_held_progress.duration_s, s_held_progress.playing);
         }
     }
 }
@@ -551,71 +489,6 @@ void hold_media(const MediaArgs &media)
     s_held_timer = lv_timer_create(held_too_long, ART_WAIT_MS, nullptr);
     lv_timer_set_repeat_count(s_held_timer, 1);
     lv_timer_set_auto_delete(s_held_timer, false);
-}
-
-void apply_media_progress(int position_s, int duration_s, bool playing)
-{
-    MediaState &media = media_state();
-    media.position_s  = position_s;
-    media.duration_s  = duration_s;
-    media.advancing   = playing;
-    media.position_at = xTaskGetTickCount();
-    publish(Topic::Media);
-}
-
-void apply_media_volume(int percent)
-{
-    media_state().volume = percent;
-    publish(Topic::Media);
-}
-
-void place_media_text(bool framed)
-{
-    const TextBox card  = framed ? s_card_with_art : s_card_bare;
-    // Nothing playing leaves the speaker's name and OFF, a short pair, which
-    // sits level with the speaker beside it rather than at the top.
-    const std::int32_t top = s_media_idle ? idle_media_text_top() : 0;
-    theme::align(s_media_source, LV_ALIGN_TOP_LEFT, card.x, top);
-    theme::align(s_media_title, LV_ALIGN_TOP_LEFT, card.x, top + MEDIA_TITLE_Y);
-    lv_obj_set_width(s_media_title, card.w);
-    lv_obj_set_width(s_media_artist, card.w);
-    s_has_art = framed;
-    layout_media_text();
-}
-
-void show_art_pixels(const void *pixels)
-{
-    // Two descriptors in turn, so the one on screen is never rewritten under it.
-    lv_image_dsc_t &dsc = s_art_dsc[s_art_slot];
-    s_art_slot          = 1 - s_art_slot;
-
-    dsc.header.magic  = LV_IMAGE_HEADER_MAGIC;
-    dsc.header.cf     = LV_COLOR_FORMAT_RGB565;
-    dsc.header.w      = media::kArtSize;
-    dsc.header.h      = media::kArtSize;
-    dsc.header.stride = media::kArtSize * RGB565_BYTES_PER_PIXEL;
-    dsc.data_size     = media::kArtSize * media::kArtSize * RGB565_BYTES_PER_PIXEL;
-    dsc.data          = static_cast<const std::uint8_t *>(pixels);
-
-    lv_image_set_src(s_media_art, &dsc);
-    lv_obj_invalidate(s_media_art);
-}
-
-void apply_album_art(const void *pixels, bool placeholder)
-{
-    if (s_media_art == nullptr) {
-        return;
-    }
-    s_art_pixels      = pixels;
-    s_art_placeholder = placeholder;
-    frame_media();
-    if (pixels != nullptr) {
-        show_art_pixels(pixels);
-    }
-    MediaState &media = media_state();
-    media.art = !s_media_idle && pixels != nullptr ? lv_image_get_src(s_media_art) : nullptr;
-    ++media.covers;
-    publish(Topic::Media);
 }
 
 void apply_pill(int index, const char *label, const char *value, Level level)
@@ -762,11 +635,6 @@ void apply_card(int card, const char *summary, Level level)
     }
 }
 
-void apply_media_hold(int preset)
-{
-    s_media_hold = preset;
-}
-
 void apply_notification_volume(int percent)
 {
     if (s_volume_slider == nullptr) {
@@ -847,44 +715,41 @@ void apply_media_updates()
             drop_held_media();
             apply_media_args(media);
             if (std::exchange(s_progress_held, false)) {
-                apply_media_progress(s_held_progress.position_s, s_held_progress.duration_s, s_held_progress.playing);
+                media_take_progress(s_held_progress.position_s, s_held_progress.duration_s, s_held_progress.playing);
             }
         }
     }
     if (ArtArgs art{}; take(p_art, art)) {
-        apply_album_art(art.pixels, art.placeholder);
-        media_state().large = nullptr;  // the old record's, until this one's large one follows
+        media_take_cover(art.pixels, art.placeholder);
         release_held_media();
     }
     if (SegmentsArgs segments{}; take(p_segments, segments)) {
-        apply_media_segments(segments.items, segments.count);
+        media_take_segments(segments.items, segments.count);
     }
     if (bool remote = false; take(p_media_remote, remote)) {
-        apply_media_remote(remote);
+        media_take_remote(remote);
     }
     if (bool seeks = false; take(p_media_seeks, seeks)) {
-        apply_media_seeks(seeks);
+        media_take_video(seeks);
     }
     if (std::uint8_t subtitles = 0; take(p_subtitles, subtitles)) {
-        apply_media_subtitles((subtitles & 1) != 0, (subtitles & 2) != 0);
+        media_take_subtitles((subtitles & 1) != 0, (subtitles & 2) != 0);
     }
     if (const void *still = nullptr; take(p_still, still)) {
-        apply_cinema_still(still);
+        media_take_still(still);
     }
     if (const void *large = nullptr; take(p_art_large, large)) {
-        media_state().large = large;
-        ++media_state().covers;
-        publish(Topic::Media);
+        media_take_large_cover(large);
     }
     if (std::uint8_t around = 0; take(p_neighbours, around)) {
-        apply_media_neighbours((around & 1) != 0, (around & 2) != 0);
+        media_take_neighbours((around & 1) != 0, (around & 2) != 0);
     }
     for (int i = 0; i < media::kPickCount; ++i) {
         if (PickArgs pick{}; take(p_pick[i], pick)) {
-            apply_pick(i, pick.name.get());
+            media_take_pick(i, pick.name.get());
         }
         if (const void *pixels = nullptr; take(p_pick_art[i], pixels)) {
-            apply_pick_art(i, pixels);
+            media_take_pick_art(i, pixels);
         }
     }
     if (ProgressArgs progress{}; take(p_progress, progress)) {
@@ -892,14 +757,14 @@ void apply_media_updates()
             s_held_progress = progress;
             s_progress_held = true;
         } else {
-            apply_media_progress(progress.position_s, progress.duration_s, progress.playing);
+            media_take_progress(progress.position_s, progress.duration_s, progress.playing);
         }
     }
     if (int volume = 0; take(p_media_volume, volume)) {
-        apply_media_volume(volume);
+        media_take_volume(volume);
     }
     if (int hold = 0; take(p_media_hold, hold)) {
-        apply_media_hold(hold);
+        media_take_hold_preset(hold);
     }
 }
 
