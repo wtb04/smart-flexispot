@@ -13,7 +13,6 @@ constexpr float DEFAULT_MIN_C     = 15.0f;
 constexpr float DEFAULT_MAX_C     = 30.0f;
 constexpr int   TENTHS_PER_DEGREE = 10;
 
-constexpr std::int32_t DIAL_CARD_W   = 480;
 constexpr std::int32_t DIAL_INSET    = 100;
 constexpr std::int32_t DIAL_CHIP     = theme::chip::size;
 constexpr std::int32_t DIAL_CHIP_GAP = 10;
@@ -191,6 +190,11 @@ void build_thermostat(lv_obj_t *parent, std::int32_t y, std::int32_t w, std::int
 
 Hvac s_dial_shown = Hvac::Heating;  // what build_thermostat leaves on screen
 }  // namespace
+
+void build_thermostat_card(lv_obj_t *parent, std::int32_t w, std::int32_t h)
+{
+    build_thermostat(parent, 0, w, h);
+}
 
 void paint_dial(Hvac state)
 {
@@ -1123,8 +1127,6 @@ void build_media_card(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int
     subscribe(Topic::Media, kNoView, paint_media_card);
 }
 
-constexpr int LIGHTS_SHARE_NUM = 5;
-constexpr int LIGHTS_SHARE_DEN = 9;
 }  // namespace
 
 std::int32_t idle_media_text_top()
@@ -1227,17 +1229,13 @@ void build_home_page(lv_obj_t *page)
 
     build_pills(page, inner_w);
 
+    // The thermostat is the control bar's now; the lights and what plays go
+    // too once Home is a board of the pages.
     const std::int32_t body_y = PILL_H + BUTTON_GAP;
     const std::int32_t body_h = inner_h - body_y;
-    build_thermostat(page, body_y, DIAL_CARD_W, body_h);
-
-    const std::int32_t col_x    = DIAL_CARD_W + BUTTON_GAP;
-    const std::int32_t col_w    = inner_w - col_x;
-    const std::int32_t lights_h = body_h * LIGHTS_SHARE_NUM / LIGHTS_SHARE_DEN;
-    build_lights_button(page, col_x, body_y, col_w, lights_h);
-
-    const std::int32_t media_y = body_y + lights_h + BUTTON_GAP;
-    build_media_card(page, col_x, media_y, col_w, inner_h - media_y);
+    const std::int32_t col_w  = (inner_w - BUTTON_GAP) / 2;
+    build_lights_button(page, 0, body_y, col_w, body_h);
+    build_media_card(page, col_w + BUTTON_GAP, body_y, inner_w - col_w - BUTTON_GAP, body_h);
 
     build_light_picker(page);
     build_pick_picker(lv_obj_get_screen(page));  // over the music view too, which is opened from there

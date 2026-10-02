@@ -15,6 +15,7 @@ namespace ui::detail {
 struct Popout {
     lv_obj_t    *scrim    = nullptr;  // clear, under the card: a tap on it folds the card away
     lv_obj_t    *frame    = nullptr;  // what shows of the card
+    lv_obj_t    *ring     = nullptr;  // background round the card, setting it apart from the page
     lv_obj_t    *card     = nullptr;
     lv_obj_t    *button   = nullptr;  // what opens it, lit while it is out
     lv_obj_t    *above    = nullptr;  // kept over the scrim while it is out, to be used meanwhile

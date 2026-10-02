@@ -45,8 +45,8 @@ constexpr std::int32_t GAP        = 16;
 // The frame: a dock at one side with the tabs and the desk, a row along the
 // top with the time and what goes on elsewhere, and the page in the rest.
 constexpr std::int32_t DOCK_W      = 112;
-constexpr std::int32_t TOP_H       = 52;   // the top row's badge and status, centred over the pages
-constexpr std::int32_t CONTENT_Y   = 60;   // the page under it
+constexpr std::int32_t TOP_H       = 72;   // the control bar's slots, centred over the pages
+constexpr std::int32_t CONTENT_Y   = 92;   // the page under it
 
 constexpr std::int32_t PANEL_PAD  = 16;
 constexpr std::int32_t BUTTON_GAP = 16;
@@ -207,6 +207,12 @@ void open_desk_sheet(bool open);
 /** The row along the top of the pages: what goes on elsewhere, the battery, the status, the time. */
 void create_top_bar(lv_obj_t *parent);
 void place_top_bar();
+/** The control bar's slots for what plays, the heating and the lights, and the
+ *  cards they drop, kept over the scrim by `bar` while one is out. */
+void build_bar_slots(lv_obj_t *bar);
+void build_bar_cards(lv_obj_t *screen, lv_obj_t *bar);
+/** The thermostat, `w` by `h` at the top left of `parent`: the heating slot's card. */
+void build_thermostat_card(lv_obj_t *parent, std::int32_t w, std::int32_t h);
 void paint_choice(lv_obj_t *const buttons[2], bool second);
 void paint_pick(lv_obj_t *const *buttons, int count, int picked);
 void paint_side_buttons();

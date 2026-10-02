@@ -27,7 +27,9 @@ void reveal(Popout &p, int shown)
     lv_obj_set_hidden(p.frame, shown <= 0);
     lv_obj_set_pos(p.frame, p.leftward ? p.x - w : p.x, p.y);
     lv_obj_set_size(p.frame, std::max<std::int32_t>(w, 1), std::max<std::int32_t>(h, 1));
-    lv_obj_set_pos(p.card, p.leftward ? w - p.near - lv_obj_get_width(p.card) : p.near, p.top);
+    const std::int32_t card_x = p.leftward ? w - p.near - lv_obj_get_width(p.card) : p.near;
+    lv_obj_set_pos(p.card, card_x, p.top);
+    lv_obj_set_pos(p.ring, card_x - GAP, p.top - GAP);
     lv_obj_update_layout(p.frame);  // moved now, while that draws nothing again
     lv_display_enable_invalidation(disp, true);
 
@@ -76,13 +78,18 @@ lv_obj_t *build_popout(Popout &p, lv_obj_t *parent, std::int32_t w, std::int32_t
     lv_obj_set_scrollable(p.frame, false);
     lv_obj_set_hidden(p.frame, true);
 
+    // It lies over the page, so a ring of background sets it apart: a shape of
+    // its own under the card, as an outline left a hairline of the page showing
+    // where its edge and the card's were both smoothed at the corners.
+    p.ring = lv_obj_create(p.frame);
+    lv_obj_remove_style_all(p.ring);
+    theme::style_panel(p.ring, theme::background, theme::radius::card + GAP);
+    lv_obj_set_clickable(p.ring, false);
+    lv_obj_set_scrollable(p.ring, false);
+
     p.card = lv_obj_create(p.frame);
     lv_obj_set_width(p.card, w);
     theme::style_panel(p.card, theme::panel, theme::radius::card);
-    // It lies over the page, so a ring of background sets it apart.
-    lv_obj_set_style_outline_width(p.card, GAP, 0);
-    lv_obj_set_style_outline_color(p.card, lv_color_hex(theme::background), 0);
-    lv_obj_set_style_outline_opa(p.card, LV_OPA_COVER, 0);
     lv_obj_set_scrollable(p.card, false);
     // A press on it keeps it out as long as it is being used.
     lv_obj_add_event_cb(p.card, [](lv_event_t *e) { lv_timer_reset(static_cast<Popout *>(lv_event_get_user_data(e))->idle); },
@@ -112,6 +119,7 @@ void place_popout(Popout &p, std::int32_t x, std::int32_t y, bool leftward)
 void fit_popout(Popout &p)
 {
     lv_obj_update_layout(p.card);
+    lv_obj_set_size(p.ring, lv_obj_get_width(p.card) + 2 * GAP, lv_obj_get_height(p.card) + 2 * GAP);
     p.full_w = p.near + lv_obj_get_width(p.card) + GAP;
     p.full_h = p.top + lv_obj_get_height(p.card) + GAP;
     reveal(p, p.shown);

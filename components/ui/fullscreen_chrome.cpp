@@ -174,7 +174,7 @@ constexpr std::int32_t STATUS_GAP       = 10;  // between what the top row holds
 constexpr std::int32_t SLOT_W           = 34;  // each of the status's marks, centred in one as wide
 constexpr std::int32_t SLOT_GAP         = 10;
 constexpr std::int32_t TAP_MARGIN       = 20;  // round the badge and the status, to be hit easily
-constexpr std::int32_t IDLE_BADGE_W     = 64;  // the timer drawn alone, wider than tall to be hit
+constexpr std::int32_t TIMER_W          = 150;  // the timer's slot, whatever it says
 constexpr std::int32_t UPDATE_ICON_SIDE = 28;
 constexpr std::int32_t UPDATE_BAR_H     = 3;
 constexpr std::int32_t UPDATE_BAR_GAP   = 4;
@@ -192,6 +192,7 @@ lv_obj_t *s_phone_icon  = nullptr;
 lv_obj_t *s_slots[4]    = {};       // the battery, the phone, Wi-Fi and the time, from the page out
 lv_obj_t *s_idle_mark   = nullptr;  // the timer drawn in the badge while it is idle
 std::int32_t s_badge_w  = 0;        // the badge's width while the timer runs
+lv_obj_t *s_spacer      = nullptr;  // between the page's end of the bar and the dock's
 lv_obj_t *s_update_box  = nullptr;  // while an update arrives, for whichever board
 lv_obj_t *s_update_icon = nullptr;
 lv_obj_t *s_update_bar  = nullptr;  // how far it is, under the icon
@@ -249,13 +250,14 @@ void show_top_focus()
     show_focus(*s_top);
     const bool away = s_presence_gate && !status_state().present;
     const bool idle = focus_idle(focus_state());
-    // Idle, only the timer drawn, as round as the row is tall.
+    // Idle, the timer drawn and what it is; the slot keeps its width either way.
     lv_obj_set_hidden(s_top->badge, away);
     lv_obj_set_hidden(s_idle_mark, !idle);
     lv_obj_set_hidden(s_top->dot, idle);
-    lv_obj_set_hidden(s_top->left, idle);
-    lv_obj_set_width(s_top->badge, idle ? IDLE_BADGE_W : s_badge_w);
-    lv_obj_set_style_pad_hor(s_top->badge, idle ? 0 : BADGE_PAD, 0);
+    if (idle) {
+        theme::set_text(s_top->left, "Focus");
+    }
+    theme::set_text_color(s_top->left, idle ? theme::secondary : theme::text);
 }
 
 lv_obj_t *make_slot(lv_obj_t *parent, std::int32_t w)
@@ -268,15 +270,21 @@ lv_obj_t *make_slot(lv_obj_t *parent, std::int32_t w)
     return slot;
 }
 
-// The status against the dock, the time at its edge, and the badge beside it.
+// The status against the dock, the time at its edge, and the timer beside it;
+// what plays, the heating and the lights from the page's far end.
 void arrange_top()
 {
     const bool right = layout().rail_right;
-    lv_obj_set_flex_align(s_top_bar, right ? LV_FLEX_ALIGN_END : LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
-    lv_obj_t *const row[] = {s_top->badge, s_update_box, s_status};
-    for (int i = 0; i < 3; ++i) {
-        lv_obj_move_to_index(row[right ? i : 2 - i], i);
+    const std::uint32_t count = lv_obj_get_child_count(s_top_bar);
+    lv_obj_t *row[8] = {};
+    for (std::uint32_t i = 0; i < count && i < std::size(row); ++i) {
+        row[i] = lv_obj_get_child(s_top_bar, static_cast<std::int32_t>(i));
+    }
+    static bool s_right_arranged = true;  // as they are built
+    if (std::exchange(s_right_arranged, right) != right) {
+        for (std::uint32_t i = 0; i < count && i < std::size(row); ++i) {
+            lv_obj_move_to_index(row[count - 1 - i], static_cast<std::int32_t>(i));
+        }
     }
     for (int i = 0; i < 4; ++i) {
         lv_obj_move_to_index(s_slots[right ? i : 3 - i], i);
@@ -296,10 +304,18 @@ void create_top_bar(lv_obj_t *parent)
     // the status takes taps only where the row reaches.
     lv_obj_set_height(s_top_bar, CONTENT_Y);
     lv_obj_set_flex_flow(s_top_bar, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(s_top_bar, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(s_top_bar, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(s_top_bar, STATUS_GAP, 0);
     lv_obj_set_scrollable(s_top_bar, false);
     lv_obj_set_clickable(s_top_bar, false);
+
+    build_bar_slots(s_top_bar);
+    build_update(s_top_bar);  // after the lights, so nothing moves as it comes and goes
+    s_spacer = lv_obj_create(s_top_bar);
+    lv_obj_remove_style_all(s_spacer);
+    lv_obj_set_flex_grow(s_spacer, 1);
+    lv_obj_set_height(s_spacer, 1);
+    lv_obj_set_clickable(s_spacer, false);
 
     s_clocks.emplace_back();
     s_top = &s_clocks.back();
@@ -309,10 +325,11 @@ void create_top_bar(lv_obj_t *parent)
     lv_obj_set_height(s_top->badge, TOP_H);
     lv_obj_set_flex_align(s_top->badge, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_ext_click_area(s_top->badge, TAP_MARGIN);
-    s_badge_w   = lv_obj_get_style_width(s_top->badge, LV_PART_MAIN);
+    s_badge_w   = std::max(lv_obj_get_style_width(s_top->badge, LV_PART_MAIN), TIMER_W);
+    lv_obj_set_width(s_top->badge, s_badge_w);
     s_idle_mark = make_status_icon(s_top->badge, &icons::timer_icon);
+    lv_obj_move_to_index(s_idle_mark, 0);
     lv_obj_set_style_image_recolor(s_idle_mark, lv_color_hex(theme::secondary), 0);
-    build_update(s_top_bar);
 
     // The battery, the phone, Wi-Fi and the time are where Setup opens.
     s_status = lv_button_create(s_top_bar);
@@ -359,6 +376,7 @@ void create_top_bar(lv_obj_t *parent)
     lv_obj_set_ignore_layout(s_setup_dot, true);
     lv_obj_align(s_setup_dot, LV_ALIGN_TOP_RIGHT, STATUS_PAD / 2, 0);
     lv_obj_set_hidden(s_setup_dot, true);
+    build_bar_cards(parent, s_top_bar);
     place_top_bar();
 
     subscribe(Topic::Status, kNoView, paint_status);
