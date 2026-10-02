@@ -134,9 +134,10 @@ void media_apply_track(const char *source, const char *title, const char *artist
 }
 }  // namespace
 
-void media_take_cover(const void *pixels, bool placeholder)
+void media_take_cover(const void *pixels, bool placeholder, int width)
 {
     s_media.art         = pixels;
+    s_media.art_width   = width;
     s_media.placeholder = placeholder;
     s_media.large       = nullptr;  // the old record's, until this one's large one follows
     ++s_media.covers;

@@ -19,17 +19,19 @@ inline constexpr int kPickCount   = 8;
 inline constexpr int kPickArtSize = 180;
 
 /**
- * RGB565, kArtSize squared, called from the fetch task. The buffer is valid
- * until the cover after next replaces it; null means there is no art.
+ * RGB565, kArtSize high and as wide as `width`, called from the fetch task: a
+ * square cover is kArtSize squared, and a tall one, a series' poster, is kept
+ * whole and narrower rather than cut square. The buffer is valid until the
+ * cover after next replaces it; null means there is no art.
  */
 enum class Art : std::uint8_t {
     None,    // nothing is playing, or the track has no cover
-    Ready,   // pixels point at kArtSize squared of RGB565
+    Ready,   // pixels point at width by kArtSize of RGB565
     Failed,  // there was a cover and it could not be had
 };
 
-/** With the cover at kLargeArtSize too, from the same picture, or null. */
-using ArtHandler = void (*)(Art state, const void *pixels, const void *large);
+/** With the cover at kLargeArtSize squared too, from the same picture, or null. */
+using ArtHandler = void (*)(Art state, const void *pixels, int width, const void *large);
 
 /** A favourite's cover, kPickArtSize squared of RGB565, or null for none; from
  *  the fetch task. The buffer is that favourite's own, rewritten in place. */

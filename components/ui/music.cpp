@@ -207,14 +207,15 @@ void show_cover()
         const std::uint32_t bytes = lv_color_format_get_size(LV_COLOR_FORMAT_RGB565);
         s_cover_dsc.header.magic  = LV_IMAGE_HEADER_MAGIC;
         s_cover_dsc.header.cf     = LV_COLOR_FORMAT_RGB565;
-        s_cover_dsc.header.w      = media::kArtSize;
+        const int width           = media.art_width;
+        s_cover_dsc.header.w      = static_cast<std::uint32_t>(width);
         s_cover_dsc.header.h      = media::kArtSize;
-        s_cover_dsc.header.stride = media::kArtSize * bytes;
-        s_cover_dsc.data_size     = media::kArtSize * media::kArtSize * bytes;
+        s_cover_dsc.header.stride = static_cast<std::uint32_t>(width) * bytes;
+        s_cover_dsc.data_size     = static_cast<std::uint32_t>(width) * media::kArtSize * bytes;
         s_cover_dsc.data          = static_cast<const std::uint8_t *>(small);
         lv_image_set_src(s_cover, &s_cover_dsc);
         lv_image_set_scale(s_cover, SMALL_SCALE);
-        paint(palette_of(static_cast<const std::uint16_t *>(small), media::kArtSize * media::kArtSize));
+        paint(palette_of(static_cast<const std::uint16_t *>(small), width * media::kArtSize));
     } else {
         paint(pages_palette());
     }

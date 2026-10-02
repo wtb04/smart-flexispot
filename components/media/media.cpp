@@ -133,8 +133,12 @@ struct Target {
     std::uint16_t *pixels;
     int            w;
     int            h;
-    const Target  *also = nullptr;
+    const Target  *also     = nullptr;
+    int           *tall_w   = nullptr;  // given, a tall picture is kept whole, as narrow as this says
 };
+
+// Taller than this share of its width, a picture is a poster, not a cover.
+constexpr int TALL_PERCENT = 115;
 
 /** The part of the picture kept: as much of its middle as has the target's
  *  shape, so a wide still shows its middle in a square frame and a square
@@ -188,16 +192,23 @@ void take_cover(const jpeg::Picture &picture, void *target)
 {
     const Target to = *static_cast<const Target *>(target);
     for (const Target *size = &to; size != nullptr; size = size->also) {
-        const Crop from = middle(picture.width, picture.height, *size);
+        Target into = *size;
+        if (into.tall_w != nullptr) {
+            const bool tall = picture.height * 100 > picture.width * TALL_PERCENT;
+            into.w          = tall ? std::max(1, into.h * picture.width / picture.height) : size->w;
+            *into.tall_w    = into.w;
+        }
+        const Crop from = middle(picture.width, picture.height, into);
         if (picture.grey) {
-            shrink_grey(static_cast<const std::uint8_t *>(picture.pixels), from, picture.stride, *size);
+            shrink_grey(static_cast<const std::uint8_t *>(picture.pixels), from, picture.stride, into);
         } else {
-            shrink(static_cast<const std::uint16_t *>(picture.pixels), from, picture.stride, *size);
+            shrink(static_cast<const std::uint16_t *>(picture.pixels), from, picture.stride, into);
         }
     }
     s_last_hardware = picture.hardware;
     ESP_LOGI(TAG, "cover %dx%d%s%s -> %dx%d, stack left %u", picture.width, picture.height,
-             picture.grey ? " grey" : "", picture.hardware ? "" : " in software", to.w, to.h,
+             picture.grey ? " grey" : "", picture.hardware ? "" : " in software",
+             to.tall_w != nullptr ? *to.tall_w : to.w, to.h,
              static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
 }
 
@@ -225,12 +236,13 @@ bool fetch_playing(const char *path)
     std::uint16_t *art   = s_art[s_next];
     std::uint16_t *large = s_large[s_next];
     const Target   big{large, kLargeArtSize, kLargeArtSize};
-    if (!fetch(url, {art, kArtSize, kArtSize, large != nullptr ? &big : nullptr})) {
+    int            width = kArtSize;
+    if (!fetch(url, {art, kArtSize, kArtSize, large != nullptr ? &big : nullptr, &width})) {
         return false;
     }
     s_next = (s_next + 1) % ART_BUFFERS;
     if (s_on_art != nullptr) {
-        s_on_art(Art::Ready, art, large);
+        s_on_art(Art::Ready, art, width, large);
     }
     return true;
 }
@@ -245,7 +257,7 @@ void clear_art()
     std::strcpy(s_loaded, "");
     record(false, false, false, true, -1);
     if (s_on_art != nullptr) {
-        s_on_art(Art::None, nullptr, nullptr);
+        s_on_art(Art::None, nullptr, kArtSize, nullptr);
     }
 }
 
@@ -290,7 +302,7 @@ void refresh_playing(Playing &playing)
         copy_path(playing.failed, wanted);
         playing.retry_wait = RETRY_FIRST_US;
         if (s_on_art != nullptr) {
-            s_on_art(Art::Failed, nullptr, nullptr);
+            s_on_art(Art::Failed, nullptr, kArtSize, nullptr);
         }
     } else {
         playing.retry_wait = std::min(playing.retry_wait * 2, RETRY_MAX_US);

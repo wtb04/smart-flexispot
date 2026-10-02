@@ -164,8 +164,10 @@ void show_item()
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_album_art(nullptr, false));
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_album_art_large(nullptr));
     } else {
-        paint(s_art, media::kArtSize, media::kArtSize, video ? EPISODES[s_item].hue : TRACKS[s_item].hue);
-        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_album_art(s_art.data(), false));
+        // An episode's cover is its series' poster, two wide to three high, as Jellyfin's.
+        const int art_w = video ? media::kArtSize * 2 / 3 : media::kArtSize;
+        paint(s_art, art_w, media::kArtSize, video ? EPISODES[s_item].hue : TRACKS[s_item].hue);
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_album_art(s_art.data(), false, art_w));
         paint(s_large, media::kLargeArtSize, media::kLargeArtSize, video ? EPISODES[s_item].hue : TRACKS[s_item].hue);
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_album_art_large(s_large.data()));
     }

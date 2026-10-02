@@ -30,7 +30,8 @@ struct MediaState {
     TickType_t position_at = 0;
     int  volume       = -1;     // percent, as last reported or set, -1 before either
 
-    const void   *art         = nullptr;  // the cover at media::kArtSize, RGB565, or null
+    const void   *art         = nullptr;  // the cover, media::kArtSize high and art_width wide, RGB565, or null
+    int           art_width   = media::kArtSize;  // narrower for a poster, kept whole
     bool          placeholder = false;    // no cover will come: a blank where it would be
     const void   *large       = nullptr;  // the same cover at media::kLargeArtSize, or null
     std::uint32_t covers      = 0;        // counts every cover that came, as one may come into the same buffer
@@ -54,7 +55,7 @@ const MediaState &media_state();
 // ---- Updates, from ui.cpp's intake. Each publishes Topic::Media. ----
 void media_take_track(const char *source, const char *title, const char *artist, const char *state,
                       bool playing, bool controllable);
-void media_take_cover(const void *pixels, bool placeholder);
+void media_take_cover(const void *pixels, bool placeholder, int width);
 void media_take_large_cover(const void *pixels);
 void media_take_progress(int position_s, int duration_s, bool playing);
 void media_take_volume(int percent);

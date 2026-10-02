@@ -557,6 +557,9 @@ constexpr lv_opa_t PAUSED_ART_DIM  = LV_OPA_50;
 constexpr lv_opa_t PLAYING_ART_DIM = LV_OPA_TRANSP;
 
 std::int32_t s_card_inner_h  = 0;
+std::int32_t s_card_inner_w  = 0;
+std::int32_t s_card_art      = 0;  // the frame's height, and its width for a square cover
+std::int32_t s_frame_w       = 0;  // as wide as it is now, narrower for a poster
 
 std::int32_t artist_height(const lv_font_t *font, std::int32_t available)
 {
@@ -878,10 +881,11 @@ void show_art_pixels(const void *pixels)
     s_art_slot                = 1 - s_art_slot;
     dsc.header.magic          = LV_IMAGE_HEADER_MAGIC;
     dsc.header.cf             = LV_COLOR_FORMAT_RGB565;
-    dsc.header.w              = media::kArtSize;
+    const int           width = media_state().art_width;
+    dsc.header.w              = static_cast<std::uint32_t>(width);
     dsc.header.h              = media::kArtSize;
-    dsc.header.stride         = media::kArtSize * bytes;
-    dsc.data_size             = media::kArtSize * media::kArtSize * bytes;
+    dsc.header.stride         = static_cast<std::uint32_t>(width) * bytes;
+    dsc.data_size             = static_cast<std::uint32_t>(width) * media::kArtSize * bytes;
     dsc.data                  = static_cast<const std::uint8_t *>(pixels);
     lv_image_set_src(s_media_art, &dsc);
     lv_obj_invalidate(s_media_art);
@@ -913,7 +917,18 @@ void paint_media_card()
     const bool has_art = media.art != nullptr && !idle;
     const bool framed  = has_art || media.placeholder || idle;
     lv_obj_set_hidden(s_media_art, !has_art);
-    if (!s_card_laid || idle != s_media_idle || framed != s_framed) {
+    // A poster is shown whole: the frame as narrow as it is, the text closer.
+    const std::int32_t frame_w =
+        has_art ? std::max<std::int32_t>(1, s_card_art * media.art_width / media::kArtSize) : s_card_art;
+    const bool reshaped = frame_w != s_frame_w;
+    if (reshaped) {
+        s_frame_w = frame_w;
+        lv_obj_set_width(s_media_frame, frame_w);
+        lv_obj_set_width(s_media_art, frame_w);
+        lv_obj_center(s_media_art);
+        s_card_with_art = {frame_w + MEDIA_CARD_PAD, s_card_inner_w - frame_w - MEDIA_CARD_PAD};
+    }
+    if (!s_card_laid || idle != s_media_idle || framed != s_framed || reshaped) {
         s_card_laid  = true;
         s_media_idle = idle;
         s_framed     = framed;
@@ -1083,6 +1098,9 @@ void build_media_card(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int
 
     const std::int32_t inner_w = w - 2 * MEDIA_CARD_PAD;
     s_card_inner_h             = h - 2 * MEDIA_CARD_PAD;
+    s_card_inner_w             = inner_w;
+    s_card_art                 = art;
+    s_frame_w                  = art;
     s_card_with_art            = {art + MEDIA_CARD_PAD, inner_w - art - MEDIA_CARD_PAD};
     s_card_bare                = {0, inner_w};
     const std::int32_t text_x  = s_card_bare.x;

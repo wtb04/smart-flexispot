@@ -297,6 +297,7 @@ struct ProgressArgs {
 struct ArtArgs {
     const void *pixels;
     bool        placeholder;
+    int         width;
 };
 struct PillArgs {
     Text<40> label;
@@ -621,7 +622,7 @@ void apply_media_updates()
         }
     }
     if (ArtArgs art{}; take(p_art, art)) {
-        media_take_cover(art.pixels, art.placeholder);
+        media_take_cover(art.pixels, art.placeholder, art.width);
         release_held_media();
     }
     if (SegmentsArgs segments{}; take(p_segments, segments)) {
@@ -848,9 +849,9 @@ esp_err_t set_media_volume(int percent)
     return ESP_OK;
 }
 
-esp_err_t set_album_art(const void *pixels, bool placeholder)
+esp_err_t set_album_art(const void *pixels, bool placeholder, int width)
 {
-    put(p_art, ArtArgs{pixels, placeholder});
+    put(p_art, ArtArgs{pixels, placeholder, width > 0 ? std::min(width, media::kArtSize) : media::kArtSize});
     return ESP_OK;
 }
 
