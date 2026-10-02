@@ -79,7 +79,7 @@ void build_badge(Clock &clock, lv_obj_t *root)
 {
     clock.badge = lv_obj_create(root);
     theme::style_panel(clock.badge, theme::panel, theme::radius::pill);
-    lv_obj_set_size(clock.badge, LV_SIZE_CONTENT, BADGE_H);
+    lv_obj_set_height(clock.badge, BADGE_H);
     lv_obj_set_style_pad_hor(clock.badge, BADGE_PAD, 0);
     lv_obj_set_style_pad_ver(clock.badge, 0, 0);
     lv_obj_set_flex_flow(clock.badge, LV_FLEX_FLOW_ROW);
@@ -94,6 +94,16 @@ void build_badge(Clock &clock, lv_obj_t *root)
     lv_obj_set_clickable(clock.dot, false);
     clock.left = theme::make_label(clock.badge, "", theme::text, fonts::size_22());
     lv_obj_set_clickable(clock.left, false);
+    // As wide as the widest it says, so neither it nor its dot moves as the
+    // digits go by or it comes to Ready.
+    std::int32_t widest = 0;
+    for (const char *text : {"00:00", "Ready"}) {
+        lv_point_t size{};
+        lv_text_get_size(&size, text, fonts::size_22(), 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+        widest = std::max(widest, size.x);
+    }
+    lv_obj_set_width(clock.left, widest);
+    lv_obj_set_width(clock.badge, 2 * BADGE_PAD + BADGE_DOT + BADGE_GAP + widest);
     lv_obj_set_hidden(clock.badge, true);
 }
 }  // namespace
