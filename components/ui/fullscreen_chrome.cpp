@@ -174,7 +174,6 @@ constexpr std::int32_t STATUS_GAP       = 10;  // between what the top row holds
 constexpr std::int32_t SLOT_W           = 34;  // each of the status's marks, centred in one as wide
 constexpr std::int32_t SLOT_GAP         = 10;
 constexpr std::int32_t TAP_MARGIN       = 20;  // round the badge and the status, to be hit easily
-constexpr std::int32_t TIMER_W          = 130;  // the timer's slot, whatever it says
 constexpr std::int32_t UPDATE_ICON_SIDE = 28;
 constexpr std::int32_t UPDATE_BAR_H     = 3;
 constexpr std::int32_t UPDATE_BAR_GAP   = 4;
@@ -190,8 +189,6 @@ Clock    *s_top         = nullptr;
 lv_obj_t *s_wifi_icon   = nullptr;
 lv_obj_t *s_phone_icon  = nullptr;
 lv_obj_t *s_slots[4]    = {};       // the battery, the phone, Wi-Fi and the time, from the page out
-lv_obj_t *s_idle_mark   = nullptr;  // the timer drawn in the badge while it is idle
-std::int32_t s_badge_w  = 0;        // the badge's width while the timer runs
 lv_obj_t *s_spacer      = nullptr;  // between the page's end of the bar and the dock's
 lv_obj_t *s_update_box  = nullptr;  // while an update arrives, for whichever board
 lv_obj_t *s_update_icon = nullptr;
@@ -225,8 +222,6 @@ void build_update(lv_obj_t *bar)
     lv_obj_set_hidden(s_update_box, true);
 }
 
-void show_top_focus();
-
 void paint_status()
 {
     const StatusState &status = status_state();
@@ -240,21 +235,6 @@ void paint_status()
     }
     // Its place is kept while plugged in, so the status keeps one width.
     show_power(*s_top);
-    show_top_focus();
-}
-
-// The focus timer, there idle too with the round it would start, as the way
-// to it; away with the owner's pages while the phone is.
-void show_top_focus()
-{
-    show_focus(*s_top);
-    const bool away = s_presence_gate && !status_state().present;
-    const bool idle = focus_idle(focus_state());
-    // Idle, the timer drawn alone; the slot keeps its width either way.
-    lv_obj_set_hidden(s_top->badge, away);
-    lv_obj_set_hidden(s_idle_mark, !idle);
-    lv_obj_set_hidden(s_top->dot, idle);
-    lv_obj_set_hidden(s_top->left, idle);
 }
 
 lv_obj_t *make_slot(lv_obj_t *parent, std::int32_t w)
@@ -267,8 +247,8 @@ lv_obj_t *make_slot(lv_obj_t *parent, std::int32_t w)
     return slot;
 }
 
-// The status against the dock, the time at its edge, and the timer beside it;
-// what plays, the heating and the lights from the page's far end.
+// The status against the dock, the time at its edge; what plays, the heating
+// and the lights from the page's far end.
 void arrange_top()
 {
     const bool right = layout().rail_right;
@@ -316,21 +296,6 @@ void create_top_bar(lv_obj_t *parent)
 
     s_clocks.emplace_back();
     s_top = &s_clocks.back();
-    build_badge(*s_top, s_top_bar, [](lv_event_t *) { toggle_focus_popout(s_top->badge, s_top_bar); });
-    // As the bar's other slots: a shape only while pressed or while its card is out.
-    lv_obj_set_style_bg_opa(s_top->badge, LV_OPA_TRANSP, 0);
-    for (const lv_state_t state : {LV_STATE_PRESSED, LV_STATE_CHECKED}) {
-        lv_obj_set_style_bg_color(s_top->badge, lv_color_hex(theme::panel), state);
-        lv_obj_set_style_bg_opa(s_top->badge, LV_OPA_COVER, state);
-    }
-    lv_obj_set_height(s_top->badge, TOP_H);
-    lv_obj_set_flex_align(s_top->badge, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_ext_click_area(s_top->badge, TAP_MARGIN);
-    s_badge_w   = std::max(lv_obj_get_style_width(s_top->badge, LV_PART_MAIN), TIMER_W);
-    lv_obj_set_width(s_top->badge, s_badge_w);
-    s_idle_mark = make_status_icon(s_top->badge, &icons::timer_icon);
-    lv_obj_move_to_index(s_idle_mark, 0);
-    lv_obj_set_style_image_recolor(s_idle_mark, lv_color_hex(theme::secondary), 0);
 
     // The battery, the phone, Wi-Fi and the time are where Setup opens.
     s_status = lv_button_create(s_top_bar);
@@ -381,15 +346,8 @@ void create_top_bar(lv_obj_t *parent)
     place_top_bar();
 
     subscribe(Topic::Status, kNoView, paint_status);
-    subscribe(Topic::Second, kNoView, [] {
-        tell_time(*s_top);
-        show_top_focus();
-    });
-    subscribe(Topic::Focus, kNoView, show_top_focus);
-    subscribe(Topic::Page, kNoView, [] {
-        show_top_focus();
-        lv_obj_set_state(s_status, LV_STATE_CHECKED, s_page == SETUP_PAGE);
-    });
+    subscribe(Topic::Second, kNoView, [] { tell_time(*s_top); });
+    subscribe(Topic::Page, kNoView, [] { lv_obj_set_state(s_status, LV_STATE_CHECKED, s_page == SETUP_PAGE); });
     subscribe(Topic::Update, kNoView, [] {
         if (settings_state().update_known) {
             paint_update_icon(settings_state().update);

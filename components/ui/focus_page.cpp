@@ -433,6 +433,7 @@ constexpr std::int32_t POP_BTN_H  = 72;
 constexpr std::int32_t POP_SIDE_W = 96;   // reset and skip, beside start
 constexpr int          POP_SCALE  = 1000;  // the bar's
 constexpr std::uint32_t POP_IDLE_MS = 15 * 1000;
+constexpr std::int32_t  FROM_DOCK   = 24;  // the card from the dock's edge, as the desk's
 
 lv_obj_t *s_pop_phase = nullptr;
 lv_obj_t *s_pop_time  = nullptr;
@@ -567,17 +568,21 @@ bool focus_full_open()
     return detail::view_open(s_full_view);
 }
 
-void toggle_focus_popout(lv_obj_t *badge, lv_obj_t *above)
+void toggle_focus_popout(lv_obj_t *button, lv_obj_t *dock, void (*lit)(bool open))
 {
     if (!s_pop.open) {
         lv_area_t at;
-        lv_obj_update_layout(badge);
-        lv_obj_get_coords(badge, &at);
-        // Under the badge, its edge level with the badge's on the dock's side.
+        lv_area_t side;
+        lv_obj_get_coords(button, &at);
+        lv_obj_get_coords(dock, &side);
+        // Beside the dock, level with the button, as the desk folds out from the height.
         const bool right = detail::layout().rail_right;
-        detail::place_popout(s_pop, right ? at.x2 + 1 + detail::GAP : at.x1 - detail::GAP, at.y2 + 1, right);
-        s_pop.button = badge;
-        s_pop.above  = above;
+        s_pop.near       = FROM_DOCK;
+        detail::fit_popout(s_pop);
+        detail::place_popout(s_pop, right ? side.x1 : side.x2 + 1, at.y1 - detail::GAP, right);
+        s_pop.button = button;
+        s_pop.above  = dock;
+        s_pop.lit    = lit;
         show_pop_part();
     }
     detail::open_popout(s_pop, !s_pop.open);

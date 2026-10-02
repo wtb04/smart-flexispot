@@ -6,6 +6,7 @@
 #include "topics.h"
 
 #include "esp_timer.h"
+#include "focus_model.h"
 
 #include <cctype>
 #include <climits>
@@ -21,6 +22,9 @@ constexpr std::int32_t DOCK_PAD      = 12;
 constexpr std::int32_t DOCK_INNER_W  = DOCK_W - 2 * DOCK_PAD;  // Stand and Sit are as tall, square to the finger
 constexpr std::int32_t DOCK_GAP      = 12;
 constexpr std::int32_t DOCK_DESK_ICON = 46;
+// The timer under the desk, apart from it and from the pages under it.
+constexpr std::int32_t FOCUS_H = 72;
+constexpr std::int32_t FOCUS_Y = 3 * (DOCK_W - 2 * 12) + 2 * 12 + 32;
 
 constexpr std::int32_t SHEET_PAD     = 28;
 constexpr std::int32_t SHEET_GAP     = 24;  // from the dock
@@ -191,6 +195,9 @@ Shortcuts *add_shortcuts(lv_obj_t *root, bool column, std::int32_t side, std::in
 }
 
 lv_obj_t   *s_tabs          = nullptr;  // the dock's column of tabs
+lv_obj_t   *s_focus_button  = nullptr;  // the timer, between the desk and the pages
+lv_obj_t   *s_focus_mark    = nullptr;  // drawn while it is idle
+lv_obj_t   *s_focus_left    = nullptr;  // how long is left while it runs
 lv_obj_t   *s_dock_height   = nullptr;  // the height, at the dock's head
 lv_obj_t   *s_dock_unit     = nullptr;  // cm, under it
 lv_obj_t   *s_height_button = nullptr;  // around it: folds the desk out
@@ -220,6 +227,55 @@ void build_dock_desk(lv_obj_t *dock)
     s_dock_unit   = theme::make_label(height, "cm", theme::secondary, theme::type_label());
 
     add_shortcuts(head, true, DOCK_INNER_W, theme::radius::control, DOCK_DESK_ICON, theme::panel_light);
+}
+
+// The timer, idle as itself; running, how long is left in the part's colour,
+// faded while paused. Away with the owner's pages while the phone is.
+void paint_focus_button()
+{
+    const Focus &focus = focus_state();
+    const bool   idle  = focus_idle(focus);
+    lv_obj_set_hidden(s_focus_button, s_presence_gate && !status_state().present);
+    lv_obj_set_hidden(s_focus_mark, !idle);
+    lv_obj_set_hidden(s_focus_left, idle);
+    if (idle) {
+        return;
+    }
+    char text[16];
+    focus_clock_text(focus, text, sizeof(text));
+    theme::set_text(s_focus_left, text);
+    const bool lit = lv_obj_has_state(s_focus_button, LV_STATE_CHECKED);
+    theme::set_text_color(s_focus_left, lit ? theme::text : focus_ink(focus_resting(focus)));
+    lv_obj_set_style_opa(s_focus_left, focus_paused(focus) ? LV_OPA_50 : LV_OPA_COVER, 0);
+}
+
+void build_focus_button(lv_obj_t *dock)
+{
+    s_focus_button = lv_button_create(dock);
+    theme::style_button(s_focus_button, theme::panel_light);
+    lv_obj_set_size(s_focus_button, DOCK_INNER_W, FOCUS_H);
+    lv_obj_align(s_focus_button, LV_ALIGN_TOP_MID, 0, FOCUS_Y);
+    theme::fill_accent(s_focus_button, LV_STATE_CHECKED);
+    // On the accent while its card is out, as the height is, the timer on it in the text's colour.
+    lv_obj_add_event_cb(s_focus_button, [](lv_event_t *) {
+        toggle_focus_popout(s_focus_button, s_rail, [](bool open) {
+            lv_obj_set_style_image_recolor(s_focus_mark, lv_color_hex(open ? theme::text : theme::secondary), 0);
+            paint_focus_button();
+        });
+    }, LV_EVENT_CLICKED, nullptr);
+    s_focus_mark = lv_image_create(s_focus_button);
+    lv_image_set_src(s_focus_mark, &icons::timer_icon);
+    lv_obj_set_style_image_recolor(s_focus_mark, lv_color_hex(theme::secondary), 0);
+    lv_obj_set_style_image_recolor_opa(s_focus_mark, LV_OPA_COVER, 0);
+    lv_obj_center(s_focus_mark);
+    s_focus_left = theme::make_label(s_focus_button, "", theme::text, fonts::size_22());
+    lv_obj_center(s_focus_left);
+    for (lv_obj_t *part : {s_focus_mark, s_focus_left}) {
+        lv_obj_set_clickable(part, false);
+    }
+    subscribe(Topic::Focus, kNoView, paint_focus_button);
+    subscribe(Topic::Second, kNoView, paint_focus_button);
+    subscribe(Topic::Status, kNoView, paint_focus_button);
 }
 
 void show_dock_height(int tenths)
@@ -316,6 +372,7 @@ void create_dock(lv_obj_t *parent)
     lv_obj_set_scrollable(dock, false);
 
     build_dock_desk(dock);
+    build_focus_button(dock);
     s_tabs = lv_obj_create(dock);
     lv_obj_remove_style_all(s_tabs);
     lv_obj_set_size(s_tabs, DOCK_INNER_W, LV_SIZE_CONTENT);

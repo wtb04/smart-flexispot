@@ -21,13 +21,13 @@ constexpr std::int32_t SLOT_PAD     = 10;
 constexpr std::int32_t SLOT_TAP     = 6;   // half the gap to the next slot, which takes the rest
 // With the timer and the status, as wide as the bar is with the battery and an
 // update both showing, so nothing ever runs off its end.
-constexpr std::int32_t MEDIA_W      = 320;
-constexpr std::int32_t HEAT_W       = 190;
-constexpr std::int32_t LIGHTS_W     = 150;
+constexpr std::int32_t MEDIA_W      = 440;
+constexpr std::int32_t HEAT_W       = 140;
+constexpr std::int32_t LIGHTS_W     = 120;
 constexpr std::uint32_t SKIP_CHECK_MS = 500;
 constexpr std::int32_t THUMB        = 52;
-constexpr std::int32_t THUMB_RADIUS = 10;
-constexpr std::int32_t PLAY_W       = 68;
+constexpr std::int32_t THUMB_RADIUS = 6;   // small enough to leave a narrow poster its corners
+constexpr std::int32_t PLAY_D       = 48;
 constexpr std::int32_t TEXT_GAP     = 12;
 constexpr std::int32_t HEAT_DOT     = 12;
 
@@ -35,8 +35,11 @@ constexpr std::uint32_t CARD_IDLE_MS = 20 * 1000;
 constexpr std::int32_t  CARD_PAD     = 24;
 constexpr std::int32_t  CARD_GAP     = 12;
 
-constexpr std::int32_t  MEDIA_CARD_W = 460;
-constexpr std::int32_t  COVER        = 112;
+constexpr std::int32_t  MEDIA_CARD_W = 480;
+constexpr std::int32_t  COVER        = 140;
+constexpr std::int32_t  CARD_BAR_H   = 6;
+constexpr std::int32_t  STEP_W       = 88;
+constexpr std::uint32_t GLIDE_MS     = 250;
 constexpr std::int32_t  CARD_BTN_H   = 64;
 constexpr std::int32_t  VOLUME_INSET = 18;
 constexpr int           SEEK_STEP_S  = 10;
@@ -169,23 +172,29 @@ void first_line(const char *text, char *out, std::size_t size)
 lv_obj_t *s_media_slot  = nullptr;
 Cover     s_slot_cover;
 lv_obj_t *s_slot_title  = nullptr;
+lv_obj_t *s_slot_artist = nullptr;
 lv_obj_t *s_slot_play   = nullptr;
-lv_obj_t *s_slot_skip   = nullptr;  // Skip intro, or Next episode, over the title while it is offered
+lv_obj_t *s_slot_skip   = nullptr;  // Skip intro, or Next episode, over the text while it is offered
 bool      s_media_held  = false;    // a hold fires LONG_PRESSED and then CLICKED on release
 
 Popout    s_media_pop;
 Cover     s_card_cover;
-lv_obj_t *s_card_source = nullptr;
-lv_obj_t *s_card_title  = nullptr;
-lv_obj_t *s_card_artist = nullptr;
+lv_obj_t *s_card_source  = nullptr;
+lv_obj_t *s_card_title   = nullptr;
+lv_obj_t *s_card_artist  = nullptr;
 lv_obj_t *s_card_episode = nullptr;  // a video's season and episode, under its series
-lv_obj_t *s_card_full   = nullptr;
-lv_obj_t *s_card_prev   = nullptr;
-lv_obj_t *s_card_next   = nullptr;
-lv_obj_t *s_volume      = nullptr;
-lv_obj_t *s_volume_fill = nullptr;
-lv_obj_t *s_volume_text = nullptr;
-bool      s_volume_held = false;
+lv_obj_t *s_card_full    = nullptr;
+lv_obj_t *s_card_bar     = nullptr;  // how far it has got
+lv_obj_t *s_card_at      = nullptr;
+lv_obj_t *s_card_length  = nullptr;
+lv_obj_t *s_card_prev    = nullptr;
+lv_obj_t *s_card_play    = nullptr;
+lv_obj_t *s_card_next    = nullptr;
+lv_obj_t *s_volume       = nullptr;
+lv_obj_t *s_volume_fill  = nullptr;
+lv_obj_t *s_volume_text  = nullptr;
+bool      s_volume_held  = false;
+int       s_card_at_s    = -1;
 
 void show_play(lv_obj_t *button, bool playing)
 {
@@ -201,6 +210,21 @@ void show_volume(int percent)
     theme::set_text(s_volume_text, text);
 }
 
+// How far it has got, as the music view shows it, while the card is out.
+void glide_card(lv_timer_t *)
+{
+    const MediaState &media = media_state();
+    if (!s_media_pop.open || media.duration_s <= 0 || !media.has_track) {
+        return;
+    }
+    const int at_ms = media_position_ms_now();
+    lv_bar_set_value(s_card_bar, at_ms / units::kMsPerSecond, LV_ANIM_OFF);
+    if (at_ms / units::kMsPerSecond != s_card_at_s) {
+        s_card_at_s = at_ms / units::kMsPerSecond;
+        write_clock(s_card_at, s_card_at_s);
+    }
+}
+
 void paint_media()
 {
     const MediaState &media = media_state();
@@ -208,6 +232,7 @@ void paint_media()
     first_line(media.artist, artist, sizeof(artist));
     theme::set_text(s_slot_title, media.has_track ? media.title : "Nothing playing");
     theme::set_text_color(s_slot_title, media.has_track ? theme::text : theme::secondary);
+    theme::set_text(s_slot_artist, media.has_track ? artist : "");
     show_play(s_slot_play, media.has_track && media.playing);
     // With nothing playing, play offers the favourites.
     theme::set_usable(s_slot_play, !media.has_track || media.remote);
@@ -218,14 +243,32 @@ void paint_media()
     }
     theme::set_text(s_card_source, media.source);
     theme::set_text(s_card_title, media.has_track ? media.title : "Nothing playing");
+    // One line or two, as the title needs, so who it is by follows it closely.
+    const std::int32_t line = lv_font_get_line_height(fonts::size_28());
+    lv_point_t         size{};
+    lv_obj_update_layout(s_card_title);
+    lv_text_get_size(&size, lv_label_get_text(s_card_title), fonts::size_28(), 0, 0, lv_obj_get_width(s_card_title),
+                     LV_TEXT_FLAG_NONE);
+    lv_obj_set_height(s_card_title, size.y > line ? 2 * line : line);
     theme::set_text(s_card_artist, media.has_track ? artist : "");
     const char *episode = std::strchr(media.artist, '\n');
     theme::set_text(s_card_episode, media.has_track && episode != nullptr ? episode + 1 : "");
     theme::set_usable(s_card_full, media.has_track);
     theme::set_text(lv_obj_get_child(s_card_prev, 0), media.video ? "-10 s" : LV_SYMBOL_PREV);
     theme::set_text(lv_obj_get_child(s_card_next, 0), media.video ? "+10 s" : LV_SYMBOL_NEXT);
-    for (lv_obj_t *button : {s_card_prev, s_card_next}) {
+    show_play(s_card_play, media.has_track && media.playing);
+    for (lv_obj_t *button : {s_card_prev, s_card_play, s_card_next}) {
         theme::set_usable(button, media.has_track && media.remote);
+    }
+    const bool timed = media.has_track && media.duration_s > 0;
+    for (lv_obj_t *part : {s_card_bar, s_card_at, s_card_length}) {
+        lv_obj_set_style_opa(part, timed ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+    }
+    if (timed) {
+        lv_bar_set_range(s_card_bar, 0, media.duration_s);
+        write_clock(s_card_length, media.duration_s);
+        s_card_at_s = -1;
+        glide_card(nullptr);
     }
     theme::set_usable(s_volume, media.volume >= 0);
     if (media.volume >= 0 && !s_volume_held) {
@@ -268,7 +311,9 @@ void skip_check(lv_timer_t *)
 {
     const MediaSkip offer = media_skip_offer();
     lv_obj_set_hidden(s_slot_skip, offer.text == nullptr);
-    lv_obj_set_hidden(s_slot_title, offer.text != nullptr);
+    for (lv_obj_t *line : {s_slot_title, s_slot_artist}) {
+        lv_obj_set_hidden(line, offer.text != nullptr);
+    }
     if (offer.text != nullptr) {
         theme::set_text(lv_obj_get_child(s_slot_skip, 0), offer.text);
     }
@@ -312,6 +357,24 @@ void volume_touched(lv_event_t *e)
     }
 }
 
+lv_obj_t *card_button(lv_obj_t *parent, const char *text, std::int32_t w)
+{
+    lv_obj_t *button = theme::make_button(parent, text, theme::panel_light, fonts::size_22());
+    lv_obj_set_size(button, w, CARD_BTN_H);
+    return button;
+}
+
+// A small round button, its symbol at the bar's text size.
+lv_obj_t *round_button(lv_obj_t *parent, const char *symbol, std::int32_t side)
+{
+    lv_obj_t *button = theme::make_button(parent, symbol, theme::panel_light, fonts::size_22());
+    lv_obj_set_size(button, side, side);
+    lv_obj_set_style_radius(button, side / 2, 0);
+    lv_obj_set_style_bg_color(button, lv_color_hex(theme::panel_light), LV_STATE_CHECKED);  // the symbol says it
+    return button;
+}
+
+// The cover, what plays and who by, and play: a small player, the rest in its card.
 void build_media_slot(lv_obj_t *bar)
 {
     s_media_slot = make_slot(bar, MEDIA_W);
@@ -321,60 +384,56 @@ void build_media_slot(lv_obj_t *bar)
     lv_obj_align(s_slot_cover.frame, LV_ALIGN_LEFT_MID, 0, 0);
 
     const std::int32_t text_x = THUMB + TEXT_GAP;
-    const std::int32_t text_w = MEDIA_W - 2 * SLOT_PAD - text_x - PLAY_W - TEXT_GAP;
+    const std::int32_t text_w = MEDIA_W - 2 * SLOT_PAD - text_x - PLAY_D - TEXT_GAP;
     s_slot_title              = one_line(s_media_slot, theme::text, fonts::size_20(), text_w);
-    lv_obj_align(s_slot_title, LV_ALIGN_LEFT_MID, text_x, 0);
-    // Where the title is, while an intro or the credits run: one tap, as Home's card had it.
+    lv_obj_align(s_slot_title, LV_ALIGN_LEFT_MID, text_x, -11);
+    s_slot_artist = one_line(s_media_slot, theme::secondary, fonts::size_16(), text_w);
+    lv_obj_align(s_slot_artist, LV_ALIGN_LEFT_MID, text_x, 13);
+
+    s_slot_play = round_button(s_media_slot, LV_SYMBOL_PLAY, PLAY_D);
+    lv_obj_align(s_slot_play, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_add_event_cb(s_slot_play, play_clicked, LV_EVENT_CLICKED, nullptr);
+
+    // Where the text is, while an intro or the credits run: one tap, as Home's card had it.
     s_slot_skip = theme::make_button(s_media_slot, "Skip intro", theme::panel_light, theme::type_body());
     theme::fill_accent(s_slot_skip);
-    lv_obj_set_size(s_slot_skip, text_w, BTN_H);
-    lv_obj_set_style_radius(s_slot_skip, BTN_H / 2, 0);
+    lv_obj_set_size(s_slot_skip, text_w, PLAY_D);
+    lv_obj_set_style_radius(s_slot_skip, PLAY_D / 2, 0);
     lv_obj_align(s_slot_skip, LV_ALIGN_LEFT_MID, text_x, 0);
     lv_obj_add_event_cb(s_slot_skip, [](lv_event_t *) {
         media_skip();
-        lv_obj_set_hidden(s_slot_skip, true);
-        lv_obj_set_hidden(s_slot_title, false);
+        skip_check(nullptr);
     }, LV_EVENT_CLICKED, nullptr);
     lv_obj_set_hidden(s_slot_skip, true);
     lv_timer_create(skip_check, SKIP_CHECK_MS, nullptr);
-
-    s_slot_play = theme::make_button(s_media_slot, LV_SYMBOL_PLAY, theme::panel_light, fonts::size_28());
-    lv_obj_set_size(s_slot_play, PLAY_W, BTN_H);
-    lv_obj_set_style_radius(s_slot_play, BTN_H / 2, 0);
-    theme::fill_accent(s_slot_play, LV_STATE_CHECKED);
-    lv_obj_align(s_slot_play, LV_ALIGN_RIGHT_MID, 0, 0);
-    lv_obj_add_event_cb(s_slot_play, play_clicked, LV_EVENT_CLICKED, nullptr);
 }
 
-lv_obj_t *card_button(lv_obj_t *parent, const char *text, std::int32_t w)
+lv_obj_t *row_of(lv_obj_t *card, std::int32_t w, std::int32_t h, lv_flex_align_t main)
 {
-    lv_obj_t *button = theme::make_button(parent, text, theme::panel_light, fonts::size_22());
-    lv_obj_set_size(button, w, CARD_BTN_H);
-    return button;
+    lv_obj_t *row = lv_obj_create(card);
+    lv_obj_remove_style_all(row);
+    lv_obj_set_size(row, w, h);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, main, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(row, CARD_GAP, 0);
+    lv_obj_set_clickable(row, false);
+    return row;
 }
 
+// The cover large, what plays, how far it has got, and its controls, as a
+// small music view: the fullscreen one is a tap on the corner away.
 void build_media_card(lv_obj_t *screen)
 {
-    lv_obj_t *card    = build_popout(s_media_pop, screen, MEDIA_CARD_W, GAP, GAP, CARD_IDLE_MS);
+    lv_obj_t *card     = build_popout(s_media_pop, screen, MEDIA_CARD_W, GAP, GAP, CARD_IDLE_MS);
     s_media_pop.button = s_media_slot;
     lv_obj_set_style_pad_all(card, CARD_PAD, 0);
     lv_obj_set_height(card, LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(card, LV_FLEX_FLOW_ROW_WRAP);
+    lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(card, CARD_GAP, 0);
-    lv_obj_set_style_pad_column(card, CARD_GAP, 0);
     const std::int32_t inner = MEDIA_CARD_W - 2 * CARD_PAD;
 
-    // A row of its own across the card: the cover, what plays, and fullscreen,
-    // however narrow a poster leaves the cover.
-    lv_obj_t *head = lv_obj_create(card);
-    lv_obj_remove_style_all(head);
-    lv_obj_set_size(head, inner, COVER);
-    lv_obj_set_flex_flow(head, LV_FLEX_FLOW_ROW);
+    lv_obj_t *head = row_of(card, inner, COVER, LV_FLEX_ALIGN_START);
     lv_obj_set_flex_align(head, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_set_style_pad_column(head, CARD_GAP, 0);
-    lv_obj_set_clickable(head, false);
-
-    // The cover opens the fullscreen view too, as the card on Home did.
     build_cover(s_card_cover, head, COVER, theme::radius::control);
     lv_obj_set_clickable(s_card_cover.frame, true);
     lv_obj_add_event_cb(s_card_cover.frame, [](lv_event_t *) { open_full_view(); }, LV_EVENT_CLICKED, nullptr);
@@ -386,32 +445,46 @@ void build_media_card(lv_obj_t *screen)
     lv_obj_set_flex_align(text, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     lv_obj_set_style_pad_row(text, theme::space::xs, 0);
     lv_obj_set_clickable(text, false);
-    const std::int32_t text_w = inner - COVER - 2 * CARD_GAP - theme::chip::size;
-    s_card_source  = one_line(text, theme::secondary, theme::type_label(), text_w);
-    s_card_title   = one_line(text, theme::text, fonts::size_22(), text_w);
-    s_card_artist  = one_line(text, theme::secondary, fonts::size_16(), text_w);
-    s_card_episode = one_line(text, theme::secondary, fonts::size_16(), text_w);
+    s_card_source  = one_line(text, theme::secondary, theme::type_label(), 1);
+    s_card_title   = theme::make_label(text, "", theme::text, fonts::size_28());
+    lv_label_set_long_mode(s_card_title, LV_LABEL_LONG_MODE_DOTS);
+    lv_obj_set_height(s_card_title, 2 * lv_font_get_line_height(fonts::size_28()));
+    s_card_artist  = one_line(text, theme::secondary, fonts::size_20(), 1);
+    s_card_episode = one_line(text, theme::secondary, fonts::size_16(), 1);
     for (lv_obj_t *line : {s_card_source, s_card_title, s_card_artist, s_card_episode}) {
         lv_obj_set_width(line, lv_pct(100));
+        lv_obj_set_clickable(line, false);
     }
-
-    // Fullscreen: the cinema view for a video, the music view else.
     s_card_full = theme::make_chip(head, "");
     theme::make_mark(s_card_full, &icons::expand_icon);
     lv_obj_set_style_bg_color(s_card_full, lv_color_hex(theme::panel_light), 0);
     lv_obj_add_event_cb(s_card_full, [](lv_event_t *) { open_full_view(); }, LV_EVENT_CLICKED, nullptr);
 
-    const std::int32_t half = (inner - CARD_GAP) / 2;
-    s_card_prev = card_button(card, LV_SYMBOL_PREV, half);
+    s_card_bar = lv_bar_create(card);
+    lv_obj_set_size(s_card_bar, inner, CARD_BAR_H);
+    theme::style_panel(s_card_bar, theme::panel_light, CARD_BAR_H / 2);
+    theme::fill_accent(s_card_bar, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(s_card_bar, CARD_BAR_H / 2, LV_PART_INDICATOR);
+    lv_obj_t *times = row_of(card, inner, lv_font_get_line_height(fonts::size_16()), LV_FLEX_ALIGN_SPACE_BETWEEN);
+    lv_obj_set_style_margin_top(times, -CARD_GAP / 2, 0);
+    s_card_at     = theme::make_label(times, "", theme::secondary, fonts::size_16());
+    s_card_length = theme::make_label(times, "", theme::secondary, fonts::size_16());
+
+    lv_obj_t *transport = row_of(card, inner, CARD_BTN_H, LV_FLEX_ALIGN_CENTER);
+    s_card_prev = card_button(transport, LV_SYMBOL_PREV, STEP_W);
     lv_obj_add_event_cb(s_card_prev, step_clicked, LV_EVENT_CLICKED, nullptr);
-    s_card_next = card_button(card, LV_SYMBOL_NEXT, half);
+    s_card_play = card_button(transport, LV_SYMBOL_PLAY, inner - 2 * (STEP_W + CARD_GAP));
+    theme::fill_accent(s_card_play, LV_STATE_CHECKED);
+    lv_obj_add_event_cb(s_card_play, [](lv_event_t *) { media_toggle_play(); }, LV_EVENT_CLICKED, nullptr);
+    s_card_next = card_button(transport, LV_SYMBOL_NEXT, STEP_W);
     lv_obj_add_event_cb(s_card_next, step_clicked, LV_EVENT_CLICKED, s_card_next);
 
-    // The volume, as wide as the music view's is tall, the favourites beside it.
-    const std::int32_t fav_w = CARD_BTN_H + 2 * CARD_GAP;
-    s_volume = lv_obj_create(card);
+    // The volume, as the music view has it, the favourites beside it.
+    lv_obj_t *sound = row_of(card, inner, CARD_BTN_H, LV_FLEX_ALIGN_START);
+    s_volume = lv_obj_create(sound);
     theme::style_panel(s_volume, theme::panel_light, theme::radius::control);
-    lv_obj_set_size(s_volume, inner - fav_w - CARD_GAP, CARD_BTN_H);
+    lv_obj_set_height(s_volume, CARD_BTN_H);
+    lv_obj_set_flex_grow(s_volume, 1);
     lv_obj_set_style_clip_corner(s_volume, true, 0);
     lv_obj_set_scrollable(s_volume, false);
     lv_obj_set_gesture_bubble(s_volume, false);
@@ -429,12 +502,12 @@ void build_media_card(lv_obj_t *screen)
     s_volume_text = theme::make_label(s_volume, "", theme::text, fonts::size_22());
     lv_obj_align(s_volume_text, LV_ALIGN_RIGHT_MID, -VOLUME_INSET, 0);
     lv_obj_set_clickable(s_volume_text, false);
-
-    lv_obj_t *favourites = card_button(card, LV_SYMBOL_LIST, fav_w);
+    lv_obj_t *favourites = card_button(sound, LV_SYMBOL_LIST, STEP_W);
     lv_obj_add_event_cb(favourites, [](lv_event_t *) {
         open_popout(s_media_pop, false);
         open_favourites();
     }, LV_EVENT_CLICKED, nullptr);
+    lv_timer_create(glide_card, GLIDE_MS, nullptr);
     fit_popout(s_media_pop);
 }
 
@@ -443,7 +516,6 @@ void build_media_card(lv_obj_t *screen)
 lv_obj_t *s_heat_slot   = nullptr;
 lv_obj_t *s_heat_dot    = nullptr;
 lv_obj_t *s_heat_now    = nullptr;
-lv_obj_t *s_heat_target = nullptr;
 Popout    s_heat_pop;
 
 void degrees(lv_obj_t *label, const char *prefix, float celsius)
@@ -459,16 +531,11 @@ void degrees(lv_obj_t *label, const char *prefix, float celsius)
 void paint_heat()
 {
     const ThermostatState &t = home_state().thermostat;
+    // The room only; its dot says heating, warm enough or off, the target is the dial's.
     degrees(s_heat_now, "", t.known ? t.current_c : -1.0f);
-    const bool off = !t.known || t.state == Hvac::Off;
-    if (off) {
-        theme::set_text(s_heat_target, t.known ? "off" : "");
-    } else {
-        degrees(s_heat_target, LV_SYMBOL_RIGHT " ", t.target_c);
-    }
+    const bool          off = !t.known || t.state == Hvac::Off;
     const std::uint32_t ink = t.state == Hvac::Heating ? theme::primary : t.state == Hvac::Idle ? theme::amber : theme::secondary;
     theme::set_bg_color(s_heat_dot, off ? theme::secondary : ink);
-    theme::set_text_color(s_heat_target, theme::secondary);
 }
 
 void build_heat_slot(lv_obj_t *bar)
@@ -483,11 +550,8 @@ void build_heat_slot(lv_obj_t *bar)
     theme::style_panel(s_heat_dot, theme::secondary, HEAT_DOT / 2);
     lv_obj_set_size(s_heat_dot, HEAT_DOT, HEAT_DOT);
     lv_obj_set_clickable(s_heat_dot, false);
-    s_heat_now    = theme::make_label(s_heat_slot, "--", theme::text, fonts::size_28());
-    s_heat_target = theme::make_label(s_heat_slot, "", theme::secondary, fonts::size_20());
-    for (lv_obj_t *label : {s_heat_now, s_heat_target}) {
-        lv_obj_set_clickable(label, false);
-    }
+    s_heat_now = theme::make_label(s_heat_slot, "--", theme::text, fonts::size_28());
+    lv_obj_set_clickable(s_heat_now, false);
 }
 
 void build_heat_card(lv_obj_t *screen)
@@ -515,13 +579,9 @@ void paint_lights_slot()
     for (const bool lit : lights.light_on) {
         on += lit ? 1 : 0;
     }
-    char text[16] = "Off";
-    if (lights.on) {
-        if (on > 0) {
-            std::snprintf(text, sizeof(text), "%d on", on);
-        } else {
-            std::snprintf(text, sizeof(text), "On");
-        }
+    char text[16] = "";
+    if (lights.on && on > 0) {
+        std::snprintf(text, sizeof(text), "%d", on);
     }
     // On in the accent, rather than the whole slot filled with it.
     theme::set_text(s_lights_text, text);
@@ -571,7 +631,7 @@ void build_lights_slot(lv_obj_t *bar)
     lv_image_set_src(s_lights_bulb, &icons::bulb_glass_icon);
     lv_obj_set_style_image_recolor_opa(s_lights_bulb, LV_OPA_COVER, 0);
     lv_obj_set_clickable(s_lights_bulb, false);
-    s_lights_text = theme::make_label(s_lights_slot, "Off", theme::secondary, fonts::size_22());
+    s_lights_text = theme::make_label(s_lights_slot, "", theme::secondary, fonts::size_22());
     lv_obj_set_clickable(s_lights_text, false);
 }
 
