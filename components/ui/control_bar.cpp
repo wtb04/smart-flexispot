@@ -19,9 +19,12 @@ namespace {
 constexpr std::int32_t BTN_H        = 56;  // a button inside a slot
 constexpr std::int32_t SLOT_PAD     = 10;
 constexpr std::int32_t SLOT_TAP     = 6;   // half the gap to the next slot, which takes the rest
-constexpr std::int32_t MEDIA_W      = 350;
-constexpr std::int32_t HEAT_W       = 210;
-constexpr std::int32_t LIGHTS_W     = 170;
+// With the timer and the status, as wide as the bar is with the battery and an
+// update both showing, so nothing ever runs off its end.
+constexpr std::int32_t MEDIA_W      = 320;
+constexpr std::int32_t HEAT_W       = 190;
+constexpr std::int32_t LIGHTS_W     = 150;
+constexpr std::uint32_t SKIP_CHECK_MS = 500;
 constexpr std::int32_t THUMB        = 52;
 constexpr std::int32_t THUMB_RADIUS = 10;
 constexpr std::int32_t PLAY_W       = 68;
@@ -88,6 +91,7 @@ void open_under(Popout &p, lv_obj_t *slot)
 // A cover to show at any size: its own descriptor, pointed at the model's
 // pixels, scaled into the frame it is in.
 struct Cover {
+    std::int32_t   side  = 0;        // its height, and its width for a square cover
     lv_obj_t      *frame = nullptr;
     lv_obj_t      *image = nullptr;
     lv_obj_t      *mark  = nullptr;  // shown while there is none
@@ -98,6 +102,7 @@ struct Cover {
 
 void build_cover(Cover &cover, lv_obj_t *parent, std::int32_t side, std::int32_t radius)
 {
+    cover.side  = side;
     cover.frame = lv_obj_create(parent);
     theme::style_panel(cover.frame, theme::panel_light, radius);
     lv_obj_set_size(cover.frame, side, side);
@@ -127,6 +132,13 @@ void paint_cover(Cover &cover)
     const bool        shown = media.has_track && media.art != nullptr;
     lv_obj_set_hidden(cover.image, !shown);
     lv_obj_set_hidden(cover.mark, shown);
+    // A poster is kept whole, as narrow as it is, rather than cut to a square.
+    const std::int32_t w = shown ? std::max<std::int32_t>(1, cover.side * media.art_width / media::kArtSize) : cover.side;
+    if (lv_obj_get_width(cover.frame) != w) {
+        lv_obj_set_width(cover.frame, w);
+        lv_obj_set_size(cover.image, w, cover.side);
+        lv_obj_center(cover.image);
+    }
     if (!shown || media.covers == cover.covers) {
         return;
     }
@@ -158,12 +170,16 @@ lv_obj_t *s_media_slot  = nullptr;
 Cover     s_slot_cover;
 lv_obj_t *s_slot_title  = nullptr;
 lv_obj_t *s_slot_play   = nullptr;
+lv_obj_t *s_slot_skip   = nullptr;  // Skip intro, or Next episode, over the title while it is offered
+bool      s_media_held  = false;    // a hold fires LONG_PRESSED and then CLICKED on release
 
 Popout    s_media_pop;
 Cover     s_card_cover;
 lv_obj_t *s_card_source = nullptr;
 lv_obj_t *s_card_title  = nullptr;
 lv_obj_t *s_card_artist = nullptr;
+lv_obj_t *s_card_episode = nullptr;  // a video's season and episode, under its series
+lv_obj_t *s_card_full   = nullptr;
 lv_obj_t *s_card_prev   = nullptr;
 lv_obj_t *s_card_next   = nullptr;
 lv_obj_t *s_volume      = nullptr;
@@ -203,6 +219,9 @@ void paint_media()
     theme::set_text(s_card_source, media.source);
     theme::set_text(s_card_title, media.has_track ? media.title : "Nothing playing");
     theme::set_text(s_card_artist, media.has_track ? artist : "");
+    const char *episode = std::strchr(media.artist, '\n');
+    theme::set_text(s_card_episode, media.has_track && episode != nullptr ? episode + 1 : "");
+    theme::set_usable(s_card_full, media.has_track);
     theme::set_text(lv_obj_get_child(s_card_prev, 0), media.video ? "-10 s" : LV_SYMBOL_PREV);
     theme::set_text(lv_obj_get_child(s_card_next, 0), media.video ? "+10 s" : LV_SYMBOL_NEXT);
     for (lv_obj_t *button : {s_card_prev, s_card_next}) {
@@ -213,6 +232,46 @@ void paint_media()
         show_volume(media.volume);
     }
     paint_cover(s_card_cover);
+}
+
+void open_full_view()
+{
+    if (!media_state().has_track) {
+        return;
+    }
+    open_popout(s_media_pop, false);
+    media_is_video() ? open_cinema() : open_music();
+}
+
+// Its card on a tap. Held: the favourites while nothing plays, or the desk to
+// the preset set for what plays, as the cinema view's low desk.
+void media_touched(lv_event_t *e)
+{
+    const MediaState &media = media_state();
+    if (lv_event_get_code(e) == LV_EVENT_LONG_PRESSED) {
+        s_media_held = true;
+        if (!media.has_track) {
+            open_favourites();
+        } else if (media.hold_preset >= 0) {
+            desk_go_to(media.hold_preset);
+        } else {
+            open_full_view();
+        }
+        return;
+    }
+    if (!std::exchange(s_media_held, false)) {
+        open_under(s_media_pop, s_media_slot);
+    }
+}
+
+void skip_check(lv_timer_t *)
+{
+    const MediaSkip offer = media_skip_offer();
+    lv_obj_set_hidden(s_slot_skip, offer.text == nullptr);
+    lv_obj_set_hidden(s_slot_title, offer.text != nullptr);
+    if (offer.text != nullptr) {
+        theme::set_text(lv_obj_get_child(s_slot_skip, 0), offer.text);
+    }
 }
 
 void play_clicked(lv_event_t *)
@@ -256,8 +315,8 @@ void volume_touched(lv_event_t *e)
 void build_media_slot(lv_obj_t *bar)
 {
     s_media_slot = make_slot(bar, MEDIA_W);
-    lv_obj_add_event_cb(s_media_slot, [](lv_event_t *) { open_under(s_media_pop, s_media_slot); }, LV_EVENT_CLICKED,
-                        nullptr);
+    lv_obj_add_event_cb(s_media_slot, media_touched, LV_EVENT_CLICKED, nullptr);
+    lv_obj_add_event_cb(s_media_slot, media_touched, LV_EVENT_LONG_PRESSED, nullptr);
     build_cover(s_slot_cover, s_media_slot, THUMB, THUMB_RADIUS);
     lv_obj_align(s_slot_cover.frame, LV_ALIGN_LEFT_MID, 0, 0);
 
@@ -265,6 +324,19 @@ void build_media_slot(lv_obj_t *bar)
     const std::int32_t text_w = MEDIA_W - 2 * SLOT_PAD - text_x - PLAY_W - TEXT_GAP;
     s_slot_title              = one_line(s_media_slot, theme::text, fonts::size_20(), text_w);
     lv_obj_align(s_slot_title, LV_ALIGN_LEFT_MID, text_x, 0);
+    // Where the title is, while an intro or the credits run: one tap, as Home's card had it.
+    s_slot_skip = theme::make_button(s_media_slot, "Skip intro", theme::panel_light, theme::type_body());
+    theme::fill_accent(s_slot_skip);
+    lv_obj_set_size(s_slot_skip, text_w, BTN_H);
+    lv_obj_set_style_radius(s_slot_skip, BTN_H / 2, 0);
+    lv_obj_align(s_slot_skip, LV_ALIGN_LEFT_MID, text_x, 0);
+    lv_obj_add_event_cb(s_slot_skip, [](lv_event_t *) {
+        media_skip();
+        lv_obj_set_hidden(s_slot_skip, true);
+        lv_obj_set_hidden(s_slot_title, false);
+    }, LV_EVENT_CLICKED, nullptr);
+    lv_obj_set_hidden(s_slot_skip, true);
+    lv_timer_create(skip_check, SKIP_CHECK_MS, nullptr);
 
     s_slot_play = theme::make_button(s_media_slot, LV_SYMBOL_PLAY, theme::panel_light, fonts::size_28());
     lv_obj_set_size(s_slot_play, PLAY_W, BTN_H);
@@ -292,27 +364,42 @@ void build_media_card(lv_obj_t *screen)
     lv_obj_set_style_pad_column(card, CARD_GAP, 0);
     const std::int32_t inner = MEDIA_CARD_W - 2 * CARD_PAD;
 
-    // The cover opens the fullscreen view, as the card on Home did.
-    build_cover(s_card_cover, card, COVER, theme::radius::control);
+    // A row of its own across the card: the cover, what plays, and fullscreen,
+    // however narrow a poster leaves the cover.
+    lv_obj_t *head = lv_obj_create(card);
+    lv_obj_remove_style_all(head);
+    lv_obj_set_size(head, inner, COVER);
+    lv_obj_set_flex_flow(head, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(head, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_set_style_pad_column(head, CARD_GAP, 0);
+    lv_obj_set_clickable(head, false);
+
+    // The cover opens the fullscreen view too, as the card on Home did.
+    build_cover(s_card_cover, head, COVER, theme::radius::control);
     lv_obj_set_clickable(s_card_cover.frame, true);
-    lv_obj_add_event_cb(s_card_cover.frame, [](lv_event_t *) {
-        if (!media_state().has_track) {
-            return;
-        }
-        open_popout(s_media_pop, false);
-        media_is_video() ? open_cinema() : open_music();
-    }, LV_EVENT_CLICKED, nullptr);
-    lv_obj_t *text = lv_obj_create(card);
+    lv_obj_add_event_cb(s_card_cover.frame, [](lv_event_t *) { open_full_view(); }, LV_EVENT_CLICKED, nullptr);
+    lv_obj_t *text = lv_obj_create(head);
     lv_obj_remove_style_all(text);
-    lv_obj_set_size(text, inner - COVER - CARD_GAP, COVER);
+    lv_obj_set_height(text, COVER);
+    lv_obj_set_flex_grow(text, 1);
     lv_obj_set_flex_flow(text, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(text, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     lv_obj_set_style_pad_row(text, theme::space::xs, 0);
     lv_obj_set_clickable(text, false);
-    const std::int32_t text_w = inner - COVER - CARD_GAP;
-    s_card_source = one_line(text, theme::secondary, theme::type_label(), text_w);
-    s_card_title  = one_line(text, theme::text, fonts::size_22(), text_w);
-    s_card_artist = one_line(text, theme::secondary, fonts::size_16(), text_w);
+    const std::int32_t text_w = inner - COVER - 2 * CARD_GAP - theme::chip::size;
+    s_card_source  = one_line(text, theme::secondary, theme::type_label(), text_w);
+    s_card_title   = one_line(text, theme::text, fonts::size_22(), text_w);
+    s_card_artist  = one_line(text, theme::secondary, fonts::size_16(), text_w);
+    s_card_episode = one_line(text, theme::secondary, fonts::size_16(), text_w);
+    for (lv_obj_t *line : {s_card_source, s_card_title, s_card_artist, s_card_episode}) {
+        lv_obj_set_width(line, lv_pct(100));
+    }
+
+    // Fullscreen: the cinema view for a video, the music view else.
+    s_card_full = theme::make_chip(head, "");
+    theme::make_mark(s_card_full, &icons::expand_icon);
+    lv_obj_set_style_bg_color(s_card_full, lv_color_hex(theme::panel_light), 0);
+    lv_obj_add_event_cb(s_card_full, [](lv_event_t *) { open_full_view(); }, LV_EVENT_CLICKED, nullptr);
 
     const std::int32_t half = (inner - CARD_GAP) / 2;
     s_card_prev = card_button(card, LV_SYMBOL_PREV, half);

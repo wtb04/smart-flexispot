@@ -174,7 +174,7 @@ constexpr std::int32_t STATUS_GAP       = 10;  // between what the top row holds
 constexpr std::int32_t SLOT_W           = 34;  // each of the status's marks, centred in one as wide
 constexpr std::int32_t SLOT_GAP         = 10;
 constexpr std::int32_t TAP_MARGIN       = 20;  // round the badge and the status, to be hit easily
-constexpr std::int32_t TIMER_W          = 150;  // the timer's slot, whatever it says
+constexpr std::int32_t TIMER_W          = 130;  // the timer's slot, whatever it says
 constexpr std::int32_t UPDATE_ICON_SIDE = 28;
 constexpr std::int32_t UPDATE_BAR_H     = 3;
 constexpr std::int32_t UPDATE_BAR_GAP   = 4;
@@ -238,8 +238,8 @@ void paint_status()
     if (std::exchange(s_wifi_shown, status.wifi ? 1 : 0) != (status.wifi ? 1 : 0)) {
         lv_image_set_src(s_wifi_icon, status.wifi ? &icons::wifi_icon : &icons::wifi_off_icon);
     }
+    // Its place is kept while plugged in, so the status keeps one width.
     show_power(*s_top);
-    lv_obj_set_hidden(s_slots[0], !status.on_battery);
     show_top_focus();
 }
 
