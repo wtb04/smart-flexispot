@@ -1,5 +1,11 @@
 #include "ui_internal.h"
 
+#include "room_model.h"
+#include "topics.h"
+
+#include <climits>
+#include <utility>
+
 namespace ui::detail {
 namespace {
 constexpr std::int32_t RAIL_INNER_W = RAIL_CARD_W - 2 * PANEL_PAD;
@@ -116,7 +122,6 @@ void preset_clicked_cb(lv_event_t *e);
 }  // namespace
 
 lv_obj_t *s_preset_buttons[kPresetCount] = {};
-bool      s_preset_active[kPresetCount]  = {};
 namespace {
 void bind_preset(lv_obj_t *button, int index)
 {
@@ -130,7 +135,7 @@ void preset_clicked_cb(lv_event_t *e)
 {
     const int index = static_cast<int>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e)));
     const bool store = lv_event_get_code(e) == LV_EVENT_LONG_PRESSED;
-    if (!store && index >= 0 && index < kPresetCount && s_preset_active[index]) {
+    if (!store && index >= 0 && index < kPresetCount && desk_state().preset_active[index]) {
         return;
     }
     if (s_handlers.preset != nullptr) {
@@ -240,6 +245,28 @@ lv_obj_t *s_drawer_toggle = nullptr;
 bool      s_drawer_open   = false;
 }  // namespace
 
+namespace {
+// Each preset button lit while the desk stands at its height.
+void paint_presets()
+{
+    for (int index = 0; index < kPresetCount; ++index) {
+        lv_obj_t  *button = s_preset_buttons[index];
+        const bool active = desk_state().preset_active[index];
+        if (button == nullptr || lv_obj_has_state(button, LV_STATE_CHECKED) == active) {
+            continue;
+        }
+        lv_obj_set_state(button, LV_STATE_CHECKED, active);
+        for (std::uint32_t i = 0; i < lv_obj_get_child_count(button); ++i) {
+            lv_obj_t *child = lv_obj_get_child(button, i);
+            theme::set_text_color(child, theme::text);
+            for (std::uint32_t j = 0; j < lv_obj_get_child_count(child); ++j) {
+                lv_obj_set_state(lv_obj_get_child(child, j), LV_STATE_CHECKED, active);
+            }
+        }
+    }
+}
+}  // namespace
+
 void create_rail(lv_obj_t *parent)
 {
     const Layout l = layout();
@@ -264,6 +291,14 @@ void create_rail(lv_obj_t *parent)
     lv_obj_set_ignore_layout(s_drawer_toggle, true);
     lv_obj_align(s_drawer_toggle, drawer_toggle_corner(l.rail_right), 0, 0);
     lv_obj_add_event_cb(s_drawer_toggle, manual_clicked_cb, LV_EVENT_CLICKED, nullptr);
+    subscribe(Topic::Desk, kNoView, [] {
+        paint_presets();
+        paint_desk_shortcuts();
+        static int s_height_shown = INT_MIN;
+        if (s_height.has_value() && std::exchange(s_height_shown, desk_state().height_mm) != desk_state().height_mm) {
+            s_height->set_tenths(desk_state().height_mm);
+        }
+    });
 }
 namespace {
 constexpr std::uint32_t DRAWER_MS = 200;
@@ -461,7 +496,7 @@ void paint_desk_shortcuts()
 {
     for (int i = 0; i < s_shortcut_sets; ++i) {
         for (std::size_t j = 0; j < SHORTCUT_COUNT; ++j) {
-            const bool active = s_preset_active[SHORTCUT_PRESETS[j]];
+            const bool active = desk_state().preset_active[SHORTCUT_PRESETS[j]];
             lv_obj_set_state(s_shortcuts[i].chips[j], LV_STATE_CHECKED, active);
             lv_obj_set_state(s_shortcuts[i].marks[j], LV_STATE_CHECKED, active);
         }

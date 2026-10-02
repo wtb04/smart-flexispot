@@ -1,6 +1,7 @@
 #include "ui_internal.h"
 
 #include "media_model.h"
+#include "room_model.h"
 #include "topics.h"
 
 #include "esp_heap_caps.h"
@@ -310,8 +311,6 @@ lv_obj_t *s_lights_button = nullptr;
 lv_obj_t *s_lights_name   = nullptr;
 lv_obj_t *s_lights_state  = nullptr;
 lv_obj_t *s_bulbs[kLightCount]   = {};
-bool      s_light_on[kLightCount] = {};
-bool      s_lights_on             = false;
 namespace {
 // A long press fires LONG_PRESSED and then CLICKED on release, so without this
 // one gesture would both open the picker and toggle the lights.
@@ -361,8 +360,8 @@ void paint_bulbs()
         }
         for (int part = 0; part < BULB_PARTS; ++part) {
             lv_obj_t *obj = lv_obj_get_child(s_bulbs[i], part);
-            lv_obj_set_state(obj, LV_STATE_CHECKED, s_light_on[i]);
-            lv_obj_set_state(obj, LV_STATE_USER_1, s_lights_on);
+            lv_obj_set_state(obj, LV_STATE_CHECKED, lights_state().light_on[i]);
+            lv_obj_set_state(obj, LV_STATE_USER_1, lights_state().on);
         }
     }
 }
@@ -437,6 +436,7 @@ void build_lights_button(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::
     lv_obj_align(s_lights_state, LV_ALIGN_BOTTOM_LEFT, 0, 0);
 
     build_bulb_strip(s_lights_button);
+    subscribe(Topic::Lights, kNoView, paint_bulbs);
 }
 
 constexpr std::int32_t PICKER_COLUMNS  = 2;

@@ -1,5 +1,6 @@
 #include "ui_internal.h"
 
+#include "room_model.h"
 #include "topics.h"
 
 #include <algorithm>
@@ -206,8 +207,6 @@ void tick(lv_timer_t *)
     theme::set_usable(s_steer[1], media_remote() && s_neighbour[1]);
     theme::fill_accent_or(s_subtitles, s_subtitles_shown, theme::panel_light);
     theme::set_usable(s_subtitles, s_subtitles_available);
-    light_chrome_chip(s_low_chip, s_preset_active[ULTRA_LOW_PRESET]);
-    light_chrome_chip(s_lights_chip, s_lights_on);
     light_chrome_chip(s_screen_chip, s_auto_off);
     keep_screen();
 }
@@ -475,6 +474,9 @@ void build_cinema(lv_obj_t *screen)
             s_handlers.lights();
         }
     });
+    subscribe(Topic::Desk, s_cinema,
+              [] { light_chrome_chip(s_low_chip, desk_state().preset_active[ULTRA_LOW_PRESET]); });
+    subscribe(Topic::Lights, s_cinema, [] { light_chrome_chip(s_lights_chip, lights_state().on); });
     // The screen going dark by itself, lit while it does.
     s_screen_chip = add_chrome_chip(chrome, &icons::screen_timer_icon, [](lv_event_t *) {
         s_auto_off = !s_auto_off;

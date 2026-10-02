@@ -1,6 +1,7 @@
 #include "ui_internal.h"
 #include "focus_model.h"
 #include "focus_page.h"
+#include "room_model.h"
 #include "topics.h"
 
 #ifndef SHOT_DRAWER
@@ -47,7 +48,6 @@ namespace {
 // The two move buttons and a button per preset, stand and sit among them.
 constexpr int MOVE_BUTTON_COUNT = 2;
 constexpr int DESK_CONTROL_MAX  = MOVE_BUTTON_COUNT + kPresetCount + kDeskShortcutButtons;
-bool          s_desk_available                  = true;
 
 lv_obj_t     *s_desk_controls[DESK_CONTROL_MAX] = {};
 int           s_desk_control_count              = 0;
@@ -92,10 +92,19 @@ void screen_off_cb(lv_event_t *)
     set_screen_state(false);
 }
 
+// Faded while the desk does not answer.
 void register_desk_control(lv_obj_t *obj)
 {
+    if (s_desk_control_count == 0) {
+        subscribe(Topic::Desk, kNoView, [] {
+            for (int i = 0; i < s_desk_control_count; ++i) {
+                theme::set_usable(s_desk_controls[i], desk_state().available);
+            }
+        });
+    }
     if (s_desk_control_count < DESK_CONTROL_MAX) {
         s_desk_controls[s_desk_control_count++] = obj;
+        theme::set_usable(obj, desk_state().available);
     }
 }
 int               s_initial_brightness = DEFAULT_BRIGHTNESS_PERCENT;
@@ -401,35 +410,20 @@ constexpr std::int32_t RGB565_BYTES_PER_PIXEL = 2;
 
 void apply_preset_active(int index, bool active)
 {
-    if (s_preset_buttons[index] == nullptr || s_preset_active[index] == active) {
-        return;
-    }
-    s_preset_active[index] = active;
-    paint_desk_shortcuts();
-    lv_obj_t *button       = s_preset_buttons[index];
-    lv_obj_set_state(button, LV_STATE_CHECKED, active);
-    for (std::uint32_t i = 0; i < lv_obj_get_child_count(button); ++i) {
-        lv_obj_t *child = lv_obj_get_child(button, i);
-        theme::set_text_color(child, theme::text);
-        for (std::uint32_t j = 0; j < lv_obj_get_child_count(child); ++j) {
-            lv_obj_set_state(lv_obj_get_child(child, j), LV_STATE_CHECKED, active);
-        }
-    }
+    desk_state().preset_active[index] = active;
+    publish(Topic::Desk);
 }
 
 void apply_height(int height_mm)
 {
-    if (s_height.has_value()) {
-        s_height->set_tenths(height_mm);
-    }
+    desk_state().height_mm = height_mm;
+    publish(Topic::Desk);
 }
 
 void apply_desk_available(bool available)
 {
-    s_desk_available = available;
-    for (int i = 0; i < s_desk_control_count; ++i) {
-        theme::set_usable(s_desk_controls[i], available);
-    }
+    desk_state().available = available;
+    publish(Topic::Desk);
 }
 
 // The card's frame holds the cover, a blank where one would not come, or,
@@ -643,8 +637,8 @@ void apply_lights(const char *label, const char *state, bool on)
     theme::set_text(s_lights_name, label != nullptr ? label : "LIGHTS");
     theme::set_text(s_lights_state, state != nullptr ? state : "--");
     paint_light(s_lights_button, s_lights_name, s_lights_state, on);
-    s_lights_on = on;
-    paint_bulbs();
+    lights_state().on = on;
+    publish(Topic::Lights);
 }
 
 void apply_light(int index, const char *name, const char *state, bool on)
@@ -661,8 +655,8 @@ void apply_light(int index, const char *name, const char *state, bool on)
         theme::set_text(light.state, state != nullptr ? state : "--");
         paint_light(light.root, light.name, light.state, on);
     }
-    s_light_on[index] = !empty && on;
-    paint_bulbs();
+    lights_state().light_on[index] = !empty && on;
+    publish(Topic::Lights);
 }
 
 void apply_dial_toggle(int index, const char *label, bool on)
