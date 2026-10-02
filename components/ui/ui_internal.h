@@ -202,7 +202,6 @@ const lv_image_dsc_t *update_icon(const UpdateState &state);
 void paint_setup_dot(bool ready);
 void paint_update_tile(const UpdateState &state);
 extern lv_obj_t *s_diag_summary;
-void apply_glance(int index, const char *value);
 extern lv_obj_t *s_volume_value;
 extern lv_obj_t *s_volume_slider;
 extern const Card *s_cards;
@@ -292,6 +291,8 @@ void follow_pages();
 void show_focus_tab(const char *caption, std::uint32_t ink, bool paused);
 void brightness_event_cb(lv_event_t *e);
 std::uint32_t info_ink(Level level);
+/** The diagnostics page follows the diagnostics model. */
+void follow_diagnostics();
 void refresh_diag_summary();
 void show_diagnostics_cb(lv_event_t *);
 void show_appearance_cb(lv_event_t *);

@@ -1,6 +1,7 @@
 #include "ui_internal.h"
 #include "focus_model.h"
 #include "focus_page.h"
+#include "diagnostics_model.h"
 #include "home_model.h"
 #include "room_model.h"
 #include "settings_model.h"
@@ -564,30 +565,6 @@ void apply_wifi(bool wifi)
     publish(Topic::Status);
 }
 
-void apply_row(int card, int row, const char *value, Level level)
-{
-    lv_obj_t *label = s_row_value[card][row];
-    if (label == nullptr) {
-        return;
-    }
-    theme::set_text(label, value != nullptr && value[0] != '\0' ? value : "--");
-    theme::set_text_color(label, info_ink(level));
-}
-
-void apply_card(int card, const char *summary, Level level)
-{
-    if (s_tile_dot[card] == nullptr) {
-        return;
-    }
-    theme::set_text(s_tile_value[card], summary != nullptr && summary[0] != '\0' ? summary : "--");
-    theme::set_bg_color(s_tile_dot[card], level_ink(level));
-    theme::set_text_color(s_tile_value[card], info_ink(level));
-    if (s_card_level[card] != level) {
-        s_card_level[card] = level;
-        refresh_diag_summary();
-    }
-}
-
 void apply_screen(bool on)
 {
     status_state().screen_on = on;
@@ -758,11 +735,11 @@ void apply_diagnostics_updates()
 {
     for (int c = 0; c < s_card_count; ++c) {
         if (InfoArgs card{}; take(p_card[c], card)) {
-            apply_card(c, card.value.get(), card.level);
+            diagnostics_take_card(c, card.value.get(), card.level);
         }
         for (int r = 0; r < s_cards[c].row_count && r < kMaxRows; ++r) {
             if (InfoArgs row{}; p_rows != nullptr && take(p_rows[c * kMaxRows + r], row)) {
-                apply_row(c, r, row.value.get(), row.level);
+                diagnostics_take_row(c, r, row.value.get(), row.level);
             }
         }
     }
@@ -772,7 +749,7 @@ void apply_glances()
 {
     for (int i = 0; i < kGlanceCount; ++i) {
         if (Text<24> value{}; take(p_glance[i], value)) {
-            apply_glance(i, value.get());
+            diagnostics_take_glance(i, value.get());
         }
     }
 }

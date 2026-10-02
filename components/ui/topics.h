@@ -23,6 +23,7 @@ enum class Topic : std::uint8_t {
     Home,    // the home page's pills, thermostat and toggles: see home_model.h
     Settings,  // the choices and the notification volume: see settings_model.h
     Update,    // firmware on its way or waiting: see settings_model.h
+    Diagnostics,  // the panel's own report and its glances: see diagnostics_model.h
     Count,
 };
 

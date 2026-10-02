@@ -1,5 +1,8 @@
 #include "ui_internal.h"
 
+#include "diagnostics_model.h"
+#include "topics.h"
+
 namespace ui::detail {
 const Card *s_cards      = nullptr;
 int         s_card_count = 0;
@@ -571,4 +574,41 @@ lv_obj_t *build_slider_card(lv_obj_t *parent, std::int32_t y, std::int32_t w, co
     return slider;
 }
 
+}  // namespace ui::detail
+
+namespace ui::detail {
+// The tiles, their rows and the summary under them, as the diagnostics model
+// has them: only what changed since they were last drawn.
+void follow_diagnostics()
+{
+    subscribe(Topic::Diagnostics, kNoView, [] {
+        static std::uint32_t s_card_shown[kMaxCards]           = {};
+        static std::uint32_t s_row_shown[kMaxCards][kMaxRows]  = {};
+        const DiagnosticsState &diagnostics = diagnostics_state();
+        bool                    levels      = false;
+        for (int card = 0; card < s_card_count; ++card) {
+            const InfoState &tile = diagnostics.cards[card];
+            if (s_tile_dot[card] != nullptr && tile.stamp != s_card_shown[card]) {
+                s_card_shown[card] = tile.stamp;
+                theme::set_text(s_tile_value[card], tile.value[0] != '\0' ? tile.value : "--");
+                theme::set_bg_color(s_tile_dot[card], level_ink(tile.level));
+                theme::set_text_color(s_tile_value[card], info_ink(tile.level));
+                levels = levels || s_card_level[card] != tile.level;
+                s_card_level[card] = tile.level;
+            }
+            for (int row = 0; row < kMaxRows; ++row) {
+                const InfoState &info  = diagnostics.rows[card][row];
+                lv_obj_t        *label = s_row_value[card][row];
+                if (label != nullptr && info.stamp != s_row_shown[card][row]) {
+                    s_row_shown[card][row] = info.stamp;
+                    theme::set_text(label, info.value[0] != '\0' ? info.value : "--");
+                    theme::set_text_color(label, info_ink(info.level));
+                }
+            }
+        }
+        if (levels) {
+            refresh_diag_summary();
+        }
+    });
+}
 }  // namespace ui::detail

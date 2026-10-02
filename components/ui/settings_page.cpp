@@ -1,4 +1,5 @@
 #include "focus_model.h"
+#include "diagnostics_model.h"
 #include "settings_model.h"
 #include "topics.h"
 #include "ui_internal.h"
@@ -254,15 +255,15 @@ void build_glances(lv_obj_t *tile)
         lv_label_set_long_mode(s_glance[i], LV_LABEL_LONG_MODE_CLIP);
         lv_obj_align(s_glance[i], LV_ALIGN_BOTTOM_RIGHT, -right, -name_h);
     }
+    subscribe(Topic::Diagnostics, kNoView, [] {
+        for (int i = 0; i < kGlanceCount; ++i) {
+            const char *value = diagnostics_state().glances[i].value;
+            theme::set_text(s_glance[i], value[0] != '\0' ? value : "--");
+        }
+    });
 }
 }  // namespace
 
-void apply_glance(int index, const char *value)
-{
-    if (s_glance[index] != nullptr) {
-        theme::set_text(s_glance[index], value != nullptr && value[0] != '\0' ? value : "--");
-    }
-}
 
 namespace {
 // The restart tile doubles as the one that installs an update, while there is
@@ -659,6 +660,7 @@ void build_settings_page(lv_obj_t *page)
     build_log_overlay(page);
     build_colour_picker(page);
     refresh_diag_summary();
+    follow_diagnostics();
 }
 
 void paint_focus_plan(const Focus &focus)
