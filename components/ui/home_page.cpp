@@ -615,9 +615,9 @@ void paint_home()
 }
 }  // namespace
 
-// The air along the top, and under it a board of the pages in small: the sky
-// large, what comes next beside it. What plays, the heating and the lights are
-// the control bar's, so not here as well.
+// The air along the top, and under it the radar as its page had it, the scope
+// and the chosen aircraft's column, and what comes next beside them. What
+// plays, the heating and the lights are the control bar's, so not here as well.
 void build_home_page(lv_obj_t *page)
 {
     const Layout l = layout();
@@ -630,8 +630,8 @@ void build_home_page(lv_obj_t *page)
 
     const std::int32_t body_y  = PILL_H + BUTTON_GAP;
     const std::int32_t body_h  = inner_h - body_y;
-    const std::int32_t radar_w = (inner_w - BUTTON_GAP) / 2;
-    build_radar_tile(page, 0, body_y, radar_w, body_h);
+    const std::int32_t radar_w = radar_cards_width(body_h);
+    radar_home_area(page, 0, body_y, radar_w, body_h);
     build_next_tile(page, radar_w + BUTTON_GAP, body_y, inner_w - radar_w - BUTTON_GAP, body_h);
 
     build_pick_picker(lv_obj_get_screen(page));  // over the music view too, which is opened from there

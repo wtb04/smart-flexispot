@@ -53,7 +53,7 @@ Once the screen was there, the extra features kept coming, each one making it a 
 
 ![The home page with music on the speaker](docs/screenshots/home-music.png)
 
-This is what the panel shows most of the day. Two things are on every page, in the same place whatever happens. The dock at the side has the desk's height at its head with Stand and Sit under it, and the pages standing up from its foot, Home lowest, then Radar and Calendar. The control bar along the top has what gets touched every day: what is playing with play and pause right there, the heating, the lights, the focus timer, and the time with the phone, Wi-Fi and the battery while it is unplugged. A tap on the track drops its card with skip, the volume, the favourites and the way into the cinema or music view, and while an episode's intro or credits run, Skip intro or Next episode takes the title's place; a tap on the heating drops its dial; a tap on the lights turns them all on or off, and holding it shows each light. A tap on the time opens Setup.
+This is what the panel shows most of the day. Two things are on every page, in the same place whatever happens. The dock at the side has the desk's height at its head with Stand and Sit under it, the focus timer under those, and the pages standing up from its foot, Home lowest, then Radar and Calendar. The control bar along the top has what gets touched every day: what is playing with play and pause right there, the heating, the lights, and the time with the phone, Wi-Fi and the battery while it is unplugged. A tap on the track drops its card with skip, the volume, the favourites and the way into the cinema or music view, and while an episode's intro or credits run, Skip intro or Next episode takes the title's place; a tap on the heating drops its dial; a tap on the lights turns them all on or off, and holding it shows each light. A tap on the time opens Setup.
 
 Home itself is for looking at: the air across the top, each reading with a dot for how it is doing, the sky overhead with every aircraft in its height's colour, and what comes next on the calendar with the few after it. A tap on either opens its page.
 
@@ -93,11 +93,11 @@ When something plays on Jellyfin the media card follows it, and holding the card
 
 ### Planes overhead
 
-| Radar | Fullscreen |
+| On Home | The radar page |
 |---|---|
-| ![The radar](docs/screenshots/radar.png) | ![The radar fullscreen](docs/screenshots/radar-full.png) |
+| ![The radar on Home](docs/screenshots/radar.png) | ![The radar page](docs/screenshots/radar-full.png) |
 
-This one is purely because it's fun. A radar of everything flying within 20 to 160 km, on a map of the coast and the borders, each plane coloured by its height. Tap one to see the airline, the aircraft, the route and a photo, and its trail draws itself back along where it has been. The pictures above are over Schiphol.
+This one is purely because it's fun. A radar of everything flying within 20 to 160 km, on a map of the coast and the borders, each plane coloured by its height. Tap one to see the airline, the aircraft, the route and a photo, and its trail draws itself back along where it has been. On Home it is the scope beside the chosen aircraft; the Radar page is the map to its every edge, with the aircraft's column over it. The pictures above are over Schiphol.
 
 Positions come from [adsb.lol](https://adsb.lol) and [adsb.fi](https://adsb.fi), aircraft and routes from [adsbdb](https://www.adsbdb.com), photos from [Planespotters](https://www.planespotters.net).
 
@@ -113,11 +113,11 @@ The calendar page reads iCal feeds, mine come from [CalendarChanger](https://git
 |---|---|
 | ![Focus](docs/screenshots/focus.png) | ![Focus fullscreen](docs/screenshots/focus-full.png) |
 
-A focus timer in rounds, 25 minutes on and 5 off by default with a long break after four. The countdown stays in the top row on every page, a tap there drops it down with its controls and from there it goes fullscreen, and if the panel restarts halfway through a round it picks it up where it should be.
+A focus timer in rounds, 25 minutes on and 5 off by default with a long break after four. The timer has its button in the dock, with the countdown on it while a round runs; a tap opens its controls beside the dock, and from there it goes fullscreen, and if the panel restarts halfway through a round it picks it up where it should be.
 
 ### Away from the desk
 
-The panel knows my phone over Bluetooth, by its identity key, and the phone in the top row shows whether it is there. While it is away, Radar, Calendar and the focus timer are hidden, leaving Home and Setup, and presets 5 and 6 show for whoever uses the desk then. *Pages while away* in Setup turns that off.
+The panel knows my phone over Bluetooth, by its identity key, and the phone in the control bar shows whether it is there. While it is away, Radar, Calendar and the focus timer are hidden, leaving Home and Setup, and presets 5 and 6 show for whoever uses the desk then. *Pages while away* in Setup turns that off.
 
 The screen can be switched off from Home Assistant, and a tap wakes it. While it is dark, the panel fetches nothing that only the screen would show. With Orientation on Auto, turning the panel upside down turns the picture with it.
 

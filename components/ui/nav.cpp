@@ -63,7 +63,7 @@ void tell_page_opened(int index)
     if (index == SETUP_PAGE && s_handlers.diagnostics != nullptr) {
         s_handlers.diagnostics();
     }
-    if (index == RADAR_PAGE) {
+    if (index == RADAR_PAGE || index == HOME_PAGE) {
         radar_page_opened();
     }
     if (index == CALENDAR_PAGE) {

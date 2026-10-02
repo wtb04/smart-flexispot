@@ -1880,6 +1880,7 @@ namespace {
 constexpr int          TILE_AFTER = 4;
 constexpr std::int32_t TILE_PAD   = 22;
 constexpr std::int32_t TILE_WHEN_W = 150;
+constexpr std::int32_t TILE_SIDE_BY_SIDE_W = 360;
 constexpr std::int64_t TILE_REFRESH_S = 30;
 
 struct TileRow {
@@ -2001,7 +2002,7 @@ void build_next_tile(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int3
     lv_obj_t *when = lv_obj_create(s_tile);
     lv_obj_remove_style_all(when);
     lv_obj_set_size(when, inner, LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(when, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_flow(when, LV_FLEX_FLOW_ROW_WRAP);  // how far off under the time, where there is no room beside it
     lv_obj_set_flex_align(when, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
     lv_obj_set_style_pad_column(when, space::l, 0);
     lv_obj_set_clickable(when, false);
@@ -2021,18 +2022,22 @@ void build_next_tile(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int3
 
     s_tile_after = theme::make_eyebrow(s_tile, "");
     lv_obj_align(s_tile_after, LV_ALIGN_TOP_LEFT, 0, 228);
-    const std::int32_t line = lv_font_get_line_height(theme::type_body()) + space::m;
+    // Narrow, when over what; wide enough, the two side by side.
+    const bool         stacked = inner < TILE_SIDE_BY_SIDE_W;
+    const std::int32_t text    = lv_font_get_line_height(theme::type_body());
+    const std::int32_t line    = (stacked ? 2 * text : text) + space::m;
+    const std::int32_t when_w  = stacked ? inner : TILE_WHEN_W;
     for (int i = 0; i < TILE_AFTER; ++i) {
         TileRow &row = s_tile_rows[i];
-        row.when     = tile_line(s_tile, theme::secondary, theme::type_body(), TILE_WHEN_W, 1);
-        row.what     = tile_line(s_tile, theme::text, theme::type_body(), inner - TILE_WHEN_W, 1);
+        row.when     = tile_line(s_tile, theme::secondary, theme::type_body(), when_w, 1);
+        row.what     = tile_line(s_tile, theme::text, theme::type_body(), stacked ? inner : inner - TILE_WHEN_W, 1);
         const std::int32_t ry = 258 + i * line;
         if (ry + line > h - 2 * TILE_PAD) {
             lv_obj_set_hidden(row.when, true);
             lv_obj_set_hidden(row.what, true);
         }
         lv_obj_align(row.when, LV_ALIGN_TOP_LEFT, 0, ry);
-        lv_obj_align(row.what, LV_ALIGN_TOP_LEFT, TILE_WHEN_W, ry);
+        lv_obj_align(row.what, LV_ALIGN_TOP_LEFT, stacked ? 0 : TILE_WHEN_W, stacked ? ry + text : ry);
     }
     detail::subscribe(detail::Topic::Calendar, detail::kNoView, show_tile);
     detail::subscribe(detail::Topic::Page, detail::kNoView, show_tile);

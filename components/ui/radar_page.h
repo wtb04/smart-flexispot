@@ -8,8 +8,11 @@
 namespace ui {
 void build_radar_page(lv_obj_t *page, std::int32_t width, std::int32_t height);
 
-/** Home's tile of the sky: the aircraft over rings, a tap to the radar page. */
-void build_radar_tile(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int32_t w, std::int32_t h);
+/** Where on Home the radar's cards go, `w` by `h` at x, y of `parent`, before
+ *  the radar page is built; on the radar page itself it is the map. */
+/** As wide as the cards are with a scope `height` high. */
+std::int32_t radar_cards_width(std::int32_t height);
+void radar_home_area(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int32_t w, std::int32_t h);
 
 /** Arriving at the page starts it following the nearest aircraft again. */
 void radar_page_opened();
