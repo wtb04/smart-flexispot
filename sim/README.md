@@ -60,7 +60,7 @@ SIM_HOME=lat,lon   # the radar's centre, in place of zone.home
 SIM_ZOOM=0.75      # the window's scale, for a smaller screen
 ```
 
-`--page N` opens a page (0 Home to 4 Setup), `--press KEYS` presses keys as
+`--page N` opens a page (0 Home to 3 Setup), `--press KEYS` presses keys as
 it starts, `am` for Home Assistant answering and music, `--tap X,Y` taps the
 screen there, as often as given, `--swipe X1,Y1,X2,Y2` swipes after the taps, `--shot S` saves a
 screenshot after S seconds and quits, and `--splash` plays the twelve-second

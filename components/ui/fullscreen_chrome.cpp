@@ -152,7 +152,7 @@ void show_focus(const Clock &clock)
 
 // The focus timer, as the tab shows it: its colour and how long is left, and a
 // tap opens it.
-void build_badge(Clock &clock, lv_obj_t *root)
+void build_badge(Clock &clock, lv_obj_t *root, lv_event_cb_t on_click)
 {
     clock.badge = lv_obj_create(root);
     theme::style_panel(clock.badge, theme::panel, theme::radius::pill);
@@ -164,7 +164,7 @@ void build_badge(Clock &clock, lv_obj_t *root)
     lv_obj_set_style_pad_column(clock.badge, BADGE_GAP, 0);
     lv_obj_set_scrollable(clock.badge, false);
     lv_obj_set_ext_click_area(clock.badge, theme::space::s);
-    lv_obj_add_event_cb(clock.badge, [](lv_event_t *) { open_focus_full(); }, LV_EVENT_CLICKED, nullptr);
+    lv_obj_add_event_cb(clock.badge, on_click, LV_EVENT_CLICKED, nullptr);
     clock.dot = lv_obj_create(clock.badge);
     theme::style_panel(clock.dot, theme::primary, theme::radius::pill);
     lv_obj_set_size(clock.dot, BADGE_DOT, BADGE_DOT);
@@ -233,6 +233,8 @@ void build_update(lv_obj_t *bar)
     lv_obj_set_hidden(s_update_box, true);
 }
 
+void show_top_focus();
+
 void paint_status()
 {
     const StatusState &status = status_state();
@@ -245,14 +247,25 @@ void paint_status()
         lv_image_set_src(s_wifi_icon, status.wifi ? &icons::wifi_icon : &icons::wifi_off_icon);
     }
     show_power(*s_top);
+    show_top_focus();
 }
 
-// The focus timer, except over its own page.
+// The focus timer, there idle too with the round it would start, as the way
+// to it; away with the owner's pages while the phone is.
 void show_top_focus()
 {
     show_focus(*s_top);
-    if (s_page == FOCUS_PAGE) {
-        lv_obj_set_hidden(s_top->badge, true);
+    const Focus &focus = focus_state();
+    const bool   away  = s_presence_gate && !status_state().present;
+    lv_obj_set_hidden(s_top->badge, away);
+    if (!away && focus_idle(focus)) {
+        char text[16];
+        std::snprintf(text, sizeof(text), "%02d:00", focus.work_min);
+        theme::set_text(s_top->left, text);
+        theme::set_text_color(s_top->left, theme::secondary);
+        theme::set_bg_color(s_top->dot, theme::secondary);
+    } else {
+        theme::set_text_color(s_top->left, theme::text);
     }
 }
 }  // namespace
@@ -270,7 +283,9 @@ void create_top_bar(lv_obj_t *parent)
 
     s_clocks.emplace_back();
     s_top = &s_clocks.back();
-    build_badge(*s_top, s_top_bar);
+    build_badge(*s_top, s_top_bar, [](lv_event_t *) { toggle_focus_popout(s_top->badge, s_top_bar); });
+    lv_obj_set_style_bg_color(s_top->badge, lv_color_hex(theme::panel_light), LV_STATE_CHECKED);
+    lv_obj_set_style_bg_color(s_top->badge, lv_color_hex(theme::panel_light), LV_STATE_PRESSED);
     build_update(s_top_bar);
 
     // The battery, the phone, Wi-Fi and the time are where Setup opens.
@@ -377,7 +392,7 @@ ViewClock add_view_clock(ViewId view, lv_obj_t *root, lv_obj_t *chip, bool focus
     build_power(clock, root);
     fade_when_idle(view, clock.power);
     if (focus_badge) {
-        build_badge(clock, root);
+        build_badge(clock, root, [](lv_event_t *) { open_focus_full(); });
     }
     subscribe(Topic::Status, view, [&clock] {
         show_power(clock);

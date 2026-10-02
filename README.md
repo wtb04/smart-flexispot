@@ -53,7 +53,7 @@ Once the screen was there, the extra features kept coming, each one making it a 
 
 ![The home page with music on the speaker](docs/screenshots/home-music.png)
 
-This is what the panel shows most of the day. The dock at the right is on every page: the desk's height at its head with Stand and Sit under it, and the pages standing up from its foot, Home lowest, then Radar, Calendar and Focus. Along the top are the time, whether my phone and Wi-Fi are there, the battery while it is unplugged, and the focus timer while it runs, the same row the fullscreen views have. A tap on the time opens Setup.
+This is what the panel shows most of the day. The dock at the right is on every page: the desk's height at its head with Stand and Sit under it, and the pages standing up from its foot, Home lowest, then Radar and Calendar. Along the top are the focus timer, the time, whether my phone and Wi-Fi are there and the battery while it is unplugged, the same row the fullscreen views have. A tap on the timer drops it down with its controls, and a tap on the time opens Setup.
 
 The rest is the room. The air across the top, each reading with a dot for how it is doing. The thermostat as a dial to turn, with its mode below. The lights, all of them with a tap, or hold for a picker of each light. And what is playing, the speaker's music here, or a Jellyfin episode as in the picture at the top.
 
@@ -113,11 +113,11 @@ The calendar page reads iCal feeds, mine come from [CalendarChanger](https://git
 |---|---|
 | ![Focus](docs/screenshots/focus.png) | ![Focus fullscreen](docs/screenshots/focus-full.png) |
 
-A focus timer in rounds, 25 minutes on and 5 off by default with a long break after four. The countdown stays on the tab in the nav bar on every page, and if the panel restarts halfway through a round it picks it up where it should be.
+A focus timer in rounds, 25 minutes on and 5 off by default with a long break after four. The countdown stays in the top row on every page, a tap there drops it down with its controls and from there it goes fullscreen, and if the panel restarts halfway through a round it picks it up where it should be.
 
 ### Away from the desk
 
-The panel knows my phone over Bluetooth, by its identity key, and the phone in the top row shows whether it is there. While it is away, Radar, Calendar and Focus are hidden, leaving Home and Setup, and presets 5 and 6 show for whoever uses the desk then. *Pages while away* in Setup turns that off.
+The panel knows my phone over Bluetooth, by its identity key, and the phone in the top row shows whether it is there. While it is away, Radar, Calendar and the focus timer are hidden, leaving Home and Setup, and presets 5 and 6 show for whoever uses the desk then. *Pages while away* in Setup turns that off.
 
 The screen can be switched off from Home Assistant, and a tap wakes it. While it is dark, the panel fetches nothing that only the screen would show. With Orientation on Auto, turning the panel upside down turns the picture with it.
 

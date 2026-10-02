@@ -1,6 +1,7 @@
 #include "focus_page.h"
 
 #include "focus_model.h"
+#include "popout.h"
 #include "topics.h"
 #include "ui_internal.h"
 
@@ -11,26 +12,18 @@
 #include <cstdio>
 #include <utility>
 
-// A dial of ticks, one for every minute of the part, round a flip clock's two
-// leaves, its controls in the corners as the radar has its zoom. Beside it the
-// set, laid out as the calendar lays out a journey: a stop for every part. And
-// the same timer fullscreen, with nothing but the time and how far it has got.
+// The timer fullscreen: a dial of ticks, one for every minute of the part,
+// round a flip clock's two leaves, with nothing else but how far it has got.
+// And a small card dropping from the top row's badge, with the time, how far
+// the part is, and what to do.
 namespace ui {
 namespace {
-using detail::BUTTON_GAP;
-using detail::PANEL_PAD;
-
-constexpr int PARTS_PER_ROUND = 2;  // a focus, then a break
-constexpr int TICKS_MAX       = detail::FOCUS_WORK_MIN_MAX;  // no part runs longer
-constexpr int ROUNDS_MAX      = detail::FOCUS_ROUNDS_MAX;
-constexpr int PARTS_MAX       = PARTS_PER_ROUND * ROUNDS_MAX;
-constexpr int STOPS_MAX       = PARTS_MAX;
+constexpr int TICKS_MAX  = detail::FOCUS_WORK_MIN_MAX;  // no part runs longer
+constexpr int ROUNDS_MAX = detail::FOCUS_ROUNDS_MAX;
 
 constexpr std::uint32_t TIMER_PERIOD_MS = 250;
 
-constexpr std::int32_t CHIP             = theme::chip::size;
 constexpr std::int32_t TICK_W           = 24;
-constexpr std::int32_t RING_CLEARANCE   = 8;
 constexpr int          DEGREES_PER_TURN = 360;
 constexpr float        DIAL_TOP_DEGREES = 270.0f;  // LVGL counts from three o'clock
 
@@ -43,17 +36,6 @@ constexpr std::int32_t COLON_DOT_GAP      = 29;
 constexpr std::int32_t COLON_H            = 2 * COLON_DOT + COLON_DOT_GAP;
 constexpr std::int32_t PHASE_ABOVE_LEAVES = 34;
 
-constexpr std::int32_t SET_W          = 330;  // room for "Long break" beside its minutes
-constexpr std::int32_t TIME_W         = 64;
-constexpr std::int32_t NODE           = 16;
-constexpr std::int32_t NODE_BORDER    = 3;
-constexpr std::int32_t RAIL           = 4;
-constexpr std::int32_t BLANK_W        = 48;
-constexpr std::int32_t BLANK_H        = 12;
-constexpr std::int32_t RUNNER         = 12;
-constexpr std::int32_t LENGTH_DOT     = 10;
-constexpr std::uint8_t RAIL_AHEAD_INK = 70;  // parts of the ink in 255, the rest the card's
-
 constexpr std::int32_t FULL_PAD          = 64;  // the ring from the screen's top and bottom, clear of the row over it
 constexpr std::int32_t FULL_DOT          = 10;
 constexpr std::int32_t FULL_DOT_GAP      = 12;
@@ -63,7 +45,7 @@ constexpr std::int32_t FULL_ROUNDS_BELOW = 44;  // the rounds under the line und
 Focus s_focus = detail::focus_state();
 
 // A clock face: a tick for every minute round two leaves, and the colon that
-// beats between them. The dial has one, and the fullscreen view the same.
+// beats between them.
 struct Face {
     lv_obj_t *ring            = nullptr;  // all of it to tap, or swipe on
     lv_obj_t *tick[TICKS_MAX] = {};
@@ -72,33 +54,8 @@ struct Face {
     lv_obj_t *seconds         = nullptr;
     lv_obj_t *colon[2]        = {};
 };
-Face s_dial;
 Face s_full_face;
 int  s_tick_count = 0;
-lv_obj_t *s_phase      = nullptr;
-lv_obj_t *s_go         = nullptr;
-lv_obj_t *s_skip       = nullptr;
-lv_obj_t *s_reset      = nullptr;
-
-struct Stop {  // a part of the set
-    lv_obj_t *when  = nullptr;
-    lv_obj_t *blank = nullptr;  // where the time goes, until there is one
-    lv_obj_t *node  = nullptr;
-    lv_obj_t *name  = nullptr;
-    lv_obj_t *rail  = nullptr;  // on to the next stop
-    lv_obj_t *run   = nullptr;  // how far down it the part has got
-};
-Stop         s_stop[STOPS_MAX];
-
-// How long each kind of part lasts, said once under the stops.
-enum Length { FOCUS_LENGTH, BREAK_LENGTH, LONG_BREAK_LENGTH, LENGTH_COUNT };
-lv_obj_t *s_length[LENGTH_COUNT] = {};
-lv_obj_t    *s_runner   = nullptr;  // the dot going down the part under way
-std::int32_t s_set_h    = 0;
-std::int32_t s_pitch    = 0;
-int          s_laid_out = -1;  // how many parts the stops are laid out for
-
-int s_shown_s = -1;
 
 lv_obj_t *s_full          = nullptr;  // the timer fullscreen
 detail::ViewId s_full_view = detail::kNoView;
@@ -108,11 +65,6 @@ lv_obj_t *s_full_round[ROUNDS_MAX] = {};
 int       s_full_shown_s  = -1;
 
 using detail::whole_seconds_up;
-
-std::int64_t now_ms()
-{
-    return detail::focus_now_ms();
-}
 
 bool resting()
 {
@@ -132,44 +84,6 @@ std::uint32_t ink_of(bool rest)
 std::int32_t left_ms()
 {
     return detail::focus_left_ms(s_focus);
-}
-
-int parts()
-{
-    return std::clamp(PARTS_PER_ROUND * s_focus.rounds, PARTS_PER_ROUND, PARTS_MAX);
-}
-
-bool is_rest(int index)
-{
-    return index % PARTS_PER_ROUND == 1;
-}
-
-int part_minutes(int index)
-{
-    if (index == parts() - 1) {
-        return s_focus.long_break_min;
-    }
-    return is_rest(index) ? s_focus.break_min : s_focus.work_min;
-}
-
-const char *part_name(int index)
-{
-    if (index == parts() - 1) {
-        return "Long break";
-    }
-    return is_rest(index) ? "Break" : "Focus";
-}
-
-// Where in the set the timer is: focus and break alternate, the last break long.
-int part_index()
-{
-    switch (s_focus.phase) {
-        case FocusPhase::Work:      return PARTS_PER_ROUND * (s_focus.round - 1);
-        case FocusPhase::Break:     return PARTS_PER_ROUND * (s_focus.round - 1) + 1;
-        case FocusPhase::LongBreak: return parts() - 1;
-        case FocusPhase::Idle:      break;
-    }
-    return -1;
 }
 
 void clock_text(std::int64_t in_ms, char *out, std::size_t size)
@@ -210,72 +124,17 @@ void show_ticks(const Face &face, int done, bool idle, bool beat)
     }
 }
 
-// Down the part under way as it runs, the way the route shows a train.
-void show_progress(std::int32_t elapsed, std::int32_t length)
-{
-    const int at = part_index();
-    for (int i = 0; i < STOPS_MAX; ++i) {
-        const Stop &stop = s_stop[i];
-        if (stop.run == nullptr) {
-            continue;
-        }
-        const bool         now    = i == at && length > 0;
-        const std::int32_t filled = now ? static_cast<std::int32_t>(
-                                              static_cast<std::int64_t>(s_pitch) * elapsed / length)
-                                        : 0;
-        lv_obj_set_height(stop.run, filled);
-        if (now) {
-            lv_obj_set_y(s_runner, lv_obj_get_y(stop.rail) + filled - RUNNER / 2);
-        }
-    }
-    lv_obj_set_hidden(s_runner, at < 0 || length <= 0 || at >= parts() - 1);  // the last has no rail on
-}
-
-// Once a second: the leaves, the colon beating, and the minute under way
-// breathing on the dial.
-void show_second(bool force)
-{
-    const std::int32_t left    = left_ms();
-    const int          seconds = static_cast<int>(whole_seconds_up(left));
-    if (seconds == s_shown_s && !force) {
-        return;
-    }
-    s_shown_s = seconds;
-
-    const bool idle   = s_focus.phase == FocusPhase::Idle;
-    const bool paused = !idle && !s_focus.running;
-    const bool beat   = seconds % 2 == 0;
-    show_leaves(s_dial, seconds, paused, beat);
-
-    const std::int32_t length  = idle ? 0 : s_focus.length_ms;
-    const std::int32_t elapsed = length > 0 ? length - left : 0;
-    const int          done    = length > 0 ? static_cast<int>(elapsed / units::kMsPerMinute) : 0;
-    show_progress(elapsed, length);
-    show_ticks(s_dial, done, idle, beat);
-}
-
 void show_full_second(bool force);
-
-// The tab shows it from every page: how long is left, or that it waits.
-void show_tab()
-{
-    if (s_focus.phase == FocusPhase::Idle) {
-        detail::show_focus_tab(nullptr, 0, false);
-        return;
-    }
-    char text[16];
-    detail::focus_clock_text(s_focus, text, sizeof(text));
-    detail::show_focus_tab(text, ink_of(resting()), !s_focus.running);
-}
+void show_pop_second(bool force);
+detail::Popout s_pop;
 
 void timer_tick(lv_timer_t *)
 {
-    show_tab();
-    if (detail::s_page == detail::FOCUS_PAGE && s_dial.leaves != nullptr) {
-        show_second(false);
-    }
     if (detail::view_open(s_full_view)) {
         show_full_second(false);
+    }
+    if (s_pop.open) {
+        show_pop_second(false);
     }
 }
 
@@ -331,16 +190,6 @@ lv_obj_t *clear_box(lv_obj_t *parent)
     return box;
 }
 
-lv_obj_t *card_at(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int32_t w, std::int32_t h)
-{
-    lv_obj_t *card = lv_obj_create(parent);
-    lv_obj_set_pos(card, x, y);
-    lv_obj_set_size(card, w, h);
-    theme::style_panel(card, theme::panel_light, theme::radius::card);
-    lv_obj_set_scrollable(card, false);
-    return card;
-}
-
 lv_obj_t *make_dot(lv_obj_t *parent, std::uint32_t colour, std::int32_t size)
 {
     lv_obj_t *dot = lv_obj_create(parent);
@@ -369,23 +218,19 @@ void lay_ticks(int count)
     s_tick_count     = count;
     const float step = static_cast<float>(DEGREES_PER_TURN) / static_cast<float>(count);
     const float gap  = tick_gap_degrees(count);
-    for (Face *face : {&s_dial, &s_full_face}) {
-        if (face->tick[0] == nullptr) {
+    Face &face = s_full_face;
+    if (face.tick[0] == nullptr) {
+        return;
+    }
+    for (int i = 0; i < TICKS_MAX; ++i) {
+        lv_obj_set_hidden(face.tick[i], i >= count);
+        if (i >= count) {
             continue;
         }
-        for (int i = 0; i < TICKS_MAX; ++i) {
-            lv_obj_set_hidden(face->tick[i], i >= count);
-            if (i >= count) {
-                continue;
-            }
-            const auto from =
-                static_cast<int>(DIAL_TOP_DEGREES + step * static_cast<float>(i) + gap / 2.0f);
-            const auto to =
-                static_cast<int>(DIAL_TOP_DEGREES + step * static_cast<float>(i + 1) - gap / 2.0f);
-            lv_arc_set_bg_angles(face->tick[i],
-                                 static_cast<lv_value_precise_t>(from % DEGREES_PER_TURN),
-                                 static_cast<lv_value_precise_t>(to % DEGREES_PER_TURN));
-        }
+        const auto from = static_cast<int>(DIAL_TOP_DEGREES + step * static_cast<float>(i) + gap / 2.0f);
+        const auto to   = static_cast<int>(DIAL_TOP_DEGREES + step * static_cast<float>(i + 1) - gap / 2.0f);
+        lv_arc_set_bg_angles(face.tick[i], static_cast<lv_value_precise_t>(from % DEGREES_PER_TURN),
+                             static_cast<lv_value_precise_t>(to % DEGREES_PER_TURN));
     }
 }
 
@@ -452,220 +297,6 @@ void build_leaves(Face &face, lv_obj_t *card)
     face.seconds = leaf(face.leaves);
 }
 
-void open_full();
-
-// The corners, as the radar's: fullscreen top right, what to do in the other three.
-void build_corners(lv_obj_t *card, std::int32_t inner, std::int32_t inner_h)
-{
-    s_reset = theme::make_chip(card, LV_SYMBOL_REFRESH);
-    lv_obj_set_pos(s_reset, 0, 0);
-    on_click(s_reset, FocusAction::Reset);
-    s_skip = theme::make_chip(card, LV_SYMBOL_NEXT);
-    lv_obj_set_pos(s_skip, 0, inner_h - CHIP);
-    on_click(s_skip, FocusAction::Skip);
-    lv_obj_t *full = theme::make_chip(card, "");
-    theme::make_mark(full, &icons::expand_icon);
-    lv_obj_set_pos(full, inner - CHIP, 0);
-    lv_obj_add_event_cb(full, [](lv_event_t *) { open_full(); }, LV_EVENT_CLICKED, nullptr);
-    s_go = theme::make_chip(card, LV_SYMBOL_PLAY);
-    theme::fill_accent(s_go, LV_STATE_CHECKED);
-    lv_obj_set_pos(s_go, inner - CHIP, inner_h - CHIP);
-    on_click(s_go, FocusAction::Toggle);
-    for (lv_obj_t *chip : {s_reset, s_skip, s_go, full}) {
-        lv_obj_set_ext_click_area(chip, theme::space::s);
-    }
-}
-
-void build_dial(lv_obj_t *parent, std::int32_t w, std::int32_t h)
-{
-    lv_obj_t *card = card_at(parent, 0, 0, w, h);
-    lv_obj_set_style_pad_all(card, PANEL_PAD, 0);
-    const std::int32_t inner   = w - 2 * PANEL_PAD;
-    const std::int32_t inner_h = h - 2 * PANEL_PAD;
-
-    build_ticks(s_dial, card, std::min(inner, inner_h) - RING_CLEARANCE);
-    build_leaves(s_dial, card);
-
-    s_phase = theme::make_eyebrow(card, "READY");
-    lv_obj_align(s_phase, LV_ALIGN_CENTER, 0, -LEAF_H / 2 - PHASE_ABOVE_LEAVES);
-
-    build_corners(card, inner, inner_h);
-}
-
-void build_stop(lv_obj_t *set, Stop &stop, std::int32_t rail_x, std::int32_t text_x)
-{
-    stop.when = theme::make_label(set, "", theme::text, theme::type_body());
-    lv_obj_set_width(stop.when, TIME_W);
-    stop.blank = lv_obj_create(set);
-    theme::style_panel(stop.blank, theme::panel, BLANK_H / 2);
-    lv_obj_set_clickable(stop.blank, false);
-    lv_obj_set_size(stop.blank, BLANK_W, BLANK_H);
-    stop.node = make_dot(set, theme::panel_light, NODE);
-    lv_obj_set_style_border_width(stop.node, NODE_BORDER, 0);
-    lv_obj_set_x(stop.node, rail_x - NODE / 2);
-    stop.name = theme::make_label(set, "", theme::text, theme::type_body());
-    lv_obj_set_x(stop.name, text_x);
-}
-
-// A column each: the kind of part with its colour, and how long it lasts.
-void build_lengths(lv_obj_t *card, std::int32_t y, std::int32_t w)
-{
-    static const char *const NAMES[LENGTH_COUNT] = {"FOCUS", "BREAK", "LONG"};
-    const std::int32_t       column_w = w / LENGTH_COUNT;
-    for (int i = 0; i < LENGTH_COUNT; ++i) {
-        const std::int32_t x   = i * column_w;
-        lv_obj_t          *dot = make_dot(card, theme::green, LENGTH_DOT);
-        theme::fill_accent_or(dot, i == FOCUS_LENGTH, theme::green);
-        lv_obj_set_pos(dot, x, y + (theme::type_label()->line_height - LENGTH_DOT) / 2);
-        lv_obj_t *name = theme::make_eyebrow(card, NAMES[i]);
-        lv_obj_set_pos(name, x + LENGTH_DOT + theme::space::s, y);
-        s_length[i] = theme::make_label(card, "", theme::text, theme::type_value());
-        lv_obj_set_pos(s_length[i], x, y + theme::type_label()->line_height + theme::space::xs);
-    }
-}
-
-void show_lengths()
-{
-    const int minutes[LENGTH_COUNT] = {s_focus.work_min, s_focus.break_min,
-                                       s_focus.long_break_min};
-    char      text[16];
-    for (int i = 0; i < LENGTH_COUNT; ++i) {
-        std::snprintf(text, sizeof(text), "%d min", minutes[i]);
-        theme::set_text(s_length[i], text);
-    }
-}
-
-void build_set(lv_obj_t *parent, std::int32_t x, std::int32_t w, std::int32_t h)
-{
-    lv_obj_t *card = card_at(parent, x, 0, w, h);
-    lv_obj_set_style_pad_all(card, theme::space::l, 0);
-    const std::int32_t inner   = w - 2 * theme::space::l;
-    const std::int32_t inner_h = h - 2 * theme::space::l;
-
-    lv_obj_align(theme::make_eyebrow(card, "THE SET"), LV_ALIGN_TOP_LEFT, 0, 0);
-
-    const std::int32_t top = theme::type_label()->line_height + theme::space::l;
-    const std::int32_t lengths_h =
-        theme::type_label()->line_height + theme::space::xs + theme::type_value()->line_height;
-    const std::int32_t lengths_y = inner_h - lengths_h;
-    build_lengths(card, lengths_y, inner);
-
-    lv_obj_t *set = clear_box(card);
-    s_set_h       = lengths_y - theme::space::l - top;
-    lv_obj_set_pos(set, 0, top);
-    lv_obj_set_size(set, inner, s_set_h);
-
-    const std::int32_t rail_x = TIME_W + theme::space::s + NODE / 2;
-    const std::int32_t text_x = rail_x + NODE / 2 + theme::space::m;
-    for (Stop &stop : s_stop) {  // the rails first, so the nodes sit on them
-        stop.rail = clear_box(set);
-        lv_obj_set_style_bg_opa(stop.rail, LV_OPA_COVER, 0);
-        lv_obj_set_width(stop.rail, RAIL);
-        lv_obj_set_x(stop.rail, rail_x - RAIL / 2);
-        stop.run = clear_box(stop.rail);
-        lv_obj_set_style_bg_opa(stop.run, LV_OPA_COVER, 0);
-        lv_obj_set_size(stop.run, RAIL, 0);
-    }
-    for (Stop &stop : s_stop) {
-        build_stop(set, stop, rail_x, text_x);
-    }
-    s_runner = make_dot(set, theme::text, RUNNER);
-    lv_obj_set_x(s_runner, rail_x - RUNNER / 2);
-    lv_obj_set_hidden(s_runner, true);
-}
-
-// As many stops as the set has parts, spread down the card.
-void lay_out_stops(int count, std::int32_t pitch)
-{
-    const std::int32_t line = theme::type_body()->line_height;
-    for (int i = 0; i < STOPS_MAX; ++i) {
-        Stop      &stop = s_stop[i];
-        const bool real = i < count;
-        for (lv_obj_t *obj : {stop.when, stop.blank, stop.node, stop.name, stop.rail}) {
-            lv_obj_set_hidden(obj, !real);
-        }
-        if (!real) {
-            continue;
-        }
-        const std::int32_t y = i * pitch;
-        lv_obj_set_y(stop.when, y);
-        lv_obj_set_y(stop.blank, y + (line - BLANK_H) / 2);
-        lv_obj_set_y(stop.node, y + (line - NODE) / 2);
-        lv_obj_set_y(stop.name, y);
-        lv_obj_set_y(stop.rail, y + line / 2);
-        lv_obj_set_height(stop.rail, pitch);
-        lv_obj_set_hidden(stop.rail, i == count - 1);
-    }
-}
-
-// When each part starts while the time runs: the one under way began its length
-// before it ends, and each after it follows on. A blank holds the place of a
-// time not yet known, and a part already done shows neither.
-void show_start_times(int count, int at)
-{
-    const bool   running   = s_focus.running && at >= 0;
-    std::int64_t starts_in = running ? s_focus.ends_at_ms - now_ms() - s_focus.length_ms : 0;
-    char         text[24];
-    for (int i = 0; i < count; ++i) {
-        Stop      &stop  = s_stop[i];
-        const bool done  = at >= 0 && i < at;
-        const bool timed = running && i >= at;
-        if (timed) {
-            clock_text(starts_in, text, sizeof(text));
-            theme::set_text(stop.when, text);
-            if (i + 1 < count) {
-                starts_in += i == at ? s_focus.length_ms
-                                     : static_cast<std::int64_t>(part_minutes(i)) *
-                                           units::kMsPerMinute;
-            }
-        } else {
-            theme::set_text(stop.when, "");
-        }
-        lv_obj_set_hidden(stop.blank, timed || done);
-    }
-}
-
-void paint_stops(int count, int at)
-{
-    for (int i = 0; i < count; ++i) {
-        Stop      &stop = s_stop[i];
-        const bool done = at >= 0 && i < at;
-        const bool now  = i == at;
-        const auto ink  = ink_of(is_rest(i));
-
-        theme::set_text(stop.name, part_name(i));
-        theme::set_text_color(stop.name, now ? ink : theme::text);
-
-        lv_obj_set_style_bg_color(stop.node, lv_color_hex(done || now ? ink : theme::panel_light),
-                                  0);
-        lv_obj_set_style_border_color(stop.node, lv_color_hex(done || now ? ink : theme::secondary),
-                                      0);
-        // The part under way fills its rail as it goes, from a dim one.
-        const lv_color_t ahead =
-            lv_color_mix(lv_color_hex(ink), lv_color_hex(theme::panel_light), RAIL_AHEAD_INK);
-        lv_obj_set_style_bg_color(stop.rail, done ? lv_color_hex(ink) : ahead, 0);
-        lv_obj_set_style_bg_color(stop.run, lv_color_hex(ink), 0);
-        for (lv_obj_t *obj : {stop.when, stop.name}) {
-            lv_obj_set_style_opa(obj, done ? LV_OPA_40 : LV_OPA_COVER, 0);
-        }
-    }
-}
-
-void show_set()
-{
-    const int          count = parts();
-    const std::int32_t pitch = (s_set_h - theme::type_body()->line_height) / std::max(1, count - 1);
-    s_pitch                  = pitch;
-    if (s_laid_out != count) {
-        s_laid_out = count;
-        lay_out_stops(count, pitch);
-    }
-    const int at = part_index();
-    show_start_times(count, at);
-    paint_stops(count, at);
-    show_lengths();
-}
-
 const char *phase_name(FocusPhase phase)
 {
     switch (phase) {
@@ -677,8 +308,28 @@ const char *phase_name(FocusPhase phase)
     return "READY";
 }
 
-// Once a second while it is up, as the dial: the leaves, the colon, the ticks,
-// and under them until when, or what a tap does.
+// Until when, or what starting it starts: `start` says how.
+void under_text(char *text, std::size_t size, int seconds, const char *start)
+{
+    const bool idle = s_focus.phase == FocusPhase::Idle;
+    if (idle || waiting()) {
+        if (s_focus.phase == FocusPhase::Work || idle) {
+            std::snprintf(text, size, "%s round %d", start, idle ? 1 : s_focus.round);
+        } else {
+            std::snprintf(text, size, "%s the break", start);
+        }
+    } else if (!s_focus.running) {
+        std::snprintf(text, size, "Paused, %d min left",
+                      static_cast<int>((seconds + units::kSecondsPerMinute - 1) / units::kSecondsPerMinute));
+    } else {
+        char until[8];
+        clock_text(left_ms(), until, sizeof(until));
+        std::snprintf(text, size, "Until %s", until);
+    }
+}
+
+// Once a second while it is up: the leaves, the colon, the ticks, and under
+// them until when, or what a tap does.
 void show_full_second(bool force)
 {
     const std::int32_t left    = left_ms();
@@ -698,21 +349,7 @@ void show_full_second(bool force)
                beat);
 
     char text[64];
-    if (idle || waiting()) {
-        if (s_focus.phase == FocusPhase::Work || idle) {
-            std::snprintf(text, sizeof(text), "Tap to start round %d",
-                          idle ? 1 : s_focus.round);
-        } else {
-            std::snprintf(text, sizeof(text), "Tap to start the break");
-        }
-    } else if (paused) {
-        std::snprintf(text, sizeof(text), "Paused, %d min left",
-                      static_cast<int>((seconds + units::kSecondsPerMinute - 1) / units::kSecondsPerMinute));
-    } else {
-        char until[8];
-        clock_text(left, until, sizeof(until));
-        std::snprintf(text, sizeof(text), "Until %s", until);
-    }
+    under_text(text, sizeof(text), seconds, "Tap to start");
     theme::set_text(s_full_under, text);
 }
 
@@ -785,39 +422,138 @@ void build_full(lv_obj_t *screen)
     }
 }
 
-// Drawn again as the model changes.
-void show_focus(const Focus &focus)
+// The card from the top row: what the part is, how long is left of it, until
+// when and how far it has got, and the controls the fullscreen view has none of.
+constexpr std::int32_t POP_W      = 440;
+constexpr std::int32_t POP_PAD    = 24;
+constexpr std::int32_t POP_INNER  = POP_W - 2 * POP_PAD;
+constexpr std::int32_t POP_GAP    = 12;
+constexpr std::int32_t POP_BAR_H  = 8;
+constexpr std::int32_t POP_BTN_H  = 72;
+constexpr std::int32_t POP_SIDE_W = 96;   // reset and skip, beside start
+constexpr int          POP_SCALE  = 1000;  // the bar's
+constexpr std::uint32_t POP_IDLE_MS = 15 * 1000;
+
+lv_obj_t *s_pop_phase = nullptr;
+lv_obj_t *s_pop_time  = nullptr;
+lv_obj_t *s_pop_under = nullptr;
+lv_obj_t *s_pop_bar   = nullptr;
+lv_obj_t *s_pop_go    = nullptr;
+lv_obj_t *s_pop_skip  = nullptr;
+lv_obj_t *s_pop_reset = nullptr;
+int       s_pop_shown_s = -1;
+
+void show_pop_second(bool force)
 {
-    const bool new_part = focus.phase != s_focus.phase || focus.round != s_focus.round ||
-                          focus.length_ms != s_focus.length_ms ||
-                          focus.work_min != s_focus.work_min || s_tick_count == 0;
-    s_focus = focus;
-    if (s_dial.leaves == nullptr) {
+    const std::int32_t left    = left_ms();
+    const int          seconds = static_cast<int>(whole_seconds_up(left));
+    if (s_pop_time == nullptr || (seconds == s_pop_shown_s && !force)) {
         return;
     }
-    const bool idle   = focus.phase == FocusPhase::Idle;
-    const bool paused = !idle && !focus.running;
+    s_pop_shown_s = seconds;
+    char text[64];
+    std::snprintf(text, sizeof(text), "%02d:%02d", seconds / units::kSecondsPerMinute, seconds % units::kSecondsPerMinute);
+    theme::set_text(s_pop_time, text);
+    under_text(text, sizeof(text), seconds, "Start");
+    theme::set_text(s_pop_under, text);
+    const bool         idle   = s_focus.phase == FocusPhase::Idle;
+    const std::int32_t length = idle ? 0 : s_focus.length_ms;
+    lv_bar_set_value(s_pop_bar, length > 0 ? static_cast<std::int32_t>(static_cast<std::int64_t>(POP_SCALE) * (length - left) / length) : 0,
+                     LV_ANIM_OFF);
+}
 
-    if (new_part) {
-        lay_ticks(idle ? focus.work_min : std::max<int>(1, focus.length_ms / units::kMsPerMinute));
+void show_pop_part()
+{
+    if (s_pop_phase == nullptr) {
+        return;
     }
+    const bool          idle = s_focus.phase == FocusPhase::Idle;
+    const std::uint32_t ink  = ink_of(resting());
+    char                text[48];
+    if (idle) {
+        std::snprintf(text, sizeof(text), "READY, %d ROUNDS", s_focus.rounds);
+    } else {
+        std::snprintf(text, sizeof(text), "%s, ROUND %d OF %d%s", phase_name(s_focus.phase), s_focus.round, s_focus.rounds,
+                      !s_focus.running && !waiting() ? ", PAUSED" : "");
+    }
+    theme::set_text(s_pop_phase, text);
+    theme::set_text_color(s_pop_phase, idle ? theme::secondary : ink);
+    lv_obj_set_style_bg_color(s_pop_bar, lv_color_hex(ink), LV_PART_INDICATOR);
+    lv_obj_set_style_opa(s_pop_time, !idle && !s_focus.running ? LV_OPA_50 : LV_OPA_COVER, 0);
 
-    char text[48];
-    std::snprintf(text, sizeof(text), "%s%s", phase_name(focus.phase),
-                  waiting() ? ", READY" : paused ? ", PAUSED" : "");
-    theme::set_text(s_phase, text);
+    lv_obj_set_state(s_pop_go, LV_STATE_CHECKED, s_focus.running);
+    lv_obj_t *glyph = lv_obj_get_child(s_pop_go, 0);
+    theme::set_text(glyph, s_focus.running ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
+    theme::set_usable(s_pop_skip, !idle);
+    theme::set_usable(s_pop_reset, !idle);
+    show_pop_second(true);
+}
+
+lv_obj_t *pop_button(lv_obj_t *row, const char *symbol, std::int32_t w, FocusAction action)
+{
+    lv_obj_t *btn = theme::make_button(row, symbol, theme::panel_light, fonts::size_28());
+    lv_obj_set_size(btn, w, POP_BTN_H);
+    on_click(btn, action);
+    return btn;
+}
+
+void build_pop(lv_obj_t *screen)
+{
+    lv_obj_t *card = detail::build_popout(s_pop, screen, POP_W, detail::GAP, detail::GAP, POP_IDLE_MS);
+    lv_obj_set_style_pad_all(card, POP_PAD, 0);
+    lv_obj_set_height(card, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(card, POP_GAP, 0);
+
+    lv_obj_t *head = clear_box(card);
+    lv_obj_set_size(head, POP_INNER, theme::chip::size);
+    s_pop_phase = theme::make_eyebrow(head, "READY");
+    lv_obj_align(s_pop_phase, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_t *full = theme::make_chip(head, "");
+    theme::make_mark(full, &icons::expand_icon);
+    lv_obj_align(full, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_set_style_bg_color(full, lv_color_hex(theme::panel_light), 0);
+    lv_obj_add_event_cb(full, [](lv_event_t *) {
+        detail::open_popout(s_pop, false);
+        open_full();
+    }, LV_EVENT_CLICKED, nullptr);
+
+    s_pop_time  = theme::make_label(card, "00:00", theme::text, theme::type_display());
+    s_pop_under = theme::make_label(card, "", theme::secondary, theme::type_body());
+
+    s_pop_bar = lv_bar_create(card);
+    lv_obj_set_size(s_pop_bar, POP_INNER, POP_BAR_H);
+    lv_bar_set_range(s_pop_bar, 0, POP_SCALE);
+    theme::style_panel(s_pop_bar, theme::panel_light, POP_BAR_H / 2);
+    lv_obj_set_style_radius(s_pop_bar, POP_BAR_H / 2, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(s_pop_bar, LV_OPA_COVER, LV_PART_INDICATOR);
+    lv_obj_set_style_margin_bottom(s_pop_bar, POP_GAP, 0);
+
+    lv_obj_t *row = clear_box(card);
+    lv_obj_set_size(row, POP_INNER, POP_BTN_H);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(row, POP_GAP, 0);
+    s_pop_reset = pop_button(row, LV_SYMBOL_REFRESH, POP_SIDE_W, FocusAction::Reset);
+    s_pop_go    = pop_button(row, LV_SYMBOL_PLAY, POP_INNER - 2 * (POP_SIDE_W + POP_GAP), FocusAction::Toggle);
+    theme::fill_accent(s_pop_go, LV_STATE_CHECKED);
+    s_pop_skip = pop_button(row, LV_SYMBOL_NEXT, POP_SIDE_W, FocusAction::Skip);
+    detail::fit_popout(s_pop);
+}
+
+// Drawn again as the model changes.
+void on_focus()
+{
+    const Focus &focus    = detail::focus_state();
+    const bool   new_part = focus.phase != s_focus.phase || focus.round != s_focus.round ||
+                          focus.length_ms != s_focus.length_ms || focus.work_min != s_focus.work_min ||
+                          s_tick_count == 0;
+    s_focus = focus;
+    if (new_part) {
+        lay_ticks(focus.phase == FocusPhase::Idle ? focus.work_min
+                                                  : std::max<int>(1, focus.length_ms / units::kMsPerMinute));
+    }
     show_full_part();
-    lv_obj_set_state(s_go, LV_STATE_CHECKED, focus.running);
-    lv_obj_t *glyph = lv_obj_get_child(s_go, 0);
-    theme::set_text(glyph, focus.running ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
-    theme::set_text_color(glyph, focus.running ? theme::text : theme::secondary);
-    theme::center_ink(glyph);
-    theme::set_usable(s_skip, !idle);
-    theme::set_usable(s_reset, !idle);
-
-    show_set();
-    show_second(true);
-    show_tab();
+    show_pop_part();
 }
 }  // namespace
 
@@ -831,21 +567,28 @@ bool focus_full_open()
     return detail::view_open(s_full_view);
 }
 
+void toggle_focus_popout(lv_obj_t *badge, lv_obj_t *above)
+{
+    if (!s_pop.open) {
+        lv_area_t at;
+        lv_obj_update_layout(badge);
+        lv_obj_get_coords(badge, &at);
+        // Its right edge under the badge's, just below the row.
+        detail::place_popout(s_pop, at.x2 + 1 + detail::GAP, at.y2 + 1, true);
+        s_pop.button = badge;
+        s_pop.above  = above;
+        show_pop_part();
+    }
+    detail::open_popout(s_pop, !s_pop.open);
+}
+
 void build_focus_full(lv_obj_t *screen)
 {
     build_full(screen);
+    build_pop(screen);
     lay_ticks(s_tick_count > 0 ? s_tick_count : s_focus.work_min);
-    show_full_part();
-}
-
-void build_focus_page(lv_obj_t *page, std::int32_t width, std::int32_t height)
-{
-    const std::int32_t dial_w = width - SET_W - BUTTON_GAP;
-    build_dial(page, dial_w, height);
-    build_set(page, dial_w + BUTTON_GAP, SET_W, height);
-
     lv_timer_create(timer_tick, TIMER_PERIOD_MS, nullptr);
-    detail::subscribe(detail::Topic::Focus, detail::kNoView, [] { show_focus(detail::focus_state()); });
+    detail::subscribe(detail::Topic::Focus, detail::kNoView, on_focus);
 }
 
 }  // namespace ui

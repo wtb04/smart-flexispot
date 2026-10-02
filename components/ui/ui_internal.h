@@ -109,9 +109,8 @@ constexpr std::uint32_t PAUSE_SETTLE_MS = 1500;
 constexpr int HOME_PAGE     = 0;
 constexpr int RADAR_PAGE    = 1;
 constexpr int CALENDAR_PAGE = 2;
-constexpr int FOCUS_PAGE    = 3;
-constexpr int SETUP_PAGE    = 4;
-constexpr int PAGE_COUNT    = 5;
+constexpr int SETUP_PAGE    = 3;  // opened from the top row's status
+constexpr int PAGE_COUNT    = 4;
 
 
 constexpr int SETTING_COUNT = static_cast<int>(Setting::Count);
@@ -270,9 +269,6 @@ void select_page(int index);
 void toggle_setup();
 /** The owner's pages come and go with their phone, and with the setting that hides them. */
 void follow_pages();
-/** The Focus tab's icon in `ink` while the timer runs, faded while paused; a
- *  null caption puts it back. */
-void show_focus_tab(const char *caption, std::uint32_t ink, bool paused);
 void brightness_event_cb(lv_event_t *e);
 std::uint32_t info_ink(Level level);
 /** The diagnostics page follows the diagnostics model. */
