@@ -12,8 +12,9 @@
 namespace ui::detail {
 namespace {
 constexpr int NEXT_UP_TAIL_S = 30;  // with no credits marked, the end is near
-// Between one episode or track and the next, the player says for a moment that
-// nothing plays: what goes is shown gone only once it has stayed gone this long.
+// Between one episode and the next, Jellyfin says for a moment that nothing
+// plays: a video that goes is shown gone only once it has stayed gone this
+// long. Music goes straight on to its next track, so a stop shows at once.
 constexpr std::uint32_t GONE_SETTLE_MS = 4000;
 
 MediaState  s_media;
@@ -92,7 +93,7 @@ void media_take_track(const char *source, const char *title, const char *artist,
                       bool playing, bool controllable)
 {
     const bool has_track = title != nullptr && title[0] != '\0';
-    if (!has_track && s_media.has_track) {
+    if (!has_track && s_media.has_track && s_media.video) {
         copy(s_gone.source, sizeof(s_gone.source), source);
         copy(s_gone.state, sizeof(s_gone.state), state);
         s_gone.controllable = controllable;

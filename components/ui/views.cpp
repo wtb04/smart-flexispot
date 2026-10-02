@@ -95,8 +95,22 @@ void watch(ViewId view, std::function<void(bool, bool)> changed)
 
 ViewId add_view(ViewSpec spec)
 {
+    const ViewId id = static_cast<ViewId>(views().size());
     if (spec.root != nullptr) {
         lv_obj_set_hidden(spec.root, true);
+    }
+    // A fullscreen view goes with a swipe down anywhere on it, as well as by
+    // its chip; what takes a swipe of its own keeps it.
+    if (spec.root != nullptr && spec.kind == ViewKind::Fullscreen) {
+        lv_obj_add_event_cb(
+            spec.root,
+            [](lv_event_t *e) {
+                if (lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_BOTTOM) {
+                    close_view(static_cast<ViewId>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e))));
+                }
+            },
+            LV_EVENT_GESTURE, reinterpret_cast<void *>(static_cast<std::intptr_t>(id)));
+        lv_obj_set_gesture_bubble(spec.root, false);
     }
     views().push_back({std::move(spec), false});
     return static_cast<ViewId>(views().size() - 1);

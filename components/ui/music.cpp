@@ -381,6 +381,7 @@ void build_volume(std::int32_t x, std::int32_t y, std::int32_t w)
     lv_obj_set_style_pad_all(s_volume, 0, 0);
     lv_obj_set_style_clip_corner(s_volume, true, 0);
     lv_obj_set_scrollable(s_volume, false);
+    lv_obj_set_gesture_bubble(s_volume, false);  // dragged a little down, it is still the volume
     for (lv_event_code_t code : {LV_EVENT_PRESSED, LV_EVENT_PRESSING, LV_EVENT_RELEASED, LV_EVENT_PRESS_LOST}) {
         lv_obj_add_event_cb(s_volume, volume_touched, code, nullptr);
     }
