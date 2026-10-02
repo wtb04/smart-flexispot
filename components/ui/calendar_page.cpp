@@ -1874,4 +1874,173 @@ void build_calendar_page(lv_obj_t *page, std::int32_t width, std::int32_t height
     detail::subscribe(detail::Topic::Calendar, detail::kNoView, show_calendar);
 }
 
+
+// ---- Home's tile: what comes next, and the few after it ----
+namespace {
+constexpr int          TILE_AFTER = 4;
+constexpr std::int32_t TILE_PAD   = 22;
+constexpr std::int32_t TILE_WHEN_W = 150;
+constexpr std::int64_t TILE_REFRESH_S = 30;
+
+struct TileRow {
+    lv_obj_t *when;
+    lv_obj_t *what;
+};
+lv_obj_t *s_tile       = nullptr;
+lv_obj_t *s_tile_kind  = nullptr;
+lv_obj_t *s_tile_title = nullptr;
+lv_obj_t *s_tile_meta  = nullptr;
+lv_obj_t *s_tile_big   = nullptr;
+lv_obj_t *s_tile_span  = nullptr;
+lv_obj_t *s_tile_after = nullptr;  // the heading over the rest
+TileRow   s_tile_rows[TILE_AFTER]{};
+
+// One line or two, as the title needs, so what is under it follows it closely.
+void fit_tile_title()
+{
+    const lv_font_t   *font = fonts::size_28();
+    const std::int32_t line = lv_font_get_line_height(font);
+    lv_point_t         size{};
+    lv_text_get_size(&size, lv_label_get_text(s_tile_title), font, 0, 0, lv_obj_get_width(s_tile_title),
+                     LV_TEXT_FLAG_NONE);
+    lv_obj_set_height(s_tile_title, size.y > line ? 2 * line : line);
+}
+
+lv_obj_t *tile_line(lv_obj_t *parent, std::uint32_t ink, const lv_font_t *font, std::int32_t w, int lines)
+{
+    lv_obj_t *label = theme::make_label(parent, "", ink, font);
+    lv_obj_set_size(label, w, lines * lv_font_get_line_height(font));
+    lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_DOTS);
+    lv_obj_set_clickable(label, false);
+    return label;
+}
+
+void show_tile()
+{
+    if (s_tile == nullptr || detail::s_page != detail::HOME_PAGE) {
+        return;
+    }
+    static ical::Event ahead[TILE_AFTER + 1];
+    const int          count = ical::upcoming(ahead, TILE_AFTER + 1);
+    const auto         now   = static_cast<std::int64_t>(std::time(nullptr));
+    char               text[96];
+    if (count == 0) {
+        theme::set_text(s_tile_kind, "NEXT");
+        theme::set_text(s_tile_title, "Nothing coming up");
+        theme::set_text_color(s_tile_title, theme::secondary);
+        fit_tile_title();
+        for (lv_obj_t *part : {s_tile_meta, s_tile_big, s_tile_span, s_tile_after}) {
+            theme::set_text(part, "");
+        }
+        for (TileRow &row : s_tile_rows) {
+            theme::set_text(row.when, "");
+            theme::set_text(row.what, "");
+        }
+        return;
+    }
+    const ical::Event &next    = ahead[0];
+    const bool         ongoing = next.start <= now;
+    char               day[24];
+    day_name(now, next.start, day, sizeof(day));
+    std::snprintf(text, sizeof(text), "%s, %s", feed_kind(next.feed), ongoing ? "now" : day);
+    theme::set_text(s_tile_kind, text);
+    theme::set_text(s_tile_title, next.summary);
+    theme::set_text_color(s_tile_title, theme::text);
+    fit_tile_title();
+    char from[16];
+    char to[16];
+    clock_of(next.start, from, sizeof(from));
+    clock_of(next.end, to, sizeof(to));
+    if (has_place(next)) {
+        std::snprintf(text, sizeof(text), "%s \xe2\x80\x93 %s, %s", from, to, place_of(next));
+    } else {
+        std::snprintf(text, sizeof(text), "%s \xe2\x80\x93 %s", from, to);
+    }
+    theme::set_text(s_tile_meta, text);
+    theme::set_text(s_tile_big, ongoing ? to : from);
+    char span[32];
+    span_of(now, ongoing ? next.end : next.start, span, sizeof(span));
+    std::snprintf(text, sizeof(text), "%s %s", ongoing ? "ends" : "", span);
+    theme::set_text(s_tile_span, ongoing ? text : span);
+
+    theme::set_text(s_tile_after, count > 1 ? "AFTER THAT" : "");
+    for (int i = 0; i < TILE_AFTER; ++i) {
+        TileRow &row = s_tile_rows[i];
+        if (i + 1 >= count) {
+            theme::set_text(row.when, "");
+            theme::set_text(row.what, "");
+            continue;
+        }
+        const ical::Event &event = ahead[i + 1];
+        const auto         at    = static_cast<std::time_t>(event.start);
+        std::tm            local{};
+        localtime_r(&at, &local);
+        std::strftime(text, sizeof(text), "%a %H:%M", &local);
+        theme::set_text(row.when, text);
+        theme::set_text(row.what, event.summary);
+    }
+}
+}  // namespace
+
+void build_next_tile(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int32_t w, std::int32_t h)
+{
+    s_tile = lv_button_create(parent);
+    theme::style_button(s_tile, theme::panel_light);
+    lv_obj_set_pos(s_tile, x, y);
+    lv_obj_set_size(s_tile, w, h);
+    lv_obj_set_style_radius(s_tile, theme::radius::card, 0);
+    lv_obj_set_style_pad_all(s_tile, TILE_PAD, 0);
+    lv_obj_set_scrollable(s_tile, false);
+    lv_obj_add_event_cb(s_tile, [](lv_event_t *) { detail::select_page(detail::CALENDAR_PAGE); }, LV_EVENT_CLICKED,
+                        nullptr);
+    const std::int32_t inner = w - 2 * TILE_PAD;
+    s_tile_kind  = tile_line(s_tile, theme::secondary, theme::type_label(), inner, 1);
+    s_tile_title = tile_line(s_tile, theme::text, fonts::size_28(), inner, 2);
+    s_tile_meta  = tile_line(s_tile, theme::secondary, theme::type_body(), inner, 1);
+    // The time and how far off it is, the one after the other whatever their widths.
+    lv_obj_t *when = lv_obj_create(s_tile);
+    lv_obj_remove_style_all(when);
+    lv_obj_set_size(when, inner, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(when, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(when, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
+    lv_obj_set_style_pad_column(when, space::l, 0);
+    lv_obj_set_clickable(when, false);
+    s_tile_big  = theme::make_label(when, "", theme::text, fonts::size_48());
+    s_tile_span = theme::make_label(when, "", theme::secondary, theme::type_body());
+    lv_obj_set_style_pad_bottom(s_tile_span, space::s, 0);
+    // What it is, when and where, and the time, each under the last.
+    lv_obj_t *head = lv_obj_create(s_tile);
+    lv_obj_remove_style_all(head);
+    lv_obj_set_size(head, inner, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(head, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(head, space::s, 0);
+    lv_obj_set_clickable(head, false);
+    for (lv_obj_t *part : {s_tile_kind, s_tile_title, s_tile_meta, when}) {
+        lv_obj_set_parent(part, head);
+    }
+
+    s_tile_after = theme::make_eyebrow(s_tile, "");
+    lv_obj_align(s_tile_after, LV_ALIGN_TOP_LEFT, 0, 228);
+    const std::int32_t line = lv_font_get_line_height(theme::type_body()) + space::m;
+    for (int i = 0; i < TILE_AFTER; ++i) {
+        TileRow &row = s_tile_rows[i];
+        row.when     = tile_line(s_tile, theme::secondary, theme::type_body(), TILE_WHEN_W, 1);
+        row.what     = tile_line(s_tile, theme::text, theme::type_body(), inner - TILE_WHEN_W, 1);
+        const std::int32_t ry = 258 + i * line;
+        if (ry + line > h - 2 * TILE_PAD) {
+            lv_obj_set_hidden(row.when, true);
+            lv_obj_set_hidden(row.what, true);
+        }
+        lv_obj_align(row.when, LV_ALIGN_TOP_LEFT, 0, ry);
+        lv_obj_align(row.what, LV_ALIGN_TOP_LEFT, TILE_WHEN_W, ry);
+    }
+    detail::subscribe(detail::Topic::Calendar, detail::kNoView, show_tile);
+    detail::subscribe(detail::Topic::Page, detail::kNoView, show_tile);
+    detail::subscribe(detail::Topic::Second, detail::kNoView, [] {
+        if (std::time(nullptr) % TILE_REFRESH_S == 0) {
+            show_tile();
+        }
+    });
+}
+
 }  // namespace ui

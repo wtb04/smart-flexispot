@@ -90,11 +90,6 @@ struct Pill {
     lv_obj_t *value  = nullptr;
     bool      shown  = false;
 };
-struct LightButton {
-    lv_obj_t *root  = nullptr;
-    lv_obj_t *name  = nullptr;
-    lv_obj_t *state = nullptr;
-};
 
 struct TextBox {
     std::int32_t x;
@@ -221,13 +216,7 @@ void write_temperature(lv_obj_t *label, float celsius, bool with_unit);
 void paint_dial(Hvac state);
 void reflow_pills();
 std::uint32_t level_ink(Level level);
-void paint_light(lv_obj_t *root, lv_obj_t *name, lv_obj_t *state, bool on);
-void layout_media_text();
-/** The speaker drawn in the card's cover frame while nothing plays. */
-void show_speaker_face(bool shown);
-/** Where the card's text starts while idle, to sit level with the speaker. */
-std::int32_t idle_media_text_top();
-/** The HK Citation One the card shows then, `side` square, painted once. */
+/** The HK Citation One the music card shows while nothing plays, `side` square, painted once. */
 const lv_image_dsc_t *speaker_picture(std::int32_t side);
 void write_clock(lv_obj_t *label, int seconds);
 void build_home_page(lv_obj_t *page);

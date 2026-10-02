@@ -53,13 +53,13 @@ Once the screen was there, the extra features kept coming, each one making it a 
 
 ![The home page with music on the speaker](docs/screenshots/home-music.png)
 
-This is what the panel shows most of the day. The dock at the right is on every page: the desk's height at its head with Stand and Sit under it, and the pages standing up from its foot, Home lowest, then Radar and Calendar. Along the top are the focus timer, the time, whether my phone and Wi-Fi are there and the battery while it is unplugged, the same row the fullscreen views have. A tap on the timer drops it down with its controls, and a tap on the time opens Setup.
+This is what the panel shows most of the day. Two things are on every page, in the same place whatever happens. The dock at the side has the desk's height at its head with Stand and Sit under it, and the pages standing up from its foot, Home lowest, then Radar and Calendar. The control bar along the top has what gets touched every day: what is playing with play and pause right there, the heating, the lights, the focus timer, and the time with the phone, Wi-Fi and the battery while it is unplugged. A tap on the track drops its card with skip, the volume and the favourites; on the heating, its dial; a tap on the lights turns them all on or off, and holding it shows each light. A tap on the time opens Setup.
 
-The rest is the room. The air across the top, each reading with a dot for how it is doing. The thermostat as a dial to turn, with its mode below. The lights, all of them with a tap, or hold for a picker of each light. And what is playing, the speaker's music here, or a Jellyfin episode as in the picture at the top.
+Home itself is for looking at: the air across the top, each reading with a dot for how it is doing, the sky overhead with every aircraft in its height's colour, and what comes next on the calendar with the few after it. A tap on either opens its page.
 
 ### The room
 
-It is built Home Assistant first. The panel talks to no light or thermostat itself: everything on the home page is one of Home Assistant's own entities, and every tap goes back to Home Assistant over its websocket.
+It is built Home Assistant first. The panel talks to no light or thermostat itself: everything in the control bar and on the home page is one of Home Assistant's own entities, and every tap goes back to Home Assistant over its websocket.
 
 It works the other way round too. The panel shows up in Home Assistant as a device of its own over MQTT, with the desk's controls, its sensors and its diagnostics, so automations can move the desk, turn the screen off or put a message on it.
 

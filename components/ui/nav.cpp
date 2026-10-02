@@ -70,7 +70,8 @@ void tell_page_opened(int index)
         show_calendar();
     }
     if (s_handlers.radar != nullptr) {
-        s_handlers.radar(index == RADAR_PAGE, page_available(RADAR_PAGE));
+        // Home's tile follows the sky as closely as the page does.
+        s_handlers.radar(index == RADAR_PAGE || index == HOME_PAGE, page_available(RADAR_PAGE));
     }
 }
 }  // namespace

@@ -105,8 +105,15 @@ void build_cover(Cover &cover, lv_obj_t *parent, std::int32_t side, std::int32_t
     lv_obj_center(cover.image);
     lv_obj_set_clickable(cover.image, false);
     lv_obj_set_hidden(cover.image, true);
-    cover.mark = theme::make_label(cover.frame, LV_SYMBOL_AUDIO, theme::secondary, fonts::size_22());
+    if (side >= COVER) {
+        // Large enough for the speaker itself, as Home's card showed it.
+        cover.mark = lv_image_create(cover.frame);
+        lv_image_set_src(cover.mark, speaker_picture(side));
+    } else {
+        cover.mark = theme::make_label(cover.frame, LV_SYMBOL_AUDIO, theme::secondary, fonts::size_22());
+    }
     lv_obj_center(cover.mark);
+    lv_obj_set_clickable(cover.mark, false);
 }
 
 void paint_cover(Cover &cover)
@@ -169,7 +176,7 @@ void show_play(lv_obj_t *button, bool playing)
 void show_volume(int percent)
 {
     lv_obj_set_width(s_volume_fill, lv_obj_get_width(s_volume) * percent / 100);
-    char text[8];
+    char text[12];
     std::snprintf(text, sizeof(text), "%d", percent);
     theme::set_text(s_volume_text, text);
 }

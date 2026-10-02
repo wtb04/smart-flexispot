@@ -3529,4 +3529,116 @@ bool radar_choose(const char *hex)
     return true;
 }
 
+
+// ---- Home's tile: the sky as the scope has it, small ----
+namespace {
+constexpr std::int32_t TILE_PAD      = 22;
+constexpr std::int32_t TILE_DOT      = 9;
+constexpr std::int32_t TILE_RING_W   = 2;
+constexpr int          TILE_RINGS    = 3;
+constexpr lv_opa_t     TILE_RING_OPA = LV_OPA_30;
+
+lv_obj_t *s_tile       = nullptr;
+lv_obj_t *s_tile_scope = nullptr;  // drawn by hand: rings and a dot for each aircraft
+lv_obj_t *s_tile_label = nullptr;  // the nearest, by name and height
+
+// Aircraft as dots in their height's colour over three rings, home in the
+// middle; no map and no trails, so it is cheap to draw again as the feed moves.
+void tile_drawn(lv_event_t *e)
+{
+    lv_layer_t *layer = lv_event_get_layer(e);
+    lv_area_t   area;
+    lv_obj_get_content_coords(s_tile_scope, &area);
+    const std::int32_t cx = (area.x1 + area.x2) / 2;
+    const std::int32_t cy = (area.y1 + area.y2) / 2;
+    const std::int32_t R  = std::min(lv_area_get_width(&area), lv_area_get_height(&area)) / 2 - TILE_DOT;
+
+    lv_draw_arc_dsc_t ring;
+    lv_draw_arc_dsc_init(&ring);
+    ring.color       = lv_color_hex(theme::secondary);
+    ring.opa         = TILE_RING_OPA;
+    ring.width       = TILE_RING_W;
+    ring.start_angle = 0;
+    ring.end_angle   = 360;
+    ring.center      = {cx, cy};
+    for (int i = 1; i <= TILE_RINGS; ++i) {
+        ring.radius = static_cast<std::uint16_t>(R * i / TILE_RINGS);
+        lv_draw_arc(layer, &ring);
+    }
+
+    lv_draw_rect_dsc_t dot;
+    lv_draw_rect_dsc_init(&dot);
+    dot.radius   = LV_RADIUS_CIRCLE;
+    dot.bg_color = lv_color_hex(theme::primary);
+    lv_area_t at = {cx - 4, cy - 4, cx + 4, cy + 4};
+    lv_draw_rect(layer, &dot, &at);
+
+    if (s_last == nullptr || !s_last->ok) {
+        return;
+    }
+    const float range = static_cast<float>(RANGES[s_range_step]);
+    for (int i = 0; i < s_last->count; ++i) {
+        const radar::Aircraft &a = s_last->list[i];
+        if (a.on_ground) {
+            continue;
+        }
+        float east  = 0.0f;
+        float north = 0.0f;
+        flat_km(a.lat, a.lon, east, north);
+        if (east * east + north * north > range * range) {
+            continue;
+        }
+        const auto x = static_cast<std::int32_t>(cx + east / range * static_cast<float>(R));
+        const auto y = static_cast<std::int32_t>(cy - north / range * static_cast<float>(R));
+        dot.bg_color = lv_color_hex(altitude_ink(a.altitude_ft));
+        at           = {x - TILE_DOT / 2, y - TILE_DOT / 2, x + TILE_DOT / 2, y + TILE_DOT / 2};
+        lv_draw_rect(layer, &dot, &at);
+    }
+}
+
+void show_tile()
+{
+    if (s_tile == nullptr || s_last == nullptr || detail::s_page != detail::HOME_PAGE) {
+        return;
+    }
+    radar::snapshot(*s_last);
+    const radar::Aircraft *nearest = nullptr;
+    for (int i = 0; i < s_last->count; ++i) {
+        const radar::Aircraft &a = s_last->list[i];
+        if (!a.on_ground && (nearest == nullptr || a.distance_nm < nearest->distance_nm)) {
+            nearest = &a;
+        }
+    }
+    char text[64] = "";
+    if (nearest != nullptr && nearest->altitude_ft >= 0) {
+        std::snprintf(text, sizeof(text), "%s, %d ft", blip_name(*nearest), nearest->altitude_ft);
+    } else if (nearest != nullptr) {
+        std::snprintf(text, sizeof(text), "%s", blip_name(*nearest));
+    }
+    theme::set_text(s_tile_label, text);
+    lv_obj_invalidate(s_tile_scope);
+}
+}  // namespace
+
+void build_radar_tile(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int32_t w, std::int32_t h)
+{
+    s_tile = lv_button_create(parent);
+    theme::style_button(s_tile, theme::panel_light);
+    lv_obj_set_pos(s_tile, x, y);
+    lv_obj_set_size(s_tile, w, h);
+    lv_obj_set_style_radius(s_tile, theme::radius::card, 0);
+    lv_obj_set_style_pad_all(s_tile, TILE_PAD, 0);
+    lv_obj_add_event_cb(s_tile, [](lv_event_t *) { detail::select_page(detail::RADAR_PAGE); }, LV_EVENT_CLICKED, nullptr);
+    lv_obj_align(theme::make_eyebrow(s_tile, "RADAR"), LV_ALIGN_TOP_LEFT, 0, 0);
+    s_tile_scope = lv_obj_create(s_tile);
+    lv_obj_remove_style_all(s_tile_scope);
+    lv_obj_set_size(s_tile_scope, lv_pct(100), lv_pct(100));
+    lv_obj_set_clickable(s_tile_scope, false);
+    lv_obj_add_event_cb(s_tile_scope, tile_drawn, LV_EVENT_DRAW_MAIN, nullptr);
+    s_tile_label = theme::make_label(s_tile, "", theme::text, theme::type_body());
+    lv_obj_align(s_tile_label, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+    detail::subscribe(detail::Topic::Radar, detail::kNoView, show_tile);
+    detail::subscribe(detail::Topic::Page, detail::kNoView, show_tile);
+}
+
 }  // namespace ui
