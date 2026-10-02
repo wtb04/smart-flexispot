@@ -15,7 +15,8 @@ Popout *s_out = nullptr;  // the one out, or on its way
 // What a frame shows from the corner, `w` across and `h` down.
 lv_area_t shown_area(const Popout &p, std::int32_t w, std::int32_t h)
 {
-    return p.leftward ? lv_area_t{p.x - w, p.y, p.x - 1, p.y + h - 1} : lv_area_t{p.x, p.y, p.x + w - 1, p.y + h - 1};
+    const std::int32_t y1 = p.upward ? p.y - h : p.y;
+    return p.leftward ? lv_area_t{p.x - w, y1, p.x - 1, y1 + h - 1} : lv_area_t{p.x, y1, p.x + w - 1, y1 + h - 1};
 }
 
 void reveal(Popout &p, int shown)
@@ -25,11 +26,12 @@ void reveal(Popout &p, int shown)
     lv_display_t      *disp = lv_display_get_default();
     lv_display_enable_invalidation(disp, false);
     lv_obj_set_hidden(p.frame, shown <= 0);
-    lv_obj_set_pos(p.frame, p.leftward ? p.x - w : p.x, p.y);
+    lv_obj_set_pos(p.frame, p.leftward ? p.x - w : p.x, p.upward ? p.y - h : p.y);
     lv_obj_set_size(p.frame, std::max<std::int32_t>(w, 1), std::max<std::int32_t>(h, 1));
     const std::int32_t card_x = p.leftward ? w - p.near - lv_obj_get_width(p.card) : p.near;
-    lv_obj_set_pos(p.card, card_x, p.top);
-    lv_obj_set_pos(p.ring, card_x - GAP, p.top - GAP);
+    const std::int32_t card_y = p.upward ? h - p.top - lv_obj_get_height(p.card) : p.top;
+    lv_obj_set_pos(p.card, card_x, card_y);
+    lv_obj_set_pos(p.ring, card_x - GAP, card_y - GAP);
     lv_obj_update_layout(p.frame);  // moved now, while that draws nothing again
     lv_display_enable_invalidation(disp, true);
 
@@ -48,7 +50,8 @@ void reveal(Popout &p, int shown)
         lv_obj_invalidate_area(scr, &across);
     }
     if (big_h > small_h && small_w > 0) {
-        const lv_area_t down{small.x1, p.y + small_h, small.x2, big.y2};
+        const lv_area_t down = p.upward ? lv_area_t{small.x1, big.y1, small.x2, small.y1 - 1}
+                                        : lv_area_t{small.x1, small.y2 + 1, small.x2, big.y2};
         lv_obj_invalidate_area(scr, &down);
     }
 }
@@ -101,9 +104,9 @@ lv_obj_t *build_popout(Popout &p, lv_obj_t *parent, std::int32_t w, std::int32_t
     return p.card;
 }
 
-void place_popout(Popout &p, std::int32_t x, std::int32_t y, bool leftward)
+void place_popout(Popout &p, std::int32_t x, std::int32_t y, bool leftward, bool upward)
 {
-    if (p.x == x && p.y == y && p.leftward == leftward) {
+    if (p.x == x && p.y == y && p.leftward == leftward && p.upward == upward) {
         return;
     }
     if (p.shown > 0) {
@@ -112,6 +115,7 @@ void place_popout(Popout &p, std::int32_t x, std::int32_t y, bool leftward)
     p.x        = x;
     p.y        = y;
     p.leftward = leftward;
+    p.upward   = upward;
     p.shown_w = p.shown_h = 0;
     reveal(p, p.shown);
 }

@@ -575,11 +575,12 @@ void toggle_focus_popout(lv_obj_t *button, lv_obj_t *dock, void (*lit)(bool open
         lv_area_t side;
         lv_obj_get_coords(button, &at);
         lv_obj_get_coords(dock, &side);
-        // Beside the dock, level with the button, as the desk folds out from the height.
+        // Beside the dock, its foot level with the button's at the dock's foot,
+        // unfolding up from there.
         const bool right = detail::layout().rail_right;
         s_pop.near       = FROM_DOCK;
         detail::fit_popout(s_pop);
-        detail::place_popout(s_pop, right ? side.x1 : side.x2 + 1, at.y1 - detail::GAP, right);
+        detail::place_popout(s_pop, right ? side.x1 : side.x2 + 1, at.y2 + 1 + detail::GAP, right, true);
         s_pop.button = button;
         s_pop.above  = dock;
         s_pop.lit    = lit;

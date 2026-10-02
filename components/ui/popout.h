@@ -24,8 +24,9 @@ struct Popout {
     std::int32_t x        = 0;  // the corner it unfolds from
     std::int32_t y        = 0;
     bool         leftward = false;  // across to the left of the corner, else to the right
+    bool         upward   = false;  // up from the corner, else down
     std::int32_t near     = 0;      // from the corner to the card, across
-    std::int32_t top      = 0;      // and down
+    std::int32_t top      = 0;      // and down, or up
     std::int32_t full_w   = 0;      // all of it shown, the ring of background round the card too
     std::int32_t full_h   = 0;
     int          shown    = 0;      // in thousandths
@@ -40,7 +41,7 @@ lv_obj_t *build_popout(Popout &p, lv_obj_t *parent, std::int32_t w, std::int32_t
                        std::uint32_t idle_ms);
 
 /** Where it unfolds from; drawn again whole if it is out. */
-void place_popout(Popout &p, std::int32_t x, std::int32_t y, bool leftward);
+void place_popout(Popout &p, std::int32_t x, std::int32_t y, bool leftward, bool upward = false);
 
 /** After the card's height changes. */
 void fit_popout(Popout &p);

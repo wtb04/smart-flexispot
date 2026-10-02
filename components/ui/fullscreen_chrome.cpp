@@ -263,8 +263,10 @@ void arrange_top()
             lv_obj_move_to_index(row[count - 1 - i], static_cast<std::int32_t>(i));
         }
     }
-    for (int i = 0; i < 4; ++i) {
-        lv_obj_move_to_index(s_slots[right ? i : 3 - i], i);
+    lv_obj_t *const status[] = {s_update_box, s_slots[0], s_slots[1], s_slots[2], s_slots[3]};
+    constexpr int   STATUS_PARTS = static_cast<int>(std::size(status));
+    for (int i = 0; i < STATUS_PARTS; ++i) {
+        lv_obj_move_to_index(status[right ? i : STATUS_PARTS - 1 - i], i);
     }
     // Against Wi-Fi beside it, what the width keeps for wider digits at the far end.
     lv_obj_set_style_text_align(s_top->label, right ? LV_TEXT_ALIGN_LEFT : LV_TEXT_ALIGN_RIGHT, 0);
@@ -287,7 +289,6 @@ void create_top_bar(lv_obj_t *parent)
     lv_obj_set_clickable(s_top_bar, false);
 
     build_bar_slots(s_top_bar);
-    build_update(s_top_bar);  // after the lights, so nothing moves as it comes and goes
     s_spacer = lv_obj_create(s_top_bar);
     lv_obj_remove_style_all(s_spacer);
     lv_obj_set_flex_grow(s_spacer, 1);
@@ -312,6 +313,9 @@ void create_top_bar(lv_obj_t *parent)
         lv_obj_set_style_bg_opa(s_status, LV_OPA_COVER, state);
     }
     lv_obj_add_event_cb(s_status, [](lv_event_t *) { toggle_setup(); }, LV_EVENT_CLICKED, nullptr);
+    // An update arriving shows with the status it is installed from, at its far
+    // end from the time, so the status only grows as it comes and goes.
+    build_update(s_status);
     for (lv_obj_t *&slot : s_slots) {
         slot = make_slot(s_status, SLOT_W);
     }

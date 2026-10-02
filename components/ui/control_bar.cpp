@@ -190,6 +190,9 @@ lv_obj_t *s_card_length  = nullptr;
 lv_obj_t *s_card_prev    = nullptr;
 lv_obj_t *s_card_play    = nullptr;
 lv_obj_t *s_card_next    = nullptr;
+lv_obj_t *s_card_extra   = nullptr;  // the favourites, or for a video its subtitles
+lv_obj_t *s_extra_list   = nullptr;
+lv_obj_t *s_extra_subs   = nullptr;
 lv_obj_t *s_volume       = nullptr;
 lv_obj_t *s_volume_fill  = nullptr;
 lv_obj_t *s_volume_text  = nullptr;
@@ -270,6 +273,10 @@ void paint_media()
         s_card_at_s = -1;
         glide_card(nullptr);
     }
+    lv_obj_set_hidden(s_extra_list, media.video);
+    lv_obj_set_hidden(s_extra_subs, !media.video);
+    theme::fill_accent_or(s_card_extra, media.video && media.subtitles_shown, theme::panel_light);
+    theme::set_usable(s_card_extra, !media.video || media.subtitles_available);
     theme::set_usable(s_volume, media.volume >= 0);
     if (media.volume >= 0 && !s_volume_held) {
         show_volume(media.volume);
@@ -503,8 +510,18 @@ void build_media_card(lv_obj_t *screen)
     s_volume_text = theme::make_label(s_volume, "", theme::text, fonts::size_22());
     lv_obj_align(s_volume_text, LV_ALIGN_RIGHT_MID, -VOLUME_INSET, 0);
     lv_obj_set_clickable(s_volume_text, false);
-    lv_obj_t *favourites = card_button(sound, LV_SYMBOL_LIST, STEP_W);
-    lv_obj_add_event_cb(favourites, [](lv_event_t *) {
+    // The favourites for music; nobody picks another while watching, so for a
+    // video the subtitles, as the cinema view has them.
+    s_card_extra = card_button(sound, LV_SYMBOL_LIST, STEP_W);
+    s_extra_list = lv_obj_get_child(s_card_extra, 0);
+    s_extra_subs = theme::make_mark(s_card_extra, &icons::subtitles_icon, LV_OPA_COVER);
+    lv_obj_set_style_image_recolor(s_extra_subs, lv_color_hex(theme::text), 0);
+    lv_obj_set_style_image_recolor_opa(s_extra_subs, LV_OPA_COVER, 0);
+    lv_obj_add_event_cb(s_card_extra, [](lv_event_t *) {
+        if (media_state().video) {
+            media_toggle_subtitles();
+            return;
+        }
         open_popout(s_media_pop, false);
         open_favourites();
     }, LV_EVENT_CLICKED, nullptr);

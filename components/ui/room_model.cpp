@@ -9,7 +9,7 @@ namespace ui::detail {
 namespace {
 // A travel that has not moved the desk for this long has ended short of its
 // preset, stopped at the desk or by another button: no longer shown as going.
-constexpr std::uint32_t STILL_MS       = 4000;
+constexpr std::uint32_t STILL_MS       = 2500;
 constexpr std::uint32_t STILL_CHECK_MS = 500;
 
 DeskState   s_desk;
