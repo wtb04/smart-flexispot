@@ -17,6 +17,12 @@ constexpr std::uint32_t STILL_CHECK_MS = 500;
 // until the desk has stood still this long and is pressed then.
 constexpr std::uint32_t SETTLE_MS       = 600;
 constexpr std::uint32_t SETTLE_CHECK_MS = 100;
+constexpr std::uint32_t STOPPED_MS      = 3000;  // a stop from here, which a start soon after waits on
+// The box takes no new start for a while after it stops, though the height it
+// says, in whole centimetres above a metre, may already stand still: measured
+// on the desk, a start 0.75 s after a stop was taken as another stop, one 1.2 s
+// after started it.
+constexpr std::uint32_t STOP_REST_MS    = 1200;
 
 DeskState   s_desk;
 LightsState s_lights;
@@ -24,6 +30,7 @@ std::uint32_t s_moved_at   = 0;  // when the height last changed, or the travel 
 std::uint32_t s_height_at  = 0;  // when the height last changed
 lv_timer_t   *s_still_timer = nullptr;
 int           s_held        = -1;  // the preset waiting for the desk to stand still
+std::uint32_t s_stopped_at  = 0;   // when a tap here last stopped the desk
 lv_timer_t   *s_held_timer  = nullptr;
 
 void copy(char *to, std::size_t size, const char *from)
@@ -72,12 +79,13 @@ void press(int index)
 
 void press_held(lv_timer_t *)
 {
-    if (lv_tick_elaps(s_height_at) < SETTLE_MS) {
+    if (lv_tick_elaps(s_height_at) < SETTLE_MS || lv_tick_elaps(s_stopped_at) < STOP_REST_MS) {
         return;
     }
     const int index = s_held;
     forget_held();
     if (index >= 0 && index == s_desk.travelling) {
+        ESP_LOGI(TAG, "desk: still, preset %d pressed", index + 1);
         s_moved_at = lv_tick_get();  // its travel starts now
         press(index);
     }
@@ -129,40 +137,53 @@ void desk_take_available(bool available)
     publish(Topic::Desk);
 }
 
+// As the box's own keys: any preset tapped while the desk is on its way stops
+// it. But a start tapped just after a stop from here would reach the box while
+// the desk still coasts, and only stop it again, so that one waits until the
+// desk has stood still.
 void desk_go_to(int index)
 {
     if (index < 0 || index >= kPresetCount || s_desk.preset_active[index]) {
         return;  // there already
     }
-    if (index == s_desk.travelling) {
-        const bool pressed = s_held != index;  // a held one never was, so has nothing to stop
-        arrived();  // the tap that stops it
-        if (pressed) {
+    if (s_desk.travelling >= 0) {
+        const bool held = s_held >= 0;  // never pressed, so nothing under way to stop
+        ESP_LOGI(TAG, "desk: preset %d tapped on the way to %d: %s", index + 1, s_desk.travelling + 1,
+                 held ? "not yet pressed, dropped" : "stop");
+        arrived();
+        if (!held) {
             press(index);
+            s_stopped_at = lv_tick_get();
         }
         return;
     }
-    // On its way elsewhere: stopped first, as the box takes the next key as a stop anyway.
-    const bool was_going = s_desk.travelling >= 0 && s_held != s_desk.travelling;
-    if (was_going) {
-        press(s_desk.travelling);
-    }
-    forget_held();
     s_desk.travelling = index;
     s_moved_at        = lv_tick_get();
     if (s_still_timer == nullptr) {
         s_still_timer = lv_timer_create(check_still, STILL_CHECK_MS, nullptr);
     }
     publish(Topic::Desk);
-    if (was_going || coasting()) {
+    const bool resting = s_stopped_at != 0 && lv_tick_elaps(s_stopped_at) < STOP_REST_MS;
+    if (resting || (s_stopped_at != 0 && lv_tick_elaps(s_stopped_at) < STOPPED_MS && coasting())) {
+        ESP_LOGI(TAG, "desk: preset %d tapped while it comes to a stop: once still", index + 1);
         s_held       = index;
-        s_height_at  = lv_tick_get();  // the stop just pressed sets it coasting, if it was not yet
         s_held_timer = lv_timer_create(press_held, SETTLE_CHECK_MS, nullptr);
         return;
     }
+    ESP_LOGI(TAG, "desk: preset %d tapped: go", index + 1);
     press(index);
 }
 
+}  // namespace ui::detail
+
+namespace ui {
+void desk_tap(int index)
+{
+    detail::desk_go_to(index);
+}
+}  // namespace ui
+
+namespace ui::detail {
 void lights_take(const char *label, const char *state, bool on)
 {
     copy(s_lights.label, sizeof(s_lights.label), label);

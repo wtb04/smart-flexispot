@@ -409,4 +409,7 @@ int bench_radar_zoom_frame(char *out, std::size_t size);  // a zoom's frame, hel
 /** A development build's: what each frame of the desk's fold-out sliding costs. */
 int bench_sheet(char *out, std::size_t size);
 
+/** A development build's: preset `index` tapped, as a finger on its button. With the LVGL lock. */
+void desk_tap(int index);
+
 }  // namespace ui

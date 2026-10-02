@@ -56,4 +56,9 @@ const char *active_preset_label();
 
 int preset_height_mm(int index);
 
+/** What the desk heard and was asked lately, a line each with the milliseconds
+ *  since boot, oldest first, into `out`; how long that is. With `clear`, the
+ *  trace starts over after. For a development build's /desk page. */
+int trace_text(char *out, std::size_t size, bool clear);
+
 }  // namespace desk

@@ -17,6 +17,7 @@ void (*s_on_height)(int) = nullptr;
 
 void on_status(const deskproto::Status &status)
 {
+    trace("heard", status.height_mm, deskproto::direction_of(status.motion) * 10 + (status.driving ? 1 : 0));
     s_motion.store(deskproto::direction_of(status.motion), std::memory_order_relaxed);
     s_driving.store(status.driving, std::memory_order_relaxed);
     if (status.height_mm >= 0 && s_on_height != nullptr) {
@@ -42,7 +43,11 @@ public:
         }
     }
 
-    void preset(int index) override { ble::desk::preset(index); }
+    void preset(int index) override
+    {
+        trace("sent preset", index + 1);
+        ble::desk::preset(index);
+    }
     void store(int index) override { ble::desk::store(index); }
 
     bool goto_height(int height_mm) override

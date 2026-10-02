@@ -73,6 +73,7 @@ adds pages to the panel's web server, all asking for the update key.
 | `/restart` | Why this run started, and what the last one left behind |
 | `/coredump` | The last crash, whole, for `idf.py coredump-info` with the build's ELF |
 | `/bench` | The fullscreen radar timed: whole frames, a tile, a trail growing, a zoom; `?rotate` the PPA, `?full` and `?back` leave it open and put it back; `?sheet` the desk's fold-out coming out, frame by frame |
+| `/desk` | What the desk heard and was asked lately, a line each with its milliseconds since boot; `?tap=N` taps preset N as a finger on its button would, `?clear` starts the trace over |
 | `/stall`, `/crash` | A held-off interrupt, a crash on purpose |
 
 ## How it is put together
