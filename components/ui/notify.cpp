@@ -1,5 +1,7 @@
 #include "ui_internal.h"
 
+#include "status_model.h"
+
 #include <cctype>
 #include <ctime>
 
@@ -183,7 +185,7 @@ void show_next_notice()
         }
         return;
     }
-    if (!s_screen_on) {
+    if (!status_state().screen_on) {
         s_notice_lit_screen = true;
         set_screen_state(true);
     }

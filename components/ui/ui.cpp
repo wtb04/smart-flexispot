@@ -2,6 +2,7 @@
 #include "focus_model.h"
 #include "focus_page.h"
 #include "room_model.h"
+#include "status_model.h"
 #include "topics.h"
 
 #ifndef SHOT_DRAWER
@@ -53,23 +54,23 @@ lv_obj_t     *s_desk_controls[DESK_CONTROL_MAX] = {};
 int           s_desk_control_count              = 0;
 }  // namespace
 
-bool      s_screen_on         = true;
 
 bool s_notice_lit_screen = false;
 
 void set_screen_state(bool on)
 {
-    if (on == s_screen_on || s_handlers.screen == nullptr) {
+    if (on == status_state().screen_on || s_handlers.screen == nullptr) {
         return;
     }
-    s_screen_on = on;
+    status_state().screen_on = on;
+    publish(Topic::Status);
     s_handlers.screen(on);
 }
 namespace {
 void wake_on_touch(lv_event_t *)
 {
     s_notice_lit_screen = false;
-    if (s_screen_on) {
+    if (status_state().screen_on) {
         return;
     }
 
@@ -193,6 +194,13 @@ bool build_next_part()
             build_focus_full(scr);
             lv_obj_move_foreground(s_rail);  // and under the rail, which it slides out from
             create_notice_card();
+            // The owner's pages come and go with their phone.
+            subscribe(Topic::Status, kNoView, [] {
+                static bool s_present_shown = false;
+                if (std::exchange(s_present_shown, status_state().present) != status_state().present) {
+                    select_page(s_page);
+                }
+            });
             return true;
         default:
             return false;
@@ -711,53 +719,23 @@ void apply_thermostat(float current_c, float target_c, const char *mode, Hvac st
 
 void apply_presence(bool has_key, bool present, bool ever_seen)
 {
-    if (s_phone_icon == nullptr) {
-        return;
-    }
-    const bool here = has_key && present;
-    static int shown_icon = -1;
-    if (shown_icon != (here ? 1 : 0)) {
-        shown_icon = here ? 1 : 0;
-        lv_image_set_src(s_phone_icon, here ? &icons::phone_icon : &icons::phone_off_icon);
-    }
-
     // A phone never seen is not here: the owner's pages stay hidden and the
     // guest presets show until it is.
     (void)ever_seen;
-    if (here != s_present) {
-        s_present = here;
-        select_page(s_page);
-    }
+    status_state().present = has_key && present;
+    publish(Topic::Status);
 }
 
 void apply_time(const char *text)
 {
-    if (s_clock_hours == nullptr) {
-        return;
-    }
-    char        hours[4]   = "--";
-    char        minutes[4] = "--";
-    const char *colon      = text != nullptr ? std::strchr(text, ':') : nullptr;
-    s_clock_known          = colon != nullptr;
-    if (s_clock_known) {
-        const std::size_t count = static_cast<std::size_t>(colon - text);
-        std::snprintf(hours, sizeof(hours), "%.*s", static_cast<int>(count), text);
-        std::snprintf(minutes, sizeof(minutes), "%s", colon + 1);
-    } else {
-        lv_obj_set_style_opa(s_clock_colon, LV_OPA_COVER, 0);
-    }
-    theme::set_text(s_clock_hours, hours);
-    theme::set_text(s_clock_minutes, minutes);
+    std::snprintf(status_state().time, sizeof(status_state().time), "%s", text != nullptr ? text : "");
+    publish(Topic::Status);
 }
 
 void apply_wifi(bool wifi)
 {
-    static int shown = -1;
-    if (s_wifi_icon == nullptr || shown == (wifi ? 1 : 0)) {
-        return;
-    }
-    shown = wifi ? 1 : 0;
-    lv_image_set_src(s_wifi_icon, wifi ? &icons::wifi_icon : &icons::wifi_off_icon);
+    status_state().wifi = wifi;
+    publish(Topic::Status);
 }
 
 void apply_row(int card, int row, const char *value, Level level)
@@ -800,8 +778,9 @@ void apply_notification_volume(int percent)
 
 void apply_screen(bool on)
 {
-    s_screen_on         = on;
-    s_notice_lit_screen = false;
+    status_state().screen_on = on;
+    s_notice_lit_screen      = false;
+    publish(Topic::Status);
 }
 
 void apply_notice(const Notice &notice)

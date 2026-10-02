@@ -1,5 +1,7 @@
 #include "ui_internal.h"
 
+#include "status_model.h"
+
 namespace ui::detail {
 namespace {
 lv_obj_t *s_pages[PAGE_COUNT]    = {};
@@ -55,7 +57,6 @@ void fit_drawer_buttons()
 }
 }  // namespace
 
-bool s_present        = false;
 int  s_page           = HOME_PAGE;
 
 std::atomic<bool> s_setup_visible{false};
@@ -67,7 +68,7 @@ void show_guest_presets()
     if (s_drawer == nullptr || s_preset_buttons[GUEST_PRESETS[0]] == nullptr) {
         return;
     }
-    const bool shown = !s_presence_gate || !s_present;
+    const bool shown = !s_presence_gate || !status_state().present;
     for (const int index : GUEST_PRESETS) {
         lv_obj_set_hidden(s_preset_buttons[index], !shown);
     }
@@ -76,7 +77,7 @@ void show_guest_presets()
 namespace {
 bool page_available(int index)
 {
-    return !NAV_ITEMS[index].needs_presence || !s_presence_gate || s_present;
+    return !NAV_ITEMS[index].needs_presence || !s_presence_gate || status_state().present;
 }
 
 void paint_tab(int index, bool active)

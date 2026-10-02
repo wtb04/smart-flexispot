@@ -1,9 +1,12 @@
 #include "ui_internal.h"
 
 #include "room_model.h"
+#include "status_model.h"
 #include "topics.h"
 
 #include <climits>
+#include <cstring>
+#include <cstdio>
 #include <utility>
 
 namespace ui::detail {
@@ -183,6 +186,34 @@ void build_clock(lv_obj_t *strip)
     lv_timer_create(clock_blink, COLON_BLINK_MS, nullptr);
 }
 
+// The time, the network and the phone, as the status model has them.
+void paint_status()
+{
+    const StatusState &status = status_state();
+    static int s_phone_shown = -1;
+    if (s_phone_shown != (status.present ? 1 : 0)) {
+        s_phone_shown = status.present ? 1 : 0;
+        lv_image_set_src(s_phone_icon, status.present ? &icons::phone_icon : &icons::phone_off_icon);
+    }
+    static int s_wifi_shown = -1;
+    if (s_wifi_shown != (status.wifi ? 1 : 0)) {
+        s_wifi_shown = status.wifi ? 1 : 0;
+        lv_image_set_src(s_wifi_icon, status.wifi ? &icons::wifi_icon : &icons::wifi_off_icon);
+    }
+    char        hours[4]   = "--";
+    char        minutes[4] = "--";
+    const char *colon      = std::strchr(status.time, ':');
+    s_clock_known          = colon != nullptr;
+    if (s_clock_known) {
+        std::snprintf(hours, sizeof(hours), "%.*s", static_cast<int>(colon - status.time), status.time);
+        std::snprintf(minutes, sizeof(minutes), "%s", colon + 1);
+    } else {
+        lv_obj_set_style_opa(s_clock_colon, LV_OPA_COVER, 0);
+    }
+    theme::set_text(s_clock_hours, hours);
+    theme::set_text(s_clock_minutes, minutes);
+}
+
 void build_status_strip(lv_obj_t *rail)
 {
     lv_obj_t *strip = lv_obj_create(rail);
@@ -195,6 +226,7 @@ void build_status_strip(lv_obj_t *rail)
     build_clock(strip);
     s_wifi_icon   = make_status_icon(strip, &icons::wifi_off_icon);
     s_phone_icon  = make_status_icon(strip, &icons::phone_off_icon);
+    subscribe(Topic::Status, kNoView, paint_status);
     s_update_icon = make_status_icon(strip, &icons::update_panel_icon);
     lv_obj_set_hidden(s_update_icon, true);
     s_update_bar = lv_bar_create(strip);

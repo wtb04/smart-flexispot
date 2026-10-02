@@ -1,5 +1,7 @@
 #include "ui_internal.h"
 
+#include "status_model.h"
+
 #include "room_model.h"
 #include "topics.h"
 
@@ -153,7 +155,7 @@ void keep_screen()
     s_skip_was_offered = offered;
     const bool untouched = lv_display_get_inactive_time(nullptr) >= DARK_AFTER_MS &&
                            lv_tick_elaps(s_woke_at) >= DARK_AFTER_MS;
-    if (s_auto_off && s_screen_on && untouched && !offered) {
+    if (s_auto_off && status_state().screen_on && untouched && !offered) {
         set_screen_state(false);
     }
 }
