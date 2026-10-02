@@ -53,8 +53,13 @@ lv_obj_t *make_slot(lv_obj_t *bar, std::int32_t w)
     lv_obj_set_style_pad_hor(slot, SLOT_PAD, 0);
     lv_obj_set_ext_click_area(slot, SLOT_TAP);
     lv_obj_set_scrollable(slot, false);
-    // Lit while its card is out.
-    lv_obj_set_style_bg_color(slot, lv_color_hex(theme::panel_light), LV_STATE_CHECKED);
+    // Nothing behind it at rest, so the bar reads as what it says rather than
+    // as a row of buttons; a shape only while pressed, or while its card is out.
+    lv_obj_set_style_bg_opa(slot, LV_OPA_TRANSP, 0);
+    for (const lv_state_t state : {LV_STATE_PRESSED, LV_STATE_CHECKED}) {
+        lv_obj_set_style_bg_color(slot, lv_color_hex(theme::panel), state);
+        lv_obj_set_style_bg_opa(slot, LV_OPA_COVER, state);
+    }
     return slot;
 }
 
@@ -152,7 +157,6 @@ void first_line(const char *text, char *out, std::size_t size)
 lv_obj_t *s_media_slot  = nullptr;
 Cover     s_slot_cover;
 lv_obj_t *s_slot_title  = nullptr;
-lv_obj_t *s_slot_artist = nullptr;
 lv_obj_t *s_slot_play   = nullptr;
 
 Popout    s_media_pop;
@@ -188,7 +192,6 @@ void paint_media()
     first_line(media.artist, artist, sizeof(artist));
     theme::set_text(s_slot_title, media.has_track ? media.title : "Nothing playing");
     theme::set_text_color(s_slot_title, media.has_track ? theme::text : theme::secondary);
-    theme::set_text(s_slot_artist, media.has_track ? artist : "");
     show_play(s_slot_play, media.has_track && media.playing);
     // With nothing playing, play offers the favourites.
     theme::set_usable(s_slot_play, !media.has_track || media.remote);
@@ -261,9 +264,7 @@ void build_media_slot(lv_obj_t *bar)
     const std::int32_t text_x = THUMB + TEXT_GAP;
     const std::int32_t text_w = MEDIA_W - 2 * SLOT_PAD - text_x - PLAY_W - TEXT_GAP;
     s_slot_title              = one_line(s_media_slot, theme::text, fonts::size_20(), text_w);
-    lv_obj_align(s_slot_title, LV_ALIGN_LEFT_MID, text_x, -11);
-    s_slot_artist = one_line(s_media_slot, theme::secondary, fonts::size_16(), text_w);
-    lv_obj_align(s_slot_artist, LV_ALIGN_LEFT_MID, text_x, 13);
+    lv_obj_align(s_slot_title, LV_ALIGN_LEFT_MID, text_x, 0);
 
     s_slot_play = theme::make_button(s_media_slot, LV_SYMBOL_PLAY, theme::panel_light, fonts::size_28());
     lv_obj_set_size(s_slot_play, PLAY_W, BTN_H);
@@ -380,15 +381,14 @@ void paint_heat()
     }
     const std::uint32_t ink = t.state == Hvac::Heating ? theme::primary : t.state == Hvac::Idle ? theme::amber : theme::secondary;
     theme::set_bg_color(s_heat_dot, off ? theme::secondary : ink);
-    theme::set_text_color(s_heat_target, off ? theme::secondary : theme::primary);
+    theme::set_text_color(s_heat_target, theme::secondary);
 }
 
 void build_heat_slot(lv_obj_t *bar)
 {
     s_heat_slot = make_slot(bar, HEAT_W);
     lv_obj_set_flex_flow(s_heat_slot, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(s_heat_slot, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_left(s_heat_slot, SLOT_PAD + theme::space::s, 0);
+    lv_obj_set_flex_align(s_heat_slot, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(s_heat_slot, TEXT_GAP, 0);
     lv_obj_add_event_cb(s_heat_slot, [](lv_event_t *) { open_under(s_heat_pop, s_heat_slot); }, LV_EVENT_CLICKED,
                         nullptr);
@@ -436,10 +436,10 @@ void paint_lights_slot()
             std::snprintf(text, sizeof(text), "On");
         }
     }
+    // On in the accent, rather than the whole slot filled with it.
     theme::set_text(s_lights_text, text);
-    lv_obj_set_state(s_lights_slot, LV_STATE_CHECKED, lights.on);
-    theme::set_text_color(s_lights_text, lights.on ? theme::text : theme::secondary);
-    lv_obj_set_style_image_recolor(s_lights_bulb, lv_color_hex(lights.on ? theme::text : theme::secondary), 0);
+    theme::set_text_color(s_lights_text, lights.on ? theme::primary : theme::secondary);
+    lv_obj_set_style_image_recolor(s_lights_bulb, lv_color_hex(lights.on ? theme::primary : theme::secondary), 0);
 
     for (int i = 0; i < kLightCount; ++i) {
         lv_obj_t        *button = s_light_buttons[i];
@@ -475,7 +475,6 @@ void lights_touched(lv_event_t *e)
 void build_lights_slot(lv_obj_t *bar)
 {
     s_lights_slot = make_slot(bar, LIGHTS_W);
-    theme::fill_accent(s_lights_slot, LV_STATE_CHECKED);
     lv_obj_set_flex_flow(s_lights_slot, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(s_lights_slot, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(s_lights_slot, TEXT_GAP, 0);
@@ -491,8 +490,8 @@ void build_lights_slot(lv_obj_t *bar)
 
 void build_lights_card(lv_obj_t *screen)
 {
-    // Not lit by its card: the slot is lit while the lights are on.
-    lv_obj_t *card = build_popout(s_lights_pop, screen, LIGHTS_CARD_W, GAP, GAP, CARD_IDLE_MS);
+    lv_obj_t *card      = build_popout(s_lights_pop, screen, LIGHTS_CARD_W, GAP, GAP, CARD_IDLE_MS);
+    s_lights_pop.button = s_lights_slot;
     lv_obj_set_style_pad_all(card, CARD_PAD, 0);
     lv_obj_set_height(card, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);

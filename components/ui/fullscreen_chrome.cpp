@@ -250,14 +250,11 @@ void show_top_focus()
     show_focus(*s_top);
     const bool away = s_presence_gate && !status_state().present;
     const bool idle = focus_idle(focus_state());
-    // Idle, the timer drawn and what it is; the slot keeps its width either way.
+    // Idle, the timer drawn alone; the slot keeps its width either way.
     lv_obj_set_hidden(s_top->badge, away);
     lv_obj_set_hidden(s_idle_mark, !idle);
     lv_obj_set_hidden(s_top->dot, idle);
-    if (idle) {
-        theme::set_text(s_top->left, "Focus");
-    }
-    theme::set_text_color(s_top->left, idle ? theme::secondary : theme::text);
+    lv_obj_set_hidden(s_top->left, idle);
 }
 
 lv_obj_t *make_slot(lv_obj_t *parent, std::int32_t w)
@@ -320,8 +317,12 @@ void create_top_bar(lv_obj_t *parent)
     s_clocks.emplace_back();
     s_top = &s_clocks.back();
     build_badge(*s_top, s_top_bar, [](lv_event_t *) { toggle_focus_popout(s_top->badge, s_top_bar); });
-    lv_obj_set_style_bg_color(s_top->badge, lv_color_hex(theme::panel_light), LV_STATE_CHECKED);
-    lv_obj_set_style_bg_color(s_top->badge, lv_color_hex(theme::panel_light), LV_STATE_PRESSED);
+    // As the bar's other slots: a shape only while pressed or while its card is out.
+    lv_obj_set_style_bg_opa(s_top->badge, LV_OPA_TRANSP, 0);
+    for (const lv_state_t state : {LV_STATE_PRESSED, LV_STATE_CHECKED}) {
+        lv_obj_set_style_bg_color(s_top->badge, lv_color_hex(theme::panel), state);
+        lv_obj_set_style_bg_opa(s_top->badge, LV_OPA_COVER, state);
+    }
     lv_obj_set_height(s_top->badge, TOP_H);
     lv_obj_set_flex_align(s_top->badge, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_ext_click_area(s_top->badge, TAP_MARGIN);
