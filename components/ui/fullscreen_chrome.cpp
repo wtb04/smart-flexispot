@@ -26,11 +26,11 @@ constexpr lv_opa_t      PAUSED_OPA = LV_OPA_50;
 constexpr time_t        CLOCK_SET = 1'700'000'000;  // any earlier and the clock is not set yet
 
 struct Clock {
-    lv_obj_t *label;
-    lv_obj_t *chip;
-    lv_obj_t *badge;  // the focus timer, or null where it is the view
-    lv_obj_t *dot;
-    lv_obj_t *left;
+    lv_obj_t *label = nullptr;
+    lv_obj_t *chip  = nullptr;
+    lv_obj_t *badge = nullptr;  // the focus timer, or null where it is the view
+    lv_obj_t *dot   = nullptr;
+    lv_obj_t *left  = nullptr;
 };
 std::deque<Clock> s_clocks;  // a deque, so what follows each keeps its place
 
@@ -70,7 +70,7 @@ void show_focus(const Clock &clock)
         theme::set_text(clock.left, text);
     }
     theme::set_bg_color(clock.dot, focus_ink(focus_resting(focus)));
-    lv_obj_set_style_opa(clock.badge, focus_paused(focus) ? PAUSED_OPA : LV_OPA_COVER, 0);
+    lv_obj_set_style_opa(clock.badge, focus_paused(focus) ? PAUSED_OPA : static_cast<lv_opa_t>(LV_OPA_COVER), 0);
 }
 
 // The focus timer, as the tab shows it: its colour and how long is left, and a
@@ -110,7 +110,7 @@ void build_badge(Clock &clock, lv_obj_t *root)
 
 ViewClock add_view_clock(ViewId view, lv_obj_t *root, lv_obj_t *chip, bool focus_badge)
 {
-    s_clocks.push_back({theme::make_label(root, "", theme::text, fonts::size_28()), chip});
+    s_clocks.push_back({.label = theme::make_label(root, "", theme::text, fonts::size_28()), .chip = chip});
     Clock &clock = s_clocks.back();
     lv_obj_set_clickable(clock.label, false);
     fade_when_idle(view, clock.label);

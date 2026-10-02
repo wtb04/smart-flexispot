@@ -10,8 +10,12 @@ struct StatusState {
     bool wifi      = false;
     bool screen_on = true;
     char time[16]  = "";     // HH:MM as the clock gives it, empty until it is set
+    bool splash_gone = false;  // the start-up splash has left the screen
 };
 
 StatusState &status_state();
+
+/** The splash has left: what waited for it, as notices do, may show. */
+void status_splash_gone();
 
 }  // namespace ui::detail

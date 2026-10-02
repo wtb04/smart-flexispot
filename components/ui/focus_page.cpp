@@ -412,7 +412,7 @@ void build_ticks(Face &face, lv_obj_t *card, std::int32_t ring)
     lv_obj_set_size(face.ring, ring, ring);
     lv_obj_center(face.ring);
     lv_obj_set_style_radius(face.ring, theme::radius::pill, 0);
-    lv_obj_add_flag(face.ring, LV_OBJ_FLAG_ADV_HITTEST);
+    lv_obj_set_adv_hittest(face.ring, true);
     touch_face(face.ring);
     for (lv_obj_t *&tick : face.tick) {
         tick = lv_arc_create(card);

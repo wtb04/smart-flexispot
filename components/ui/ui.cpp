@@ -3,6 +3,7 @@
 #include "focus_page.h"
 #include "diagnostics_model.h"
 #include "home_model.h"
+#include "notices_model.h"
 #include "radar_model.h"
 #include "room_model.h"
 #include "settings_model.h"
@@ -411,8 +412,6 @@ void drop_oldest(Notice *queue, int &count)
 
 // ---- What each update does, on the LVGL task. ----
 
-constexpr std::int32_t MEDIA_TITLE_Y          = 28;  // under the source line
-constexpr std::int32_t RGB565_BYTES_PER_PIXEL = 2;
 
 void apply_preset_active(int index, bool active)
 {
@@ -571,26 +570,6 @@ void apply_screen(bool on)
     status_state().screen_on = on;
     s_notice_lit_screen      = false;
     publish(Topic::Status);
-}
-
-void apply_notice(const Notice &notice)
-{
-    if (s_notice_card == nullptr) {
-        return;
-    }
-    if (s_notice_count == NOTIFY_QUEUE_LEN) {
-        ESP_LOGW(TAG, "notification queue full, dropping oldest");
-        drop_oldest(s_notice_queue, s_notice_count);
-    }
-    s_notice_queue[s_notice_count++] = notice;
-    if (splash_on_screen()) {
-        return;  // shown as the splash leaves, rather than over it
-    }
-    if (lv_obj_is_hidden(s_notice_card)) {
-        show_next_notice();
-    } else {
-        paint_notice_corner();
-    }
 }
 
 void apply_settings_and_presence()
@@ -789,7 +768,7 @@ void apply_inbox()
     s_inbox_count = 0;
     portEXIT_CRITICAL(&s_pending_lock);
     for (int i = 0; i < count; ++i) {
-        apply_notice(notices[i]);
+        notices_take(notices[i]);
     }
 }
 

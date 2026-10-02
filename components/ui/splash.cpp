@@ -1,5 +1,7 @@
 #include "ui_internal.h"
 
+#include "status_model.h"
+
 #include <numbers>
 
 namespace ui::detail {
@@ -227,9 +229,7 @@ void splash_leave()
     }
     s_splash_hid_count = 0;
     splash_hide(nullptr);
-    if (s_notice_count > 0 && lv_obj_is_hidden(s_notice_card)) {
-        show_next_notice();  // what came while it was up
-    }
+    status_splash_gone();
 }
 
 void splash_animate(lv_timer_t *)
@@ -501,11 +501,6 @@ void keep_under_splash()
         lv_obj_set_hidden(child, true);
         s_splash_hid[s_splash_hid_count++] = child;
     }
-}
-
-bool splash_on_screen()
-{
-    return s_splash != nullptr && !lv_obj_is_hidden(s_splash);
 }
 
 void apply_splash()

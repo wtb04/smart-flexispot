@@ -1,6 +1,8 @@
 #include "ui_internal.h"
 
+#include "notices_model.h"
 #include "status_model.h"
+#include "topics.h"
 
 #include <cctype>
 #include <ctime>
@@ -24,8 +26,6 @@ constexpr int          LINE_STEPS   = 1000;
 constexpr time_t       CLOCK_SET    = 1'700'000'000;  // any earlier and the clock is not set yet
 }  // namespace
 
-Notice      s_notice_queue[NOTIFY_QUEUE_LEN];
-int         s_notice_count = 0;
 lv_obj_t   *s_notice_scrim = nullptr;
 lv_obj_t   *s_notice_card  = nullptr;
 namespace {
@@ -58,24 +58,14 @@ void hide_notice()
     }
 }
 
-Notice take_first_notice()
-{
-    const Notice notice = s_notice_queue[0];
-    for (int i = 1; i < s_notice_count; ++i) {
-        s_notice_queue[i - 1] = s_notice_queue[i];
-    }
-    --s_notice_count;
-    return notice;
-}
-
 }  // namespace
 
 // When it came, and how many wait behind it.
 void paint_notice_corner()
 {
     char corner[32];
-    if (s_notice_count > 0) {
-        std::snprintf(corner, sizeof(corner), "%d MORE, %s", s_notice_count, s_notice_clock);
+    if (notices_state().count > 0) {
+        std::snprintf(corner, sizeof(corner), "%d MORE, %s", notices_state().count, s_notice_clock);
     } else {
         std::snprintf(corner, sizeof(corner), "%s", s_notice_clock);
     }
@@ -177,7 +167,8 @@ void restart_notice_timer(int timeout_ms)
 
 void show_next_notice()
 {
-    if (s_notice_count == 0) {
+    Notice notice{};
+    if (!notices_take_next(notice)) {
         hide_notice();
         if (s_notice_lit_screen) {
             s_notice_lit_screen = false;
@@ -189,7 +180,6 @@ void show_next_notice()
         s_notice_lit_screen = true;
         set_screen_state(true);
     }
-    const Notice notice = take_first_notice();
     write_notice(notice);
     raise_notice();
     restart_notice_timer(notice.timeout_ms);
@@ -286,6 +276,21 @@ void create_notice_card()
 
     s_notice_timer = lv_timer_create(notice_timeout_cb, NOTIFY_DEFAULT_MS, nullptr);
     lv_timer_pause(s_notice_timer);
+
+    // The next as it comes, once the splash is out of the way; while one shows,
+    // how many wait behind it.
+    const auto follow = [] {
+        if (!status_state().splash_gone) {
+            return;
+        }
+        if (!lv_obj_is_hidden(s_notice_card)) {
+            paint_notice_corner();
+        } else if (notices_state().count > 0) {
+            show_next_notice();
+        }
+    };
+    subscribe(Topic::Notices, kNoView, follow);
+    subscribe(Topic::Status, kNoView, follow);
 }
 
 }  // namespace ui::detail
