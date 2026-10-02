@@ -170,16 +170,17 @@ void build_badge(Clock &clock, lv_obj_t *root, lv_event_cb_t on_click)
 }  // namespace
 
 namespace {
-constexpr std::int32_t STATUS_GAP       = 20;  // between what the top row holds
-constexpr std::int32_t SLOT_W           = 40;  // each of the status's marks, centred in one as wide
-constexpr std::int32_t SLOT_GAP         = 8;
-constexpr std::int32_t TAP_MARGIN       = 16;  // round the badge and the status, to be hit easily
+constexpr std::int32_t STATUS_GAP       = 10;  // between what the top row holds
+constexpr std::int32_t SLOT_W           = 34;  // each of the status's marks, centred in one as wide
+constexpr std::int32_t SLOT_GAP         = 10;
+constexpr std::int32_t TAP_MARGIN       = 20;  // round the badge and the status, to be hit easily
+constexpr std::int32_t IDLE_BADGE_W     = 64;  // the timer drawn alone, wider than tall to be hit
 constexpr std::int32_t UPDATE_ICON_SIDE = 28;
 constexpr std::int32_t UPDATE_BAR_H     = 3;
 constexpr std::int32_t UPDATE_BAR_GAP   = 4;
 constexpr std::int32_t PERCENT_ALL      = 100;
 
-constexpr std::int32_t STATUS_PAD = 16;  // inside the status, which opens Setup
+constexpr std::int32_t STATUS_PAD = 14;  // inside the status, which opens Setup
 constexpr std::int32_t SETUP_DOT  = 10;  // an update waiting there
 
 lv_obj_t *s_top_bar     = nullptr;
@@ -253,7 +254,7 @@ void show_top_focus()
     lv_obj_set_hidden(s_idle_mark, !idle);
     lv_obj_set_hidden(s_top->dot, idle);
     lv_obj_set_hidden(s_top->left, idle);
-    lv_obj_set_width(s_top->badge, idle ? TOP_H : s_badge_w);
+    lv_obj_set_width(s_top->badge, idle ? IDLE_BADGE_W : s_badge_w);
     lv_obj_set_style_pad_hor(s_top->badge, idle ? 0 : BADGE_PAD, 0);
 }
 
@@ -280,7 +281,8 @@ void arrange_top()
     for (int i = 0; i < 4; ++i) {
         lv_obj_move_to_index(s_slots[right ? i : 3 - i], i);
     }
-    lv_obj_set_style_text_align(s_top->label, right ? LV_TEXT_ALIGN_RIGHT : LV_TEXT_ALIGN_LEFT, 0);
+    // Against Wi-Fi beside it, what the width keeps for wider digits at the far end.
+    lv_obj_set_style_text_align(s_top->label, right ? LV_TEXT_ALIGN_LEFT : LV_TEXT_ALIGN_RIGHT, 0);
     lv_obj_align(s_setup_dot, right ? LV_ALIGN_TOP_RIGHT : LV_ALIGN_TOP_LEFT, right ? STATUS_PAD / 2 : -STATUS_PAD / 2, 0);
 }
 }  // namespace

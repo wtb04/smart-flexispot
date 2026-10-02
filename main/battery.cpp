@@ -23,6 +23,10 @@ constexpr int        CHECK_EVERY   = 30;
 
 constexpr float RESUME_VOLTS = 8.00f;
 
+// Unplugged or plugged in shows at once rather than at the next check, once
+// this many readings in a row agree, so a current near nothing does not flicker.
+constexpr int AGREEING_READINGS = 2;
+
 // A reading is logged when it moves this far, rather than every poll: the log
 // is for what changed.
 constexpr int LOG_STEP_PERCENT = 5;
@@ -69,6 +73,29 @@ void steer_charger(const power::State &state, bool &topped_off)
     }
 }
 
+// What the screen was last told, and how many readings since have said otherwise.
+struct Shown {
+    bool on_battery = false;
+    bool charging   = false;
+    int  differing  = 0;
+};
+Shown s_shown;
+
+void tell_screen(const power::State &state)
+{
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_battery(state.present, state.percent, state.charging, state.on_battery));
+    s_shown = {state.on_battery, state.charging, 0};
+}
+
+bool power_source_moved(const power::State &state)
+{
+    if (state.on_battery == s_shown.on_battery && state.charging == s_shown.charging) {
+        s_shown.differing = 0;
+        return false;
+    }
+    return ++s_shown.differing >= AGREEING_READINGS;
+}
+
 jobs::Result poll()
 {
     static bool topped_off   = false;
@@ -96,6 +123,9 @@ jobs::Result poll()
     } else {
         // Poked by refresh(), or at the turn of a round: the rest too.
         const bool check = s_check_now.exchange(false) || ++pass % CHECK_EVERY == 0;
+        if (read && !check && power_source_moved(state)) {
+            tell_screen(state);
+        }
         if (!read || !check) {
             return jobs::done();
         }
@@ -108,7 +138,7 @@ jobs::Result poll()
     }
     if (read) {
         log_if_changed(state, present, was_present, logged);
-        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_battery(state.present, state.percent, state.charging, state.on_battery));
+        tell_screen(state);
         steer_charger(state, topped_off);
     }
     return jobs::done();
