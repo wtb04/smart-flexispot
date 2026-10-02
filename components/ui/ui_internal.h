@@ -196,6 +196,7 @@ void place_notice();
 /** The dock: the tabs, Stand and Sit, the height that folds the desk out. */
 void create_dock(lv_obj_t *parent);
 lv_obj_t *dock_tabs();  // the column the tabs go in
+void dock_tabs_done();  // after the last tab, which the timer stands over
 /** The desk folded out beside the dock: its height, every preset, up and down. */
 void create_desk_sheet(lv_obj_t *parent);
 void open_desk_sheet(bool open);

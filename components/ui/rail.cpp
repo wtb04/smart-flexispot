@@ -22,9 +22,8 @@ constexpr std::int32_t DOCK_PAD      = 12;
 constexpr std::int32_t DOCK_INNER_W  = DOCK_W - 2 * DOCK_PAD;  // Stand and Sit are as tall, square to the finger
 constexpr std::int32_t DOCK_GAP      = 12;
 constexpr std::int32_t DOCK_DESK_ICON = 46;
-// The timer under the desk, apart from it and from the pages under it.
-constexpr std::int32_t FOCUS_H = 72;
-constexpr std::int32_t FOCUS_Y = 3 * (DOCK_W - 2 * 12) + 2 * 12 + 32;
+constexpr std::int32_t FOCUS_H     = 72;
+constexpr std::int32_t FOCUS_APART = 16;  // from the tabs under it
 
 constexpr std::int32_t SHEET_PAD     = 28;
 constexpr std::int32_t SHEET_GAP     = 24;  // from the dock
@@ -249,12 +248,13 @@ void paint_focus_button()
     lv_obj_set_style_opa(s_focus_left, focus_paused(focus) ? LV_OPA_50 : LV_OPA_COVER, 0);
 }
 
-void build_focus_button(lv_obj_t *dock)
+// Over the pages' tabs, a little apart from them, being no page itself.
+void build_focus_button(lv_obj_t *tabs)
 {
-    s_focus_button = lv_button_create(dock);
+    s_focus_button = lv_button_create(tabs);
     theme::style_button(s_focus_button, theme::panel_light);
     lv_obj_set_size(s_focus_button, DOCK_INNER_W, FOCUS_H);
-    lv_obj_align(s_focus_button, LV_ALIGN_TOP_MID, 0, FOCUS_Y);
+    lv_obj_set_style_margin_bottom(s_focus_button, FOCUS_APART, 0);
     theme::fill_accent(s_focus_button, LV_STATE_CHECKED);
     // On the accent while its card is out, as the height is, the timer on it in the text's colour.
     lv_obj_add_event_cb(s_focus_button, [](lv_event_t *) {
@@ -360,6 +360,11 @@ lv_obj_t *dock_tabs()
     return s_tabs;
 }
 
+void dock_tabs_done()
+{
+    build_focus_button(s_tabs);  // last in a column that stands up from the foot, so on top
+}
+
 void create_dock(lv_obj_t *parent)
 {
     const Layout l = layout();
@@ -372,7 +377,6 @@ void create_dock(lv_obj_t *parent)
     lv_obj_set_scrollable(dock, false);
 
     build_dock_desk(dock);
-    build_focus_button(dock);
     s_tabs = lv_obj_create(dock);
     lv_obj_remove_style_all(s_tabs);
     lv_obj_set_size(s_tabs, DOCK_INNER_W, LV_SIZE_CONTENT);

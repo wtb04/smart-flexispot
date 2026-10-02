@@ -198,6 +198,7 @@ void create_content(lv_obj_t *parent)
         }
         s_pages[i] = make_page(area, l);
     }
+    dock_tabs_done();
 }
 
 bool build_next_page()
@@ -206,7 +207,12 @@ bool build_next_page()
     const Layout l   = layout();
     switch (next++) {
         case 0: build_home_page(s_pages[HOME_PAGE]); return true;
-        case 1: build_padded_page(RADAR_PAGE, build_radar_page, l); return true;
+        case 1:
+            // The map is the page's panel itself, to its rounded edge on the screen's black.
+            lv_obj_set_style_bg_opa(s_pages[RADAR_PAGE], LV_OPA_TRANSP, 0);
+            lv_obj_set_style_pad_all(s_pages[RADAR_PAGE], 0, 0);
+            build_radar_page(s_pages[RADAR_PAGE], l.content_w, l.content_h);
+            return true;
         case 2: build_padded_page(CALENDAR_PAGE, build_calendar_page, l); return true;
         case 3:
             build_settings_page(s_pages[SETUP_PAGE]);

@@ -59,12 +59,9 @@ lv_obj_t *make_slot(lv_obj_t *bar, std::int32_t w)
     lv_obj_set_style_pad_hor(slot, SLOT_PAD, 0);
     lv_obj_set_ext_click_area(slot, SLOT_TAP);
     lv_obj_set_scrollable(slot, false);
-    // Nothing behind it at rest, so the bar reads as what it says rather than
-    // as a row of buttons; a shape only while pressed, or while its card is out.
-    lv_obj_set_style_bg_opa(slot, LV_OPA_TRANSP, 0);
+    // Lighter while pressed, or while its card is out.
     for (const lv_state_t state : {LV_STATE_PRESSED, LV_STATE_CHECKED}) {
-        lv_obj_set_style_bg_color(slot, lv_color_hex(theme::panel), state);
-        lv_obj_set_style_bg_opa(slot, LV_OPA_COVER, state);
+        lv_obj_set_style_bg_color(slot, lv_color_hex(theme::panel_light), state);
     }
     return slot;
 }
@@ -586,7 +583,10 @@ void paint_lights_slot()
     // On in the accent, rather than the whole slot filled with it.
     theme::set_text(s_lights_text, text);
     theme::set_text_color(s_lights_text, lights.on ? theme::primary : theme::secondary);
-    lv_obj_set_style_image_recolor(s_lights_bulb, lv_color_hex(lights.on ? theme::primary : theme::secondary), 0);
+    for (std::uint32_t i = 0; i < lv_obj_get_child_count(s_lights_bulb); ++i) {
+        lv_obj_set_style_image_recolor(lv_obj_get_child(s_lights_bulb, static_cast<std::int32_t>(i)),
+                                       lv_color_hex(lights.on ? theme::primary : theme::secondary), 0);
+    }
 
     for (int i = 0; i < kLightCount; ++i) {
         lv_obj_t        *button = s_light_buttons[i];
@@ -627,10 +627,18 @@ void build_lights_slot(lv_obj_t *bar)
     lv_obj_set_style_pad_column(s_lights_slot, TEXT_GAP, 0);
     lv_obj_add_event_cb(s_lights_slot, lights_touched, LV_EVENT_CLICKED, nullptr);
     lv_obj_add_event_cb(s_lights_slot, lights_touched, LV_EVENT_LONG_PRESSED, nullptr);
-    s_lights_bulb = lv_image_create(s_lights_slot);
-    lv_image_set_src(s_lights_bulb, &icons::bulb_glass_icon);
-    lv_obj_set_style_image_recolor_opa(s_lights_bulb, LV_OPA_COVER, 0);
+    // The whole bulb, the glass over its base, as Home's lights were drawn.
+    s_lights_bulb = lv_obj_create(s_lights_slot);
+    lv_obj_remove_style_all(s_lights_bulb);
+    lv_obj_set_size(s_lights_bulb, icons::bulb_glass_icon.header.w, icons::bulb_glass_icon.header.h);
     lv_obj_set_clickable(s_lights_bulb, false);
+    for (const lv_image_dsc_t *part : {&icons::bulb_glass_icon, &icons::bulb_base_icon}) {
+        lv_obj_t *image = lv_image_create(s_lights_bulb);
+        lv_image_set_src(image, part);
+        lv_obj_set_pos(image, 0, 0);
+        lv_obj_set_style_image_recolor_opa(image, LV_OPA_COVER, 0);
+        lv_obj_set_clickable(image, false);
+    }
     s_lights_text = theme::make_label(s_lights_slot, "", theme::secondary, fonts::size_22());
     lv_obj_set_clickable(s_lights_text, false);
 }

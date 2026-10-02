@@ -1,6 +1,7 @@
 #include "calendar_page.h"
 
 #include "ui_internal.h"
+#include "status_model.h"
 #include "topics.h"
 
 #include "fonts/units_font.h"
@@ -1918,7 +1919,12 @@ lv_obj_t *tile_line(lv_obj_t *parent, std::uint32_t ink, const lv_font_t *font, 
 
 void show_tile()
 {
-    if (s_tile == nullptr || detail::s_page != detail::HOME_PAGE) {
+    if (s_tile == nullptr) {
+        return;
+    }
+    // Away with the calendar's own page while the phone is.
+    lv_obj_set_hidden(s_tile, detail::s_presence_gate && !detail::status_state().present);
+    if (detail::s_page != detail::HOME_PAGE) {
         return;
     }
     static ical::Event ahead[TILE_AFTER + 1];
@@ -2041,6 +2047,7 @@ void build_next_tile(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int3
     }
     detail::subscribe(detail::Topic::Calendar, detail::kNoView, show_tile);
     detail::subscribe(detail::Topic::Page, detail::kNoView, show_tile);
+    detail::subscribe(detail::Topic::Status, detail::kNoView, show_tile);
     detail::subscribe(detail::Topic::Second, detail::kNoView, [] {
         if (std::time(nullptr) % TILE_REFRESH_S == 0) {
             show_tile();
