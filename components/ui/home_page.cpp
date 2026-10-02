@@ -1,6 +1,7 @@
 #include "ui_internal.h"
 
 #include "media_model.h"
+#include "home_model.h"
 #include "room_model.h"
 #include "topics.h"
 
@@ -372,6 +373,35 @@ void paint_light(lv_obj_t *root, lv_obj_t *name, lv_obj_t *state, bool on)
     theme::set_text_color(name, on ? theme::text : theme::secondary);
     theme::set_text_color(state, theme::text);
 }
+
+namespace {
+// The lights button and each light's, as the lights model has them.
+void paint_lights()
+{
+    const LightsState &lights = lights_state();
+    if (s_lights_button != nullptr) {
+        theme::set_text(s_lights_name, lights.label[0] != '\0' ? lights.label : "LIGHTS");
+        theme::set_text(s_lights_state, lights.state[0] != '\0' ? lights.state : "--");
+        paint_light(s_lights_button, s_lights_name, s_lights_state, lights.on);
+    }
+    for (int index = 0; index < kLightCount; ++index) {
+        LightButton      &button = s_lights[index];
+        const LightState &light  = lights.lights[index];
+        if (button.root == nullptr) {
+            continue;
+        }
+        const bool empty = light.name[0] == '\0';
+        lv_obj_set_hidden(button.root, empty);
+        lv_obj_set_hidden(s_bulbs[index], empty);
+        if (!empty) {
+            theme::set_text(button.name, light.name);
+            theme::set_text(button.state, light.state[0] != '\0' ? light.state : "--");
+            paint_light(button.root, button.name, button.state, lights.light_on[index]);
+        }
+    }
+    paint_bulbs();
+}
+}  // namespace
 namespace {
 void lights_event_cb(lv_event_t *e)
 {
@@ -436,7 +466,7 @@ void build_lights_button(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::
     lv_obj_align(s_lights_state, LV_ALIGN_BOTTOM_LEFT, 0, 0);
 
     build_bulb_strip(s_lights_button);
-    subscribe(Topic::Lights, kNoView, paint_bulbs);
+    subscribe(Topic::Lights, kNoView, paint_lights);
 }
 
 constexpr std::int32_t PICKER_COLUMNS  = 2;
@@ -1092,6 +1122,79 @@ void open_favourites()
     open_pick_picker();
 }
 
+namespace {
+// The pills, the toggles and the thermostat, as the home model has them.
+void paint_home()
+{
+    const HomeState &home = home_state();
+    for (int index = 0; index < kPillCount; ++index) {
+        Pill            &pill  = s_pills[index];
+        const PillState &state = home.pills[index];
+        if (pill.root == nullptr) {
+            continue;
+        }
+        const bool empty = state.label[0] == '\0';
+        lv_obj_set_hidden(pill.root, empty);
+        if (pill.shown == empty) {
+            pill.shown = !empty;
+            reflow_pills();
+        }
+        if (!empty) {
+            theme::set_text(pill.label, state.label);
+            theme::set_text(pill.value, state.value[0] != '\0' ? state.value : "--");
+            theme::set_bg_color(pill.dot, level_ink(state.level));
+        }
+    }
+    for (int index = 0; index < kDialToggleCount; ++index) {
+        lv_obj_t         *chip   = s_dial_toggles[index];
+        const ToggleState &toggle = home.toggles[index];
+        if (chip == nullptr) {
+            continue;
+        }
+        const bool empty = toggle.label[0] == '\0';
+        lv_obj_set_hidden(chip, empty);
+        if (!empty) {
+            lv_obj_t *text = lv_obj_get_child(chip, 0);
+            theme::set_text(text, toggle.label);
+            theme::center_ink(text);
+            lv_obj_set_state(chip, LV_STATE_CHECKED, toggle.on);
+            theme::set_text_color(text, toggle.on ? theme::text : theme::secondary);
+            lv_obj_set_style_text_opa(text, toggle.on ? static_cast<lv_opa_t>(LV_OPA_COVER) : theme::mark_opa, 0);
+        }
+    }
+
+    const ThermostatState &thermostat = home.thermostat;
+    if (s_dial == nullptr) {
+        return;
+    }
+    static float s_range_shown[3] = {};
+    if (thermostat.ranged && (s_range_shown[0] != thermostat.min_c || s_range_shown[1] != thermostat.max_c ||
+                              s_range_shown[2] != thermostat.step_c)) {
+        s_range_shown[0] = thermostat.min_c;
+        s_range_shown[1] = thermostat.max_c;
+        s_range_shown[2] = thermostat.step_c;
+        lv_arc_set_range(s_dial, static_cast<int>(thermostat.min_c * DIAL_SCALE),
+                         static_cast<int>(thermostat.max_c * DIAL_SCALE));
+        s_dial_step = thermostat.step_c > 0.0f ? thermostat.step_c : DEFAULT_STEP_C;
+    }
+    if (!thermostat.known) {
+        return;
+    }
+    write_temperature(s_dial_current, thermostat.current_c, true);
+    if (!s_dial_dragging) {
+        write_temperature(s_dial_target, thermostat.target_c, true);
+        if (thermostat.target_c >= 0.0f) {
+            lv_arc_set_value(s_dial, static_cast<int>(thermostat.target_c * DIAL_SCALE + 0.5f));
+        }
+    }
+    paint_dial(thermostat.state);
+    lv_obj_set_state(s_dial_mode, LV_STATE_CHECKED, thermostat.state != Hvac::Off);
+    lv_obj_t *mode_text = lv_obj_get_child(s_dial_mode, 0);
+    theme::set_text(mode_text, thermostat.mode[0] != '\0' ? thermostat.mode : "--");
+    theme::set_text_color(mode_text, theme::text);
+}
+}  // namespace
+
 void build_home_page(lv_obj_t *page)
 {
     const Layout l = layout();
@@ -1116,6 +1219,7 @@ void build_home_page(lv_obj_t *page)
 
     build_light_picker(page);
     build_pick_picker(lv_obj_get_screen(page));  // over the music view too, which is opened from there
+    subscribe(Topic::Home, kNoView, paint_home);
 }
 
 }  // namespace ui::detail

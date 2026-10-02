@@ -1,6 +1,7 @@
 #include "ui_internal.h"
 #include "focus_model.h"
 #include "focus_page.h"
+#include "home_model.h"
 #include "room_model.h"
 #include "status_model.h"
 #include "topics.h"
@@ -493,101 +494,58 @@ void hold_media(const MediaArgs &media)
 
 void apply_pill(int index, const char *label, const char *value, Level level)
 {
-    Pill &pill = s_pills[index];
-    if (pill.root == nullptr) {
-        return;
-    }
-    const bool empty = label == nullptr || label[0] == '\0';
-    lv_obj_set_hidden(pill.root, empty);
-    if (pill.shown == empty) {
-        pill.shown = !empty;
-        reflow_pills();
-    }
-    if (!empty) {
-        theme::set_text(pill.label, label);
-        theme::set_text(pill.value, value != nullptr ? value : "--");
-        theme::set_bg_color(pill.dot, level_ink(level));
-    }
+    PillState &pill = home_state().pills[index];
+    copy_text(pill.label, sizeof(pill.label), label);
+    copy_text(pill.value, sizeof(pill.value), value);
+    pill.level = level;
+    publish(Topic::Home);
 }
 
 void apply_lights(const char *label, const char *state, bool on)
 {
-    if (s_lights_button == nullptr) {
-        return;
-    }
-    theme::set_text(s_lights_name, label != nullptr ? label : "LIGHTS");
-    theme::set_text(s_lights_state, state != nullptr ? state : "--");
-    paint_light(s_lights_button, s_lights_name, s_lights_state, on);
-    lights_state().on = on;
+    LightsState &lights = lights_state();
+    copy_text(lights.label, sizeof(lights.label), label);
+    copy_text(lights.state, sizeof(lights.state), state);
+    lights.on = on;
     publish(Topic::Lights);
 }
 
 void apply_light(int index, const char *name, const char *state, bool on)
 {
-    LightButton &light = s_lights[index];
-    if (light.root == nullptr) {
-        return;
-    }
-    const bool empty = name == nullptr || name[0] == '\0';
-    lv_obj_set_hidden(light.root, empty);
-    lv_obj_set_hidden(s_bulbs[index], empty);
-    if (!empty) {
-        theme::set_text(light.name, name);
-        theme::set_text(light.state, state != nullptr ? state : "--");
-        paint_light(light.root, light.name, light.state, on);
-    }
-    lights_state().light_on[index] = !empty && on;
+    LightState &light = lights_state().lights[index];
+    copy_text(light.name, sizeof(light.name), name);
+    copy_text(light.state, sizeof(light.state), state);
+    lights_state().light_on[index] = light.name[0] != '\0' && on;
     publish(Topic::Lights);
 }
 
 void apply_dial_toggle(int index, const char *label, bool on)
 {
-    lv_obj_t *chip = s_dial_toggles[index];
-    if (chip == nullptr) {
-        return;
-    }
-    const bool empty = label == nullptr || label[0] == '\0';
-    lv_obj_set_hidden(chip, empty);
-    if (!empty) {
-        lv_obj_t *text = lv_obj_get_child(chip, 0);
-        theme::set_text(text, label);
-        theme::center_ink(text);
-        lv_obj_set_state(chip, LV_STATE_CHECKED, on);
-        theme::set_text_color(text, on ? theme::text : theme::secondary);
-        lv_obj_set_style_text_opa(text, on ? static_cast<lv_opa_t>(LV_OPA_COVER) : theme::mark_opa,
-                                  0);
-    }
+    ToggleState &toggle = home_state().toggles[index];
+    copy_text(toggle.label, sizeof(toggle.label), label);
+    toggle.on = on;
+    publish(Topic::Home);
 }
 
 void apply_thermostat_range(float min_c, float max_c, float step_c)
 {
-    if (s_dial == nullptr) {
-        return;
-    }
-    lv_arc_set_range(s_dial, static_cast<int>(min_c * DIAL_SCALE),
-                     static_cast<int>(max_c * DIAL_SCALE));
-    s_dial_step = step_c > 0.0f ? step_c : DEFAULT_STEP_C;
+    ThermostatState &thermostat = home_state().thermostat;
+    thermostat.ranged = true;
+    thermostat.min_c  = min_c;
+    thermostat.max_c  = max_c;
+    thermostat.step_c = step_c;
+    publish(Topic::Home);
 }
 
 void apply_thermostat(float current_c, float target_c, const char *mode, Hvac state)
 {
-    if (s_dial == nullptr) {
-        return;
-    }
-    write_temperature(s_dial_current, current_c, true);
-    if (!s_dial_dragging) {
-        write_temperature(s_dial_target, target_c, true);
-        if (target_c >= 0.0f) {
-            lv_arc_set_value(s_dial, static_cast<int>(target_c * DIAL_SCALE + 0.5f));
-        }
-    }
-
-    paint_dial(state);
-
-    lv_obj_set_state(s_dial_mode, LV_STATE_CHECKED, state != Hvac::Off);
-    lv_obj_t *mode_text = lv_obj_get_child(s_dial_mode, 0);
-    theme::set_text(mode_text, mode != nullptr ? mode : "--");
-    theme::set_text_color(mode_text, theme::text);
+    ThermostatState &thermostat = home_state().thermostat;
+    thermostat.known     = true;
+    thermostat.current_c = current_c;
+    thermostat.target_c  = target_c;
+    copy_text(thermostat.mode, sizeof(thermostat.mode), mode);
+    thermostat.state = state;
+    publish(Topic::Home);
 }
 
 void apply_presence(bool has_key, bool present, bool ever_seen)

@@ -13,9 +13,17 @@ struct DeskState {
     bool preset_active[kPresetCount] = {};  // the one it stands at, if any
 };
 
+struct LightState {
+    char name[48]  = "";  // empty leaves it out
+    char state[32] = "";
+};
+
 struct LightsState {
-    bool on = false;                 // any of them, as the lights button shows
-    bool light_on[kLightCount] = {}; // each, by its place on the page
+    bool       on = false;                 // any of them, as the lights button shows
+    bool       light_on[kLightCount] = {}; // each, by its place on the page
+    char       label[40] = "";             // the lights button's, and what it says of them
+    char       state[32] = "";
+    LightState lights[kLightCount];
 };
 
 DeskState   &desk_state();

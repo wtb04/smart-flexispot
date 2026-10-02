@@ -20,6 +20,7 @@ enum class Topic : std::uint8_t {
     Desk,    // its height, presets and whether it answers: see room_model.h
     Lights,  // which are on: see room_model.h
     Status,  // the phone, the network, the time and the screen: see status_model.h
+    Home,    // the home page's pills, thermostat and toggles: see home_model.h
     Count,
 };
 
