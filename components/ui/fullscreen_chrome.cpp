@@ -2,6 +2,7 @@
 
 #include "focus_model.h"
 #include "focus_page.h"
+#include "settings_model.h"
 #include "status_model.h"
 #include "topics.h"
 
@@ -10,10 +11,13 @@
 #include <cstring>
 #include <ctime>
 #include <deque>
+#include <utility>
 
 // What every fullscreen view has over it: Stand and Sit at the left, the time
 // and the way back at the right, there while the screen is being touched; and
-// beside the time, the focus timer while it runs, there all the while.
+// beside the time, the focus timer while it runs, there all the while. The
+// pages have the same row over them, with the network, the phone and any
+// update beside the time.
 namespace ui::detail {
 namespace {
 constexpr std::int32_t  INSET     = 24;  // near the corners, leaving the middle to the view
@@ -180,6 +184,141 @@ void build_badge(Clock &clock, lv_obj_t *root)
     lv_obj_set_hidden(clock.badge, true);
 }
 }  // namespace
+
+namespace {
+constexpr std::int32_t STATUS_GAP       = 20;  // between what the top row holds
+constexpr std::int32_t UPDATE_ICON_SIDE = 28;
+constexpr std::int32_t UPDATE_BAR_H     = 3;
+constexpr std::int32_t UPDATE_BAR_GAP   = 4;
+constexpr std::int32_t PERCENT_ALL      = 100;
+
+lv_obj_t *s_top_bar     = nullptr;
+Clock    *s_top         = nullptr;
+lv_obj_t *s_wifi_icon   = nullptr;
+lv_obj_t *s_phone_icon  = nullptr;
+lv_obj_t *s_update_box  = nullptr;  // while an update arrives, for whichever board
+lv_obj_t *s_update_icon = nullptr;
+lv_obj_t *s_update_bar  = nullptr;  // how far it is, under the icon
+
+lv_obj_t *make_status_icon(lv_obj_t *parent, const lv_image_dsc_t *src)
+{
+    lv_obj_t *icon = lv_image_create(parent);
+    lv_image_set_src(icon, src);
+    lv_obj_set_style_image_recolor(icon, lv_color_hex(theme::text), 0);
+    lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
+    lv_obj_set_clickable(icon, false);
+    return icon;
+}
+
+void build_update(lv_obj_t *bar)
+{
+    s_update_box = lv_obj_create(bar);
+    lv_obj_remove_style_all(s_update_box);
+    lv_obj_set_size(s_update_box, UPDATE_ICON_SIDE, UPDATE_ICON_SIDE + 2 * (UPDATE_BAR_GAP + UPDATE_BAR_H));
+    lv_obj_set_clickable(s_update_box, false);
+    s_update_icon = make_status_icon(s_update_box, &icons::update_panel_icon);
+    lv_obj_center(s_update_icon);
+    s_update_bar = lv_bar_create(s_update_box);
+    lv_obj_set_size(s_update_bar, UPDATE_ICON_SIDE, UPDATE_BAR_H);
+    lv_obj_align(s_update_bar, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_bar_set_range(s_update_bar, 0, PERCENT_ALL);
+    theme::style_panel(s_update_bar, theme::panel_light, UPDATE_BAR_H / 2);
+    theme::fill_accent(s_update_bar, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(s_update_bar, UPDATE_BAR_H / 2, LV_PART_INDICATOR);
+    lv_obj_set_hidden(s_update_box, true);
+}
+
+void paint_status()
+{
+    const StatusState &status = status_state();
+    static int s_phone_shown = -1;
+    if (std::exchange(s_phone_shown, status.present ? 1 : 0) != (status.present ? 1 : 0)) {
+        lv_image_set_src(s_phone_icon, status.present ? &icons::phone_icon : &icons::phone_off_icon);
+    }
+    static int s_wifi_shown = -1;
+    if (std::exchange(s_wifi_shown, status.wifi ? 1 : 0) != (status.wifi ? 1 : 0)) {
+        lv_image_set_src(s_wifi_icon, status.wifi ? &icons::wifi_icon : &icons::wifi_off_icon);
+    }
+    show_power(*s_top);
+}
+
+// The focus timer, except over its own page.
+void show_top_focus()
+{
+    show_focus(*s_top);
+    if (s_page == FOCUS_PAGE) {
+        lv_obj_set_hidden(s_top->badge, true);
+    }
+}
+}  // namespace
+
+void create_top_bar(lv_obj_t *parent)
+{
+    s_top_bar = lv_obj_create(parent);
+    lv_obj_remove_style_all(s_top_bar);
+    lv_obj_set_height(s_top_bar, theme::chip::size);
+    lv_obj_set_flex_flow(s_top_bar, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(s_top_bar, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(s_top_bar, STATUS_GAP, 0);
+    lv_obj_set_scrollable(s_top_bar, false);
+    lv_obj_set_clickable(s_top_bar, false);
+
+    s_clocks.emplace_back();
+    s_top = &s_clocks.back();
+    build_badge(*s_top, s_top_bar);
+    build_update(s_top_bar);
+    build_power(*s_top, s_top_bar);
+    s_phone_icon = make_status_icon(s_top_bar, &icons::phone_off_icon);
+    s_wifi_icon  = make_status_icon(s_top_bar, &icons::wifi_off_icon);
+    s_top->label = theme::make_label(s_top_bar, "", theme::text, fonts::size_28());
+    place_top_bar();
+
+    subscribe(Topic::Status, kNoView, paint_status);
+    subscribe(Topic::Second, kNoView, [] {
+        tell_time(*s_top);
+        show_top_focus();
+    });
+    subscribe(Topic::Focus, kNoView, show_top_focus);
+    subscribe(Topic::Page, kNoView, show_top_focus);
+    subscribe(Topic::Update, kNoView, [] {
+        if (settings_state().update_known) {
+            paint_update_icon(settings_state().update);
+        }
+    });
+}
+
+// Along the top of the pages, ending level with their right edge.
+void place_top_bar()
+{
+    const Layout l = layout();
+    lv_obj_set_pos(s_top_bar, l.content_x, TOP_INSET);
+    lv_obj_set_width(s_top_bar, l.content_w - theme::space::s);
+}
+
+const lv_image_dsc_t *update_icon(const UpdateState &state)
+{
+    if (state.busy == UpdateTarget::Panel) {
+        return &icons::update_panel_icon;
+    }
+    return state.phase == UpdatePhase::Installing ? &icons::install_companion_icon
+                                                  : &icons::update_companion_icon;
+}
+
+void paint_update_icon(const UpdateState &state)
+{
+    if (s_update_box == nullptr) {
+        return;
+    }
+    const bool busy = state.busy != UpdateTarget::None;
+    lv_obj_set_hidden(s_update_box, !busy);
+    if (busy) {
+        // Accent for one that installs, and restarts, as soon as it is in.
+        lv_obj_set_style_image_recolor(
+            s_update_icon, lv_color_hex(state.immediate ? theme::primary : theme::text), 0);
+        lv_image_set_src(s_update_icon, update_icon(state));
+        lv_bar_set_value(s_update_bar, state.percent, LV_ANIM_OFF);
+    }
+}
 
 ViewClock add_view_clock(ViewId view, lv_obj_t *root, lv_obj_t *chip, bool focus_badge)
 {

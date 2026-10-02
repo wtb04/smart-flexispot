@@ -43,13 +43,11 @@ constexpr std::uint32_t LOCK_TIMEOUT_MS = 500;
 // Sized from the real display rather than with percentages: LV_PCT() returns an
 // encoded sentinel, so LV_PCT(100) - something lays out as nonsense.
 constexpr std::int32_t GAP        = 16;
-constexpr std::int32_t EDGE_GAP   = 0;   // navigation sits on the bottom edge
-constexpr std::int32_t RAIL_W      = 330;
-// The rail is a panel like the content beside it, set in by the same gap on its
-// outer sides rather than running flush to the edge of the glass.
-constexpr std::int32_t RAIL_CARD_W = RAIL_W - GAP;
-constexpr std::int32_t NAV_H       = 92;
-constexpr std::int32_t RAIL_BTN_H  = 124;
+// The frame: a dock at one side with the tabs and the desk, a row along the
+// top with the time and what goes on elsewhere, and the page in the rest.
+constexpr std::int32_t DOCK_W      = 96;
+constexpr std::int32_t TOP_INSET   = 24;   // the top row's chips from the top, as over the fullscreen views
+constexpr std::int32_t CONTENT_Y   = 96;   // the page under that row
 
 constexpr std::int32_t PANEL_PAD  = 16;
 constexpr std::int32_t BUTTON_GAP = 16;
@@ -58,10 +56,11 @@ struct Layout {
     std::int32_t screen_w;
     std::int32_t screen_h;
     std::int32_t content_x;
+    std::int32_t content_y;
     std::int32_t content_w;
     std::int32_t content_h;
-    std::int32_t rail_x;
-    bool         rail_right;
+    std::int32_t rail_x;      // the dock's
+    bool         rail_right;  // the dock at the right, as the panel is bolted on the desk's right
 };
 
 constexpr int          NOTIFY_QUEUE_LEN  = 4;
@@ -79,7 +78,7 @@ constexpr const char *PRESET_NAMES[kPresetCount] = {
     "Preset 1", "Ultra low", "Stand", "Sit", "Sit 2", "Stand 2",
 };
 
-constexpr std::int32_t DRAWER_W  = 340;
+constexpr std::int32_t DRAWER_W  = 520;  // the desk's fold-out beside the dock
 
 constexpr int   DIAL_SCALE     = 10;
 constexpr float DEFAULT_STEP_C = 0.5f;
@@ -106,7 +105,7 @@ constexpr int PROGRESS_SCALE   = 10;  // bar units per second
 
 constexpr std::uint32_t PAUSE_SETTLE_MS = 1500;
 
-// The tabs, in the order they stand along the bottom.
+// The tabs, in the order they stand down the dock.
 constexpr int HOME_PAGE     = 0;
 constexpr int RADAR_PAGE    = 1;
 constexpr int CALENDAR_PAGE = 2;
@@ -154,19 +153,11 @@ extern int s_initial_brightness;
 extern std::optional<SegmentDisplay> s_height;
 extern lv_obj_t *s_rail;
 extern lv_obj_t *s_content;
-extern lv_obj_t *s_clock_box;
 extern lv_obj_t *s_side_buttons[CHOICE_COUNT];
 extern lv_obj_t *s_flip_buttons[ORIENTATION_COUNT];
-extern lv_obj_t *s_wifi_icon;
-extern lv_obj_t *s_phone_icon;
-extern lv_obj_t *s_clock_hours;
-extern lv_obj_t *s_clock_colon;
-extern lv_obj_t *s_clock_minutes;
-extern bool s_clock_known;
 extern lv_obj_t *s_notice_scrim;
 extern lv_obj_t *s_notice_card;
 extern lv_obj_t *s_preset_buttons[kPresetCount];
-extern lv_obj_t *s_drawer;
 extern lv_obj_t *s_dial;
 extern int s_page;
 extern std::atomic<bool> s_setup_visible;
@@ -179,10 +170,10 @@ extern lv_obj_t *s_diag_view;
 /** The focus plan as the timer has it, onto the settings that change it. */
 void paint_focus_plan(const Focus &focus);
 
-/** An update arriving or ready: the rail's icon, the dot on Setup and the
+/** An update arriving or ready: the top row's icon, the dot on Setup and the
  *  tile that installs it. Each with the LVGL lock held. */
 void paint_update_icon(const UpdateState &state);
-/** The rail's symbol for what is updating: the screen or companion arriving, or going on. */
+/** The symbol for what is updating: the screen or companion arriving, or going on. */
 const lv_image_dsc_t *update_icon(const UpdateState &state);
 void paint_setup_dot(bool ready);
 void paint_update_tile(const UpdateState &state);
@@ -199,7 +190,7 @@ void register_desk_control(lv_obj_t *obj);
 
 /** Stand and Sit as two small chips at x, y over a fullscreen view's root,
  *  which covers the rail; lit as the rail's are. */
-inline constexpr int kDeskShortcutButtons = 8;  // over the radar, focus, music and cinema views
+inline constexpr int kDeskShortcutButtons = 10;  // the dock's, and over the radar, focus, music and cinema views
 lv_obj_t *add_desk_shortcuts(lv_obj_t *root, std::int32_t x, std::int32_t y,  // what holds them
                              std::uint32_t chip_colour);
 void paint_desk_shortcuts();
@@ -208,9 +199,17 @@ void show_desk_travel(lv_obj_t *obj, bool travelling);  // after the preset the 
 void show_next_notice();
 void paint_notice_corner();  // when the notice on show came, and how many wait
 void create_notice_card();
-void create_rail(lv_obj_t *parent);
-void place_drawer(std::int32_t width);
-void create_drawer(lv_obj_t *parent);
+/** The notice over the pages or a fullscreen view, the dock left clear. */
+void place_notice();
+/** The dock: the tabs, Stand and Sit, the height that folds the desk out. */
+void create_dock(lv_obj_t *parent);
+lv_obj_t *dock_tabs();  // the column the tabs go in
+/** The desk folded out beside the dock: its height, every preset, up and down. */
+void create_desk_sheet(lv_obj_t *parent);
+void open_desk_sheet(bool open);
+/** The row along the top of the pages: what goes on elsewhere, the battery, the status, the time. */
+void create_top_bar(lv_obj_t *parent);
+void place_top_bar();
 void paint_choice(lv_obj_t *const buttons[2], bool second);
 void paint_pick(lv_obj_t *const *buttons, int count, int picked);
 void paint_side_buttons();
@@ -230,7 +229,7 @@ const lv_image_dsc_t *speaker_picture(std::int32_t side);
 void write_clock(lv_obj_t *label, int seconds);
 void build_home_page(lv_obj_t *page);
 
-// The presets the rail's Stand and Sit buttons send the desk to.
+// The presets the dock's Stand and Sit send the desk to.
 constexpr int STAND_PRESET     = 2;
 constexpr int SIT_PRESET       = 3;
 constexpr int ULTRA_LOW_PRESET = 1;  // Preset 2, as the cinema view sends the desk down
@@ -270,8 +269,8 @@ void show_guest_presets();
 void select_page(int index);
 /** The owner's pages come and go with their phone, and with the setting that hides them. */
 void follow_pages();
-/** The Focus tab's caption in place of its name, and its icon in `ink`, faded
- *  while paused; a null caption puts it back. */
+/** The Focus tab's icon in `ink` while the timer runs, faded while paused; a
+ *  null caption puts it back. */
 void show_focus_tab(const char *caption, std::uint32_t ink, bool paused);
 void brightness_event_cb(lv_event_t *e);
 std::uint32_t info_ink(Level level);

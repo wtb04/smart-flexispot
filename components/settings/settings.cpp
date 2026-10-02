@@ -38,7 +38,7 @@ constexpr Spec SPECS[] = {
     {"presence_gate", 1, 0, 1},
     {"desk_over_ble", 1, 0, 1},
     {"accent", 0, 0, MAX_RGB},
-    {"rail_right", 0, 0, 1},
+    {"rail_right", 1, 0, 1},
     {"flipped", 0, 0, 1},
     {"orient_auto", 0, 0, 1},
     // Upright reads x positive on this board, against what M5's demo implies:

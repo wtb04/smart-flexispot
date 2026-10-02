@@ -53,7 +53,7 @@ Once the screen was there, the extra features kept coming, each one making it a 
 
 ![The home page with music on the speaker](docs/screenshots/home-music.png)
 
-This is what the panel shows most of the day. The rail on the left is on every page: the clock, whether my phone and Wi-Fi are there, the desk's height as its own display shows it, and Stand and Sit, with the arrow for the other presets. Along the bottom are the pages, Home, Radar, Calendar, Focus and Setup.
+This is what the panel shows most of the day. The dock at the right is on every page: the pages, Home, Radar, Calendar, Focus and Setup, and at its foot Stand and Sit with the desk's height under them. Along the top are the time, whether my phone and Wi-Fi are there, the battery while it is unplugged, and the focus timer while it runs, the same row the fullscreen views have.
 
 The rest is the room. The air across the top, each reading with a dot for how it is doing. The thermostat as a dial to turn, with its mode below. The lights, all of them with a tap, or hold for a picker of each light. And what is playing, the speaker's music here, or a Jellyfin episode as in the picture at the top.
 
@@ -79,7 +79,7 @@ Anything in Home Assistant can put a message on the screen through the panel's *
 
 ### The desk
 
-The rail down the left is always there: the height as the control box reports it, Stand and Sit, and an arrow to the other presets. Tap a preset to go there, hold it to save the current height.
+Stand and Sit are always in the dock, with the height as the control box reports it under them. Tap the height and the rest of the desk folds out: the height in big digits as its own display shows it, every preset, and up and down to hold. Tap a preset to go there, tap it again to stop, hold it to save the current height.
 
 - **Six presets instead of four.** The control box has four of its own. The panel drives the desk to the other two itself, and learns how far the desk rolls on after the keys are let go, so it stops where you asked.
 - **No cable across the room, if you want.** The desk can be wired straight to the Tab5, or to a small ESP32 left at the desk that the panel talks to over Bluetooth (see [option 2](#option-2-over-bluetooth-with-a-companion)).
@@ -117,7 +117,7 @@ A focus timer in rounds, 25 minutes on and 5 off by default with a long break af
 
 ### Away from the desk
 
-The panel knows my phone over Bluetooth, by its identity key, and the phone on the rail shows whether it is there. While it is away, Radar, Calendar and Focus are hidden, leaving Home and Setup, and presets 5 and 6 show for whoever uses the desk then. *Pages while away* in Setup turns that off.
+The panel knows my phone over Bluetooth, by its identity key, and the phone in the top row shows whether it is there. While it is away, Radar, Calendar and Focus are hidden, leaving Home and Setup, and presets 5 and 6 show for whoever uses the desk then. *Pages while away* in Setup turns that off.
 
 The screen can be switched off from Home Assistant, and a tap wakes it. While it is dark, the panel fetches nothing that only the screen would show. With Orientation on Auto, turning the panel upside down turns the picture with it.
 
@@ -127,7 +127,7 @@ The screen can be switched off from Home Assistant, and a tap wakes it. While it
 |---|---|
 | ![Setup](docs/screenshots/setup.png) | ![Diagnostics](docs/screenshots/diagnostics.png) |
 
-Brightness, accent colour, which side the rail is on, the focus lengths. Diagnostics has a card for every part (Wi-Fi, Home Assistant, the desk and its link, the battery, the radar, the calendar) and a log you can filter, so when something is off you can see why without a laptop.
+Brightness, accent colour, which side the dock is on, the focus lengths. Diagnostics has a card for every part (Wi-Fi, Home Assistant, the desk and its link, the battery, the radar, the calendar) and a log you can filter, so when something is off you can see why without a laptop.
 
 ## Will it work with my desk?
 

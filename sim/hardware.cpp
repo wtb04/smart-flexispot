@@ -24,7 +24,7 @@ constexpr int REPORT_EVERY_MS              = 100;
 int          s_height_mm  = HEIGHTS_MM[3];
 int          s_heights[ui::kPresetCount];
 int          s_target_mm  = -1;  // on its way to a preset
-ui::Move     s_moving     = ui::Move::Stop;  // held on the rail
+ui::Move     s_moving     = ui::Move::Stop;  // held in the desk fold-out
 bool         s_linked     = true;
 std::int64_t s_reported_ms = 0;
 

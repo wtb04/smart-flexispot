@@ -28,6 +28,7 @@ enum class Topic : std::uint8_t {
     Radar,     // the traffic fetched again: the radar component has it
     Lookup,    // a tapped aircraft's details or photo: see radar_model.h
     Notices,   // the notices waiting: see notices_model.h
+    Page,      // the page on show: s_page
     Count,
 };
 

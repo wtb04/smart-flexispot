@@ -607,7 +607,7 @@ void build_appearance_view(lv_obj_t *parent, std::int32_t w, std::int32_t h)
     y += ROW_PITCH;
     build_accent_card(view, y, w);
     y += ROW_PITCH;
-    build_choice_card(view, y, w, LV_SYMBOL_BARS, "Sidebar", "LEFT", "RIGHT", side_clicked_cb,
+    build_choice_card(view, y, w, LV_SYMBOL_BARS, "Dock", "LEFT", "RIGHT", side_clicked_cb,
                       s_side_buttons);
     paint_side_buttons();
     y += ROW_PITCH;

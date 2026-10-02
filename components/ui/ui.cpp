@@ -21,15 +21,13 @@ namespace ui::detail {
 namespace {
 constexpr std::uint32_t APPLY_PERIOD_MS = 20;
 
-constexpr std::int32_t NAV_GAP    = GAP;
-
 constexpr int DEFAULT_BRIGHTNESS_PERCENT = 80;
 
 constexpr std::uint32_t SHOT_START_MS = 25000;
 constexpr std::uint32_t SHOT_PAGE_MS  = 2000;
 }  // namespace
 
-bool s_rail_right = false;
+bool s_rail_right = true;
 
 Orientation s_orientation = Orientation::Normal;
 
@@ -38,14 +36,13 @@ Layout layout()
     lv_display_t      *disp = lv_display_get_default();
     const std::int32_t w    = lv_display_get_horizontal_resolution(disp);
     const std::int32_t h    = lv_display_get_vertical_resolution(disp);
-    const std::int32_t x      = s_rail_right ? GAP : RAIL_W + GAP;
-    const std::int32_t area_h = h - GAP - EDGE_GAP;
     return Layout{w,
                   h,
-                  x,
-                  w - RAIL_W - 2 * GAP,
-                  area_h - NAV_H - NAV_GAP,
-                  s_rail_right ? w - RAIL_W : 0,
+                  s_rail_right ? GAP : GAP + DOCK_W + GAP,
+                  CONTENT_Y,
+                  w - DOCK_W - 3 * GAP,
+                  h - CONTENT_Y - GAP,
+                  s_rail_right ? w - GAP - DOCK_W : GAP,
                   s_rail_right};
 }
 
@@ -116,17 +113,10 @@ void register_desk_control(lv_obj_t *obj)
 int               s_initial_brightness = DEFAULT_BRIGHTNESS_PERCENT;
 
 std::optional<SegmentDisplay> s_height;
-lv_obj_t *s_rail          = nullptr;
+lv_obj_t *s_rail          = nullptr;  // the dock
 lv_obj_t *s_content       = nullptr;
-lv_obj_t *s_clock_box     = nullptr;
 lv_obj_t *s_side_buttons[CHOICE_COUNT]      = {};
 lv_obj_t *s_flip_buttons[ORIENTATION_COUNT] = {};
-lv_obj_t *s_wifi_icon     = nullptr;
-lv_obj_t *s_phone_icon    = nullptr;
-lv_obj_t *s_clock_hours   = nullptr;
-lv_obj_t *s_clock_colon   = nullptr;
-lv_obj_t *s_clock_minutes = nullptr;
-bool      s_clock_known   = false;
 namespace {
 // One page per tick rather than all at once: a tab's colour eases in, and a
 // picture taken straight after the switch shows the old tab lit. Pages hidden
@@ -147,7 +137,7 @@ void take_screenshots(lv_timer_t *timer)
     if (++step < static_cast<int>(std::size(PAGES))) {
         select_page(PAGES[step]);
         if (SHOT_DRAWER) {
-            place_drawer(DRAWER_W);
+            open_desk_sheet(true);
         }
         lv_timer_set_period(timer, SHOT_PAGE_MS);
         return;
@@ -178,8 +168,9 @@ bool build_next_part()
     lv_obj_t  *scr  = lv_screen_active();
     switch (next++) {
         case 0:
-            create_rail(scr);
+            create_dock(scr);
             create_content(scr);
+            create_top_bar(scr);
             return true;
         case 1:
             if (build_next_page()) {
@@ -193,11 +184,11 @@ bool build_next_part()
             if (SHOT_ENABLED) {
                 lv_timer_create(take_screenshots, SHOT_START_MS, nullptr);
             }
-            create_drawer(scr);  // after the content, so it overlays it when open
+            create_desk_sheet(scr);  // after the content, so it overlays it when open
             build_cinema(scr);
             build_music(scr);
             build_focus_full(scr);
-            lv_obj_move_foreground(s_rail);  // and under the rail, which it slides out from
+            lv_obj_move_foreground(s_rail);  // and under the dock, which it slides out from
             create_notice_card();
             follow_pages();
             return true;

@@ -108,22 +108,26 @@ void write_notice(const Notice &notice)
     paint_notice_corner();
 }
 
-// Over the page, the rail left clear, or over the whole screen when a view
-// has it all and the rail is out of sight.
+}  // namespace
+
+// Over the pages and the top row, the dock left clear, or over the whole screen
+// when a view has it all and the dock is out of sight.
 void place_notice()
 {
     const Layout l    = layout();
     const bool   full = fullscreen_open();
-    lv_obj_set_pos(s_notice_scrim, full || l.rail_right ? 0 : RAIL_W, 0);
-    lv_obj_set_size(s_notice_scrim, full ? l.screen_w : l.screen_w - RAIL_W, l.screen_h);
+    const std::int32_t dock = DOCK_W + GAP;
+    lv_obj_set_pos(s_notice_scrim, full || l.rail_right ? 0 : dock, 0);
+    lv_obj_set_size(s_notice_scrim, full ? l.screen_w : l.screen_w - dock, l.screen_h);
     if (full) {
         lv_obj_align(s_notice_card, LV_ALIGN_CENTER, 0, 0);
     } else {
         lv_obj_align(s_notice_card, LV_ALIGN_CENTER, l.content_x + l.content_w / 2 - l.screen_w / 2,
-                     GAP + l.content_h / 2 - l.screen_h / 2);
+                     l.content_y + l.content_h / 2 - l.screen_h / 2);
     }
 }
 
+namespace {
 void raise_notice()
 {
     place_notice();
