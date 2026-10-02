@@ -1,8 +1,9 @@
 #include "focus_page.h"
 
+#include "focus_model.h"
+#include "topics.h"
 #include "ui_internal.h"
 
-#include "esp_timer.h"
 #include "fonts/units_font.h"
 
 #include <algorithm>
@@ -58,19 +59,8 @@ constexpr std::int32_t FULL_DOT          = 10;
 constexpr std::int32_t FULL_DOT_GAP      = 12;
 constexpr std::int32_t FULL_ROUNDS_BELOW = 44;  // the rounds under the line under the leaves
 
-// As last told; until then, the plan as it stands at boot.
-Focus s_focus{
-    .phase          = FocusPhase::Idle,
-    .round          = 0,
-    .rounds         = detail::FOCUS_ROUNDS_DEFAULT,
-    .running        = false,
-    .ends_at_ms     = 0,
-    .left_ms        = 0,
-    .length_ms      = 0,
-    .work_min       = detail::FOCUS_WORK_MIN_DEFAULT,
-    .break_min      = detail::FOCUS_BREAK_MIN_DEFAULT,
-    .long_break_min = detail::FOCUS_LONG_BREAK_MIN_DEFAULT,
-};
+// The model's, as last drawn: what changed is drawn against it.
+Focus s_focus = detail::focus_state();
 
 // A clock face: a tick for every minute round two leaves, and the colon that
 // beats between them. The dial has one, and the fullscreen view the same.
@@ -117,43 +107,31 @@ lv_obj_t *s_full_under    = nullptr;  // until when, or what a tap does
 lv_obj_t *s_full_round[ROUNDS_MAX] = {};
 int       s_full_shown_s  = -1;
 
+using detail::whole_seconds_up;
+
 std::int64_t now_ms()
 {
-    return esp_timer_get_time() / units::kUsPerMs;
-}
-
-// Rounded up, so a countdown reads zero only once it is over.
-std::int64_t whole_seconds_up(std::int64_t ms)
-{
-    return (ms + units::kMsPerSecond - 1) / units::kMsPerSecond;
+    return detail::focus_now_ms();
 }
 
 bool resting()
 {
-    return s_focus.phase == FocusPhase::Break || s_focus.phase == FocusPhase::LongBreak;
+    return detail::focus_resting(s_focus);
 }
 
-// Set up and not yet started: the next round, waiting for the button.
 bool waiting()
 {
-    return s_focus.phase != FocusPhase::Idle && !s_focus.running &&
-           s_focus.left_ms == s_focus.length_ms;
+    return detail::focus_waiting(s_focus);
 }
 
 std::uint32_t ink_of(bool rest)
 {
-    return rest ? theme::green : theme::primary;
+    return detail::focus_ink(rest);
 }
 
 std::int32_t left_ms()
 {
-    if (s_focus.phase == FocusPhase::Idle) {
-        return s_focus.work_min * units::kMsPerMinute;
-    }
-    if (!s_focus.running) {
-        return s_focus.left_ms;
-    }
-    return static_cast<std::int32_t>(std::max<std::int64_t>(0, s_focus.ends_at_ms - now_ms()));
+    return detail::focus_left_ms(s_focus);
 }
 
 int parts()
@@ -205,7 +183,7 @@ void clock_text(std::int64_t in_ms, char *out, std::size_t size)
 
 void show_leaves(const Face &face, int seconds, bool paused, bool beat)
 {
-    char text[8];
+    char text[12];
     std::snprintf(text, sizeof(text), "%02d", seconds / units::kSecondsPerMinute);
     theme::set_text(face.minutes, text);
     std::snprintf(text, sizeof(text), "%02d", seconds % units::kSecondsPerMinute);
@@ -285,14 +263,8 @@ void show_tab()
         detail::show_focus_tab(nullptr, 0, false);
         return;
     }
-    char      text[16];
-    const int seconds = static_cast<int>(whole_seconds_up(left_ms()));
-    if (waiting()) {
-        std::snprintf(text, sizeof(text), "Ready");
-    } else {
-        std::snprintf(text, sizeof(text), "%02d:%02d", seconds / units::kSecondsPerMinute,
-                      seconds % units::kSecondsPerMinute);
-    }
+    char text[16];
+    detail::focus_clock_text(s_focus, text, sizeof(text));
     detail::show_focus_tab(text, ink_of(resting()), !s_focus.running);
 }
 
@@ -805,22 +777,21 @@ void build_full(lv_obj_t *screen)
         dot = make_dot(rounds, theme::panel_light, FULL_DOT);
     }
     s_full_view = detail::add_view({"focus", detail::ViewKind::Fullscreen, s_full, show_full_part, nullptr});
-    detail::add_fullscreen_chrome(s_full_view, s_full, [](lv_event_t *) { detail::close_view(s_full_view); });
+    detail::add_fullscreen_chrome(s_full_view, s_full, [](lv_event_t *) { detail::close_view(s_full_view); },
+                                  false);  // the timer is the view
     // What the time says around it goes with the buttons, leaving the ring and the time.
     for (lv_obj_t *part : {s_full_phase, s_full_under, rounds}) {
         detail::fade_when_idle(s_full_view, part);
     }
 }
 
-}  // namespace
-
+// Drawn again as the model changes.
 void show_focus(const Focus &focus)
 {
     const bool new_part = focus.phase != s_focus.phase || focus.round != s_focus.round ||
                           focus.length_ms != s_focus.length_ms ||
                           focus.work_min != s_focus.work_min || s_tick_count == 0;
     s_focus = focus;
-    detail::paint_focus_plan(focus);
     if (s_dial.leaves == nullptr) {
         return;
     }
@@ -848,6 +819,12 @@ void show_focus(const Focus &focus)
     show_second(true);
     show_tab();
 }
+}  // namespace
+
+void open_focus_full()
+{
+    open_full();
+}
 
 bool focus_full_open()
 {
@@ -868,7 +845,7 @@ void build_focus_page(lv_obj_t *page, std::int32_t width, std::int32_t height)
     build_set(page, dial_w + BUTTON_GAP, SET_W, height);
 
     lv_timer_create(timer_tick, TIMER_PERIOD_MS, nullptr);
-    show_focus(s_focus);
+    detail::subscribe(detail::Topic::Focus, detail::kNoView, [] { show_focus(detail::focus_state()); });
 }
 
 }  // namespace ui

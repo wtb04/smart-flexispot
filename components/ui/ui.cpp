@@ -1,5 +1,7 @@
 #include "ui_internal.h"
+#include "focus_model.h"
 #include "focus_page.h"
+#include "topics.h"
 
 #ifndef SHOT_DRAWER
 #define SHOT_DRAWER 0
@@ -991,7 +993,7 @@ void apply_glances()
 void apply_page_updates()
 {
     if (Focus focus{}; take(p_focus, focus)) {
-        show_focus(focus);
+        detail::set_focus_state(focus);
     }
     if (UpdateState update{}; take(p_update, update)) {
         paint_update_icon(update);
@@ -1046,6 +1048,7 @@ void apply_pending(lv_timer_t *)
     apply_glances();
     apply_page_updates();
     apply_inbox();
+    detail::deliver_topics();  // what follows a topic, once for all that changed
 }
 }  // namespace
 

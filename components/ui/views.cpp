@@ -1,5 +1,7 @@
 #include "views.h"
 
+#include "topics.h"
+
 #include <cstdint>
 #include <utility>
 #include <vector>
@@ -138,6 +140,7 @@ void open_view(ViewId view)
     if (entry->spec.opened) {
         entry->spec.opened();
     }
+    deliver_to_view(view);  // what changed while it was closed, now it is laid out
 }
 
 void toggle_view(ViewId view)

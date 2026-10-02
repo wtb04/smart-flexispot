@@ -453,7 +453,6 @@ void build_cinema(lv_obj_t *screen)
                              s_skip_was_offered = false;
                              lv_timer_resume(s_tick);
                              tick(s_tick);
-                             update_view_clocks();
                          },
                          [] { lv_timer_pause(s_tick); }});
     Chrome chrome = add_fullscreen_chrome(s_cinema, s_view, [](lv_event_t *) { close_cinema(); });

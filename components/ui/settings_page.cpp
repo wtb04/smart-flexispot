@@ -1,3 +1,5 @@
+#include "focus_model.h"
+#include "topics.h"
 #include "ui_internal.h"
 
 namespace ui::detail {
@@ -592,6 +594,7 @@ void build_focus_view(lv_obj_t *parent, std::int32_t w, std::int32_t h)
         build_stepper(view, SUB_BODY_Y + i * ROW_PITCH, w, s_plan[i]);
     }
     s_focus_view = view;
+    subscribe(Topic::Focus, kNoView, [] { paint_focus_plan(focus_state()); });
 }
 
 void build_appearance_view(lv_obj_t *parent, std::int32_t w, std::int32_t h)

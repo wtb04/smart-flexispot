@@ -169,6 +169,9 @@ void paint(const Palette &colours)
     lv_obj_set_style_bg_color(s_play, colours.accent, 0);
     if (s_chrome.close != nullptr) {
         lv_obj_set_style_bg_color(s_chrome.close, colours.surface, 0);
+        if (s_chrome.badge != nullptr) {
+            lv_obj_set_style_bg_color(s_chrome.badge, colours.surface, 0);
+        }
         for (std::uint32_t i = 0; s_chrome.desk != nullptr && i < lv_obj_get_child_count(s_chrome.desk); ++i) {
             lv_obj_t *chip = lv_obj_get_child(s_chrome.desk, static_cast<std::int32_t>(i));
             lv_obj_set_style_bg_color(chip, colours.surface, 0);
@@ -476,7 +479,6 @@ void build_music(lv_obj_t *screen)
                             lv_timer_resume(s_glide);
                             lv_timer_resume(s_check);
                             refresh_music();
-                            update_view_clocks();
                         },
                         [] {
                             lv_timer_pause(s_glide);

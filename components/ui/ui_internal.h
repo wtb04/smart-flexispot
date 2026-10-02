@@ -310,9 +310,13 @@ void apply_music_cover(const void *pixels);  // media::kLargeArtSize square, or 
 void refresh_music();  // after what plays changed: its title, cover and times together
 /** The time in a fullscreen view's bottom right corner, shown or put away by a
  *  tap there, as the last tap left it in any of them. */
-// The time beside a fullscreen view's chip back, faded with its other buttons.
-lv_obj_t *add_view_clock(ViewId view, lv_obj_t *root, lv_obj_t *chip);
-void      update_view_clocks();
+// The time beside a fullscreen view's chip back, faded with its other buttons,
+// and the focus timer beside it while it runs, unless the view is the timer's.
+struct ViewClock {
+    lv_obj_t *label;
+    lv_obj_t *badge;  // null without one
+};
+ViewClock add_view_clock(ViewId view, lv_obj_t *root, lv_obj_t *chip, bool focus_badge = true);
 // Stand and Sit, the time and the way back, over a fullscreen view, and any
 // quick actions of the view's own after Stand and Sit.
 struct Chrome {
@@ -320,9 +324,10 @@ struct Chrome {
     lv_obj_t    *root;
     lv_obj_t    *close;
     lv_obj_t    *desk;    // its chips are its children
+    lv_obj_t    *badge;   // the focus timer's, or null
     std::int32_t next_x;  // where a quick action goes
 };
-Chrome    add_fullscreen_chrome(ViewId view, lv_obj_t *root, lv_event_cb_t on_close);
+Chrome    add_fullscreen_chrome(ViewId view, lv_obj_t *root, lv_event_cb_t on_close, bool focus_badge = true);
 lv_obj_t *add_chrome_chip(Chrome &chrome, const lv_image_dsc_t *icon, lv_event_cb_t on_click);
 void      light_chrome_chip(lv_obj_t *chip, bool on);  // in the accent while on
 void apply_media_neighbours(bool previous, bool next);
