@@ -173,7 +173,7 @@ namespace {
 constexpr std::int32_t STATUS_GAP       = 20;  // between what the top row holds
 constexpr std::int32_t SLOT_W           = 40;  // each of the status's marks, centred in one as wide
 constexpr std::int32_t SLOT_GAP         = 8;
-constexpr std::int32_t TAP_MARGIN       = 12;  // round the badge and the status, to be hit easily
+constexpr std::int32_t TAP_MARGIN       = 16;  // round the badge and the status, to be hit easily
 constexpr std::int32_t UPDATE_ICON_SIDE = 28;
 constexpr std::int32_t UPDATE_BAR_H     = 3;
 constexpr std::int32_t UPDATE_BAR_GAP   = 4;
@@ -289,7 +289,10 @@ void create_top_bar(lv_obj_t *parent)
 {
     s_top_bar = lv_obj_create(parent);
     lv_obj_remove_style_all(s_top_bar);
-    lv_obj_set_height(s_top_bar, TOP_H);
+    // The whole strip over the pages, from the screen's edge: LVGL looks for
+    // what a touch hit only inside its parent, so the room round the badge and
+    // the status takes taps only where the row reaches.
+    lv_obj_set_height(s_top_bar, CONTENT_Y);
     lv_obj_set_flex_flow(s_top_bar, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(s_top_bar, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(s_top_bar, STATUS_GAP, 0);
@@ -377,7 +380,7 @@ void create_top_bar(lv_obj_t *parent)
 void place_top_bar()
 {
     const Layout l = layout();
-    lv_obj_set_pos(s_top_bar, l.content_x, TOP_Y);
+    lv_obj_set_pos(s_top_bar, l.content_x, 0);
     lv_obj_set_width(s_top_bar, l.content_w);
     arrange_top();
 }
