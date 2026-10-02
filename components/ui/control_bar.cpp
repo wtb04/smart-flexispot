@@ -25,7 +25,10 @@ constexpr std::int32_t MEDIA_W      = 440;
 constexpr std::int32_t HEAT_W       = 140;
 constexpr std::int32_t LIGHTS_W     = 120;
 constexpr std::uint32_t SKIP_CHECK_MS = 500;
-constexpr std::int32_t THUMB        = 52;
+constexpr std::int32_t THUMB        = 48;
+// Far enough in from the pill's round end that the cover's corners stay inside its curve.
+constexpr std::int32_t THUMB_INSET  = (TOP_H - THUMB) / 2 + 4;
+constexpr int          BULB_SCALE   = 200;  // of LV_SCALE_NONE: the bulb a little smaller than Home drew it
 constexpr std::int32_t THUMB_RADIUS = 6;   // small enough to leave a narrow poster its corners
 constexpr std::int32_t PLAY_D       = 48;
 constexpr std::int32_t TEXT_GAP     = 12;
@@ -378,9 +381,10 @@ void build_media_slot(lv_obj_t *bar)
     lv_obj_add_event_cb(s_media_slot, media_touched, LV_EVENT_CLICKED, nullptr);
     lv_obj_add_event_cb(s_media_slot, media_touched, LV_EVENT_LONG_PRESSED, nullptr);
     build_cover(s_slot_cover, s_media_slot, THUMB, THUMB_RADIUS);
-    lv_obj_align(s_slot_cover.frame, LV_ALIGN_LEFT_MID, 0, 0);
+    const std::int32_t inset = THUMB_INSET - SLOT_PAD;
+    lv_obj_align(s_slot_cover.frame, LV_ALIGN_LEFT_MID, inset, 0);
 
-    const std::int32_t text_x = THUMB + TEXT_GAP;
+    const std::int32_t text_x = inset + THUMB + TEXT_GAP;
     const std::int32_t text_w = MEDIA_W - 2 * SLOT_PAD - text_x - PLAY_D - TEXT_GAP;
     s_slot_title              = one_line(s_media_slot, theme::text, fonts::size_20(), text_w);
     lv_obj_align(s_slot_title, LV_ALIGN_LEFT_MID, text_x, -11);
@@ -582,6 +586,7 @@ void paint_lights_slot()
     }
     // On in the accent, rather than the whole slot filled with it.
     theme::set_text(s_lights_text, text);
+    lv_obj_set_hidden(s_lights_text, text[0] == '\0');  // the bulb alone, in the middle, while all are off
     theme::set_text_color(s_lights_text, lights.on ? theme::primary : theme::secondary);
     for (std::uint32_t i = 0; i < lv_obj_get_child_count(s_lights_bulb); ++i) {
         lv_obj_set_style_image_recolor(lv_obj_get_child(s_lights_bulb, static_cast<std::int32_t>(i)),
@@ -630,12 +635,14 @@ void build_lights_slot(lv_obj_t *bar)
     // The whole bulb, the glass over its base, as Home's lights were drawn.
     s_lights_bulb = lv_obj_create(s_lights_slot);
     lv_obj_remove_style_all(s_lights_bulb);
-    lv_obj_set_size(s_lights_bulb, icons::bulb_glass_icon.header.w, icons::bulb_glass_icon.header.h);
+    lv_obj_set_size(s_lights_bulb, icons::bulb_glass_icon.header.w * BULB_SCALE / LV_SCALE_NONE,
+                    icons::bulb_glass_icon.header.h * BULB_SCALE / LV_SCALE_NONE);
     lv_obj_set_clickable(s_lights_bulb, false);
     for (const lv_image_dsc_t *part : {&icons::bulb_glass_icon, &icons::bulb_base_icon}) {
         lv_obj_t *image = lv_image_create(s_lights_bulb);
         lv_image_set_src(image, part);
-        lv_obj_set_pos(image, 0, 0);
+        lv_image_set_scale(image, BULB_SCALE);
+        lv_obj_center(image);
         lv_obj_set_style_image_recolor_opa(image, LV_OPA_COVER, 0);
         lv_obj_set_clickable(image, false);
     }
