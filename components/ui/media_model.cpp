@@ -12,10 +12,23 @@
 namespace ui::detail {
 namespace {
 constexpr int NEXT_UP_TAIL_S = 30;  // with no credits marked, the end is near
+// Between one episode or track and the next, the player says for a moment that
+// nothing plays: what goes is shown gone only once it has stayed gone this long.
+constexpr std::uint32_t GONE_SETTLE_MS = 4000;
 
 MediaState  s_media;
 Pick        s_picks[media::kPickCount];
 lv_timer_t *s_pause_timer = nullptr;
+
+// What it said while the last track seemed to go, kept until that has lasted.
+struct Gone {
+    lv_timer_t *timer = nullptr;
+    char        source[sizeof(MediaState::source)] = "";
+    char        state[sizeof(MediaState::state)]   = "";
+    bool        controllable = false;
+    bool        video_told   = false;  // the player stopped seeking meanwhile, or started again
+    bool        video        = false;
+} s_gone;
 
 void copy(char *to, std::size_t size, const char *from)
 {
@@ -50,8 +63,59 @@ const MediaState &media_state()
     return s_media;
 }
 
+namespace {
+void apply_gone(lv_timer_t *);
+
+void settle_gone()
+{
+    if (s_gone.timer != nullptr) {
+        lv_timer_delete(s_gone.timer);
+        s_gone.timer = nullptr;
+    }
+}
+
+void media_apply_track(const char *source, const char *title, const char *artist, const char *state,
+                       bool playing, bool controllable);
+
+// It stayed gone: shown so now, as it was told.
+void apply_gone(lv_timer_t *)
+{
+    settle_gone();
+    if (s_gone.video_told) {
+        s_media.video = s_gone.video;
+    }
+    media_apply_track(s_gone.source, nullptr, nullptr, s_gone.state, false, s_gone.controllable);
+}
+}  // namespace
+
 void media_take_track(const char *source, const char *title, const char *artist, const char *state,
                       bool playing, bool controllable)
+{
+    const bool has_track = title != nullptr && title[0] != '\0';
+    if (!has_track && s_media.has_track) {
+        copy(s_gone.source, sizeof(s_gone.source), source);
+        copy(s_gone.state, sizeof(s_gone.state), state);
+        s_gone.controllable = controllable;
+        if (s_gone.timer == nullptr) {
+            s_gone.video_told = false;
+            s_gone.timer      = lv_timer_create(apply_gone, GONE_SETTLE_MS, nullptr);
+            lv_timer_set_repeat_count(s_gone.timer, 1);
+            lv_timer_set_auto_delete(s_gone.timer, false);
+        }
+        return;
+    }
+    if (s_gone.timer != nullptr) {
+        settle_gone();  // the next one came in time: on to it, as if nothing had gone
+        if (s_gone.video_told) {
+            s_media.video = s_gone.video;
+        }
+    }
+    media_apply_track(source, title, artist, state, playing, controllable);
+}
+
+namespace {
+void media_apply_track(const char *source, const char *title, const char *artist, const char *state,
+                       bool playing, bool controllable)
 {
     const bool has_track = title != nullptr && title[0] != '\0';
     copy(s_media.source, sizeof(s_media.source), source != nullptr && source[0] != '\0' ? source : "SPEAKER");
@@ -68,6 +132,7 @@ void media_take_track(const char *source, const char *title, const char *artist,
     }
     publish(Topic::Media);
 }
+}  // namespace
 
 void media_take_cover(const void *pixels, bool placeholder)
 {
@@ -108,6 +173,11 @@ void media_take_remote(bool remote)
 
 void media_take_video(bool seeks)
 {
+    if (s_gone.timer != nullptr) {
+        s_gone.video_told = true;  // kept with what went, and given as it goes or comes back
+        s_gone.video      = seeks;
+        return;
+    }
     s_media.video = seeks;
     publish(Topic::Media);
 }

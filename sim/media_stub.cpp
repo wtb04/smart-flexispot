@@ -63,6 +63,11 @@ bool video()
 double       s_position_s = 0;   // at s_position_at
 std::int64_t s_position_at = 0;  // ms
 std::int64_t s_reported_at = 0;
+// Between one episode and the next, Jellyfin says for a moment that nothing
+// plays, and the card falls back to the speaker: so here too.
+constexpr std::int64_t BETWEEN_MS = 1200;
+std::int64_t s_between_until = 0;
+int          s_between_item  = 0;
 
 std::vector<std::uint16_t> s_art;    // shown cover
 std::vector<std::uint16_t> s_large;  // the same, large, for the music view
@@ -194,6 +199,20 @@ void go_to(int item, int from_s)
     set_position(from_s);
     show_item();
 }
+
+// On to another episode as Jellyfin goes, through a moment of nothing; a track
+// goes straight on.
+void go_on_to(int item)
+{
+    if (!video()) {
+        go_to(item, 0);
+        return;
+    }
+    s_between_item  = item;
+    s_between_until = now_ms() + BETWEEN_MS;
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media("OFFICE SPEAKER", "", "", "OFF", false, false));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_seeks(false));
+}
 }  // namespace
 
 void start()
@@ -208,13 +227,18 @@ void start()
 
 void tick()
 {
-    if (s_scene == Scene::Idle || !s_playing) {
+    if (s_between_until != 0 && now_ms() >= s_between_until) {
+        s_between_until = 0;
+        go_to(s_between_item, 0);
+        return;
+    }
+    if (s_scene == Scene::Idle || !s_playing || s_between_until != 0) {
         return;
     }
     if (position_s() >= length_s()) {
         const int last = s_scene == Scene::Music ? static_cast<int>(std::size(TRACKS)) : static_cast<int>(std::size(EPISODES));
         if (s_item + 1 < last) {
-            go_to(s_item + 1, 0);  // as a queue or Jellyfin's next up goes on
+            go_on_to(s_item + 1);  // as a queue or Jellyfin's next up goes on
         } else {
             s_playing = false;
             show_item();
@@ -260,8 +284,8 @@ void on_media(ui::MediaAction action)
             show_text();
             report_progress();
             break;
-        case ui::MediaAction::Next:     go_to((s_item + 1) % count, 0); break;
-        case ui::MediaAction::Previous: go_to((s_item + count - 1) % count, 0); break;
+        case ui::MediaAction::Next:     go_on_to((s_item + 1) % count); break;
+        case ui::MediaAction::Previous: go_on_to((s_item + count - 1) % count); break;
         case ui::MediaAction::VolumeUp:   on_volume(std::min(100, s_volume + 5)); break;
         case ui::MediaAction::VolumeDown: on_volume(std::max(0, s_volume - 5)); break;
         case ui::MediaAction::Mute:
