@@ -3,6 +3,7 @@
 #include "focus_page.h"
 #include "home_model.h"
 #include "room_model.h"
+#include "settings_model.h"
 #include "status_model.h"
 #include "topics.h"
 
@@ -195,13 +196,7 @@ bool build_next_part()
             build_focus_full(scr);
             lv_obj_move_foreground(s_rail);  // and under the rail, which it slides out from
             create_notice_card();
-            // The owner's pages come and go with their phone.
-            subscribe(Topic::Status, kNoView, [] {
-                static bool s_present_shown = false;
-                if (std::exchange(s_present_shown, status_state().present) != status_state().present) {
-                    select_page(s_page);
-                }
-            });
+            follow_pages();
             return true;
         default:
             return false;
@@ -593,15 +588,6 @@ void apply_card(int card, const char *summary, Level level)
     }
 }
 
-void apply_notification_volume(int percent)
-{
-    if (s_volume_slider == nullptr) {
-        return;
-    }
-    lv_slider_set_value(s_volume_slider, percent, LV_ANIM_OFF);
-    write_percent(s_volume_value, percent);
-}
-
 void apply_screen(bool on)
 {
     status_state().screen_on = on;
@@ -634,7 +620,7 @@ void apply_settings_and_presence()
     bool on = false;
     for (int i = 0; i < SETTING_COUNT; ++i) {
         if (take(p_setting[i], on)) {
-            apply_setting(i, on);
+            settings_take(i, on);
         }
     }
     if (PresenceArgs presence{}; take(p_presence, presence)) {
@@ -764,7 +750,7 @@ void apply_rail_updates()
         apply_wifi(wifi);
     }
     if (int volume = 0; take(p_notification_volume, volume)) {
-        apply_notification_volume(volume);
+        settings_take_volume(volume);
     }
 }
 
@@ -797,11 +783,7 @@ void apply_page_updates()
         detail::set_focus_state(focus);
     }
     if (UpdateState update{}; take(p_update, update)) {
-        paint_update_icon(update);
-        // Only once all that arrives is in and checked, not while any still comes.
-        paint_setup_dot((update.panel_ready || update.companion_ready) &&
-                        update.busy == UpdateTarget::None);
-        paint_update_tile(update);
+        settings_take_update(update);
     }
     if (bool calendar = false; take(p_calendar, calendar)) {
         show_calendar();

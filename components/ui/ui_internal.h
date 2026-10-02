@@ -285,6 +285,8 @@ lv_obj_t *add_chrome_chip(Chrome &chrome, const lv_image_dsc_t *icon, lv_event_c
 void      light_chrome_chip(lv_obj_t *chip, bool on);  // in the accent while on
 void show_guest_presets();
 void select_page(int index);
+/** The owner's pages come and go with their phone, and with the setting that hides them. */
+void follow_pages();
 /** The Focus tab's caption in place of its name, and its icon in `ink`, faded
  *  while paused; a null caption puts it back. */
 void show_focus_tab(const char *caption, std::uint32_t ink, bool paused);
@@ -301,7 +303,6 @@ bool splash_on_screen();
 
 /** For updates kept outside ui.cpp's slots: asks the LVGL task to look. */
 void request_apply();
-void apply_setting(int index, bool on);
 void restart_held_cb(lv_event_t *);
 void volume_changed_cb(lv_event_t *e);
 lv_obj_t *build_tile(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int32_t w,

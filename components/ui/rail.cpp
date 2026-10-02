@@ -1,6 +1,7 @@
 #include "ui_internal.h"
 
 #include "room_model.h"
+#include "settings_model.h"
 #include "status_model.h"
 #include "topics.h"
 
@@ -323,6 +324,11 @@ void create_rail(lv_obj_t *parent)
     lv_obj_set_ignore_layout(s_drawer_toggle, true);
     lv_obj_align(s_drawer_toggle, drawer_toggle_corner(l.rail_right), 0, 0);
     lv_obj_add_event_cb(s_drawer_toggle, manual_clicked_cb, LV_EVENT_CLICKED, nullptr);
+    subscribe(Topic::Update, kNoView, [] {
+        if (settings_state().update_known) {
+            paint_update_icon(settings_state().update);
+        }
+    });
     subscribe(Topic::Desk, kNoView, [] {
         paint_presets();
         paint_desk_shortcuts();

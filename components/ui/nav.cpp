@@ -1,6 +1,8 @@
 #include "ui_internal.h"
 
+#include "settings_model.h"
 #include "status_model.h"
+#include "topics.h"
 
 namespace ui::detail {
 namespace {
@@ -289,4 +291,26 @@ void paint_setup_dot(bool ready)
     }
 }
 
+}  // namespace ui::detail
+
+namespace ui::detail {
+void follow_pages()
+{
+    const auto pages = [] {
+        const bool gate = settings_state().on[static_cast<int>(Setting::PresenceGate)];
+        static bool s_present_shown = false;
+        const bool  moved = std::exchange(s_present_shown, status_state().present) != status_state().present;
+        if (std::exchange(s_presence_gate, gate) != gate || moved) {
+            select_page(s_page);
+        }
+    };
+    subscribe(Topic::Status, kNoView, pages);
+    subscribe(Topic::Settings, kNoView, pages);
+    // Only once all that arrives is in and checked, not while any still comes.
+    subscribe(Topic::Update, kNoView, [] {
+        const UpdateState &update = settings_state().update;
+        paint_setup_dot(settings_state().update_known && (update.panel_ready || update.companion_ready) &&
+                        update.busy == UpdateTarget::None);
+    });
+}
 }  // namespace ui::detail

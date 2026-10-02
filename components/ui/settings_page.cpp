@@ -1,4 +1,5 @@
 #include "focus_model.h"
+#include "settings_model.h"
 #include "topics.h"
 #include "ui_internal.h"
 
@@ -404,18 +405,10 @@ void more_clicked_cb(lv_event_t *e)
 
 // Each setting is two ways, painted like the sidebar and orientation choices.
 lv_obj_t *s_setting_choice[SETTING_COUNT][CHOICE_COUNT] = {};
-bool      s_setting_on[SETTING_COUNT]                   = {};
 
 void pick_setting(Setting setting, bool on)
 {
-    const int index = static_cast<int>(setting);
-    if (on == s_setting_on[index]) {
-        return;
-    }
-    apply_setting(index, on);
-    if (s_handlers.setting != nullptr) {
-        s_handlers.setting(setting, on);
-    }
+    settings_pick(setting, on);
 }
 
 void gate_clicked_cb(lv_event_t *e)
@@ -455,15 +448,18 @@ lv_obj_t *build_row_card(lv_obj_t *parent, std::int32_t y, std::int32_t w, const
     return root;
 }
 
-void apply_setting(int index, bool on)
+// The choices and the volume, as the settings model has them.
+void paint_settings()
 {
-    s_setting_on[index] = on;
-    if (s_setting_choice[index][0] != nullptr) {
-        paint_choice(s_setting_choice[index], on);
+    const SettingsState &settings = settings_state();
+    for (int index = 0; index < SETTING_COUNT; ++index) {
+        if (s_setting_choice[index][0] != nullptr) {
+            paint_choice(s_setting_choice[index], settings.on[index]);
+        }
     }
-    if (static_cast<Setting>(index) == Setting::PresenceGate) {
-        s_presence_gate = on;
-        select_page(s_page);
+    if (s_volume_slider != nullptr && settings.notification_volume >= 0) {
+        lv_slider_set_value(s_volume_slider, settings.notification_volume, LV_ANIM_OFF);
+        write_percent(s_volume_value, settings.notification_volume);
     }
 }
 
@@ -565,9 +561,12 @@ void build_behaviour_view(lv_obj_t *parent, std::int32_t w, std::int32_t h)
     y += ROW_PITCH;
     s_volume_slider = build_slider_card(view, y, w, LV_SYMBOL_VOLUME_MAX, "Notification volume",
                                         0, 0, volume_changed_cb, &s_volume_value);
-    for (int i = 0; i < SETTING_COUNT; ++i) {
-        apply_setting(i, s_setting_on[i]);
-    }
+    subscribe(Topic::Settings, kNoView, paint_settings);
+    subscribe(Topic::Update, kNoView, [] {
+        if (settings_state().update_known) {
+            paint_update_tile(settings_state().update);
+        }
+    });
 
     s_behaviour_view = view;
 }
