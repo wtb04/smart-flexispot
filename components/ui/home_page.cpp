@@ -1,5 +1,8 @@
 #include "ui_internal.h"
 
+#include "media_model.h"
+#include "topics.h"
+
 #include "esp_heap_caps.h"
 
 namespace ui::detail {
@@ -561,10 +564,6 @@ void layout_media_text()
     layout_card_text(s_has_art ? s_card_with_art : s_card_bare);
 }
 
-int        s_position_s   = 0;
-int        s_duration_s   = 0;
-bool       s_media_playing = false;
-TickType_t s_position_at  = 0;
 namespace {
 constexpr int SECONDS_PER_MINUTE = 60;
 
@@ -786,14 +785,13 @@ void write_clock(lv_obj_t *label, int seconds)
 }
 
 lv_timer_t *s_pause_timer     = nullptr;
-bool        s_playing_shown   = false;
-bool        s_has_track_shown = false;
 
 void apply_playing(bool playing)
 {
-    s_playing_shown = playing;
+    media_state().playing = playing;
+    publish(Topic::Media);
 
-    const lv_opa_t dim = s_has_track_shown && !playing ? PAUSED_ART_DIM : PLAYING_ART_DIM;
+    const lv_opa_t dim = media_state().has_track && !playing ? PAUSED_ART_DIM : PLAYING_ART_DIM;
     if (lv_obj_get_style_image_recolor_opa(s_media_art, LV_PART_MAIN) != dim) {
         lv_obj_set_style_image_recolor(s_media_art, lv_color_hex(theme::background), 0);
         lv_obj_set_style_image_recolor_opa(s_media_art, dim, 0);
@@ -814,13 +812,12 @@ void pause_settled(lv_timer_t *)
     apply_playing(false);
 }
 namespace {
-bool s_media_remote = true;
 
 // A player that takes no commands is followed, not steered: whatever was
 // tapped, nothing that would play, pause, skip or seek it is sent.
 bool steers(MediaAction action)
 {
-    return s_media_remote || action == MediaAction::VolumeDown || action == MediaAction::VolumeUp ||
+    return media_state().remote || action == MediaAction::VolumeDown || action == MediaAction::VolumeUp ||
            action == MediaAction::Mute;
 }
 
@@ -836,31 +833,26 @@ constexpr std::int32_t  EXPAND_CHIP    = theme::chip::size;
 
 MediaSegment s_segments[kMaxSegments]{};
 int          s_segment_count = 0;
-bool         s_media_seeks   = false;
 lv_obj_t    *s_skip          = nullptr;
 lv_obj_t    *s_expand        = nullptr;  // into the cinema view for a video, the music view else
 int          s_skip_to       = -1;    // where skipping the intro seeks to
 bool         s_skip_next     = false; // skipping starts the next episode instead
 const char  *s_skip_text     = nullptr;
 
-/** Seconds into what plays, carried forward while it plays. */
 int position_now()
 {
-    int at = s_position_s;
-    if (s_media_playing) {
-        at += static_cast<int>((xTaskGetTickCount() - s_position_at) / configTICK_RATE_HZ);
-    }
-    return s_duration_s > 0 ? std::min(at, s_duration_s) : at;
+    return media_position_now();
 }
 
 void seek_to(int position_s)
 {
-    if (!s_media_remote) {
+    if (!media_state().remote) {
         return;
     }
-    position_s    = std::max(0, s_duration_s > 0 ? std::min(position_s, s_duration_s) : position_s);
-    s_position_s  = position_s;
-    s_position_at = xTaskGetTickCount();
+    position_s    = std::max(0, media_state().duration_s > 0 ? std::min(position_s, media_state().duration_s) : position_s);
+    media_state().position_s  = position_s;
+    media_state().position_at = xTaskGetTickCount();
+    publish(Topic::Media);
     if (s_handlers.seek != nullptr) {
         s_handlers.seek(position_s);
     }
@@ -871,7 +863,7 @@ void skip_check(lv_timer_t *)
     const char *text = nullptr;
     int         to   = -1;
     bool        next = false;
-    if (s_media_seeks && s_has_track_shown && s_duration_s > 0) {
+    if (media_state().video && media_state().has_track && media_state().duration_s > 0) {
         const int at            = position_now();
         bool      credits_known = false;
         for (int i = 0; i < s_segment_count; ++i) {
@@ -887,8 +879,8 @@ void skip_check(lv_timer_t *)
                 }
             }
         }
-        next = next || (!credits_known && s_duration_s > NEXT_UP_TAIL_S &&
-                        at >= s_duration_s - NEXT_UP_TAIL_S);
+        next = next || (!credits_known && media_state().duration_s > NEXT_UP_TAIL_S &&
+                        at >= media_state().duration_s - NEXT_UP_TAIL_S);
         // Seeking to the end only stops the player there; the episode after
         // is started instead, and without one there is nothing to go on to.
         next = next && cinema_has_next();
@@ -900,7 +892,7 @@ void skip_check(lv_timer_t *)
     s_skip_next = next;
     s_skip_text = text;
     lv_obj_set_hidden(s_skip, text == nullptr);
-    lv_obj_set_hidden(s_expand, !s_has_track_shown);
+    lv_obj_set_hidden(s_expand, !media_state().has_track);
     if (text != nullptr) {
         theme::set_text(lv_obj_get_child(s_skip, 0), text);
     }
@@ -945,11 +937,11 @@ void media_swiped(lv_dir_t direction)
         }
         return;
     }
-    if (!s_media_remote) {
+    if (!media_state().remote) {
         return;
     }
     // A video goes ten seconds on or back, as its own player does.
-    if (s_media_seeks) {
+    if (media_state().video) {
         seek_to(position_now() + (direction == LV_DIR_LEFT ? SEEK_STEP_S : -SEEK_STEP_S));
         return;
     }
@@ -961,7 +953,7 @@ void media_swiped(lv_dir_t direction)
 void media_held()
 {
     s_media_long = true;
-    if (!s_has_track_shown) {
+    if (!media_state().has_track) {
         open_pick_picker();
         return;
     }
@@ -982,11 +974,11 @@ void media_tapped()
     if (std::exchange(s_media_long, false) || std::exchange(s_media_swiped, false)) {
         return;
     }
-    if (!s_has_track_shown || !s_media_remote) {
+    if (!media_state().has_track || !media_state().remote) {
         return;  // nothing to pause or carry on with, or a player that will not
     }
     cancel_pause_settle();
-    apply_playing(!s_playing_shown);
+    apply_playing(!media_state().playing);
     if (s_handlers.media != nullptr) {
         s_handlers.media(MediaAction::PlayPause);
     }
@@ -1072,22 +1064,6 @@ void show_speaker_face(bool shown)
     lv_obj_set_hidden(s_speaker_face, !shown);
 }
 
-int s_media_volume = -1;
-
-int media_position_now()
-{
-    return position_now();
-}
-
-int media_position_ms_now()
-{
-    std::int64_t at = static_cast<std::int64_t>(s_position_s) * units::kMsPerSecond;
-    if (s_media_playing) {
-        at += static_cast<std::int64_t>(xTaskGetTickCount() - s_position_at) * units::kMsPerSecond / configTICK_RATE_HZ;
-    }
-    const std::int64_t end = static_cast<std::int64_t>(s_duration_s) * units::kMsPerSecond;
-    return static_cast<int>(end > 0 ? std::min(at, end) : at);
-}
 
 void open_favourites()
 {
@@ -1105,7 +1081,7 @@ void media_toggle_play()
         return;
     }
     cancel_pause_settle();
-    apply_playing(!s_playing_shown);
+    apply_playing(!media_state().playing);
     if (s_handlers.media != nullptr) {
         s_handlers.media(MediaAction::PlayPause);
     }
@@ -1118,7 +1094,7 @@ const char *media_skip_text()
 
 void media_skip()
 {
-    if (!s_media_remote) {
+    if (!media_state().remote) {
         return;
     }
     if (s_skip_next) {
@@ -1130,11 +1106,6 @@ void media_skip()
     }
 }
 
-bool media_is_video()
-{
-    return s_media_seeks && s_has_track_shown;
-}
-
 void apply_media_segments(const MediaSegment *segments, int count)
 {
     s_segment_count = count;
@@ -1143,17 +1114,19 @@ void apply_media_segments(const MediaSegment *segments, int count)
 
 void apply_media_seeks(bool seeks)
 {
-    s_media_seeks = seeks;
+    media_state().video = seeks;
+    publish(Topic::Media);
 }
 
 void apply_media_remote(bool remote)
 {
-    s_media_remote = remote;
+    media_state().remote = remote;
+    publish(Topic::Media);
 }
 
 bool media_remote()
 {
-    return s_media_remote;
+    return media_state().remote;
 }
 
 void apply_pick(int index, const char *name)

@@ -1,5 +1,7 @@
 #include "ui_internal.h"
 
+#include "topics.h"
+
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
@@ -29,7 +31,6 @@ constexpr std::uint8_t VOLUME_FILL_MIX = 64;  // of the text's colour into the b
 constexpr std::int32_t PAUSED_MARK  = 120;
 constexpr lv_opa_t     PAUSED_DIM   = LV_OPA_50;
 constexpr std::uint32_t GLIDE_MS    = 33;   // the bar looked at, moved only when its end would move
-constexpr std::uint32_t CHECK_MS    = 500;  // still playing, and still music
 // The card's cover, when there is no large one, grown to the large one's size.
 constexpr std::uint32_t SMALL_SCALE = LV_SCALE_NONE * media::kLargeArtSize / media::kArtSize;
 
@@ -102,9 +103,9 @@ lv_obj_t      *s_view    = nullptr;
 lv_obj_t      *s_cover   = nullptr;
 lv_obj_t      *s_paused  = nullptr;
 lv_image_dsc_t s_cover_dsc{};
-const void    *s_large   = nullptr;  // the large cover, or null for the card's
 const void    *s_shown   = nullptr;  // the cover on show, and coloured by
-bool           s_cover_new = true;   // a cover came, maybe into the same buffer
+std::uint32_t  s_covers_shown = 0;   // the model's count of covers when it was shown
+bool           s_repaint = true;     // coloured again regardless, as on opening
 lv_obj_t      *s_source  = nullptr;
 lv_obj_t      *s_title   = nullptr;
 lv_obj_t      *s_artist  = nullptr;
@@ -125,7 +126,6 @@ int            s_duration_shown = -1;
 std::int32_t   s_bar_end      = -1;  // where the bar's end was last drawn, in pixels
 int            s_elapsed_s    = -1;
 lv_timer_t    *s_glide   = nullptr;
-lv_timer_t    *s_check   = nullptr;
 ViewId         s_music   = kNoView;
 
 void close_music()
@@ -187,17 +187,18 @@ void paint(const Palette &colours)
 // biggest thing on the screen.
 void show_cover()
 {
-    const void *small = s_media_art != nullptr && !lv_obj_is_hidden(s_media_art)
-                            ? lv_image_get_src(s_media_art)
-                            : nullptr;
-    const void *wanted = s_large != nullptr ? s_large : small;
-    if (wanted == s_shown && !s_cover_new) {
+    const MediaState &media = media_state();
+    const void       *small = media.art;
+    const void       *large = media.large;
+    const void       *wanted = large != nullptr ? large : small;
+    if (wanted == s_shown && media.covers == s_covers_shown && !s_repaint) {
         return;
     }
-    s_shown     = wanted;
-    s_cover_new = false;
+    s_shown        = wanted;
+    s_covers_shown = media.covers;
+    s_repaint      = false;
     lv_obj_set_hidden(s_cover, wanted == nullptr);
-    if (s_large != nullptr) {
+    if (large != nullptr) {
         const std::uint32_t bytes = lv_color_format_get_size(LV_COLOR_FORMAT_RGB565);
         s_cover_dsc.header.magic  = LV_IMAGE_HEADER_MAGIC;
         s_cover_dsc.header.cf     = LV_COLOR_FORMAT_RGB565;
@@ -205,10 +206,10 @@ void show_cover()
         s_cover_dsc.header.h      = COVER;
         s_cover_dsc.header.stride = COVER * bytes;
         s_cover_dsc.data_size     = COVER * COVER * bytes;
-        s_cover_dsc.data          = static_cast<const std::uint8_t *>(s_large);
+        s_cover_dsc.data          = static_cast<const std::uint8_t *>(large);
         lv_image_set_src(s_cover, &s_cover_dsc);
         lv_image_set_scale(s_cover, LV_SCALE_NONE);
-        paint(palette_of(static_cast<const std::uint16_t *>(s_large), COVER * COVER));
+        paint(palette_of(static_cast<const std::uint16_t *>(large), COVER * COVER));
     } else if (small != nullptr) {
         lv_image_set_src(s_cover, small);
         lv_image_set_scale(s_cover, SMALL_SCALE);
@@ -232,12 +233,12 @@ void show_volume(int percent)
 // elapsed time only when a second has gone.
 void glide(lv_timer_t *)
 {
-    if (s_duration_s <= 0) {
+    if (media_state().duration_s <= 0) {
         return;
     }
     const int          at_ms = media_position_ms_now();
     const std::int32_t end   = static_cast<std::int32_t>(static_cast<std::int64_t>(at_ms) * lv_obj_get_width(s_bar) /
-                                                         (static_cast<std::int64_t>(s_duration_s) * units::kMsPerSecond));
+                                                         (static_cast<std::int64_t>(media_state().duration_s) * units::kMsPerSecond));
     if (end != s_bar_end) {
         s_bar_end = end;
         lv_bar_set_value(s_bar, at_ms, LV_ANIM_OFF);
@@ -246,13 +247,6 @@ void glide(lv_timer_t *)
     if (at_s != s_elapsed_s) {
         s_elapsed_s = at_s;
         write_clock(s_elapsed, at_s);
-    }
-}
-
-void check(lv_timer_t *)
-{
-    if (!s_has_track_shown || media_is_video()) {
-        close_music();  // it stopped, or the cinema view is for this
     }
 }
 
@@ -272,40 +266,41 @@ void place_text(const char *title)
     lv_obj_set_y(s_title, top + source_h + LINE_GAP);
     lv_obj_set_y(s_artist, top + source_h + LINE_GAP + title_h + LINE_GAP);
 }
-}  // namespace
 
-void refresh_music()
+// What plays, as the model has it: its words, cover and times together.
+void show_media()
 {
-    if (s_view == nullptr || !view_open(s_music)) {
+    const MediaState &media = media_state();
+    if (!media.has_track || media_is_video()) {
+        close_music();  // it stopped, or the cinema view is for this
         return;
     }
-    theme::set_text(s_source, lv_label_get_text(s_media_source));
-    const char *title = lv_label_get_text(s_media_title);
-    if (std::strcmp(title, lv_label_get_text(s_title)) != 0) {
-        theme::set_text(s_title, title);
-        place_text(title);
+    theme::set_text(s_source, media.source);
+    if (std::strcmp(media.title, lv_label_get_text(s_title)) != 0) {
+        theme::set_text(s_title, media.title);
+        place_text(media.title);
     }
-    theme::set_text(s_artist, lv_label_get_text(s_media_artist));
+    theme::set_text(s_artist, media.artist);
     show_cover();
 
-    const bool known = s_duration_s > 0;
+    const bool known = media_state().duration_s > 0;
     for (lv_obj_t *part : {s_bar, s_elapsed, s_total}) {
         lv_obj_set_hidden(part, !known);
     }
     if (known) {
-        if (s_duration_s != s_duration_shown) {
-            s_duration_shown = s_duration_s;
-            lv_bar_set_range(s_bar, 0, s_duration_s * units::kMsPerSecond);
-            write_clock(s_total, s_duration_s);
+        if (media_state().duration_s != s_duration_shown) {
+            s_duration_shown = media_state().duration_s;
+            lv_bar_set_range(s_bar, 0, media_state().duration_s * units::kMsPerSecond);
+            write_clock(s_total, media_state().duration_s);
         }
         s_bar_end   = -1;  // where it is may have jumped
         s_elapsed_s = -1;
         glide(nullptr);
     }
 
-    theme::set_text(lv_obj_get_child(s_play, 0), s_playing_shown ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
-    lv_obj_set_hidden(s_paused, s_playing_shown);
-    const lv_opa_t dim = s_playing_shown ? static_cast<lv_opa_t>(LV_OPA_TRANSP) : PAUSED_DIM;
+    theme::set_text(lv_obj_get_child(s_play, 0), media_state().playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
+    lv_obj_set_hidden(s_paused, media_state().playing);
+    const lv_opa_t dim = media_state().playing ? static_cast<lv_opa_t>(LV_OPA_TRANSP) : PAUSED_DIM;
     if (lv_obj_get_style_image_recolor_opa(s_cover, LV_PART_MAIN) != dim) {
         lv_obj_set_style_image_recolor(s_cover, lv_color_hex(theme::background), 0);
         lv_obj_set_style_image_recolor_opa(s_cover, dim, 0);
@@ -313,13 +308,12 @@ void refresh_music()
     for (lv_obj_t *control : s_steer) {
         theme::set_usable(control, media_remote());
     }
-    theme::set_usable(s_volume, s_media_volume >= 0);
-    if (s_media_volume >= 0 && !s_volume_held) {
-        show_volume(s_media_volume);
+    theme::set_usable(s_volume, media_state().volume >= 0);
+    if (media_state().volume >= 0 && !s_volume_held) {
+        show_volume(media_state().volume);
     }
 }
 
-namespace {
 void volume_touched(lv_event_t *e)
 {
     const lv_event_code_t code = lv_event_get_code(e);
@@ -333,10 +327,11 @@ void volume_touched(lv_event_t *e)
     lv_obj_get_coords(s_volume, &bar);
     const int percent = std::clamp(static_cast<int>((at.x - bar.x1) * 100 / lv_area_get_width(&bar)), 0, 100);
     s_volume_held     = true;
-    if (percent == s_media_volume) {
+    if (percent == media_state().volume) {
         return;
     }
-    s_media_volume = percent;
+    media_state().volume = percent;
+    publish(Topic::Media);
     show_volume(percent);
     if (s_handlers.media_volume != nullptr) {
         s_handlers.media_volume(percent);
@@ -469,29 +464,17 @@ void build_music(lv_obj_t *screen)
     paint(pages_palette());
 
     s_glide = lv_timer_create(glide, GLIDE_MS, nullptr);
-    s_check = lv_timer_create(check, CHECK_MS, nullptr);
     lv_timer_pause(s_glide);
-    lv_timer_pause(s_check);
     s_music = add_view({"music", ViewKind::Fullscreen, s_view,
                         [] {
-                            s_cover_new      = true;  // coloured again, as the accent may have changed
+                            s_repaint        = true;  // coloured again, as the accent may have changed
                             s_duration_shown = -1;
                             lv_timer_resume(s_glide);
-                            lv_timer_resume(s_check);
-                            refresh_music();
                         },
-                        [] {
-                            lv_timer_pause(s_glide);
-                            lv_timer_pause(s_check);
-                        }});
+                        [] { lv_timer_pause(s_glide); }});
+    subscribe(Topic::Media, s_music, show_media);
     s_chrome = add_fullscreen_chrome(s_music, s_view, [](lv_event_t *) { close_music(); });
     paint(pages_palette());
-}
-
-void apply_music_cover(const void *pixels)
-{
-    s_large     = pixels;
-    s_cover_new = true;
 }
 
 bool music_open()

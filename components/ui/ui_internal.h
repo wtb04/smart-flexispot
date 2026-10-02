@@ -4,6 +4,7 @@
 // ui component includes this; ui.h is the interface.
 
 #include "ui.h"
+#include "media_model.h"
 
 #include "board.h"
 #include "media.h"
@@ -197,13 +198,7 @@ extern lv_image_dsc_t s_art_dsc[2];
 extern int s_art_slot;
 extern TextBox s_card_with_art, s_card_bare;
 extern bool s_has_art;
-extern int s_position_s;
-extern int s_duration_s;
-extern bool s_media_playing;
-extern TickType_t s_position_at;
 extern lv_timer_t *s_pause_timer;
-extern bool s_playing_shown;
-extern bool s_has_track_shown;
 extern bool s_present;
 extern int s_page;
 extern std::atomic<bool> s_setup_visible;
@@ -288,15 +283,11 @@ constexpr int SIT_PRESET       = 3;
 constexpr int ULTRA_LOW_PRESET = 1;  // Preset 2, as the cinema view sends the desk down
 
 // What plays on the media card, for the cinema view to show and control too.
-int         media_position_now();     // seconds, carried forward while it plays
-int         media_position_ms_now();  // the same in milliseconds, for a bar that glides
 void        open_favourites();        // the favourites' picker, when there are any
 void        media_seek_by(int delta_s);
 void        media_toggle_play();
 const char *media_skip_text();     // what the skip button offers, null for nothing
 void        media_skip();
-bool        media_is_video();
-extern int  s_media_volume;  // percent, as last reported or set, -1 before either
 
 // Jellyfin fullscreen: the film, its controls, the desk and the lights.
 void build_cinema(lv_obj_t *screen);
@@ -306,8 +297,6 @@ void apply_cinema_still(const void *pixels);
 void build_music(lv_obj_t *screen);
 void open_music();
 bool music_open();
-void apply_music_cover(const void *pixels);  // media::kLargeArtSize square, or null
-void refresh_music();  // after what plays changed: its title, cover and times together
 /** The time in a fullscreen view's bottom right corner, shown or put away by a
  *  tap there, as the last tap left it in any of them. */
 // The time beside a fullscreen view's chip back, faded with its other buttons,

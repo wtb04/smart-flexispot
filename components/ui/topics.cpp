@@ -22,6 +22,7 @@ std::deque<Follower> &followers()
 
 bool s_changed[static_cast<int>(Topic::Count)] = {};
 lv_timer_t *s_second = nullptr;
+bool        s_delivery_due = false;
 
 void second(lv_timer_t *)
 {
@@ -49,10 +50,17 @@ void subscribe(Topic topic, ViewId view, std::function<void()> changed)
 void publish(Topic topic)
 {
     s_changed[static_cast<int>(topic)] = true;
+    // Changed by a tap rather than an update: told on the next pass of the LVGL
+    // task all the same, once however many changed by then.
+    if (!s_delivery_due) {
+        s_delivery_due = true;
+        lv_async_call([](void *) { deliver_topics(); }, nullptr);
+    }
 }
 
 void deliver_topics()
 {
+    s_delivery_due = false;
     bool changed[static_cast<int>(Topic::Count)];
     for (int i = 0; i < static_cast<int>(Topic::Count); ++i) {
         changed[i]   = s_changed[i];

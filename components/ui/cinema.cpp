@@ -1,5 +1,7 @@
 #include "ui_internal.h"
 
+#include "topics.h"
+
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
@@ -96,8 +98,8 @@ void place_text(const char *title)
 /** The artist line holds the series, then its season and episode. */
 void show_text()
 {
-    const char *title  = lv_label_get_text(s_media_title);
-    const char *artist = lv_label_get_text(s_media_artist);
+    const char *title  = media_state().title;
+    const char *artist = media_state().artist;
     const char *split  = std::strchr(artist, '\n');
     if (std::strcmp(title, lv_label_get_text(s_title)) != 0) {
         theme::set_text(s_title, title);
@@ -116,22 +118,22 @@ void show_text()
 
 void show_progress()
 {
-    const bool known = s_duration_s > 0;
+    const bool known = media_state().duration_s > 0;
     lv_obj_set_hidden(s_bar, !known);
     lv_obj_set_hidden(s_elapsed, !known);
     lv_obj_set_hidden(s_total, !known);
     if (known) {
         const int at = media_position_now();
-        lv_bar_set_range(s_bar, 0, s_duration_s);
+        lv_bar_set_range(s_bar, 0, media_state().duration_s);
         lv_bar_set_value(s_bar, at, LV_ANIM_OFF);
         write_clock(s_elapsed, at);
-        write_clock(s_total, s_duration_s);
+        write_clock(s_total, media_state().duration_s);
     }
     // Ends at, by the clock, once the clock is known.
     const time_t now = std::time(nullptr);
     lv_obj_set_hidden(s_ends, !known || now < CLOCK_SET);
     if (known && now >= CLOCK_SET) {
-        const time_t ends = now + (s_duration_s - media_position_now());
+        const time_t ends = now + (media_state().duration_s - media_position_now());
         std::tm      local{};
         localtime_r(&ends, &local);
         char text[24];
@@ -163,21 +165,34 @@ void show_volume(int percent)
     theme::set_text(s_volume_level, text);
 }
 
-void tick(lv_timer_t *)
+// What plays, as the model has it, as it changes.
+void show_media()
 {
     if (!media_is_video()) {
         close_cinema();  // the film ended, or something else took over the card
         return;
     }
     show_text();
-    const lv_opa_t dim = s_playing_shown ? static_cast<lv_opa_t>(LV_OPA_TRANSP) : PAUSED_DIM;
+    const bool     playing = media_state().playing;
+    const lv_opa_t dim     = playing ? static_cast<lv_opa_t>(LV_OPA_TRANSP) : PAUSED_DIM;
     if (lv_obj_get_style_image_recolor_opa(s_still, LV_PART_MAIN) != dim) {
         lv_obj_set_style_image_recolor(s_still, lv_color_hex(theme::background), 0);
         lv_obj_set_style_image_recolor_opa(s_still, dim, 0);
     }
     show_progress();
-    theme::set_text(lv_obj_get_child(s_play, 0), s_playing_shown ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
-    lv_obj_set_hidden(s_paused, s_playing_shown);
+    theme::set_text(lv_obj_get_child(s_play, 0), playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
+    lv_obj_set_hidden(s_paused, playing);
+    theme::set_usable(s_volume, media_state().volume >= 0);
+    if (media_state().volume >= 0 && !s_volume_held) {
+        show_volume(media_state().volume);
+    }
+}
+
+// What goes on with the time: how far, the intro or credits to skip, and the
+// screen going dark; and what is not followed yet, the room and the episodes.
+void tick(lv_timer_t *)
+{
+    show_progress();
     const char *skip = media_skip_text();
     lv_obj_set_hidden(s_skip, skip == nullptr);
     if (skip != nullptr) {
@@ -191,10 +206,6 @@ void tick(lv_timer_t *)
     theme::set_usable(s_steer[1], media_remote() && s_neighbour[1]);
     theme::fill_accent_or(s_subtitles, s_subtitles_shown, theme::panel_light);
     theme::set_usable(s_subtitles, s_subtitles_available);
-    theme::set_usable(s_volume, s_media_volume >= 0);
-    if (s_media_volume >= 0 && !s_volume_held) {
-        show_volume(s_media_volume);
-    }
     light_chrome_chip(s_low_chip, s_preset_active[ULTRA_LOW_PRESET]);
     light_chrome_chip(s_lights_chip, s_lights_on);
     light_chrome_chip(s_screen_chip, s_auto_off);
@@ -315,10 +326,11 @@ void volume_touched(lv_event_t *e)
     lv_obj_get_coords(s_volume, &bar);
     const int percent = std::clamp(static_cast<int>((at.x - bar.x1) * 100 / lv_area_get_width(&bar)), 0, 100);
     s_volume_held = true;
-    if (percent == s_media_volume) {
+    if (percent == media_state().volume) {
         return;
     }
-    s_media_volume = percent;
+    media_state().volume = percent;
+    publish(Topic::Media);
     show_volume(percent);
     if (s_handlers.media_volume != nullptr) {
         s_handlers.media_volume(percent);
@@ -455,6 +467,7 @@ void build_cinema(lv_obj_t *screen)
                              tick(s_tick);
                          },
                          [] { lv_timer_pause(s_tick); }});
+    subscribe(Topic::Media, s_cinema, show_media);
     Chrome chrome = add_fullscreen_chrome(s_cinema, s_view, [](lv_event_t *) { close_cinema(); });
     s_low_chip    = add_chrome_chip(chrome, &icons::desk_lowest_icon, [](lv_event_t *) { preset(ULTRA_LOW_PRESET); });
     s_lights_chip = add_chrome_chip(chrome, &icons::bulb_icon, [](lv_event_t *) {
