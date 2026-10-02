@@ -1037,9 +1037,7 @@ void media_held()
         return;
     }
     if (media_state().hold_preset >= 0) {
-        if (s_handlers.preset != nullptr) {
-            s_handlers.preset(media_state().hold_preset, false);
-        }
+        desk_go_to(media_state().hold_preset);
     } else {
         open_music();
     }

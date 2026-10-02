@@ -416,20 +416,17 @@ void drop_oldest(Notice *queue, int &count)
 
 void apply_preset_active(int index, bool active)
 {
-    desk_state().preset_active[index] = active;
-    publish(Topic::Desk);
+    desk_take_active(index, active);
 }
 
 void apply_height(int height_mm)
 {
-    desk_state().height_mm = height_mm;
-    publish(Topic::Desk);
+    desk_take_height(height_mm);
 }
 
 void apply_desk_available(bool available)
 {
-    desk_state().available = available;
-    publish(Topic::Desk);
+    desk_take_available(available);
 }
 
 void apply_media_args(const MediaArgs &media)
@@ -500,20 +497,12 @@ void apply_pill(int index, const char *label, const char *value, Level level)
 
 void apply_lights(const char *label, const char *state, bool on)
 {
-    LightsState &lights = lights_state();
-    copy_text(lights.label, sizeof(lights.label), label);
-    copy_text(lights.state, sizeof(lights.state), state);
-    lights.on = on;
-    publish(Topic::Lights);
+    lights_take(label, state, on);
 }
 
 void apply_light(int index, const char *name, const char *state, bool on)
 {
-    LightState &light = lights_state().lights[index];
-    copy_text(light.name, sizeof(light.name), name);
-    copy_text(light.state, sizeof(light.state), state);
-    lights_state().light_on[index] = light.name[0] != '\0' && on;
-    publish(Topic::Lights);
+    lights_take_light(index, name, state, on);
 }
 
 void apply_dial_toggle(int index, const char *label, bool on)

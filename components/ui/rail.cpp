@@ -138,12 +138,10 @@ void bind_preset(lv_obj_t *button, int index)
 void preset_clicked_cb(lv_event_t *e)
 {
     const int index = static_cast<int>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e)));
-    const bool store = lv_event_get_code(e) == LV_EVENT_LONG_PRESSED;
-    if (!store && index >= 0 && index < kPresetCount && desk_state().preset_active[index]) {
-        return;
-    }
-    if (s_handlers.preset != nullptr) {
-        s_handlers.preset(index, store);
+    if (lv_event_get_code(e) != LV_EVENT_LONG_PRESSED) {
+        desk_go_to(index);
+    } else if (s_handlers.preset != nullptr) {
+        s_handlers.preset(index, true);  // held: the height it is at, stored there
     }
 }
 
@@ -279,12 +277,48 @@ bool      s_drawer_open   = false;
 }  // namespace
 
 namespace {
+constexpr std::int32_t  TRAVEL_RING = 3;    // round a preset the desk is on its way to
+constexpr std::uint32_t TRAVEL_PULSE_MS = 700;
+
+void set_ring_opa(void *obj, std::int32_t opa)
+{
+    lv_obj_set_style_border_opa(static_cast<lv_obj_t *>(obj), static_cast<lv_opa_t>(opa), 0);
+}
+
+}  // namespace
+
+// A ring in the accent that breathes while the desk is on its way there.
+void show_desk_travel(lv_obj_t *obj, bool travelling)
+{
+    if (obj == nullptr || (lv_obj_get_style_border_width(obj, LV_PART_MAIN) > 0) == travelling) {
+        return;
+    }
+    lv_anim_delete(obj, set_ring_opa);
+    lv_obj_set_style_border_width(obj, travelling ? TRAVEL_RING : 0, 0);
+    if (!travelling) {
+        return;
+    }
+    lv_obj_set_style_border_color(obj, lv_color_hex(theme::primary), 0);
+    lv_anim_t anim;
+    lv_anim_init(&anim);
+    lv_anim_set_var(&anim, obj);
+    lv_anim_set_exec_cb(&anim, set_ring_opa);
+    lv_anim_set_values(&anim, LV_OPA_30, LV_OPA_COVER);
+    lv_anim_set_duration(&anim, TRAVEL_PULSE_MS);
+    lv_anim_set_playback_duration(&anim, TRAVEL_PULSE_MS);
+    lv_anim_set_repeat_count(&anim, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_start(&anim);
+}
+
+
+namespace {
 // Each preset button lit while the desk stands at its height.
 void paint_presets()
 {
     for (int index = 0; index < kPresetCount; ++index) {
         lv_obj_t  *button = s_preset_buttons[index];
         const bool active = desk_state().preset_active[index];
+        show_desk_travel(button, desk_state().travelling == index);
         if (button == nullptr || lv_obj_has_state(button, LV_STATE_CHECKED) == active) {
             continue;
         }
@@ -535,6 +569,7 @@ void paint_desk_shortcuts()
     for (int i = 0; i < s_shortcut_sets; ++i) {
         for (std::size_t j = 0; j < SHORTCUT_COUNT; ++j) {
             const bool active = desk_state().preset_active[SHORTCUT_PRESETS[j]];
+            show_desk_travel(s_shortcuts[i].chips[j], desk_state().travelling == SHORTCUT_PRESETS[j]);
             lv_obj_set_state(s_shortcuts[i].chips[j], LV_STATE_CHECKED, active);
             lv_obj_set_state(s_shortcuts[i].marks[j], LV_STATE_CHECKED, active);
         }

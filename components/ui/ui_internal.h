@@ -202,7 +202,9 @@ void register_desk_control(lv_obj_t *obj);
 inline constexpr int kDeskShortcutButtons = 8;  // over the radar, focus, music and cinema views
 lv_obj_t *add_desk_shortcuts(lv_obj_t *root, std::int32_t x, std::int32_t y,  // what holds them
                              std::uint32_t chip_colour);
-void paint_desk_shortcuts();  // after the preset the desk is at changes
+void paint_desk_shortcuts();
+/** A ring in the accent round a preset's button, breathing while the desk is on its way there. */
+void show_desk_travel(lv_obj_t *obj, bool travelling);  // after the preset the desk is at changes
 void show_next_notice();
 void paint_notice_corner();  // when the notice on show came, and how many wait
 void create_notice_card();
