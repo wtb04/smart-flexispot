@@ -78,7 +78,7 @@ When something plays on Jellyfin the control bar follows it, and holding it ther
 |---|---|
 | ![The radar on Home](docs/screenshots/radar.png) | ![The radar page](docs/screenshots/radar-full.png) |
 
-Purely because it's fun: everything flying within 20 to 160 km on a map of the coast, each plane coloured by its height, with its airline, route, photo and trail. Left alone it follows the most notable aircraft in view, an A380 over a 737, taking turns every few minutes. Positions come from [adsb.lol](https://adsb.lol) and [adsb.fi](https://adsb.fi), aircraft and routes from [adsbdb](https://www.adsbdb.com), photos from [Planespotters](https://www.planespotters.net).
+Purely because it's fun: everything flying within 20 to 160 km on a map of the coast, each plane coloured by its height, with its airline, route, photo and trail. Left alone it follows the most notable aircraft in view, an A380 over a 737, taking turns every few minutes. Positions come from [adsb.lol](https://adsb.lol) and [adsb.fi](https://adsb.fi), aircraft and routes from [adsbdb](https://www.adsbdb.com) and [hexdb.io](https://hexdb.io), photos from [Planespotters](https://www.planespotters.net).
 
 ### The day
 
@@ -163,7 +163,7 @@ How the panel is put together inside, the desk protocol, and how to run the test
 ## Credits
 
 - [iMicknl/LoctekMotion_IoT](https://github.com/iMicknl/LoctekMotion_IoT) for working out the control box protocol and pinouts. This project would not exist without it.
-- [adsb.lol](https://adsb.lol), [adsb.fi](https://adsb.fi), [adsbdb](https://www.adsbdb.com) and [Planespotters](https://www.planespotters.net) for the planes, and the photographers for their photos.
+- [adsb.lol](https://adsb.lol), [adsb.fi](https://adsb.fi), [adsbdb](https://www.adsbdb.com), [hexdb.io](https://hexdb.io) and [Planespotters](https://www.planespotters.net) for the planes, and the photographers for their photos.
 - [Natural Earth](https://www.naturalearthdata.com) for the map.
 
 Made by [Wouter ten Brinke](https://woutertenbrinke.nl).

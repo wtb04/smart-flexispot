@@ -94,7 +94,7 @@ constexpr int          DOT_SIZE           = 5;
 
 // Turns between the few most notable in view, this often; one held drops out
 // only once it is outside a few more than that.
-constexpr std::uint32_t ROTATE_MS    = 5 * 60 * 1000;
+constexpr std::uint32_t ROTATE_MS    = 3 * 60 * 1000;
 constexpr int           ROTATE_AMONG = 3;
 constexpr int           ROTATE_KEEP  = ROTATE_AMONG + 1;
 constexpr std::uint32_t REFOLLOW_MS = 60 * 1000;  // untouched this long, it follows again
