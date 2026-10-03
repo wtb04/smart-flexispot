@@ -519,7 +519,7 @@ esp_err_t start_display(lv_display_t **out_disp)
 
 // The panel reads its frame from PSRAM through the DW-GDMA, some 140 MB/s at
 // the ST7121's 70 MHz. Every master starts level with every other, and when
-// the PPA and the CPU's cache were both busy with a fullscreen radar frame the
+// the PPA and the CPU's cache were both busy with a whole radar frame the
 // panel's reads fell behind and it showed blue for a moment: what IDF's DSI
 // driver calls an underrun, and says only the interconnect can prevent. Its
 // reads go first now; the rest keep taking turns behind them.

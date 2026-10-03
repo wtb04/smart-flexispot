@@ -252,16 +252,16 @@ int       s_range_step  = INITIAL_RANGE_STEP;
 // The two cards, the scope's and the column beside it, on Home; on the radar
 // page they become the map, to the page's every edge, with the column over it.
 // One radar, moved between the two as the page changes.
-lv_obj_t    *s_page      = nullptr;  // Home's place for them
-std::int32_t s_page_w    = 0;
-std::int32_t s_page_h    = 0;
+lv_obj_t    *s_home_area      = nullptr;  // Home's place for them
+std::int32_t s_home_w    = 0;
+std::int32_t s_home_h    = 0;
 lv_obj_t    *s_bezel     = nullptr;
 lv_obj_t    *s_column    = nullptr;
-lv_obj_t    *s_full      = nullptr;  // the radar page, which the map fills
-std::int32_t s_full_w    = 0;
-std::int32_t s_full_h    = 0;
+lv_obj_t    *s_map_page      = nullptr;  // the radar page, which the map fills
+std::int32_t s_map_w    = 0;
+std::int32_t s_map_h    = 0;
 bool         s_mapped    = false;    // laid out as the map, on the radar page
-lv_obj_t    *s_full_chip = nullptr;  // on Home, to the radar page
+lv_obj_t    *s_map_chip = nullptr;  // on Home, to the radar page
 lv_obj_t    *s_screw     = nullptr;
 
 // The scope is one opaque picture, which the PPA copies to the screen whole:
@@ -1388,9 +1388,9 @@ bool start_fast_zoom(int from_km)
     // ones, and the compass's letters, are kept as they are now.
     lv_area_t keep[16];
     int       kept = 0;
-    for (lv_obj_t *control : {s_zoom_out, s_zoom_in, s_full_chip, s_rings[0], s_rings[1], s_rings[2], s_rings[3],
+    for (lv_obj_t *control : {s_zoom_out, s_zoom_in, s_map_chip, s_rings[0], s_rings[1], s_rings[2], s_rings[3],
                               s_compass[0], s_compass[1], s_compass[2], s_compass[3]}) {
-        if (control != nullptr && !lv_obj_has_flag(control, LV_OBJ_FLAG_HIDDEN) && kept < 16) {
+        if (control != nullptr && !lv_obj_is_hidden(control) && kept < 16) {
             lv_obj_get_coords(control, &keep[kept++]);
         }
     }
@@ -1492,7 +1492,7 @@ lv_obj_t *zoom_chip(lv_obj_t *bezel, const lv_image_dsc_t *mark, int step)
     return chip;
 }
 
-void full_clicked(lv_event_t *);
+void map_clicked(lv_event_t *);
 
 // Zoom along the bottom, where the thumbs rest; on Home the way to the radar
 // page at the top right, as the cards of the control bar have it; a
@@ -1502,25 +1502,25 @@ void build_corners(lv_obj_t *bezel)
     s_zoom_out  = zoom_chip(bezel, &icons::minus_icon, 1);
     s_zoom_in   = zoom_chip(bezel, &icons::plus_icon, -1);
     s_screw     = theme::make_screw(bezel, ZOOM_D);
-    s_full_chip = theme::make_chip(bezel, "");
-    theme::make_mark(s_full_chip, &icons::expand_icon);
-    lv_obj_set_ext_click_area(s_full_chip, (CORNER - ZOOM_D) / 2);
-    lv_obj_add_event_cb(s_full_chip, full_clicked, LV_EVENT_CLICKED, nullptr);
+    s_map_chip = theme::make_chip(bezel, "");
+    theme::make_mark(s_map_chip, &icons::expand_icon);
+    lv_obj_set_ext_click_area(s_map_chip, (CORNER - ZOOM_D) / 2);
+    lv_obj_add_event_cb(s_map_chip, map_clicked, LV_EVENT_CLICKED, nullptr);
 }
 
 // On Home the chips are the darker surface on the lighter card; on the radar
 // page the map is that surface, so they take the black of the margin.
-void paint_chips(bool full)
+void paint_chips(bool mapped)
 {
-    for (lv_obj_t *chip : {s_zoom_out, s_zoom_in, s_full_chip}) {
-        lv_obj_set_style_bg_color(chip, lv_color_hex(full ? theme::background : theme::panel), 0);
+    for (lv_obj_t *chip : {s_zoom_out, s_zoom_in, s_map_chip}) {
+        lv_obj_set_style_bg_color(chip, lv_color_hex(mapped ? theme::background : theme::panel), 0);
     }
 }
 
 void place_corners(std::int32_t w, std::int32_t h)
 {
     lv_obj_set_pos(s_screw, EDGE, EDGE);
-    lv_obj_set_pos(s_full_chip, w - ZOOM_D - EDGE, EDGE);
+    lv_obj_set_pos(s_map_chip, w - ZOOM_D - EDGE, EDGE);
     lv_obj_set_pos(s_zoom_out, EDGE, h - ZOOM_D - EDGE);
     lv_obj_set_pos(s_zoom_in, w - ZOOM_D - EDGE, h - ZOOM_D - EDGE);
 }
@@ -2783,28 +2783,28 @@ void place_summary(std::int32_t area_w, std::int32_t height)
 }
 
 // The scope's card and the column beside it, as Home has them.
-void lay_out_page()
+void lay_out_cards()
 {
-    const std::int32_t area_w = s_page_w - COLUMN_W - COLUMN_GAP;
-    const std::int32_t disc   = std::min(area_w, s_page_h) - 2 * BEZEL;
-    lv_obj_set_parent(s_bezel, s_page);
+    const std::int32_t area_w = s_home_w - COLUMN_W - COLUMN_GAP;
+    const std::int32_t disc   = std::min(area_w, s_home_h) - 2 * BEZEL;
+    lv_obj_set_parent(s_bezel, s_home_area);
     lv_obj_set_style_bg_opa(s_bezel, LV_OPA_COVER, 0);
     lv_obj_set_pos(s_bezel, 0, 0);
-    lv_obj_set_size(s_bezel, area_w, s_page_h);
+    lv_obj_set_size(s_bezel, area_w, s_home_h);
     build_scope_in({disc, disc, disc / 2, disc / 2, disc / 2 - RIM_BAND, false, 0}, (area_w - disc) / 2,
-                   (s_page_h - disc) / 2);
-    place_corners(area_w, s_page_h);
+                   (s_home_h - disc) / 2);
+    place_corners(area_w, s_home_h);
     paint_chips(false);
     lv_obj_set_hidden(s_screw, false);
-    place_summary(area_w, s_page_h);
+    place_summary(area_w, s_home_h);
 
-    lv_obj_set_parent(s_column, s_page);
+    lv_obj_set_parent(s_column, s_home_area);
     lv_obj_set_pos(s_column, area_w + COLUMN_GAP, 0);
-    lv_obj_set_size(s_column, COLUMN_W, s_page_h);
+    lv_obj_set_size(s_column, COLUMN_W, s_home_h);
     lv_obj_set_style_bg_color(s_column, lv_color_hex(theme::panel_light), 0);
     lv_obj_set_style_bg_opa(s_column, LV_OPA_COVER, 0);
-    place_readings_at(s_page_h);
-    lv_obj_set_hidden(s_full_chip, false);
+    place_readings_at(s_home_h);
+    lv_obj_set_hidden(s_map_chip, false);
     s_mapped = false;
     show_radar(*s_last);
 }
@@ -2812,12 +2812,12 @@ void lay_out_page()
 // On the radar page there are no cards: the map is one rounded panel over the
 // whole page, the planes to its every edge, the rings at its height beside the
 // column, and the column floating over it on a darkened patch.
-void lay_out_full()
+void lay_out_map()
 {
-    const std::int32_t w      = s_full_w;
-    const std::int32_t h      = s_full_h;
+    const std::int32_t w      = s_map_w;
+    const std::int32_t h      = s_map_h;
     const std::int32_t area_w = w - COLUMN_W - detail::GAP;  // the map beside the column
-    lv_obj_set_parent(s_bezel, s_full);
+    lv_obj_set_parent(s_bezel, s_map_page);
     lv_obj_set_style_bg_opa(s_bezel, LV_OPA_TRANSP, 0);
     lv_obj_set_pos(s_bezel, 0, 0);
     lv_obj_set_size(s_bezel, w, h);
@@ -2825,10 +2825,10 @@ void lay_out_full()
     place_corners(area_w, h);
     paint_chips(true);
     lv_obj_set_hidden(s_screw, true);
-    lv_obj_set_hidden(s_full_chip, true);  // the dock's tabs go back
+    lv_obj_set_hidden(s_map_chip, true);  // the dock's tabs go back
     place_summary(area_w, h);
 
-    lv_obj_set_parent(s_column, s_full);
+    lv_obj_set_parent(s_column, s_map_page);
     lv_obj_set_pos(s_column, area_w, detail::GAP);
     lv_obj_set_size(s_column, COLUMN_W, h - 2 * detail::GAP);
     lv_obj_set_style_bg_color(s_column, lv_color_hex(theme::background), 0);
@@ -2839,14 +2839,14 @@ void lay_out_full()
 }
 
 // Laid out by radar_page_opened as the page is chosen.
-void open_full()
+void open_map()
 {
     detail::select_page(detail::RADAR_PAGE);
 }
 
-void full_clicked(lv_event_t *)
+void map_clicked(lv_event_t *)
 {
-    open_full();
+    open_map();
 }
 }  // namespace
 
@@ -2860,13 +2860,13 @@ void build_radar_page(lv_obj_t *page, std::int32_t width, std::int32_t height)
     }
     s_last->age_s = -1;  // nothing read yet, rather than a reading that failed
 
-    s_full        = page;
-    s_full_w      = width;
-    s_full_h      = height;
-    if (s_page == nullptr) {  // no place on Home: the cards on the radar page
-        s_page   = page;
-        s_page_w = width;
-        s_page_h = height;
+    s_map_page        = page;
+    s_map_w      = width;
+    s_map_h      = height;
+    if (s_home_area == nullptr) {  // no place on Home: the cards on the radar page
+        s_home_area   = page;
+        s_home_w = width;
+        s_home_h = height;
     }
     s_shown_range = static_cast<float>(RANGES[s_range_step]);
     s_bezel       = theme::make_card(page);
@@ -2882,7 +2882,7 @@ void build_radar_page(lv_obj_t *page, std::int32_t width, std::int32_t height)
     quiet(s_summary);
     paint_range_buttons();
     build_column(page, 0, height);
-    lay_out_page();
+    lay_out_cards();
     s_grow_timer = lv_timer_create(grow_tick, TRAIL_FRAME_MS, nullptr);
     lv_timer_pause(s_grow_timer);
     detail::subscribe(detail::Topic::Radar, detail::kNoView, refresh_radar);
@@ -2923,7 +2923,7 @@ void radar_page_opened()
         radar::snapshot(*s_last);  // laid out, it draws this once
         s_radar_stale = false;
     }
-    s_mapped ? lay_out_page() : lay_out_full();
+    s_mapped ? lay_out_cards() : lay_out_map();
 }
 
 void show_radar(const radar::Snapshot &snapshot)
@@ -3050,11 +3050,11 @@ int whole_frame_ms()
 int without_ms(const std::vector<lv_obj_t *> &parts)
 {
     for (lv_obj_t *part : parts) {
-        lv_obj_add_flag(part, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(part, true);
     }
     const int ms = whole_frame_ms();
     for (lv_obj_t *part : parts) {
-        lv_obj_remove_flag(part, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(part, false);
     }
     return ms;
 }
@@ -3141,7 +3141,7 @@ bool bench_ready()
 }
 }  // namespace
 
-int bench_radar_full(char *out, std::size_t size, bool open)
+int bench_radar_map(char *out, std::size_t size, bool open)
 {
     if (!open) {
 #ifdef ESP_PLATFORM
@@ -3158,7 +3158,7 @@ int bench_radar_full(char *out, std::size_t size, bool open)
     if (!bench_ready()) {
         return std::snprintf(out, size, "waiting for the feed\n");
     }
-    open_full();
+    open_map();
     s_following    = true;
     s_grown_hex[0] = '\0';  // its trail grows in, as when chosen
     show_radar(*s_last);
@@ -3166,7 +3166,7 @@ int bench_radar_full(char *out, std::size_t size, bool open)
 }
 
 // One frame of a zoom in, magnified by a quarter, held on the panel until
-// bench_radar_full(false) puts the screen back: to see what a zoom shows.
+// bench_radar_map(false) puts the screen back: to see what a zoom shows.
 int bench_radar_zoom_frame(char *out, std::size_t size)
 {
 #ifdef ESP_PLATFORM
@@ -3176,9 +3176,9 @@ int bench_radar_zoom_frame(char *out, std::size_t size)
     lv_refr_now(nullptr);
     lv_area_t keep[16];
     int       kept = 0;
-    for (lv_obj_t *control : {s_zoom_out, s_zoom_in, s_full_chip, s_rings[0], s_rings[1], s_rings[2], s_rings[3],
+    for (lv_obj_t *control : {s_zoom_out, s_zoom_in, s_map_chip, s_rings[0], s_rings[1], s_rings[2], s_rings[3],
                               s_compass[0], s_compass[1], s_compass[2], s_compass[3]}) {
-        if (control != nullptr && !lv_obj_has_flag(control, LV_OBJ_FLAG_HIDDEN) && kept < 16) {
+        if (control != nullptr && !lv_obj_is_hidden(control) && kept < 16) {
             lv_obj_get_coords(control, &keep[kept++]);
         }
     }
@@ -3214,7 +3214,7 @@ int bench_radar(char *out, std::size_t size)
 
     int n = std::snprintf(out, size, "page frame %d ms\n", whole_frame_ms());
     const std::int64_t opening = esp_timer_get_time();
-    open_full();
+    open_map();
     const int laid_out = static_cast<int>((esp_timer_get_time() - opening) / units::kUsPerMs);
     const int first    = timed_frame();
     n += std::snprintf(out + n, size - n, "opening the map: laid out %d ms, first frame %d ms\n", laid_out, first);
@@ -3418,11 +3418,11 @@ int bench_radar(char *out, std::size_t size)
                            static_cast<double>(one.catch_up_us) / 1000.0 / std::max<std::uint32_t>(one.frames, 1));
         const auto tile_without = [&](const char *name, std::vector<lv_obj_t *> parts) {
             for (lv_obj_t *part : parts) {
-                lv_obj_add_flag(part, LV_OBJ_FLAG_HIDDEN);
+                lv_obj_set_hidden(part, true);
             }
             n += std::snprintf(out + n, size - n, "  without %s %.1f ms\n", name, tile_ms());
             for (lv_obj_t *part : parts) {
-                lv_obj_remove_flag(part, LV_OBJ_FLAG_HIDDEN);
+                lv_obj_set_hidden(part, false);
             }
         };
         // The same area drawn again through the view's root rather than the
@@ -3432,10 +3432,10 @@ int bench_radar(char *out, std::size_t size)
             std::int64_t  total = 0;
             lv_refr_now(nullptr);
             for (int i = 0; i < RUNS; ++i) {
-                lv_obj_invalidate_area(s_full, &tile);
+                lv_obj_invalidate_area(s_map_page, &tile);
                 lv_refr_now(nullptr);  // the wait for the panel is in each, so it is taken out
                 const std::int64_t began = esp_timer_get_time();
-                lv_obj_invalidate_area(s_full, &tile);
+                lv_obj_invalidate_area(s_map_page, &tile);
                 board::take_flush_times();
                 lv_refr_now(nullptr);
                 const board::FlushTimes one = board::take_flush_times();
@@ -3444,12 +3444,12 @@ int bench_radar(char *out, std::size_t size)
             return static_cast<double>(total) / RUNS / 1000.0;
         };
         n += std::snprintf(out + n, size - n, "  the tile through the root, less the wait: %.1f ms", root_ms());
-        lv_obj_add_flag(s_canvas, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(s_canvas, true);
         n += std::snprintf(out + n, size - n, ", without the picture %.1f ms", root_ms());
-        lv_obj_remove_flag(s_canvas, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(s_scope, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(s_canvas, false);
+        lv_obj_set_hidden(s_scope, true);
         n += std::snprintf(out + n, size - n, ", without the scope %.1f ms\n", root_ms());
-        lv_obj_remove_flag(s_scope, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(s_scope, false);
         tile_without("the altitude scale", {std::begin(s_legend), std::end(s_legend)});
         tile_without("the picture", {s_canvas});
         std::vector<lv_obj_t *> names;
@@ -3495,15 +3495,15 @@ std::int32_t radar_cards_width(std::int32_t height)
 
 void radar_home_area(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int32_t w, std::int32_t h)
 {
-    s_page = lv_obj_create(parent);
-    lv_obj_remove_style_all(s_page);
-    lv_obj_set_pos(s_page, x, y);
-    lv_obj_set_size(s_page, w, h);
-    lv_obj_set_scrollable(s_page, false);
-    s_page_w = w;
-    s_page_h = h;
+    s_home_area = lv_obj_create(parent);
+    lv_obj_remove_style_all(s_home_area);
+    lv_obj_set_pos(s_home_area, x, y);
+    lv_obj_set_size(s_home_area, w, h);
+    lv_obj_set_scrollable(s_home_area, false);
+    s_home_w = w;
+    s_home_h = h;
     // Away with the radar page while the phone is, as the feed stops then.
-    detail::subscribe(detail::Topic::Page, detail::kNoView, [] { lv_obj_set_hidden(s_page, detail::owner_away()); });
+    detail::subscribe(detail::Topic::Page, detail::kNoView, [] { lv_obj_set_hidden(s_home_area, detail::owner_away()); });
 }
 
 }  // namespace ui

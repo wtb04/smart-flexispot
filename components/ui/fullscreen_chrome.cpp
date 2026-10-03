@@ -1,7 +1,7 @@
 #include "ui_internal.h"
 
 #include "focus_model.h"
-#include "focus_page.h"
+#include "focus_view.h"
 #include "settings_model.h"
 #include "status_model.h"
 #include "topics.h"
@@ -225,7 +225,7 @@ lv_obj_t *make_slot(lv_obj_t *parent, std::int32_t w)
 void arrange_top()
 {
     // Built for the dock at the right; for the left, each row runs the other way.
-    const bool           right = layout().rail_right;
+    const bool           right = layout().dock_right;
     const lv_flex_flow_t flow  = right ? LV_FLEX_FLOW_ROW : LV_FLEX_FLOW_ROW_REVERSE;
     lv_obj_set_flex_flow(s_top_bar, flow);
     lv_obj_set_flex_flow(s_status, flow);

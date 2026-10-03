@@ -135,9 +135,9 @@ void on_screen(bool on)
     }
 }
 
-void on_rail_side(bool right)
+void on_dock_side(bool right)
 {
-    settings::set(settings::Key::RailSide, right);
+    settings::set(settings::Key::DockSide, right);
 }
 
 void on_orientation(ui::Orientation orientation)
@@ -407,7 +407,7 @@ extern "C" void app_main(void)
         .radar       = on_radar_page,
         .log         = diagnostics::logs,
         .primary     = on_primary,
-        .rail_side   = on_rail_side,
+        .dock_side   = on_dock_side,
         .orientation = on_orientation,
         .screen      = on_screen,
         .details     = on_details,
@@ -422,7 +422,7 @@ extern "C" void app_main(void)
     ui::set_cards(diagnostics::cards(), diagnostics::card_count());
     ESP_ERROR_CHECK(ui::init(handlers, brightness,
                              static_cast<std::uint32_t>(settings::get(settings::Key::Accent)),
-                             settings::enabled(settings::Key::RailSide),
+                             settings::enabled(settings::Key::DockSide),
                              settings::enabled(settings::Key::OrientAuto) ? ui::Orientation::Auto
                              : flipped                                    ? ui::Orientation::Flipped
                                                                           : ui::Orientation::Normal));

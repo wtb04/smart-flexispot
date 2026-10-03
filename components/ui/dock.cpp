@@ -25,18 +25,18 @@ constexpr std::int32_t FOCUS_H     = 72;
 constexpr std::int32_t FOCUS_APART = 16;  // from the tabs over it
 constexpr std::int32_t HOME_APART  = 24;  // from Sit over it
 
-constexpr std::int32_t SHEET_PAD     = 28;
-constexpr std::int32_t SHEET_BTN_GAP = 20;
-constexpr std::int32_t SHEET_W       = 520;
-constexpr std::int32_t SHEET_INNER_W = SHEET_W - 2 * SHEET_PAD;
-constexpr std::int32_t SHEET_COLS    = 2;
-constexpr std::int32_t SHEET_BTN_W   = (SHEET_INNER_W - (SHEET_COLS - 1) * SHEET_BTN_GAP) / SHEET_COLS;
-constexpr std::int32_t SHEET_BTN_H   = 112;
+constexpr std::int32_t CARD_PAD     = 28;
+constexpr std::int32_t CARD_BTN_GAP = 20;
+constexpr std::int32_t CARD_W       = 520;
+constexpr std::int32_t CARD_INNER_W = CARD_W - 2 * CARD_PAD;
+constexpr std::int32_t CARD_COLS    = 2;
+constexpr std::int32_t CARD_BTN_W   = (CARD_INNER_W - (CARD_COLS - 1) * CARD_BTN_GAP) / CARD_COLS;
+constexpr std::int32_t CARD_BTN_H   = 112;
 // Folded out, it goes again once left alone this long.
-constexpr std::uint32_t SHEET_IDLE_MS = 20 * 1000;
+constexpr std::uint32_t CARD_IDLE_MS = 20 * 1000;
 
 // The presets the dock has no room for.
-constexpr int SHEET_PRESETS[] = {ULTRA_LOW_PRESET, 0, 4, 5};
+constexpr int CARD_PRESETS[] = {ULTRA_LOW_PRESET, 0, 4, 5};
 // Presets 5 and 6 are for whoever uses the desk while the phone is away.
 constexpr int GUEST_PRESETS[] = {4, 5};
 
@@ -190,8 +190,8 @@ lv_obj_t   *s_focus_left    = nullptr;  // how long is left while it runs
 lv_obj_t   *s_dock_height   = nullptr;  // the height, at the dock's head
 lv_obj_t   *s_dock_unit     = nullptr;  // cm, under it
 lv_obj_t   *s_height_button = nullptr;  // around it: folds the desk out
-Popout      s_desk;                     // the rest of the desk, folded out beside the height
-lv_obj_t   *s_sheet         = nullptr;  // its card
+Popout      s_desk_pop;                     // the rest of the desk, folded out beside the height
+lv_obj_t   *s_desk_card         = nullptr;  // its card
 
 void build_dock_desk(lv_obj_t *dock)
 {
@@ -212,7 +212,7 @@ void build_dock_desk(lv_obj_t *dock)
     theme::fill_accent(height, LV_STATE_CHECKED);
     lv_obj_set_flex_flow(height, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(height, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_add_event_cb(height, [](lv_event_t *) { open_desk_sheet(!s_desk.open); }, LV_EVENT_CLICKED, nullptr);
+    lv_obj_add_event_cb(height, [](lv_event_t *) { open_desk_card(!s_desk_pop.open); }, LV_EVENT_CLICKED, nullptr);
     s_dock_height = theme::make_label(height, "--", theme::primary, fonts::size_28());
     s_dock_unit   = theme::make_label(height, "cm", theme::secondary, theme::type_label());
 
@@ -249,7 +249,7 @@ void build_focus_button(lv_obj_t *tabs)
     theme::fill_accent(s_focus_button, LV_STATE_CHECKED);
     // On the accent while its card is out, as the height is, the timer on it in the text's colour.
     lv_obj_add_event_cb(s_focus_button, [](lv_event_t *) {
-        toggle_focus_popout(s_focus_button, s_rail, [](bool open) {
+        toggle_focus_popout(s_focus_button, s_dock, [](bool open) {
             lv_obj_set_style_image_recolor(s_focus_mark, lv_color_hex(open ? theme::text : theme::secondary), 0);
             paint_focus_button();
         });
@@ -276,14 +276,7 @@ void show_dock_height(int mm)
     theme::set_text(s_dock_height, text);
 }
 
-// From the dock's edge, at the top, out across the page.
-void place_sheet()
-{
-    const Layout l = layout();
-    place_popout(s_desk, l.rail_right ? l.rail_x : l.rail_x + DOCK_W, 0, l.rail_right);
-}
-
-void add_sheet_preset(lv_obj_t *grid, int index)
+void add_card_preset(lv_obj_t *grid, int index)
 {
     char label[24];
     std::snprintf(label, sizeof(label), "%s", preset_name(index));
@@ -291,35 +284,42 @@ void add_sheet_preset(lv_obj_t *grid, int index)
         *c = static_cast<char>(std::toupper(static_cast<unsigned char>(*c)));
     }
     lv_obj_t *btn = theme::make_button(grid, label, theme::panel_light, fonts::size_22());
-    lv_obj_set_size(btn, SHEET_BTN_W, SHEET_BTN_H);
+    lv_obj_set_size(btn, CARD_BTN_W, CARD_BTN_H);
     theme::fill_accent(btn, LV_STATE_CHECKED);
     bind_preset(btn, index);
     register_desk_control(btn);
 }
 
 // As tall as the rows of buttons showing.
-void fit_sheet()
+void fit_desk_card()
 {
     int showing = 0;
-    for (const int index : SHEET_PRESETS) {
+    for (const int index : CARD_PRESETS) {
         showing += lv_obj_is_hidden(s_preset_buttons[index]) ? 0 : 1;
     }
-    const int          rows = (showing + SHEET_COLS - 1) / SHEET_COLS + 1;
-    lv_obj_set_height(s_sheet, 2 * SHEET_PAD + rows * SHEET_BTN_H + (rows - 1) * SHEET_BTN_GAP);
-    fit_popout(s_desk);
+    const int          rows = (showing + CARD_COLS - 1) / CARD_COLS + 1;
+    lv_obj_set_height(s_desk_card, 2 * CARD_PAD + rows * CARD_BTN_H + (rows - 1) * CARD_BTN_GAP);
+    fit_popout(s_desk_pop);
 }
 }  // namespace
 
+// From the dock's edge, at the top, out across the page.
+void place_desk_card()
+{
+    const Layout l = layout();
+    place_popout(s_desk_pop, l.dock_right ? l.dock_x : l.dock_x + DOCK_W, 0, l.dock_right);
+}
+
 void show_guest_presets()
 {
-    if (s_sheet == nullptr) {
+    if (s_desk_card == nullptr) {
         return;
     }
     const bool shown = owner_away() || !s_presence_gate;
     for (const int index : GUEST_PRESETS) {
         lv_obj_set_hidden(s_preset_buttons[index], !shown);
     }
-    fit_sheet();
+    fit_desk_card();
 }
 
 void paint_desk_shortcuts()
@@ -362,8 +362,8 @@ void create_dock(lv_obj_t *parent)
 {
     const Layout l = layout();
     lv_obj_t    *dock = lv_obj_create(parent);
-    s_rail            = dock;
-    lv_obj_set_pos(dock, l.rail_x, GAP);
+    s_dock            = dock;
+    lv_obj_set_pos(dock, l.dock_x, GAP);
     lv_obj_set_size(dock, DOCK_W, l.screen_h - 2 * GAP);
     theme::style_panel(dock, theme::panel, theme::radius::card);
     lv_obj_set_style_pad_all(dock, DOCK_PAD, 0);
@@ -383,75 +383,36 @@ void create_dock(lv_obj_t *parent)
     });
 }
 
-void open_desk_sheet(bool open)
+void open_desk_card(bool open)
 {
-    open_popout(s_desk, open);
+    open_popout(s_desk_pop, open);
 }
 
-void create_desk_sheet(lv_obj_t *parent)
+void create_desk_card(lv_obj_t *parent)
 {
-    s_sheet       = build_popout(s_desk, parent, SHEET_W, FROM_DOCK, GAP, SHEET_IDLE_MS);
-    s_desk.button = s_height_button;
-    s_desk.above  = s_rail;
+    s_desk_card       = build_popout(s_desk_pop, parent, CARD_W, FROM_DOCK, GAP, CARD_IDLE_MS);
+    s_desk_pop.button = s_height_button;
+    s_desk_pop.above  = s_dock;
     // On the accent while out, the height on it in the text's colour.
-    s_desk.lit = [](bool open) {
+    s_desk_pop.lit = [](bool open) {
         theme::set_text_color(s_dock_height, open ? theme::text : theme::primary);
         theme::set_text_color(s_dock_unit, open ? theme::text : theme::secondary);
     };
-    lv_obj_set_style_pad_all(s_sheet, SHEET_PAD, 0);
-    lv_obj_set_flex_flow(s_sheet, LV_FLEX_FLOW_ROW_WRAP);
-    lv_obj_set_style_pad_row(s_sheet, SHEET_BTN_GAP, 0);
-    lv_obj_set_style_pad_column(s_sheet, SHEET_BTN_GAP, 0);
+    lv_obj_set_style_pad_all(s_desk_card, CARD_PAD, 0);
+    lv_obj_set_flex_flow(s_desk_card, LV_FLEX_FLOW_ROW_WRAP);
+    lv_obj_set_style_pad_row(s_desk_card, CARD_BTN_GAP, 0);
+    lv_obj_set_style_pad_column(s_desk_card, CARD_BTN_GAP, 0);
 
     // Up and down first, level with the height they change.
-    create_move_button(s_sheet, LV_SYMBOL_UP, Move::Up, SHEET_BTN_W, SHEET_BTN_H);
-    create_move_button(s_sheet, LV_SYMBOL_DOWN, Move::Down, SHEET_BTN_W, SHEET_BTN_H);
-    for (const int index : SHEET_PRESETS) {
-        add_sheet_preset(s_sheet, index);
+    create_move_button(s_desk_card, LV_SYMBOL_UP, Move::Up, CARD_BTN_W, CARD_BTN_H);
+    create_move_button(s_desk_card, LV_SYMBOL_DOWN, Move::Down, CARD_BTN_W, CARD_BTN_H);
+    for (const int index : CARD_PRESETS) {
+        add_card_preset(s_desk_card, index);
     }
 
-    place_sheet();
+    place_desk_card();
     show_guest_presets();
     paint_presets();
-}
-
-namespace {
-void place_for_side()
-{
-    const Layout l = layout();
-    lv_obj_set_x(s_rail, l.rail_x);
-    lv_obj_set_pos(s_content, l.content_x, l.content_y);
-    place_sheet();
-    place_top_bar();
-    place_notice();
-}
-}  // namespace
-
-void paint_pick(lv_obj_t *const *buttons, int count, int picked)
-{
-    for (int i = 0; i < count; ++i) {
-        const bool chosen = i == picked;
-        lv_obj_set_state(buttons[i], LV_STATE_CHECKED, chosen);
-        theme::set_text_color(lv_obj_get_child(buttons[i], 0),
-                              chosen ? theme::text : theme::secondary);
-    }
-}
-
-void paint_choice(lv_obj_t *const buttons[2], bool second)
-{
-    paint_pick(buttons, 2, second ? 1 : 0);
-}
-
-void paint_side_buttons()
-{
-    paint_choice(s_side_buttons, s_rail_right);
-}
-
-void apply_rail_side(bool right)
-{
-    s_rail_right = right;
-    place_for_side();
-    paint_side_buttons();
 }
 
 }  // namespace ui::detail
@@ -465,12 +426,12 @@ constexpr std::int64_t BENCH_GIVE_UP_US = 2'000'000;
 int time_fold(bool open, char *out, std::size_t size)
 {
     using namespace detail;
-    open_desk_sheet(open);
+    open_desk_card(open);
     const std::int64_t began  = esp_timer_get_time();
     std::int64_t       drawn  = 0;
     std::int64_t       worst  = 0;
     int                frames = 0;
-    while (popout_moving(s_desk) && esp_timer_get_time() - began < BENCH_GIVE_UP_US) {
+    while (popout_moving(s_desk_pop) && esp_timer_get_time() - began < BENCH_GIVE_UP_US) {
         lv_anim_refr_now();
         const std::int64_t start = esp_timer_get_time();
         lv_refr_now(nullptr);
@@ -487,15 +448,15 @@ int time_fold(bool open, char *out, std::size_t size)
 }
 }  // namespace
 
-int bench_sheet(char *out, std::size_t size)
+int bench_desk_card(char *out, std::size_t size)
 {
     using namespace detail;
-    if (s_sheet == nullptr) {
+    if (s_desk_card == nullptr) {
         return std::snprintf(out, size, "not built yet\n");
     }
     const int page = s_page;
-    open_desk_sheet(false);
-    while (popout_moving(s_desk)) {
+    open_desk_card(false);
+    while (popout_moving(s_desk_pop)) {
         lv_anim_refr_now();
     }
     select_page(HOME_PAGE);

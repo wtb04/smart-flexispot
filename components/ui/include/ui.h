@@ -99,7 +99,7 @@ using PrimaryHandler = void (*)(std::uint32_t colour);
 using ScreenHandler = void (*)(bool on);
 
 /** True while the dock is against the right edge. */
-using RailSideHandler = void (*)(bool right);
+using DockSideHandler = void (*)(bool right);
 
 /** True while the panel is hung the other way up. */
 enum class Orientation : std::uint8_t { Normal, Flipped, Auto };
@@ -290,7 +290,7 @@ struct Handlers {
     RadarHandler       radar;
     LogHandler         log;
     PrimaryHandler     primary;
-    RailSideHandler    rail_side;
+    DockSideHandler    dock_side;
     OrientationHandler orientation;
     ScreenHandler      screen;
     DetailsHandler     details;
@@ -303,11 +303,11 @@ struct Handlers {
 };
 
 /** Requires the LVGL port to be running. A zero accent keeps the built-in
- *  colour; rail_right puts the dock against the right edge instead of the left.
+ *  colour; dock_right puts the dock against the right edge instead of the left.
  *  orientation only tells the page which choice to show; board::init() has
  *  already turned the display, and turns it again as the choice asks. */
 esp_err_t init(const Handlers &handlers, int initial_brightness, std::uint32_t accent,
-               bool rail_right, Orientation orientation);
+               bool dock_right, Orientation orientation);
 
 /** After init() has put up the splash and the screen is lit: everything else,
  *  built behind the splash a part at a time so that it keeps moving. Nothing
@@ -404,10 +404,10 @@ int bench_radar_open(char *out, std::size_t size);
 /** A development build's: the radar page left open, running as it does,
  *  following the nearest aircraft; or, with `open` false, the screen put back
  *  as it was before. */
-int bench_radar_full(char *out, std::size_t size, bool open);
+int bench_radar_map(char *out, std::size_t size, bool open);
 int bench_radar_zoom_frame(char *out, std::size_t size);  // a zoom's frame, held until put back
 /** A development build's: what each frame of the desk's card unfolding costs. */
-int bench_sheet(char *out, std::size_t size);
+int bench_desk_card(char *out, std::size_t size);
 
 /** A development build's: preset `index` tapped, as a finger on its button. With the LVGL lock. */
 void desk_tap(int index);

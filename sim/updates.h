@@ -1,7 +1,7 @@
 #pragma once
 
 // Firmware updates, played: nothing is sent or installed. U steps through what
-// the rail, the Setup dot and the restart tile show while one arrives and waits.
+// the control bar's icon, the Setup dot and the restart tile show while one arrives and waits.
 namespace updates {
 void next();
 

@@ -118,21 +118,6 @@ void nav_event_cb(lv_event_t *e)
 }
 }  // namespace
 
-lv_obj_t *s_brightness_value = nullptr;
-
-void brightness_event_cb(lv_event_t *e)
-{
-    auto      *slider  = static_cast<lv_obj_t *>(lv_event_get_target(e));
-    const int  percent = static_cast<int>(lv_slider_get_value(slider));
-
-    char text[8];
-    std::snprintf(text, sizeof(text), "%d%%", percent);
-    theme::set_text(s_brightness_value, text);
-
-    if (s_handlers.brightness != nullptr) {
-        s_handlers.brightness(percent);
-    }
-}
 namespace {
 lv_obj_t *make_bare_box(lv_obj_t *parent)
 {

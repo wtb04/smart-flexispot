@@ -1,4 +1,4 @@
-#include "focus_page.h"
+#include "focus_view.h"
 
 #include "focus_model.h"
 #include "popout.h"
@@ -571,7 +571,7 @@ void toggle_focus_popout(lv_obj_t *button, lv_obj_t *dock, void (*lit)(bool open
         lv_obj_get_coords(dock, &side);
         // Beside the dock, its foot level with the button's at the dock's foot,
         // unfolding up from there.
-        const bool right = detail::layout().rail_right;
+        const bool right = detail::layout().dock_right;
         detail::place_popout(s_pop, right ? side.x1 : side.x2 + 1, at.y2 + 1 + detail::GAP, right, true);
         s_pop.button = button;
         s_pop.above  = dock;

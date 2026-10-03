@@ -73,7 +73,7 @@ void open_under(Popout &p, lv_obj_t *slot)
     if (!p.open) {
         lv_area_t at;
         lv_obj_get_coords(slot, &at);
-        const bool right = layout().rail_right;
+        const bool right = layout().dock_right;
         place_popout(p, right ? at.x1 - GAP : at.x2 + 1 + GAP, at.y2 + 1, !right);
     }
     open_popout(p, !p.open);

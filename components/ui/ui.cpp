@@ -1,6 +1,6 @@
 #include "ui_internal.h"
 #include "focus_model.h"
-#include "focus_page.h"
+#include "focus_view.h"
 #include "diagnostics_model.h"
 #include "home_model.h"
 #include "notices_model.h"
@@ -27,7 +27,7 @@ constexpr std::uint32_t SHOT_START_MS = 25000;
 constexpr std::uint32_t SHOT_PAGE_MS  = 2000;
 }  // namespace
 
-bool s_rail_right = true;
+bool s_dock_right = true;
 
 Orientation s_orientation = Orientation::Normal;
 
@@ -38,12 +38,12 @@ Layout layout()
     const std::int32_t h    = lv_display_get_vertical_resolution(disp);
     return Layout{w,
                   h,
-                  s_rail_right ? GAP : GAP + DOCK_W + GAP,
+                  s_dock_right ? GAP : GAP + DOCK_W + GAP,
                   CONTENT_Y,
                   w - DOCK_W - 3 * GAP,
                   h - CONTENT_Y - GAP,
-                  s_rail_right ? w - GAP - DOCK_W : GAP,
-                  s_rail_right};
+                  s_dock_right ? w - GAP - DOCK_W : GAP,
+                  s_dock_right};
 }
 
 Handlers s_handlers{};
@@ -112,10 +112,18 @@ void register_desk_control(lv_obj_t *obj)
 }
 int               s_initial_brightness = DEFAULT_BRIGHTNESS_PERCENT;
 
-lv_obj_t *s_rail          = nullptr;  // the dock
+lv_obj_t *s_dock          = nullptr;  // the dock
 lv_obj_t *s_content       = nullptr;
-lv_obj_t *s_side_buttons[CHOICE_COUNT]      = {};
-lv_obj_t *s_flip_buttons[ORIENTATION_COUNT] = {};
+
+void place_for_side()
+{
+    const Layout l = layout();
+    lv_obj_set_x(s_dock, l.dock_x);
+    lv_obj_set_pos(s_content, l.content_x, l.content_y);
+    place_desk_card();
+    place_top_bar();
+    place_notice();
+}
 namespace {
 // One page per tick rather than all at once: a tab's colour eases in, and a
 // picture taken straight after the switch shows the old tab lit. Pages hidden
@@ -136,7 +144,7 @@ void take_screenshots(lv_timer_t *timer)
     if (++step < static_cast<int>(std::size(PAGES))) {
         select_page(PAGES[step]);
         if (SHOT_DESK_CARD) {
-            open_desk_sheet(true);
+            open_desk_card(true);
         }
         lv_timer_set_period(timer, SHOT_PAGE_MS);
         return;
@@ -183,9 +191,10 @@ bool build_next_part()
             if (SHOT_ENABLED) {
                 lv_timer_create(take_screenshots, SHOT_START_MS, nullptr);
             }
-            create_desk_sheet(scr);
+            create_desk_card(scr);
             build_cinema(scr);
             build_music(scr);
+            build_favourites(scr);
             build_focus_full(scr);
             create_notice_card();
             follow_pages();
@@ -687,7 +696,7 @@ void apply_home_updates()
     }
 }
 
-void apply_rail_updates()
+void apply_status_updates()
 {
     if (TimeText time{}; take(p_time, time)) {
         apply_time(time.get());
@@ -772,7 +781,7 @@ void apply_pending(lv_timer_t *)
     apply_desk_updates();
     apply_media_updates();
     apply_home_updates();
-    apply_rail_updates();
+    apply_status_updates();
     apply_diagnostics_updates();
     apply_glances();
     apply_page_updates();
@@ -1142,7 +1151,7 @@ esp_err_t notify(const char *source, const char *title, const char *message, Lev
 }
 
 esp_err_t init(const Handlers &handlers, int initial_brightness, std::uint32_t accent,
-               bool rail_right, Orientation orientation)
+               bool dock_right, Orientation orientation)
 {
     ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
     fonts::init();
@@ -1150,7 +1159,7 @@ esp_err_t init(const Handlers &handlers, int initial_brightness, std::uint32_t a
     if (accent != 0) {
         theme::set_primary(accent);
     }
-    s_rail_right         = rail_right;
+    s_dock_right         = dock_right;
     s_orientation        = orientation;
     s_handlers           = handlers;
     s_initial_brightness = initial_brightness;

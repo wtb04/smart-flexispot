@@ -477,4 +477,16 @@ void open_music()
 {
     open_view(s_music);
 }
+// Minutes and seconds, as a track's progress is told: here, in its card and in the cinema view.
+void write_clock(lv_obj_t *label, int seconds)
+{
+    if (seconds < 0) {
+        seconds = 0;
+    }
+    char text[16];
+    std::snprintf(text, sizeof(text), "%d:%02d", seconds / units::kSecondsPerMinute,
+                  seconds % units::kSecondsPerMinute);
+    theme::set_text(label, text);
+}
+
 }  // namespace ui::detail
