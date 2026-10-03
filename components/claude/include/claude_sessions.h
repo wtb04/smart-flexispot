@@ -12,7 +12,7 @@
 namespace claude {
 
 inline constexpr int kSessionCount = 6;  // the most kept; the one heard from longest ago makes room
-inline constexpr int kLatelyCount  = 4;
+inline constexpr int kLatelyCount  = 6;
 inline constexpr int kStepCount    = 5;  // two done, the one under way, two to come
 
 // Shown this long after the last event from any session, and while one waits on you.

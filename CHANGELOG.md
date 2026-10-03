@@ -12,7 +12,7 @@ One frame for every page, with what is touched every day in it.
 - Home is the air, the radar as its page had it, and what comes next; the Radar page is the map to its every edge.
 - The desk's presets act as the control box's own keys: one tapped while the desk moves stops it, and a start just after a stop waits until the box will take it.
 - The panel shows it has been unplugged or plugged in within two seconds.
-- Claude Code on the laptops: a pill beside the lights while a session works, a ring of one piece per session, amber with a chime and a notice while one waits on you, and gone ten minutes after the last event. Its card has each session's project and laptop, what it does, its steps and what it did last. The laptops post to `/claude` from Claude Code's hooks with `tools/claude-hook`, names only, under a key of their own.
+- Claude Code on the laptops: a pill beside the lights while a session works, a ring of one piece per session with their count inside it, amber with a chime and a notice while one waits on you, and gone ten minutes after the last event. Its card has each session's project and laptop, what it does, its steps and what it did last. The laptops post to `/claude` from Claude Code's hooks with `tools/claude-hook`, names only, under a key of their own.
 - `/desk` on a development build: what the desk heard and was asked, and a preset tapped from afar.
 
 ## v0.7.0, 30 September 2026

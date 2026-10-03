@@ -12,13 +12,12 @@
 
 // The laptops' Claude Code sessions: beside the lights while any has been
 // heard from in the last ten minutes, or waits on you, a ring of one piece per
-// session round a shell's prompt; under it a card of what each is doing.
-// Gone the rest of the time, and while an update arrives, which needs its room.
+// session with how many there are inside it; under it a card of what each is
+// doing. Gone the rest of the time, and while an update arrives, which needs
+// its room.
 namespace ui::detail {
 namespace {
-constexpr std::int32_t PILL_W       = 120;
-constexpr std::int32_t PILL_PAD     = 14;
-constexpr std::int32_t PILL_GAP     = 12;
+constexpr std::int32_t PILL_W       = TOP_H;  // round: the ring and its count, nothing more
 constexpr std::int32_t RING         = 48;
 constexpr std::int32_t RING_W       = 4;
 constexpr int          RING_GAP_DEG = 14;  // between its pieces
@@ -44,6 +43,7 @@ constexpr std::int32_t  DETAIL_W     = (ROW_INNER - DETAIL_INSET - ROW_PAD - 2 *
 constexpr std::int32_t  WHEN_W       = 52;
 constexpr std::int32_t  ACT_ICON     = 22;
 constexpr std::int32_t  STEP_ICON    = 16;
+constexpr int           LATELY_BESIDE_STEPS = claude::kStepCount;  // as many as the steps, to keep it level
 constexpr int           ROWS         = 4;  // the most urgent; more, one opened, would run off the screen
 constexpr std::uint32_t CARD_IDLE_MS = 30 * 1000;
 constexpr std::int64_t  MS_PER_MIN   = 60 * 1000;
@@ -65,6 +65,8 @@ struct Row {
     lv_obj_t *step_line[claude::kStepCount]{};
     lv_obj_t *step_icon[claude::kStepCount]{};
     lv_obj_t *step_text[claude::kStepCount]{};
+    lv_obj_t *steps_col  = nullptr;
+    lv_obj_t *lately_col = nullptr;
     lv_obj_t *act_line[claude::kLatelyCount]{};
     lv_obj_t *act_when[claude::kLatelyCount]{};
     lv_obj_t *act_symbol[claude::kLatelyCount]{};  // LVGL's own, for editing and reading
@@ -75,7 +77,6 @@ struct Row {
 claude::Snapshot *s_snap = nullptr;  // in PSRAM, by LVGL's allocator: internal RAM is short
 lv_obj_t         *s_slot = nullptr;
 lv_obj_t         *s_ring[claude::kSessionCount]{};
-lv_obj_t         *s_mark  = nullptr;
 lv_obj_t         *s_count = nullptr;
 Popout            s_pop;
 lv_obj_t         *s_summary = nullptr;
@@ -222,7 +223,6 @@ void paint_pill()
             lv_obj_set_style_arc_opa(piece, LV_OPA_COVER, LV_PART_MAIN);
         }
     }
-    tint(s_mark, !amber && busy, amber ? theme::background : theme::secondary);
     char count[8];
     std::snprintf(count, sizeof(count), "%d", s_snap->count);
     theme::set_text(s_count, count);
@@ -233,7 +233,9 @@ void paint_pill()
 
 void paint_detail(Row &row, const claude::Session &session)
 {
-    lv_obj_set_hidden(row.step_head, session.step_count == 0);
+    const bool steps = session.step_count > 0;
+    lv_obj_set_hidden(row.steps_col, !steps);
+    lv_obj_set_width(row.lately_col, steps ? DETAIL_W : 2 * DETAIL_W + 2 * theme::space::l);
     for (int i = 0; i < claude::kStepCount; ++i) {
         const bool shown = i < session.step_count;
         lv_obj_set_hidden(row.step_line[i], !shown);
@@ -250,7 +252,7 @@ void paint_detail(Row &row, const claude::Session &session)
         theme::set_text_color(row.step_text[i], now ? theme::text : theme::secondary);
     }
     for (int i = 0; i < claude::kLatelyCount; ++i) {
-        const bool shown = i < session.lately_count;
+        const bool shown = i < session.lately_count && (!steps || i < LATELY_BESIDE_STEPS);
         lv_obj_set_hidden(row.act_line[i], !shown);
         if (!shown) {
             continue;
@@ -444,6 +446,7 @@ void build_detail(Row &row)
     lv_obj_set_style_pad_column(row.detail, 2 * theme::space::l, 0);
 
     lv_obj_t *steps = column(row.detail, DETAIL_W, theme::space::s);
+    row.steps_col   = steps;
     row.step_head   = theme::make_eyebrow(steps, "STEPS");
     for (int i = 0; i < claude::kStepCount; ++i) {
         row.step_line[i] = theme::make_box(steps);
@@ -456,8 +459,12 @@ void build_detail(Row &row)
                                             DETAIL_W - STEP_ICON - theme::space::s);
     }
 
+    // In two columns of its own when there are no steps beside it.
     lv_obj_t *lately = column(row.detail, DETAIL_W, theme::space::s);
-    theme::make_eyebrow(lately, "LATELY");
+    lv_obj_set_flex_flow(lately, LV_FLEX_FLOW_ROW_WRAP);
+    lv_obj_set_style_pad_column(lately, 2 * theme::space::l, 0);
+    row.lately_col = lately;
+    lv_obj_set_width(theme::make_eyebrow(lately, "LATELY"), lv_pct(100));
     for (int i = 0; i < claude::kLatelyCount; ++i) {
         row.act_line[i] = theme::make_box(lately);
         lv_obj_set_size(row.act_line[i], DETAIL_W, LV_SIZE_CONTENT);
@@ -534,13 +541,11 @@ void build_claude_slot(lv_obj_t *bar)
     theme::style_button(s_slot, theme::panel);
     lv_obj_set_size(s_slot, PILL_W, TOP_H);
     lv_obj_set_style_radius(s_slot, theme::radius::pill, 0);
-    lv_obj_set_style_pad_left(s_slot, PILL_PAD, 0);
-    lv_obj_set_style_pad_right(s_slot, 0, 0);
     lv_obj_set_ext_click_area(s_slot, BAR_GAP / 2);
     lv_obj_set_scrollable(s_slot, false);
     lv_obj_set_flex_flow(s_slot, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(s_slot, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(s_slot, PILL_GAP, 0);
+    lv_obj_set_flex_align(s_slot, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_all(s_slot, 0, 0);
     theme::light_when_out(s_slot);
     lv_obj_add_event_cb(s_slot, pill_tapped, LV_EVENT_CLICKED, nullptr);
 
@@ -558,12 +563,11 @@ void build_claude_slot(lv_obj_t *bar)
         lv_obj_set_clickable(piece, false);
         lv_obj_set_hidden(piece, true);
     }
-    s_mark = theme::make_icon(ring, &icons::claude_mark_icon, theme::secondary);
-    lv_obj_center(s_mark);
-    // As wide as two digits, so the pill keeps its look from one session to six.
-    s_count = theme::make_label(s_slot, "0", theme::secondary, fonts::size_22());
-    lv_obj_set_width(s_count, width_of("00", fonts::size_22()));
+    s_count = theme::make_label(ring, "0", theme::secondary, fonts::size_20());
+    lv_obj_set_width(s_count, RING);
+    lv_obj_set_style_text_align(s_count, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_clickable(s_count, false);
+    theme::center_ink(s_count);  // the digits in the ring's middle, not the line
     lv_obj_set_hidden(s_slot, true);
 }
 

@@ -101,15 +101,15 @@ TEST(ClaudeTable, a_prompt_sets_it_working_and_its_tools_say_what_it_does)
 {
     Table table;
     table.apply(event("s1", "UserPromptSubmit"), 0);
-    for (const char *file : {"a.cpp", "b.cpp", "c.cpp", "d.cpp", "e.cpp"}) {
-        table.apply(event("s1", "PreToolUse", "Edit", file), 1 * min);
+    for (int i = 0; i < kLatelyCount + 2; ++i) {
+        table.apply(event("s1", "PreToolUse", "Edit", ("f" + std::to_string(i)).c_str()), 1 * min);
     }
     const Session &s = shot(table, 2 * min).sessions[0];
     EXPECT_EQ(s.state, State::Working);
-    EXPECT_STREQ(s.doing.what, "e.cpp");
+    EXPECT_EQ(std::string(s.doing.what), "f" + std::to_string(kLatelyCount + 1));
     ASSERT_EQ(s.lately_count, kLatelyCount) << "only the last few";
-    EXPECT_STREQ(s.lately[0].what, "e.cpp") << "newest first";
-    EXPECT_STREQ(s.lately[3].what, "b.cpp");
+    EXPECT_STREQ(s.lately[0].what, s.doing.what) << "newest first";
+    EXPECT_EQ(std::string(s.lately[kLatelyCount - 1].what), "f2");
 }
 
 TEST(ClaudeTable, a_step_list_written_is_no_action)

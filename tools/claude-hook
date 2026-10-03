@@ -16,10 +16,11 @@ command -v jq >/dev/null && command -v curl >/dev/null || exit 0
 
 body=$(jq -c --arg machine "${CLAUDE_MACHINE:-$(hostname -s)}" '
   def base: split("/") | last;
-  # The command that does the work: past any cd, and any variable set first.
+  # The command that does the work: past any cd, any variable set first, and
+  # into a $( ) one is set from.
   def first_word:
-    [splits("&&|\\|\\||;|\\|") | split(" ") | map(select(. != ""))
-     | until(length == 0 or (.[0] | contains("=") | not); .[1:]) | .[0] // empty]
+    [splits("&&|\\|\\||;|\\||\n") | gsub("\\$\\(|`|[()]"; " ") | [splits("[ \t]+")] | map(select(. != ""))
+     | until(length == 0 or (.[0] | (contains("=") or startswith("-")) | not); .[1:]) | .[0] // empty]
     | (map(select(. != "cd" and . != "export")) + .) | (.[0] // "") | base;
   (.tool_input // {}) as $in
   | (.tool_name // "") as $tool
