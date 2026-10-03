@@ -42,18 +42,6 @@ esp_err_t display_on(int percent);
  *  above all -- has to put it to sleep rather than only dim it. */
 esp_err_t display_off();
 
-/** A development build's: interrupts held off on `core` for `ms`, as a long
- *  critical section would, and what the display's DMA did meanwhile. */
-struct StallProbe {
-    int           channel          = -1;
-    int           core             = -1;
-    int           moves            = 0;  // times its source address changed
-    int           wraps            = 0;  // times it went back to a buffer's start
-    std::int32_t  longest_still_us = 0;
-    std::uint32_t first = 0, last = 0, fb0 = 0, fb1 = 0;
-};
-StallProbe probe_stall(int ms, int core);
-
 /** How many frames the panel has been sent since it started, some 58 a
  *  second; fewer when something held its interrupt off. */
 std::uint32_t refreshes();
@@ -84,14 +72,6 @@ struct FlushTimes {
     std::int64_t  catch_up_us = 0;
 };
 FlushTimes take_flush_times();
-
-/** For the bench: turning a whole frame onto the panel in strips or tiles of
- *  each size, timed. Under the LVGL lock, into the buffer not on show. */
-int bench_rotation(char *out, std::size_t size);
-
-/** For a development build: a copy of the frame the panel is showing, as it
- *  holds it, portrait RGB565, to free with heap_caps_free; null without room. */
-std::uint8_t *copy_shown_frame(int &width, int &height);
 
 /** A zoom drawn past LVGL, which is to draw nothing until zoom_end(): each
  *  frame is the picture LVGL shows, magnified by the PPA as it turns it onto

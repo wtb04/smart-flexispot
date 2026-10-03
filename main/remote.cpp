@@ -42,9 +42,6 @@ constexpr int           LOG_LINES_MAX     = 400;
 constexpr std::uint32_t ALL_CHANNELS      = 0xffffffff;
 constexpr std::size_t   QUERY_MAX         = 32;
 constexpr std::size_t   SEND_CHUNK        = 16 * units::kBytesPerKiB;
-constexpr std::uint32_t CRASH_DELAY_MS    = 500;  // for the answer to get out first
-constexpr std::uint32_t CRASH_STACK       = 2048;
-constexpr UBaseType_t   CRASH_PRIORITY    = 5;
 
 esp_err_t refuse(httpd_req_t *req)
 {
@@ -240,38 +237,8 @@ esp_err_t screen_page(httpd_req_t *req)
     heap_caps_free(pixels);
     return err == ESP_OK ? httpd_resp_send_chunk(req, nullptr, 0) : err;
 }
-constexpr std::uint32_t PANEL_LOCK_MS = 1000;
 
-// The frame the panel itself shows, as its DMA reads it: portrait, and after
-// whatever the buffers' bringing up to date did, which /screen does not see.
-esp_err_t panel_page(httpd_req_t *req)
-{
-    if (!ota::authorised(req)) {
-        return refuse(req);
-    }
-    int           width  = 0;
-    int           height = 0;
-    std::uint8_t *pixels = nullptr;
-    if (lvgl_port_lock(PANEL_LOCK_MS)) {
-        pixels = board::copy_shown_frame(width, height);
-        lvgl_port_unlock();
-    }
-    if (pixels == nullptr) {
-        httpd_resp_set_status(req, "503 Service Unavailable");
-        return httpd_resp_sendstr(req, "the frame could not be had\n");
-    }
-    httpd_resp_set_type(req, "application/octet-stream");
-    char      head[32];
-    const int n   = std::snprintf(head, sizeof(head), "RGB565 %d %d\n", width, height);
-    esp_err_t err = httpd_resp_send_chunk(req, head, n);
-    const std::size_t total = static_cast<std::size_t>(width) * height * sizeof(std::uint16_t);
-    for (std::size_t at = 0; err == ESP_OK && at < total; at += SEND_CHUNK) {
-        err = httpd_resp_send_chunk(req, reinterpret_cast<const char *>(pixels) + at,
-                                    static_cast<ssize_t>(std::min(SEND_CHUNK, total - at)));
-    }
-    heap_caps_free(pixels);
-    return err == ESP_OK ? httpd_resp_send_chunk(req, nullptr, 0) : err;
-}
+constexpr std::uint32_t PANEL_LOCK_MS = 1000;
 
 // Every half minute, in the log: what could run down or pile up over a long
 // run, the heaps, the screen's objects and the slowest frame since the last
@@ -373,34 +340,6 @@ void start_stats()
     }
     xTaskCreate(stats_task, "stats", STATS_STACK, nullptr, STATS_PRIORITY, nullptr);
 }
-// Interrupts held off on a core for a while, and what the display's DMA did
-// meanwhile: /stall?ms=30&core=0.
-esp_err_t stall_page(httpd_req_t *req)
-{
-    if (!ota::authorised(req)) {
-        return refuse(req);
-    }
-    char query[QUERY_MAX] = "", value[8] = "";
-    httpd_req_get_url_query_str(req, query, sizeof(query));
-    int ms = 30, core = 0;
-    if (httpd_query_key_value(query, "ms", value, sizeof(value)) == ESP_OK) {
-        ms = std::clamp(std::atoi(value), 1, 200);
-    }
-    if (httpd_query_key_value(query, "core", value, sizeof(value)) == ESP_OK) {
-        core = std::clamp(std::atoi(value), 0, 1);
-    }
-    const board::StallProbe p = board::probe_stall(ms, core);
-    char text[256];
-    std::snprintf(text, sizeof(text),
-                  "%d ms on core %d, channel %d: moved %d times, wrapped %d, still for %ld us at most\n"
-                  "from %08lx to %08lx; frames at %08lx and %08lx\n",
-                  ms, p.core, p.channel, p.moves, p.wraps, static_cast<long>(p.longest_still_us),
-                  static_cast<unsigned long>(p.first), static_cast<unsigned long>(p.last),
-                  static_cast<unsigned long>(p.fb0), static_cast<unsigned long>(p.fb1));
-    httpd_resp_set_type(req, "text/plain");
-    return httpd_resp_sendstr(req, text);
-}
-
 // Every live connection net keeps, and how it is doing; ?restart=N begins
 // that one again, as a drop would.
 esp_err_t streams_page(httpd_req_t *req)
@@ -521,23 +460,6 @@ esp_err_t restart_page(httpd_req_t *req)
     return httpd_resp_sendstr_chunk(req, nullptr);
 }
 
-// Crashes the panel on purpose, a moment after answering, to see that
-// last_words catches it: the log after the restart says where.
-esp_err_t crash_page(httpd_req_t *req)
-{
-    if (!ota::authorised(req)) {
-        return refuse(req);
-    }
-    httpd_resp_sendstr(req, "crashing\n");
-    xTaskCreate(
-        [](void *) {
-            vTaskDelay(pdMS_TO_TICKS(CRASH_DELAY_MS));
-            *static_cast<volatile int *>(nullptr) = 0;
-        },
-        "crash", CRASH_STACK, nullptr, CRASH_PRIORITY, nullptr);
-    return ESP_OK;
-}
-
 // The desk's trace, of what it heard and was asked; ?clear starts it over,
 // ?tap=N taps preset N (1 to 6) as a finger on its button would.
 esp_err_t desk_page(httpd_req_t *req)
@@ -587,8 +509,6 @@ esp_err_t bench_page(httpd_req_t *req)
         n = std::strcmp(query, "open") == 0     ? ui::bench_radar_open(text, sizeof(text))
             : std::strcmp(query, "map") == 0    ? ui::bench_radar_map(text, sizeof(text), true)
             : std::strcmp(query, "back") == 0   ? ui::bench_radar_map(text, sizeof(text), false)
-            : std::strcmp(query, "zoomed") == 0 ? ui::bench_radar_zoom_frame(text, sizeof(text))
-            : std::strcmp(query, "rotate") == 0 ? board::bench_rotation(text, sizeof(text))
             : std::strcmp(query, "desk") == 0   ? ui::bench_desk_card(text, sizeof(text))
             : std::strcmp(query, "pages") == 0  ? ui::bench_pages(text, sizeof(text))
                                                 : ui::bench_radar(text, sizeof(text));
@@ -610,14 +530,11 @@ esp_err_t start()
     const httpd_uri_t pages[] = {
         {.uri = "/log", .method = HTTP_GET, .handler = log_page, .user_ctx = nullptr},
         {.uri = "/screen", .method = HTTP_GET, .handler = screen_page, .user_ctx = nullptr},
-        {.uri = "/panel", .method = HTTP_GET, .handler = panel_page, .user_ctx = nullptr},
         {.uri = "/heap", .method = HTTP_GET, .handler = heap_page, .user_ctx = nullptr},
         {.uri = "/power", .method = HTTP_GET, .handler = power_page, .user_ctx = nullptr},
         {.uri = "/bench", .method = HTTP_GET, .handler = bench_page, .user_ctx = nullptr},
         {.uri = "/desk", .method = HTTP_GET, .handler = desk_page, .user_ctx = nullptr},
-        {.uri = "/crash", .method = HTTP_GET, .handler = crash_page, .user_ctx = nullptr},
         {.uri = "/restart", .method = HTTP_GET, .handler = restart_page, .user_ctx = nullptr},
-        {.uri = "/stall", .method = HTTP_GET, .handler = stall_page, .user_ctx = nullptr},
         {.uri = "/streams", .method = HTTP_GET, .handler = streams_page, .user_ctx = nullptr},
         {.uri = "/jobs", .method = HTTP_GET, .handler = jobs_page, .user_ctx = nullptr},
         {.uri = "/coredump", .method = HTTP_GET, .handler = coredump_page, .user_ctx = nullptr},

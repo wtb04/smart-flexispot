@@ -419,7 +419,6 @@ int bench_radar_open(char *out, std::size_t size);
  *  following the nearest aircraft; or, with `open` false, the screen put back
  *  as it was before. */
 int bench_radar_map(char *out, std::size_t size, bool open);
-int bench_radar_zoom_frame(char *out, std::size_t size);  // a zoom's frame, held until put back
 /** A development build's: what each frame of the desk's card unfolding costs. */
 int bench_desk_card(char *out, std::size_t size);
 /** A development build's: each page switched to in turn, what the switch, its
