@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <vector>
+#include <string>
 
 // What live.cpp's threads call, one fetch at a time.
 namespace live {
