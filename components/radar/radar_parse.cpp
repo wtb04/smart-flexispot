@@ -572,7 +572,7 @@ double dot(const Unit &a, const Unit &b)
 
 namespace {
 // ICAO type designators of the wide-bodies, by how they start.
-constexpr const char *WIDE_BODIES[] = {"B74", "B76", "B77", "B78", "A33", "A34", "A35", "A38", "A30", "MD11", "IL96"};
+constexpr const char *WIDE_BODIES[] = {"B74", "B76", "B77", "B78", "A33", "A34", "A35", "A38", "A30", "A310", "MD11", "IL96"};
 constexpr int         CRUISING_FT   = 20000;
 constexpr int         MILITARY      = 6;  // over a heavy cruising, 5
 constexpr int         EMERGENCY     = 10;
@@ -608,11 +608,12 @@ int notability(const Aircraft &aircraft)
     const bool  airline = std::isupper(call[0]) && std::isupper(call[1]) && std::isupper(call[2]) &&
                           std::isdigit(call[3]);
     const char  size    = aircraft.category[0] == 'A' ? aircraft.category[1] : '\0';
-    if (!airline && size != '3' && size != '4' && size != '5') {
+    const bool  wide    = size == '5' || wide_body(aircraft.type);
+    if (!airline && !wide && size != '3' && size != '4') {
         return 0;
     }
     int score = 1;
-    if (size == '5' || wide_body(aircraft.type)) {
+    if (wide) {
         score += 3;
     } else if (size == '4') {
         score += 1;

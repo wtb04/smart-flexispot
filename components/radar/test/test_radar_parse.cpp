@@ -336,6 +336,10 @@ TEST(RadarParse, notability)
     EXPECT_GT(narrow_high, narrow_low) << "cruising over climbing out";
     EXPECT_GT(wide_high, narrow_high) << "a heavy over a 737";
     EXPECT_GT(wide_by_type, narrow_high) << "a wide-body known by its type, without a category";
+    EXPECT_EQ(notability(aircraft("KLM689", "", "A332", 9000)), notability(aircraft("", "", "A310", 9000)))
+        << "an A330 and an A310 alike";
+    EXPECT_LT(notability(aircraft("EZY12AB", "", "A319", 9000)), notability(aircraft("", "", "A310", 9000)))
+        << "but not an A319";
     EXPECT_GT(notability(aircraft("PHAHJ", "A1", "C172", 2000, 7700)), wide_high) << "an emergency above all";
 
     Aircraft fighter = aircraft("VIPER1", "A6", "F35", 12000);
