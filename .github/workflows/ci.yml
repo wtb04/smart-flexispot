@@ -1,7 +1,11 @@
 name: CI
 
+# A branch is checked by its pull request, so a push to it runs once rather
+# than twice; main and the tags on their own.
 on:
   push:
+    branches: [main]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -50,6 +54,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     container: espressif/idf:v5.5.5
+    env:
+      IDF_CCACHE_ENABLE: 1
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_MAXSIZE: 1G
     strategy:
       fail-fast: false
       matrix:
@@ -81,11 +90,26 @@ jobs:
         run: |
           sed -i "s|path: .*/components/esp_hosted$|path: $PWD/components/esp_hosted|" dependencies.lock
 
+      # What the last build compiled, so only what changed is compiled again.
+      - name: Compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-${{ matrix.variant }}-${{ github.sha }}
+          restore-keys: ccache-${{ matrix.variant }}-
+
+      - name: Downloaded components
+        uses: actions/cache@v4
+        with:
+          path: managed_components
+          key: components-${{ hashFiles('dependencies.lock') }}
+
       - name: Build
         shell: bash
         run: |
           . "$IDF_PATH/export.sh"
           idf.py -B ${{ matrix.dir }} ${{ matrix.flags }} build
+          ccache -s
 
       # One image for the whole flash, written at 0x0 on a panel fresh from
       # the box or one that will not boot.
@@ -126,15 +150,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install SDL, curl, zlib and a virtual display
+      - name: Install SDL, curl, zlib, ccache and a virtual display
         run: |
           sudo apt-get update
-          sudo apt-get install -y libsdl2-dev libcurl4-openssl-dev zlib1g-dev pkg-config xvfb
+          sudo apt-get install -y libsdl2-dev libcurl4-openssl-dev zlib1g-dev pkg-config xvfb ccache
+
+      - name: Compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-sim-${{ github.sha }}
+          restore-keys: ccache-sim-
 
       - name: Build
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+          CCACHE_BASEDIR: ${{ github.workspace }}
         run: |
-          cmake -S sim -B sim/build -DCMAKE_BUILD_TYPE=Release
+          cmake -S sim -B sim/build -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
           cmake --build sim/build -j "$(nproc)"
+          ccache -s
 
       # SDL's dummy driver has no renderer on Linux; a virtual X server has.
       - name: Screenshots of the main views
