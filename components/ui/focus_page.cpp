@@ -311,7 +311,7 @@ const char *phase_name(FocusPhase phase)
 // Until when, or what starting it starts: `start` says how.
 void under_text(char *text, std::size_t size, int seconds, const char *start)
 {
-    const bool idle = s_focus.phase == FocusPhase::Idle;
+    const bool idle = detail::focus_idle(s_focus);
     if (idle || waiting()) {
         if (s_focus.phase == FocusPhase::Work || idle) {
             std::snprintf(text, size, "%s round %d", start, idle ? 1 : s_focus.round);
@@ -339,8 +339,8 @@ void show_full_second(bool force)
     }
     s_full_shown_s = seconds;
 
-    const bool         idle    = s_focus.phase == FocusPhase::Idle;
-    const bool         paused  = !idle && !s_focus.running;
+    const bool         idle    = detail::focus_idle(s_focus);
+    const bool         paused  = detail::focus_paused(s_focus);
     const bool         beat    = seconds % 2 == 0;
     const std::int32_t length  = idle ? 0 : s_focus.length_ms;
     const std::int32_t elapsed = length > 0 ? length - left : 0;
@@ -359,11 +359,11 @@ void show_full_part()
     if (s_full == nullptr) {
         return;
     }
-    const bool          idle = s_focus.phase == FocusPhase::Idle;
+    const bool          idle = detail::focus_idle(s_focus);
     const std::uint32_t ink  = ink_of(resting());
     char                text[48];
     std::snprintf(text, sizeof(text), "%s%s", phase_name(s_focus.phase),
-                  waiting() ? ", READY" : !idle && !s_focus.running ? ", PAUSED" : "");
+                  waiting() ? ", READY" : detail::focus_paused(s_focus) ? ", PAUSED" : "");
     theme::set_text(s_full_phase, text);
     theme::set_text_color(s_full_phase, idle ? theme::secondary : ink);
 
@@ -433,7 +433,6 @@ constexpr std::int32_t POP_BTN_H  = 72;
 constexpr std::int32_t POP_SIDE_W = 96;   // reset and skip, beside start
 constexpr int          POP_SCALE  = 1000;  // the bar's
 constexpr std::uint32_t POP_IDLE_MS = 15 * 1000;
-constexpr std::int32_t  FROM_DOCK   = 24;  // the card from the dock's edge, as the desk's
 
 lv_obj_t *s_pop_phase = nullptr;
 lv_obj_t *s_pop_time  = nullptr;
@@ -457,7 +456,7 @@ void show_pop_second(bool force)
     theme::set_text(s_pop_time, text);
     under_text(text, sizeof(text), seconds, "Start");
     theme::set_text(s_pop_under, text);
-    const bool         idle   = s_focus.phase == FocusPhase::Idle;
+    const bool         idle   = detail::focus_idle(s_focus);
     const std::int32_t length = idle ? 0 : s_focus.length_ms;
     lv_bar_set_value(s_pop_bar, length > 0 ? static_cast<std::int32_t>(static_cast<std::int64_t>(POP_SCALE) * (length - left) / length) : 0,
                      LV_ANIM_OFF);
@@ -468,7 +467,7 @@ void show_pop_part()
     if (s_pop_phase == nullptr) {
         return;
     }
-    const bool          idle = s_focus.phase == FocusPhase::Idle;
+    const bool          idle = detail::focus_idle(s_focus);
     const std::uint32_t ink  = ink_of(resting());
     char                text[48];
     if (idle) {
@@ -480,7 +479,7 @@ void show_pop_part()
     theme::set_text(s_pop_phase, text);
     theme::set_text_color(s_pop_phase, idle ? theme::secondary : ink);
     lv_obj_set_style_bg_color(s_pop_bar, lv_color_hex(ink), LV_PART_INDICATOR);
-    lv_obj_set_style_opa(s_pop_time, !idle && !s_focus.running ? LV_OPA_50 : LV_OPA_COVER, 0);
+    lv_obj_set_style_opa(s_pop_time, detail::focus_paused(s_focus) ? LV_OPA_50 : LV_OPA_COVER, 0);
 
     lv_obj_set_state(s_pop_go, LV_STATE_CHECKED, s_focus.running);
     lv_obj_t *glyph = lv_obj_get_child(s_pop_go, 0);
@@ -500,7 +499,7 @@ lv_obj_t *pop_button(lv_obj_t *row, const char *symbol, std::int32_t w, FocusAct
 
 void build_pop(lv_obj_t *screen)
 {
-    lv_obj_t *card = detail::build_popout(s_pop, screen, POP_W, detail::GAP, detail::GAP, POP_IDLE_MS);
+    lv_obj_t *card = detail::build_popout(s_pop, screen, POP_W, detail::FROM_DOCK, detail::GAP, POP_IDLE_MS);
     lv_obj_set_style_pad_all(card, POP_PAD, 0);
     lv_obj_set_height(card, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
@@ -550,7 +549,7 @@ void on_focus()
                           s_tick_count == 0;
     s_focus = focus;
     if (new_part) {
-        lay_ticks(focus.phase == FocusPhase::Idle ? focus.work_min
+        lay_ticks(detail::focus_idle(focus) ? focus.work_min
                                                   : std::max<int>(1, focus.length_ms / units::kMsPerMinute));
     }
     show_full_part();
@@ -573,8 +572,6 @@ void toggle_focus_popout(lv_obj_t *button, lv_obj_t *dock, void (*lit)(bool open
         // Beside the dock, its foot level with the button's at the dock's foot,
         // unfolding up from there.
         const bool right = detail::layout().rail_right;
-        s_pop.near       = FROM_DOCK;
-        detail::fit_popout(s_pop);
         detail::place_popout(s_pop, right ? side.x1 : side.x2 + 1, at.y2 + 1 + detail::GAP, right, true);
         s_pop.button = button;
         s_pop.above  = dock;

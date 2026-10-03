@@ -149,11 +149,7 @@ lv_obj_t *make_tab_icon(lv_obj_t *tab, const NavItem &item)
     if (item.image == nullptr) {
         return theme::make_label(tab, item.icon, theme::secondary, fonts::size_28());
     }
-    lv_obj_t *icon = lv_image_create(tab);
-    lv_image_set_src(icon, item.image);
-    lv_obj_set_style_image_recolor(icon, lv_color_hex(theme::secondary), 0);
-    lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
-    return icon;
+    return theme::make_icon(tab, item.image, theme::secondary);
 }
 
 lv_obj_t *make_nav_tab(lv_obj_t *dock, int index)

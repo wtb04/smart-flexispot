@@ -26,7 +26,6 @@ constexpr std::int32_t FOCUS_APART = 16;  // from the tabs over it
 constexpr std::int32_t HOME_APART  = 24;  // from Sit over it
 
 constexpr std::int32_t SHEET_PAD     = 28;
-constexpr std::int32_t SHEET_GAP     = 24;  // from the dock
 constexpr std::int32_t SHEET_BTN_GAP = 20;
 constexpr std::int32_t SHEET_W       = 520;
 constexpr std::int32_t SHEET_INNER_W = SHEET_W - 2 * SHEET_PAD;
@@ -41,7 +40,6 @@ constexpr int SHEET_PRESETS[] = {ULTRA_LOW_PRESET, 0, 4, 5};
 // Presets 5 and 6 are for whoever uses the desk while the phone is away.
 constexpr int GUEST_PRESETS[] = {4, 5};
 
-constexpr std::int32_t DESK_ICON_W = 58;  // the size the desk's pictures are drawn at
 
 void move_event_cb(lv_event_t *e)
 {
@@ -145,7 +143,6 @@ constexpr int          SHORTCUT_SETS      = kDeskShortcutButtons / static_cast<i
 struct Shortcuts {
     lv_obj_t *box                   = nullptr;
     lv_obj_t *chips[SHORTCUT_COUNT] = {};
-    lv_obj_t *marks[SHORTCUT_COUNT] = {};
 };
 Shortcuts s_shortcuts[SHORTCUT_SETS];
 int       s_shortcut_sets = 0;
@@ -159,25 +156,19 @@ Shortcuts *add_shortcuts(lv_obj_t *root, bool column, std::int32_t side, std::in
         return nullptr;
     }
     Shortcuts &set = s_shortcuts[s_shortcut_sets++];
-    set.box        = lv_obj_create(root);
-    lv_obj_remove_style_all(set.box);
+    set.box        = theme::make_box(root);
     const std::int32_t length = static_cast<std::int32_t>(SHORTCUT_COUNT) * (side + SHORTCUT_GAP) - SHORTCUT_GAP;
     lv_obj_set_size(set.box, column ? side : length, column ? length : side);
-    lv_obj_set_clickable(set.box, false);
     for (std::size_t i = 0; i < SHORTCUT_COUNT; ++i) {
-        lv_obj_t *chip = theme::make_chip(set.box, "");
+        lv_obj_t *chip = theme::make_icon_chip(set.box, SHORTCUT_PRESETS[i] == STAND_PRESET ? &icons::desk_up_icon
+                                                                                           : &icons::desk_down_icon,
+                                                mark_w);
         lv_obj_set_size(chip, side, side);
         lv_obj_set_style_radius(chip, radius, 0);
         const std::int32_t at = static_cast<std::int32_t>(i) * (side + SHORTCUT_GAP);
         lv_obj_set_pos(chip, column ? 0 : at, column ? at : 0);
         lv_obj_set_style_bg_color(chip, lv_color_hex(colour), 0);
         lv_obj_set_ext_click_area(chip, SHORTCUT_GAP / 2);
-        theme::fill_accent(chip, LV_STATE_CHECKED);
-        lv_obj_t *mark = theme::make_mark(chip, SHORTCUT_PRESETS[i] == STAND_PRESET ? &icons::desk_up_icon
-                                                                                  : &icons::desk_down_icon);
-        lv_image_set_scale(mark, LV_SCALE_NONE * mark_w / DESK_ICON_W);
-        lv_obj_set_style_image_recolor(mark, lv_color_hex(theme::text), LV_STATE_CHECKED);
-        lv_obj_set_style_image_opa(mark, LV_OPA_COVER, LV_STATE_CHECKED);
         auto *preset = reinterpret_cast<void *>(static_cast<std::intptr_t>(SHORTCUT_PRESETS[i]));
         lv_obj_add_event_cb(chip, preset_clicked_cb, LV_EVENT_SHORT_CLICKED, preset);
         if (column) {
@@ -186,7 +177,6 @@ Shortcuts *add_shortcuts(lv_obj_t *root, bool column, std::int32_t side, std::in
         }
         register_desk_control(chip);
         set.chips[i] = chip;
-        set.marks[i] = mark;
     }
     paint_desk_shortcuts();
     return &set;
@@ -264,10 +254,7 @@ void build_focus_button(lv_obj_t *tabs)
             paint_focus_button();
         });
     }, LV_EVENT_CLICKED, nullptr);
-    s_focus_mark = lv_image_create(s_focus_button);
-    lv_image_set_src(s_focus_mark, &icons::timer_icon);
-    lv_obj_set_style_image_recolor(s_focus_mark, lv_color_hex(theme::secondary), 0);
-    lv_obj_set_style_image_recolor_opa(s_focus_mark, LV_OPA_COVER, 0);
+    s_focus_mark = theme::make_icon(s_focus_button, &icons::timer_icon, theme::secondary);
     lv_obj_center(s_focus_mark);
     s_focus_left = theme::make_label(s_focus_button, "", theme::text, fonts::size_22());
     lv_obj_center(s_focus_left);
@@ -341,8 +328,7 @@ void paint_desk_shortcuts()
         for (std::size_t j = 0; j < SHORTCUT_COUNT; ++j) {
             const bool active = desk_state().preset_active[SHORTCUT_PRESETS[j]];
             show_desk_travel(s_shortcuts[i].chips[j], desk_state().travelling == SHORTCUT_PRESETS[j]);
-            lv_obj_set_state(s_shortcuts[i].chips[j], LV_STATE_CHECKED, active);
-            lv_obj_set_state(s_shortcuts[i].marks[j], LV_STATE_CHECKED, active);
+            theme::light_chip(s_shortcuts[i].chips[j], active);
         }
     }
 }
@@ -384,13 +370,11 @@ void create_dock(lv_obj_t *parent)
     lv_obj_set_scrollable(dock, false);
 
     build_dock_desk(dock);
-    s_tabs = lv_obj_create(dock);
-    lv_obj_remove_style_all(s_tabs);
+    s_tabs = theme::make_box(dock);
     lv_obj_set_size(s_tabs, DOCK_INNER_W, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(s_tabs, LV_FLEX_FLOW_COLUMN_REVERSE);
     lv_obj_set_style_pad_row(s_tabs, BUTTON_GAP / 2, 0);
     lv_obj_align(s_tabs, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_set_clickable(s_tabs, false);
 
     subscribe(Topic::Desk, kNoView, [] {
         paint_presets();
@@ -406,7 +390,7 @@ void open_desk_sheet(bool open)
 
 void create_desk_sheet(lv_obj_t *parent)
 {
-    s_sheet       = build_popout(s_desk, parent, SHEET_W, SHEET_GAP, GAP, SHEET_IDLE_MS);
+    s_sheet       = build_popout(s_desk, parent, SHEET_W, FROM_DOCK, GAP, SHEET_IDLE_MS);
     s_desk.button = s_height_button;
     s_desk.above  = s_rail;
     // On the accent while out, the height on it in the text's colour.

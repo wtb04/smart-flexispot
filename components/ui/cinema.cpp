@@ -230,7 +230,7 @@ void tick(lv_timer_t *)
     if (skip != nullptr) {
         theme::set_text(lv_obj_get_child(s_skip, 0), skip);
     }
-    light_chrome_chip(s_screen_chip, s_auto_off);
+    theme::light_chip(s_screen_chip, s_auto_off);
     keep_screen();
 }
 
@@ -480,10 +480,10 @@ void build_cinema(lv_obj_t *screen)
         }
     });
     subscribe(Topic::Desk, s_cinema, [] {
-        light_chrome_chip(s_low_chip, desk_state().preset_active[ULTRA_LOW_PRESET]);
+        theme::light_chip(s_low_chip, desk_state().preset_active[ULTRA_LOW_PRESET]);
         show_desk_travel(s_low_chip, desk_state().travelling == ULTRA_LOW_PRESET);
     });
-    subscribe(Topic::Lights, s_cinema, [] { light_chrome_chip(s_lights_chip, lights_state().on); });
+    subscribe(Topic::Lights, s_cinema, [] { theme::light_chip(s_lights_chip, lights_state().on); });
     // The screen going dark by itself, lit while it does.
     s_screen_chip = add_chrome_chip(chrome, &icons::screen_timer_icon, [](lv_event_t *) {
         s_auto_off = !s_auto_off;

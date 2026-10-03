@@ -63,20 +63,8 @@ lv_obj_t *make_slot(lv_obj_t *bar, std::int32_t w)
     lv_obj_set_style_pad_hor(slot, SLOT_PAD, 0);
     lv_obj_set_ext_click_area(slot, SLOT_TAP);
     lv_obj_set_scrollable(slot, false);
-    // Lighter while pressed, or while its card is out.
-    for (const lv_state_t state : {LV_STATE_PRESSED, LV_STATE_CHECKED}) {
-        lv_obj_set_style_bg_color(slot, lv_color_hex(theme::panel_light), state);
-    }
+    theme::light_when_out(slot);
     return slot;
-}
-
-lv_obj_t *one_line(lv_obj_t *parent, std::uint32_t ink, const lv_font_t *font, std::int32_t w)
-{
-    lv_obj_t *label = theme::make_label(parent, "", ink, font);
-    lv_obj_set_width(label, w);
-    lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_DOTS);
-    lv_obj_set_clickable(label, false);
-    return label;
 }
 
 // Under the slot, from its edge away from the dock, unfolding towards the dock.
@@ -391,8 +379,8 @@ void build_media_slot(lv_obj_t *bar)
     const std::int32_t text_x = inset + THUMB + TEXT_GAP;
     const std::int32_t text_w = MEDIA_W - 2 * SLOT_PAD - text_x - PLAY_D - TEXT_GAP;
     s_slot_text_x             = text_x;
-    s_slot_title              = one_line(s_media_slot, theme::text, fonts::size_20(), text_w);
-    s_slot_artist             = one_line(s_media_slot, theme::secondary, fonts::size_16(), text_w);
+    s_slot_title              = theme::make_line(s_media_slot, theme::text, fonts::size_20(), text_w);
+    s_slot_artist             = theme::make_line(s_media_slot, theme::secondary, fonts::size_16(), text_w);
     lv_obj_align(s_slot_artist, LV_ALIGN_LEFT_MID, text_x, ARTIST_DROP);
 
     s_slot_play = round_button(s_media_slot, LV_SYMBOL_PLAY, PLAY_D);
@@ -415,13 +403,11 @@ void build_media_slot(lv_obj_t *bar)
 
 lv_obj_t *row_of(lv_obj_t *card, std::int32_t w, std::int32_t h, lv_flex_align_t main)
 {
-    lv_obj_t *row = lv_obj_create(card);
-    lv_obj_remove_style_all(row);
+    lv_obj_t *row = theme::make_box(card);
     lv_obj_set_size(row, w, h);
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(row, main, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(row, CARD_GAP, 0);
-    lv_obj_set_clickable(row, false);
     return row;
 }
 
@@ -442,20 +428,18 @@ void build_media_card(lv_obj_t *screen)
     build_cover(s_card_cover, head, COVER, theme::radius::control);
     lv_obj_set_clickable(s_card_cover.frame, true);
     lv_obj_add_event_cb(s_card_cover.frame, [](lv_event_t *) { open_full_view(); }, LV_EVENT_CLICKED, nullptr);
-    lv_obj_t *text = lv_obj_create(head);
-    lv_obj_remove_style_all(text);
+    lv_obj_t *text = theme::make_box(head);
     lv_obj_set_height(text, COVER);
     lv_obj_set_flex_grow(text, 1);
     lv_obj_set_flex_flow(text, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(text, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     lv_obj_set_style_pad_row(text, theme::space::xs, 0);
-    lv_obj_set_clickable(text, false);
-    s_card_source  = one_line(text, theme::secondary, theme::type_label(), 1);
+    s_card_source  = theme::make_line(text, theme::secondary, theme::type_label(), 1);
     s_card_title   = theme::make_label(text, "", theme::text, fonts::size_28());
     lv_label_set_long_mode(s_card_title, LV_LABEL_LONG_MODE_DOTS);
     lv_obj_set_height(s_card_title, 2 * lv_font_get_line_height(fonts::size_28()));
-    s_card_artist  = one_line(text, theme::secondary, fonts::size_20(), 1);
-    s_card_episode = one_line(text, theme::secondary, fonts::size_16(), 1);
+    s_card_artist  = theme::make_line(text, theme::secondary, fonts::size_20(), 1);
+    s_card_episode = theme::make_line(text, theme::secondary, fonts::size_16(), 1);
     for (lv_obj_t *line : {s_card_source, s_card_title, s_card_artist, s_card_episode}) {
         lv_obj_set_width(line, lv_pct(100));
         lv_obj_set_clickable(line, false);
@@ -642,18 +626,13 @@ void build_lights_slot(lv_obj_t *bar)
     lv_obj_add_event_cb(s_lights_slot, lights_touched, LV_EVENT_SHORT_CLICKED, nullptr);
     lv_obj_add_event_cb(s_lights_slot, lights_touched, LV_EVENT_LONG_PRESSED, nullptr);
     // The whole bulb, the glass over its base.
-    s_lights_bulb = lv_obj_create(s_lights_slot);
-    lv_obj_remove_style_all(s_lights_bulb);
+    s_lights_bulb = theme::make_box(s_lights_slot);
     lv_obj_set_size(s_lights_bulb, icons::bulb_glass_icon.header.w * BULB_SCALE / LV_SCALE_NONE,
                     icons::bulb_glass_icon.header.h * BULB_SCALE / LV_SCALE_NONE);
-    lv_obj_set_clickable(s_lights_bulb, false);
     for (const lv_image_dsc_t *part : {&icons::bulb_glass_icon, &icons::bulb_base_icon}) {
-        lv_obj_t *image = lv_image_create(s_lights_bulb);
-        lv_image_set_src(image, part);
+        lv_obj_t *image = theme::make_icon(s_lights_bulb, part);
         lv_image_set_scale(image, BULB_SCALE);
         lv_obj_center(image);
-        lv_obj_set_style_image_recolor_opa(image, LV_OPA_COVER, 0);
-        lv_obj_set_clickable(image, false);
     }
     s_lights_text = theme::make_label(s_lights_slot, "", theme::secondary, fonts::size_22());
     lv_obj_set_clickable(s_lights_text, false);
@@ -679,7 +658,7 @@ void build_lights_card(lv_obj_t *screen)
                 s_handlers.light(static_cast<int>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e))));
             }
         }, LV_EVENT_CLICKED, reinterpret_cast<void *>(static_cast<std::intptr_t>(i)));
-        lv_obj_t *name = one_line(button, theme::text, fonts::size_22(), inner * 2 / 3);
+        lv_obj_t *name = theme::make_line(button, theme::text, fonts::size_22(), inner * 2 / 3);
         lv_obj_align(name, LV_ALIGN_LEFT_MID, 0, 0);
         lv_obj_t *state = theme::make_label(button, "", theme::text, fonts::size_20());
         lv_obj_align(state, LV_ALIGN_RIGHT_MID, 0, 0);

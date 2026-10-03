@@ -512,6 +512,48 @@ inline lv_obj_t *make_mark(lv_obj_t *parent, const lv_image_dsc_t *mark, lv_opa_
     return image;
 }
 
+/** A picture in one colour, as the icons are drawn: white shapes recoloured. */
+inline lv_obj_t *make_icon(lv_obj_t *parent, const lv_image_dsc_t *icon, std::uint32_t ink = text)
+{
+    lv_obj_t *image = lv_image_create(parent);
+    lv_image_set_src(image, icon);
+    lv_obj_set_style_image_recolor(image, lv_color_hex(ink), 0);
+    lv_obj_set_style_image_recolor_opa(image, LV_OPA_COVER, 0);
+    lv_obj_set_clickable(image, false);
+    return image;
+}
+
+/** A label `w` wide kept to `lines` lines, ending in dots: they only shorten a
+ *  label of fixed height, and one left at its content's height simply grows. */
+inline lv_obj_t *make_line(lv_obj_t *parent, std::uint32_t ink, const lv_font_t *font, std::int32_t w,
+                           int lines = 1)
+{
+    lv_obj_t *label = make_label(parent, "", ink, font);
+    lv_obj_set_size(label, w, lines * lv_font_get_line_height(font));
+    lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_DOTS);
+    lv_obj_set_clickable(label, false);
+    return label;
+}
+
+/** Nothing drawn and no taps taken: what holds others in place. */
+inline lv_obj_t *make_box(lv_obj_t *parent)
+{
+    lv_obj_t *box = lv_obj_create(parent);
+    lv_obj_remove_style_all(box);
+    lv_obj_set_clickable(box, false);
+    lv_obj_set_scrollable(box, false);
+    return box;
+}
+
+/** A button lighter while pressed, and while what it opens is out. */
+inline void light_when_out(lv_obj_t *button)
+{
+    for (const lv_state_t state : {LV_STATE_PRESSED, LV_STATE_CHECKED}) {
+        lv_obj_set_style_bg_color(button, lv_color_hex(panel_light), state);
+        lv_obj_set_style_bg_opa(button, LV_OPA_COVER, state);
+    }
+}
+
 /** A Pozidriv screw head: the cross, and a finer one turned between its arms.
  *  Decoration that says a card is an instrument; it does nothing, so it is the
  *  quietest thing on it. The chips that do something are the same dot. */
@@ -540,6 +582,28 @@ inline lv_obj_t *make_chip(lv_obj_t *parent, const char *value,
     lv_obj_set_style_text_opa(label, mark_opa, 0);
     center_ink(label);
     return chip;
+}
+
+/** A chip with a picture, its longer side `mark` across, both lit in the
+ *  accent while checked: see light_chip. */
+inline lv_obj_t *make_icon_chip(lv_obj_t *parent, const lv_image_dsc_t *icon, std::int32_t mark)
+{
+    lv_obj_t *chip = make_chip(parent, "");
+    fill_accent(chip, LV_STATE_CHECKED);
+    lv_obj_t *image = make_mark(chip, icon);
+    lv_image_set_scale(image, LV_SCALE_NONE * mark / std::max<std::int32_t>(icon->header.w, icon->header.h));
+    lv_obj_set_style_image_recolor(image, lv_color_hex(text), LV_STATE_CHECKED);
+    lv_obj_set_style_image_opa(image, LV_OPA_COVER, LV_STATE_CHECKED);
+    return chip;
+}
+
+/** A chip lit or not, its picture with it: a state is not handed down by itself. */
+inline void light_chip(lv_obj_t *chip, bool on)
+{
+    lv_obj_set_state(chip, LV_STATE_CHECKED, on);
+    for (std::uint32_t i = 0; i < lv_obj_get_child_count(chip); ++i) {
+        lv_obj_set_state(lv_obj_get_child(chip, static_cast<std::int32_t>(i)), LV_STATE_CHECKED, on);
+    }
 }
 
 }  // namespace ui::theme

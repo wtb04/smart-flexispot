@@ -77,28 +77,21 @@ void show_power(const Clock &clock)
 
 void build_power(Clock &clock, lv_obj_t *root)
 {
-    clock.power = lv_obj_create(root);
-    lv_obj_remove_style_all(clock.power);
+    clock.power = theme::make_box(root);
     lv_obj_set_size(clock.power, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_set_clickable(clock.power, false);
 
-    clock.cell = lv_obj_create(clock.power);
-    lv_obj_remove_style_all(clock.cell);
+    clock.cell = theme::make_box(clock.power);
     lv_obj_set_size(clock.cell, CELL_W + CELL_NUB_W, CELL_H);
-    lv_obj_set_clickable(clock.cell, false);
-    lv_obj_t *body = lv_obj_create(clock.cell);
-    lv_obj_remove_style_all(body);
+    lv_obj_t *body = theme::make_box(clock.cell);
     lv_obj_set_size(body, CELL_W, CELL_H);
     lv_obj_set_style_border_width(body, CELL_LINE, 0);
     lv_obj_set_style_border_color(body, lv_color_hex(theme::secondary), 0);
     lv_obj_set_style_radius(body, CELL_LINE + 1, 0);
-    lv_obj_t *nub = lv_obj_create(clock.cell);
-    lv_obj_remove_style_all(nub);
+    lv_obj_t *nub = theme::make_box(clock.cell);
     theme::style_panel(nub, theme::secondary, 1);
     lv_obj_set_size(nub, CELL_NUB_W, CELL_NUB_H);
     lv_obj_align(nub, LV_ALIGN_RIGHT_MID, 0, 0);
-    clock.fill = lv_obj_create(clock.cell);
-    lv_obj_remove_style_all(clock.fill);
+    clock.fill = theme::make_box(clock.cell);
     theme::style_panel(clock.fill, theme::text, 1);
     lv_obj_set_size(clock.fill, 1, CELL_H - 4 * CELL_LINE);
     lv_obj_set_pos(clock.fill, 2 * CELL_LINE, 2 * CELL_LINE);
@@ -189,23 +182,11 @@ lv_obj_t *s_update_box  = nullptr;  // while an update arrives, for whichever bo
 lv_obj_t *s_update_icon = nullptr;
 lv_obj_t *s_update_bar  = nullptr;  // how far it is, under the icon
 
-lv_obj_t *make_status_icon(lv_obj_t *parent, const lv_image_dsc_t *src)
-{
-    lv_obj_t *icon = lv_image_create(parent);
-    lv_image_set_src(icon, src);
-    lv_obj_set_style_image_recolor(icon, lv_color_hex(theme::text), 0);
-    lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
-    lv_obj_set_clickable(icon, false);
-    return icon;
-}
-
 void build_update(lv_obj_t *bar)
 {
-    s_update_box = lv_obj_create(bar);
-    lv_obj_remove_style_all(s_update_box);
+    s_update_box = theme::make_box(bar);
     lv_obj_set_size(s_update_box, UPDATE_ICON_SIDE, UPDATE_ICON_SIDE + 2 * (UPDATE_BAR_GAP + UPDATE_BAR_H));
-    lv_obj_set_clickable(s_update_box, false);
-    s_update_icon = make_status_icon(s_update_box, &icons::update_panel_icon);
+    s_update_icon = theme::make_icon(s_update_box, &icons::update_panel_icon);
     lv_obj_center(s_update_icon);
     s_update_bar = lv_bar_create(s_update_box);
     lv_obj_set_size(s_update_bar, UPDATE_ICON_SIDE, UPDATE_BAR_H);
@@ -234,11 +215,8 @@ void paint_status()
 
 lv_obj_t *make_slot(lv_obj_t *parent, std::int32_t w)
 {
-    lv_obj_t *slot = lv_obj_create(parent);
-    lv_obj_remove_style_all(slot);
+    lv_obj_t *slot = theme::make_box(parent);
     lv_obj_set_size(slot, w, TOP_H);
-    lv_obj_set_clickable(slot, false);
-    lv_obj_set_scrollable(slot, false);
     return slot;
 }
 
@@ -291,10 +269,7 @@ void create_top_bar(lv_obj_t *parent)
     lv_obj_set_style_pad_column(s_status, SLOT_GAP, 0);
     lv_obj_set_ext_click_area(s_status, TAP_MARGIN);
     lv_obj_set_style_radius(s_status, theme::radius::pill, 0);
-    for (const lv_state_t state : {LV_STATE_PRESSED, LV_STATE_CHECKED}) {
-        lv_obj_set_style_bg_color(s_status, lv_color_hex(theme::panel_light), state);
-        lv_obj_set_style_bg_opa(s_status, LV_OPA_COVER, state);
-    }
+    theme::light_when_out(s_status);
     lv_obj_add_event_cb(s_status, [](lv_event_t *) { toggle_setup(); }, LV_EVENT_CLICKED, nullptr);
     // An update arriving shows with the status it is installed from, at its far
     // end from the time, so the status only grows as it comes and goes.
@@ -304,8 +279,8 @@ void create_top_bar(lv_obj_t *parent)
     }
     build_power(*s_top, s_slots[0]);
     lv_obj_center(s_top->power);
-    s_phone_icon = make_status_icon(s_slots[1], &icons::phone_off_icon);
-    s_wifi_icon  = make_status_icon(s_slots[2], &icons::wifi_off_icon);
+    s_phone_icon = theme::make_icon(s_slots[1], &icons::phone_off_icon);
+    s_wifi_icon  = theme::make_icon(s_slots[2], &icons::wifi_off_icon);
     lv_obj_center(s_phone_icon);
     lv_obj_center(s_wifi_icon);
     s_top->label = theme::make_label(s_slots[3], "00:00", theme::text, fonts::size_28());
@@ -432,25 +407,14 @@ Chrome add_fullscreen_chrome(ViewId view, lv_obj_t *root, lv_event_cb_t on_close
 
 lv_obj_t *add_chrome_chip(Chrome &chrome, const lv_image_dsc_t *icon, lv_event_cb_t on_click)
 {
-    lv_obj_t *chip = theme::make_chip(chrome.root, "");
+    lv_obj_t *chip = theme::make_icon_chip(chrome.root, icon, CHIP_MARK);
     lv_obj_set_pos(chip, chrome.next_x, INSET);
     lv_obj_set_ext_click_area(chip, CHIP_STEP / 2);
     lv_obj_add_event_cb(chip, on_click, LV_EVENT_CLICKED, nullptr);
-    theme::fill_accent(chip, LV_STATE_CHECKED);
-    lv_obj_t *mark = theme::make_mark(chip, icon);
-    lv_image_set_scale(mark, LV_SCALE_NONE * CHIP_MARK / std::max<std::int32_t>(icon->header.w, icon->header.h));
-    lv_obj_set_style_image_recolor(mark, lv_color_hex(theme::text), LV_STATE_CHECKED);
-    lv_obj_set_style_image_opa(mark, LV_OPA_COVER, LV_STATE_CHECKED);
     fade_when_idle(chrome.view, chip);
     chrome.next_x += theme::chip::size + CHIP_STEP;
     return chip;
 }
 
-void light_chrome_chip(lv_obj_t *chip, bool on)
-{
-    lv_obj_set_state(chip, LV_STATE_CHECKED, on);
-    for (std::uint32_t i = 0; i < lv_obj_get_child_count(chip); ++i) {
-        lv_obj_set_state(lv_obj_get_child(chip, static_cast<std::int32_t>(i)), LV_STATE_CHECKED, on);
-    }
-}
+
 }  // namespace ui::detail

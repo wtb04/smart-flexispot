@@ -48,6 +48,7 @@ constexpr std::int32_t DOCK_W      = 112;
 constexpr std::int32_t TOP_H       = 72;   // the control bar's slots, centred over the pages
 constexpr std::int32_t CONTENT_Y   = 92;   // the page under it
 constexpr std::int32_t BAR_GAP     = 10;   // between the control bar's slots
+constexpr std::int32_t FROM_DOCK   = 24;   // a card unfolding from the dock, from its edge
 
 constexpr std::int32_t PANEL_PAD  = 16;
 constexpr std::int32_t BUTTON_GAP = 16;
@@ -254,7 +255,6 @@ struct Chrome {
 };
 Chrome    add_fullscreen_chrome(ViewId view, lv_obj_t *root, lv_event_cb_t on_close, bool focus_badge = true);
 lv_obj_t *add_chrome_chip(Chrome &chrome, const lv_image_dsc_t *icon, lv_event_cb_t on_click);
-void      light_chrome_chip(lv_obj_t *chip, bool on);  // in the accent while on
 void show_guest_presets();
 void select_page(int index);
 /** Setup from the control bar's status, and back to where it was opened from. */
