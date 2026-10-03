@@ -67,6 +67,7 @@ constexpr std::int64_t SHOW_WAYS_WITHIN = 3 * units::kSecondsPerHour;  // hours 
 constexpr std::int32_t LIST_W        = 500;
 constexpr std::int32_t DOT           = 10;
 constexpr std::int32_t TIME_W        = 64;
+constexpr std::int32_t BASELINE_LIFT = 6;  // a smaller line beside a large one, onto its baseline
 constexpr std::int32_t SCROLLBAR_W   = 4;
 constexpr std::int32_t NOW_LINE_W    = 2;
 // How far a corner chip reaches up into a card's padding, with a gap over it.
@@ -160,9 +161,8 @@ lv_obj_t *s_kind      = nullptr;
 lv_obj_t *s_title     = nullptr;
 lv_obj_t *s_meta      = nullptr;
 lv_obj_t *s_session   = nullptr;  // the part of the title after " - "
+lv_obj_t *s_until     = nullptr;  // beside the start, when it ends
 lv_obj_t *s_place     = nullptr;
-lv_obj_t *s_count     = nullptr;  // how long until it
-lv_obj_t *s_count_note = nullptr;
 lv_obj_t *s_next      = nullptr;
 lv_obj_t *s_after     = nullptr;  // the rest of the week
 std::int32_t s_page_h  = 0;
@@ -564,30 +564,22 @@ const lv_image_dsc_t *icon_of(const char *mode)
     return is_mode(mode, "train") ? &icons::train_icon : &icons::bus_icon;
 }
 
-// What kind of event, and today, now, or which day: the line over its title.
+// What kind of event, and when: how long until it, or until it ends, on its
+// day, and which day before that.
 void kind_text(const ical::Event &event, std::int64_t now, char *out, std::size_t size)
 {
+    char when[32];
     if (event.start <= now) {
-        std::snprintf(out, size, "%s, now", feed_kind(event.feed));
+        span_of(now, event.end, when, sizeof(when));
+        std::snprintf(out, size, "%s, ends %s", feed_kind(event.feed), when);
         return;
     }
-    char day[24];
-    day_name(now, event.start, day, sizeof(day));
-    std::snprintf(out, size, "%s, %s", feed_kind(event.feed), day);
-}
-
-// From and to, and where.
-void meta_text(const ical::Event &event, char *out, std::size_t size)
-{
-    char from[16];
-    char to[16];
-    clock_of(event.start, from, sizeof(from));
-    clock_of(event.end, to, sizeof(to));
-    if (has_place(event)) {
-        std::snprintf(out, size, "%s \xe2\x80\x93 %s, %s", from, to, place_of(event));
+    if (days_from(now, event.start) < 1) {
+        span_of(now, event.start, when, sizeof(when));
     } else {
-        std::snprintf(out, size, "%s \xe2\x80\x93 %s", from, to);
+        day_name(now, event.start, when, sizeof(when));
     }
+    std::snprintf(out, size, "%s, %s", feed_kind(event.feed), when);
 }
 
 // A timetable's title is the course and the session, "Course - Session": each
@@ -870,9 +862,8 @@ void show_next(const ical::Event *first, std::int64_t now)
         fit_lines(s_title, s_title_w, TITLE_LINES_MAX);
         lv_obj_set_hidden(s_session, true);
         theme::set_text(s_meta, "");
+        theme::set_text(s_until, "");
         theme::set_text(s_place, "");
-        theme::set_text(s_count, "");
-        theme::set_text(s_count_note, "");
         return;
     }
     char text[ical::kSummaryMax];
@@ -889,25 +880,15 @@ void show_next(const ical::Event *first, std::int64_t now)
     lv_obj_set_hidden(s_session, session[0] == '\0');
 
     char from[16];
-    char to[16];
+    char to[24];
     clock_of(first->start, from, sizeof(from));
-    clock_of(first->end, to, sizeof(to));
-    std::snprintf(text, sizeof(text), "%s \xe2\x80\x93 %s", from, to);
-    theme::set_text(s_meta, text);
+    theme::set_text(s_meta, from);
+    clock_of(first->end, text, sizeof(text));
+    std::snprintf(to, sizeof(to), "\xe2\x80\x93 %.16s", text);
+    theme::set_text(s_until, to);
     short_place(place_of(*first), text, sizeof(text));
     theme::set_text(s_place, text);
-
-    char span[32];
-    if (first->start <= now) {
-        span_of(now, first->end, span, sizeof(span));
-        theme::set_text(s_count, "on now");
-        std::snprintf(text, sizeof(text), "until %s, %s", to, span);
-        theme::set_text(s_count_note, text);
-    } else {
-        span_of(now, first->start, span, sizeof(span));
-        theme::set_text(s_count, span);
-        theme::set_text(s_count_note, "");
-    }
+    lv_obj_set_hidden(s_place, text[0] == '\0');
 }
 
 void show_day_heading(Item &head, std::int64_t now, std::int64_t at, bool first)
@@ -1417,22 +1398,15 @@ void build_next_card(std::int32_t left_w)
     s_session = line_label(s_next, theme::secondary, theme::type_body());
     lv_obj_set_width(s_session, LV_PCT(100));
 
-    // When and where on the left, how long until it on the right.
-    lv_obj_t *when = row_of(s_next, LV_SIZE_CONTENT, space::m);
+    // When and where, what is needed to get there on time, large.
+    lv_obj_t *when = row_of(s_next, LV_SIZE_CONTENT, space::s);
     lv_obj_set_style_margin_top(when, space::m, 0);
-    lv_obj_set_flex_align(when, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
-    lv_obj_t *at = column_of(when, 0);
-    lv_obj_set_width(at, 0);
-    lv_obj_set_flex_grow(at, 1);
-    s_meta  = line_label(at, theme::text, theme::type_value());
-    lv_obj_set_width(s_meta, LV_PCT(100));
-    s_place = line_label(at, theme::secondary, theme::type_label());
+    lv_obj_set_flex_align(when, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
+    s_meta  = line_label(when, theme::text, theme::type_display());
+    s_until = line_label(when, theme::secondary, theme::type_value());
+    lv_obj_set_style_margin_bottom(s_until, BASELINE_LIFT, 0);
+    s_place = line_label(s_next, theme::text, theme::type_title());
     lv_obj_set_width(s_place, LV_PCT(100));
-    lv_obj_t *until = column_of(when, 0);
-    lv_obj_set_width(until, LV_SIZE_CONTENT);
-    lv_obj_set_flex_align(until, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
-    s_count      = line_label(until, theme::text, fonts::size_32());
-    s_count_note = line_label(until, theme::secondary, theme::type_label());
 
     lv_obj_t *give = bare(s_next);  // the foot at the card's bottom
     lv_obj_set_size(give, 1, 1);
@@ -1679,10 +1653,11 @@ struct TileRow {
 lv_obj_t    *s_tile       = nullptr;
 std::int32_t s_tile_w     = 0;  // inside its padding
 lv_obj_t    *s_tile_kind  = nullptr;
-lv_obj_t    *s_tile_title = nullptr;
-lv_obj_t    *s_tile_meta  = nullptr;
+lv_obj_t    *s_tile_when  = nullptr;
 lv_obj_t    *s_tile_big   = nullptr;
-lv_obj_t    *s_tile_span  = nullptr;
+lv_obj_t    *s_tile_until = nullptr;
+lv_obj_t    *s_tile_place = nullptr;
+lv_obj_t    *s_tile_title = nullptr;
 lv_obj_t    *s_tile_after = nullptr;  // the heading over the rest
 TileRow      s_tile_rows[TILE_AFTER]{};
 
@@ -1702,34 +1677,31 @@ void show_tile()
     char               text[96];
     const bool         any   = count > 0;
     const ical::Event &next  = ahead[0];
-    const bool         ongoing = any && next.start <= now;
     if (any) {
         kind_text(next, now, text, sizeof(text));
     }
     theme::set_text(s_tile_kind, any ? text : "NEXT");
+    lv_obj_set_hidden(s_tile_when, !any);
+    lv_obj_set_hidden(s_tile_place, true);
+    if (any) {
+        clock_of(next.start, text, sizeof(text));
+        theme::set_text(s_tile_big, text);
+        char until[24];
+        clock_of(next.end, text, sizeof(text));
+        std::snprintf(until, sizeof(until), "\xe2\x80\x93 %.16s", text);
+        theme::set_text(s_tile_until, until);
+        short_place(place_of(next), text, sizeof(text));
+        theme::set_text(s_tile_place, text);
+        lv_obj_set_hidden(s_tile_place, text[0] == '\0');
+    }
     // The course alone, as the calendar's agenda has it.
     char course[ical::kSummaryMax];
     char session[ical::kSummaryMax];
     split_title(any ? next.summary : "", course, sizeof(course), session, sizeof(session));
     theme::set_text(s_tile_title, any ? course : "Nothing coming up");
     theme::set_text_color(s_tile_title, any ? theme::text : theme::secondary);
-    fit_lines(s_tile_title, s_tile_w, 2);
-    if (any) {
-        meta_text(next, text, sizeof(text));
-    }
-    theme::set_text(s_tile_meta, any ? text : "");
-    char time[16] = "";
-    char span[32] = "";
-    text[0]       = '\0';
-    if (any) {
-        clock_of(ongoing ? next.end : next.start, time, sizeof(time));
-        span_of(now, ongoing ? next.end : next.start, span, sizeof(span));
-        std::snprintf(text, sizeof(text), "%s%s", ongoing ? "ends " : "", span);
-    }
-    theme::set_text(s_tile_big, time);
-    theme::set_text(s_tile_span, text);
+    fit_lines(s_tile_title, s_tile_w, 3);
 
-    lv_obj_set_hidden(s_tile_after, count < 2);
     for (int i = 0; i < TILE_AFTER; ++i) {
         TileRow &row = s_tile_rows[i];
         lv_obj_set_hidden(row.row, i + 1 >= count);
@@ -1742,8 +1714,24 @@ void show_tile()
         localtime_r(&at, &local);
         std::strftime(text, sizeof(text), "%a %H:%M", &local);
         theme::set_text(row.when, text);
-        theme::set_text(row.what, event.summary);
+        split_title(event.summary, course, sizeof(course), session, sizeof(session));
+        theme::set_text(row.what, course);
     }
+    // Only whole rows: one the card would cut through goes, and those after it.
+    lv_obj_set_hidden(s_tile_after, false);
+    lv_obj_update_layout(s_tile);
+    lv_area_t tile;
+    lv_obj_get_coords(s_tile, &tile);
+    int shown = 0;
+    for (int i = 0; i < TILE_AFTER; ++i) {
+        lv_area_t area;
+        lv_obj_get_coords(s_tile_rows[i].row, &area);
+        if (shown < i || area.y2 > tile.y2 - TILE_PAD) {
+            lv_obj_set_hidden(s_tile_rows[i].row, true);
+        }
+        shown += lv_obj_is_hidden(s_tile_rows[i].row) ? 0 : 1;
+    }
+    lv_obj_set_hidden(s_tile_after, shown == 0);
 }
 }  // namespace
 
@@ -1763,13 +1751,19 @@ void build_next_tile(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int3
     lv_obj_add_event_cb(s_tile, [](lv_event_t *) { detail::select_page(detail::CALENDAR_PAGE); }, LV_EVENT_CLICKED,
                         nullptr);
     s_tile_w     = w - 2 * TILE_PAD;
-    s_tile_kind  = line_label(s_tile, theme::secondary, theme::type_label());
-    s_tile_title = dotted_label(s_tile, theme::text, fonts::size_28());
-    s_tile_meta  = line_label(s_tile, theme::secondary, theme::type_body());
-    // The time, and how far off it is under it, where it cannot jump beside it as it changes.
-    s_tile_big  = theme::make_label(s_tile, "", theme::text, fonts::size_48());
-    s_tile_span = line_label(s_tile, theme::secondary, theme::type_body());
-    for (lv_obj_t *part : {s_tile_kind, s_tile_title, s_tile_meta, s_tile_span}) {
+    s_tile_kind = line_label(s_tile, theme::secondary, theme::type_label());
+    // When it starts and where, large; the end drops under the start when there is no room beside it.
+    s_tile_when = row_of(s_tile, LV_SIZE_CONTENT, space::s);
+    lv_obj_set_width(s_tile_when, s_tile_w);
+    lv_obj_set_flex_flow(s_tile_when, LV_FLEX_FLOW_ROW_WRAP);
+    lv_obj_set_flex_align(s_tile_when, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
+    s_tile_big   = line_label(s_tile_when, theme::text, theme::type_display());
+    s_tile_until = line_label(s_tile_when, theme::secondary, theme::type_body());
+    lv_obj_set_style_margin_bottom(s_tile_until, BASELINE_LIFT, 0);
+    s_tile_place = line_label(s_tile, theme::text, theme::type_title());
+    s_tile_title = dotted_label(s_tile, theme::text, theme::type_value());
+    lv_obj_set_style_margin_top(s_tile_title, space::xs, 0);
+    for (lv_obj_t *part : {s_tile_kind, s_tile_place, s_tile_title}) {
         lv_obj_set_width(part, s_tile_w);
     }
 
