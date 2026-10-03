@@ -51,6 +51,7 @@ radar::Details             s_details{};
 std::vector<std::uint16_t> s_photo[2];  // shown while the next is fetched into the other
 int                        s_photo_shown = 0;
 int                        s_photo_w = 0, s_photo_h = 0;
+std::string                s_photo_credit;  // its photographer
 
 void feeds()
 {
@@ -106,13 +107,15 @@ void lookups()
         if (fetch_trace(hex.c_str())) {
             s_sky_changed = true;
         }
-        int  w = 0, h = 0;
-        auto pixels = fetch_photo(hex.c_str(), w, h);
+        int         w = 0, h = 0;
+        std::string credit;
+        auto        pixels = fetch_photo(hex.c_str(), w, h, credit);
         std::lock_guard<std::mutex> hold(s_lookup_lock);
         if (s_found_hex == hex) {
             s_photo[1 - s_photo_shown] = std::move(pixels);
             s_photo_w                  = w;
             s_photo_h                  = h;
+            s_photo_credit             = credit;
             s_photo_ready              = true;
         }
     }
@@ -150,7 +153,7 @@ void pump()
         s_photo_shown = 1 - s_photo_shown;
         const auto &pixels = s_photo[s_photo_shown];
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_radar_photo(s_found_hex.c_str(), pixels.empty() ? nullptr : pixels.data(),
-                                                          s_photo_w, s_photo_h));
+                                                          s_photo_w, s_photo_h, s_photo_credit.c_str()));
     }
 }
 

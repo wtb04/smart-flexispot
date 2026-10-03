@@ -474,6 +474,7 @@ enum class Photo : std::uint8_t { Unknown, Asked, None, Found };
 struct PhotoEntry {
     char         hex[kHexLen];
     char         url[kPhotoUrlLen];
+    char         credit[kPhotographerLen];
     Photo        state;
     int          slot;  // decoded into, or -1
     std::int64_t used_us;
@@ -551,11 +552,16 @@ void show_photo(const char *hex, std::uint32_t tap, int slot)
         return;
     }
     if (slot < 0) {
-        s_on_photo(hex, nullptr, 0, 0);
+        s_on_photo(hex, nullptr, 0, 0, "");
         return;
     }
+    char credit[kPhotographerLen] = "";
+    {
+        Lock hold;
+        std::snprintf(credit, sizeof(credit), "%s", s_photo_entries[s_photo_slots[slot].entry].credit);
+    }
     const PhotoSlot &photo = s_photo_slots[slot];
-    s_on_photo(hex, photo.pixels, photo.width, photo.height);
+    s_on_photo(hex, photo.pixels, photo.width, photo.height, credit);
 }
 
 void ask_image(const std::string &hex, const std::string &url, std::uint32_t tap)
@@ -625,9 +631,11 @@ void ask_photo_lookup(const char *hex, net::Priority priority, std::uint32_t tap
     request.max_body    = LOOKUP_BODY_MAX;
     request.what        = "photo lookup";
     request.done        = [hex = std::string(hex), tap](const net::Response &answer) {
-        char found[kPhotoUrlLen] = "";
+        char found[kPhotoUrlLen]       = "";
+        char credit[kPhotographerLen] = "";
         const bool answered = answer.status == HTTP_OK || answer.status == HTTP_NOT_FOUND;
-        const bool has      = answer.status == HTTP_OK && parse_photo(answer.body, answer.length, found, sizeof(found));
+        const bool has      = answer.status == HTTP_OK &&
+                         parse_photo(answer.body, answer.length, found, sizeof(found), credit, sizeof(credit));
         std::string url;
         if (has) {
             // Over plain http: the image host takes it, and it saves a handshake.
@@ -638,6 +646,7 @@ void ask_photo_lookup(const char *hex, net::Priority priority, std::uint32_t tap
             PhotoEntry &entry = s_photo_entries[photo_entry(hex.c_str())];
             entry.state       = has ? Photo::Found : answered ? Photo::None : Photo::Unknown;
             std::snprintf(entry.url, sizeof(entry.url), "%s", url.c_str());
+            std::snprintf(entry.credit, sizeof(entry.credit), "%s", credit);
         }
         if (tap == 0 || !tapped(tap)) {
             return;

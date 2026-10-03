@@ -18,6 +18,8 @@ inline constexpr int kOwnerLen        = 36;
 inline constexpr int kManufacturerLen = 20;
 inline constexpr int kModelLen        = 28;
 inline constexpr int kPhotoUrlLen     = 160;
+inline constexpr int kCountryLen      = 28;
+inline constexpr int kPhotographerLen = 40;
 
 struct Aircraft {
     char  hex[kHexLen];
@@ -37,11 +39,15 @@ struct Aircraft {
     int   vertical_fpm;
     bool  on_ground;
     bool  military;  // as the feed's database has it
+    int   selected_ft;  // the altitude its autopilot is set to, -1 when not said
+    bool  approach;     // its autopilot's approach mode is on
     std::int64_t seen_us;  // when a reading last had it; set by merge_reading
 };
 
 struct Details {
+    char flight_iata[kFlightLen];  // the flight number as sold, "EK147", rather than the callsign
     char airline[kAirlineLen];
+    char airline_country[kCountryLen];
     char origin_code[kAirportCodeLen];  // IATA
     char origin_city[kCityLen];
     char dest_code[kAirportCodeLen];
@@ -53,9 +59,11 @@ struct Details {
     bool  has_origin_at;
     bool  has_dest_at;
     char owner[kOwnerLen];
+    char owner_country[kCountryLen];  // where it is registered
     char manufacturer[kManufacturerLen];
     char model[kModelLen];
     char photo_url[kPhotoUrlLen];
+    char photographer[kPhotographerLen];  // to credit, as Planespotters asks
     bool has_route;
     bool has_aircraft;
     bool photo_checked;  // the photo database has been asked, whatever it said
@@ -70,7 +78,8 @@ bool parse_aircraft(const char *json, std::size_t length, Details &out);
 /** Reads planespotters' /pub/photos/hex/{hex} and takes the larger thumbnail's
  *  address. False when the aircraft has no photograph on file, which is an
  *  ordinary answer rather than a failure. */
-bool parse_photo(const char *json, std::size_t length, char *out, std::size_t size);
+bool parse_photo(const char *json, std::size_t length, char *out, std::size_t size,
+                 char *photographer = nullptr, std::size_t photographer_size = 0);
 
 /** Whether the route fits where the aircraft is: near the great circle from
  *  one airport to the other, and not past either end. A callsign's route can
@@ -78,6 +87,11 @@ bool parse_photo(const char *json, std::size_t length, char *out, std::size_t si
  *  that does not fit is not to be shown. True when the airports' places are not
  *  known, as nothing then says it is wrong. */
 bool route_fits(const Details &details, float lat, float lon);
+
+/** How far along its route an aircraft at lat/lon is, as a share from 0 to 1,
+ *  and the kilometres left along the great circle. False when the airports'
+ *  places are not known. */
+bool route_progress(const Details &details, float lat, float lon, float &share, float &left_km);
 
 /** How much an aircraft is worth following of its own accord, 0 for not at
  *  all: on the ground, or a light aircraft calling by its registration. An

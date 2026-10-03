@@ -2,6 +2,10 @@
 
 The versions are the points where the panel was a step further on my desk. None of them is a stable release, it is still a project in progress.
 
+## Unreleased
+
+- The radar's plane column as a boarding pass: the flight number as sold with the airline beside it, the route's two ends with how far along the flight is and the kilometres to go, "On approach" when the autopilot's approach is on, a Military chip and the country of an aircraft without a route, then altitude with where it is climbing or descending to, speed, which way it heads and where it is from you, with the aircraft and its registration last. The photographer is named on the photo, as Planespotters asks.
+
 ## v0.8.0, 3 October 2026
 
 One frame for every page, a quicker panel, and a radar that follows what is worth seeing.
