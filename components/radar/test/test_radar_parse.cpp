@@ -340,6 +340,13 @@ TEST(RadarParse, notability)
         << "an A330 and an A310 alike";
     EXPECT_LT(notability(aircraft("EZY12AB", "", "A319", 9000)), notability(aircraft("", "", "A310", 9000)))
         << "but not an A319";
+    const int a330 = notability(aircraft("KLM689", "A5", "A333", 9000));
+    const int b777 = notability(aircraft("KLM691", "A5", "B77W", 9000));
+    const int a380 = notability(aircraft("UAE147", "A5", "A388", 9000));
+    EXPECT_GT(b777, a330) << "a 777 over an A330";
+    EXPECT_GT(a380, b777) << "an A380 over a 777";
+    EXPECT_GT(a380, notability(aircraft("KLM691", "A5", "B77W", 36000))) << "even one cruising";
+    EXPECT_GT(notability(aircraft("", "", "A337", 9000)), a330) << "the Beluga XL is no A330";
     EXPECT_GT(notability(aircraft("PHAHJ", "A1", "C172", 2000, 7700)), wide_high) << "an emergency above all";
 
     Aircraft fighter = aircraft("VIPER1", "A6", "F35", 12000);

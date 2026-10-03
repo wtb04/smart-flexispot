@@ -95,7 +95,7 @@ constexpr int          DOT_SIZE           = 5;
 // Stays with the aircraft it follows until another is clearly nearer, so the
 // card does not flick between two at much the same distance.
 constexpr float FOLLOW_MARGIN = 1.2f;
-constexpr std::uint32_t REFOLLOW_MS = 60 * 1000;  // untouched this long, Home follows again
+constexpr std::uint32_t REFOLLOW_MS = 60 * 1000;  // untouched this long, it follows again
 
 constexpr int SQUAWK_HIJACK    = 7500;
 constexpr int SQUAWK_NO_RADIO  = 7600;
@@ -2968,8 +2968,8 @@ void show_radar(const radar::Snapshot &snapshot)
     plot_traffic(range_km);
     paint_legend();
 
-    // On Home, a minute without a touch and it follows again whatever was chosen.
-    if (!s_following && !s_mapped && lv_display_get_inactive_time(nullptr) >= REFOLLOW_MS) {
+    // A minute without a touch and it follows again, whatever was chosen.
+    if (!s_following && lv_display_get_inactive_time(nullptr) >= REFOLLOW_MS) {
         s_following = true;
     }
     if (s_following) {

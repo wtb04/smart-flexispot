@@ -571,25 +571,36 @@ double dot(const Unit &a, const Unit &b)
 }  // namespace
 
 namespace {
-// ICAO type designators of the wide-bodies, by how they start.
-constexpr const char *WIDE_BODIES[] = {"B74", "B76", "B77", "B78", "A33", "A34", "A35", "A38", "A30", "A310", "MD11", "IL96"};
-constexpr int         CRUISING_FT   = 20000;
-constexpr int         MILITARY      = 6;  // over a heavy cruising, 5
-constexpr int         EMERGENCY     = 10;
+// Wide-bodies by their ICAO type, by how it starts, and how much more each is
+// worth than an airliner: the giants, the large twins and four-engined, and
+// the rest. The Beluga XL's A337 before the A33 it starts like.
+struct Wide {
+    const char *start;
+    int         extra;
+};
+constexpr Wide WIDE_BODIES[] = {
+    {"A38", 6}, {"B74", 6}, {"A124", 6}, {"A225", 6}, {"A3ST", 6}, {"A337", 6},
+    {"B77", 4}, {"A35", 4}, {"A34", 4},
+    {"A33", 3}, {"B76", 3}, {"B78", 3}, {"A30", 3}, {"A310", 3}, {"MD11", 3}, {"IL96", 3},
+};
+constexpr int HEAVY       = 3;  // ADS-B's A5 of a type not in the list
+constexpr int CRUISING_FT = 20000;
+constexpr int MILITARY    = 9;  // over a giant cruising, 8
+constexpr int EMERGENCY   = 12;
 
 bool emergency(int squawk)
 {
     return squawk == 7500 || squawk == 7600 || squawk == 7700;
 }
 
-bool wide_body(const char *type)
+int wide_extra(const char *type)
 {
-    for (const char *start : WIDE_BODIES) {
-        if (std::strncmp(type, start, std::strlen(start)) == 0) {
-            return true;
+    for (const Wide &wide : WIDE_BODIES) {
+        if (std::strncmp(type, wide.start, std::strlen(wide.start)) == 0) {
+            return wide.extra;
         }
     }
-    return false;
+    return 0;
 }
 }  // namespace
 
@@ -608,16 +619,16 @@ int notability(const Aircraft &aircraft)
     const bool  airline = std::isupper(call[0]) && std::isupper(call[1]) && std::isupper(call[2]) &&
                           std::isdigit(call[3]);
     const char  size    = aircraft.category[0] == 'A' ? aircraft.category[1] : '\0';
-    const bool  wide    = size == '5' || wide_body(aircraft.type);
-    if (!airline && !wide && size != '3' && size != '4') {
+    int         extra   = wide_extra(aircraft.type);
+    if (extra == 0 && size == '5') {
+        extra = HEAVY;
+    } else if (extra == 0 && size == '4') {
+        extra = 1;
+    }
+    if (!airline && extra == 0 && size != '3') {
         return 0;
     }
-    int score = 1;
-    if (wide) {
-        score += 3;
-    } else if (size == '4') {
-        score += 1;
-    }
+    int score = 1 + extra;
     if (aircraft.altitude_ft >= CRUISING_FT) {
         score += 1;
     }

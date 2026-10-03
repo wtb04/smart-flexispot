@@ -80,10 +80,10 @@ bool route_fits(const Details &details, float lat, float lon);
 /** How much an aircraft is worth following of its own accord, 0 for not at
  *  all: on the ground, or a light aircraft calling by its registration. An
  *  airline's flight, by a callsign of three letters and then a number, or one
- *  large by its ADS-B category, scores 1; a wide-body or heavy 3 more, a
- *  high-vortex one as a 757 1 more, and cruising high 1 more. A military
- *  aircraft is above those, whatever its callsign, and an emergency squawk
- *  above all of them. */
+ *  large by its ADS-B category, scores 1; a wide-body 3 more, a 777, A350 or
+ *  A340 4 more, a giant as an A380 or 747 6 more, a high-vortex one as a 757
+ *  1 more, and cruising high 1 more. A military aircraft is above those,
+ *  whatever its callsign, and an emergency squawk above all of them. */
 int notability(const Aircraft &aircraft);
 inline bool interesting(const Aircraft &aircraft) { return notability(aircraft) > 0; }
 
