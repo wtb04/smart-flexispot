@@ -263,7 +263,9 @@ std::int32_t s_map_w    = 0;
 std::int32_t s_map_h    = 0;
 bool         s_mapped    = false;    // laid out as the map, on the radar page
 lv_obj_t    *s_map_chip = nullptr;  // on Home, to the radar page
-lv_obj_t    *s_screw     = nullptr;
+lv_obj_t    *s_track      = nullptr;  // following on its own, or how near it is to again
+lv_obj_t    *s_track_mark = nullptr;
+lv_obj_t    *s_track_ring = nullptr;
 
 // The scope is one opaque picture, which the PPA copies to the screen whole:
 // the map, drawn for each range into s_ground, and each reading's planes over a
@@ -1498,14 +1500,79 @@ lv_obj_t *zoom_chip(lv_obj_t *bezel, const lv_image_dsc_t *mark, int step)
 
 void map_clicked(lv_event_t *);
 
+constexpr std::uint32_t TRACK_TICK_MS = 500;
+constexpr std::int32_t  TRACK_RING_W  = 3;
+constexpr int           TRACK_STEPS   = 100;
+
+void follow_again()
+{
+    s_following = true;
+    if (s_last != nullptr) {
+        show_radar(*s_last);
+    }
+}
+
+// Lit while it follows on its own; chosen by hand, faded, its ring filling over
+// the minute untouched after which it follows again.
+void paint_track()
+{
+    if (s_track == nullptr) {
+        return;
+    }
+    lv_obj_set_hidden(s_track_ring, s_following);
+    lv_obj_set_style_image_recolor(s_track_mark, lv_color_hex(s_following ? theme::primary : theme::secondary), 0);
+    lv_obj_set_style_image_opa(s_track_mark, s_following ? static_cast<lv_opa_t>(LV_OPA_COVER) : theme::mark_opa, 0);
+    if (!s_following) {
+        const std::uint32_t idle = std::min(lv_display_get_inactive_time(nullptr), REFOLLOW_MS);
+        const int           step = static_cast<int>(idle * TRACK_STEPS / REFOLLOW_MS);
+        if (lv_arc_get_value(s_track_ring) != step) {
+            lv_arc_set_value(s_track_ring, step);
+        }
+    }
+}
+
+void track_tick(lv_timer_t *)
+{
+    if (!s_following && lv_display_get_inactive_time(nullptr) >= REFOLLOW_MS) {
+        follow_again();
+    }
+    paint_track();
+}
+
+lv_obj_t *build_track(lv_obj_t *bezel)
+{
+    lv_obj_t *chip = theme::make_chip(bezel, "");
+    lv_obj_set_ext_click_area(chip, (CORNER - ZOOM_D) / 2);
+    lv_obj_add_event_cb(chip, [](lv_event_t *) {
+        follow_again();
+        paint_track();
+    }, LV_EVENT_PRESSED, nullptr);
+    s_track_mark = theme::make_mark(chip, &icons::track_icon, LV_OPA_COVER);
+    s_track_ring = lv_arc_create(chip);
+    lv_obj_set_size(s_track_ring, ZOOM_D, ZOOM_D);
+    lv_obj_center(s_track_ring);
+    lv_obj_remove_style(s_track_ring, nullptr, LV_PART_KNOB);
+    lv_obj_set_style_pad_all(s_track_ring, 0, 0);
+    lv_obj_set_style_arc_opa(s_track_ring, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(s_track_ring, TRACK_RING_W, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(s_track_ring, lv_color_hex(theme::secondary), LV_PART_INDICATOR);
+    lv_arc_set_rotation(s_track_ring, 270);  // from the top, as a clock's hand
+    lv_arc_set_bg_angles(s_track_ring, 0, FULL_TURN_DEG);
+    lv_arc_set_range(s_track_ring, 0, TRACK_STEPS);
+    lv_obj_set_clickable(s_track_ring, false);
+    quiet(s_track_ring);
+    lv_timer_create(track_tick, TRACK_TICK_MS, nullptr);
+    return chip;
+}
+
 // Zoom along the bottom, where the thumbs rest; on Home the way to the radar
-// page at the top right, as the cards of the control bar have it; a
-// screw in the last corner.
+// page at the top right, as the cards of the control bar have it; whether it
+// follows on its own in the last corner.
 void build_corners(lv_obj_t *bezel)
 {
     s_zoom_out  = zoom_chip(bezel, &icons::minus_icon, 1);
     s_zoom_in   = zoom_chip(bezel, &icons::plus_icon, -1);
-    s_screw     = theme::make_screw(bezel, ZOOM_D);
+    s_track     = build_track(bezel);
     s_map_chip = theme::make_chip(bezel, "");
     theme::make_mark(s_map_chip, &icons::expand_icon);
     lv_obj_set_ext_click_area(s_map_chip, (CORNER - ZOOM_D) / 2);
@@ -1516,14 +1583,14 @@ void build_corners(lv_obj_t *bezel)
 // page the map is that surface, so they take the black of the margin.
 void paint_chips(bool mapped)
 {
-    for (lv_obj_t *chip : {s_zoom_out, s_zoom_in, s_map_chip}) {
+    for (lv_obj_t *chip : {s_zoom_out, s_zoom_in, s_map_chip, s_track}) {
         lv_obj_set_style_bg_color(chip, lv_color_hex(mapped ? theme::background : theme::panel), 0);
     }
 }
 
 void place_corners(std::int32_t w, std::int32_t h)
 {
-    lv_obj_set_pos(s_screw, EDGE, EDGE);
+    lv_obj_set_pos(s_track, EDGE, EDGE);
     lv_obj_set_pos(s_map_chip, w - ZOOM_D - EDGE, EDGE);
     lv_obj_set_pos(s_zoom_out, EDGE, h - ZOOM_D - EDGE);
     lv_obj_set_pos(s_zoom_in, w - ZOOM_D - EDGE, h - ZOOM_D - EDGE);
@@ -2823,7 +2890,6 @@ void lay_out_cards()
                    (s_home_h - disc) / 2);
     place_corners(area_w, s_home_h);
     paint_chips(false);
-    lv_obj_set_hidden(s_screw, false);
     place_summary(area_w, s_home_h);
 
     lv_obj_set_parent(s_column, s_home_area);
@@ -2852,7 +2918,6 @@ void lay_out_map()
     build_scope_in({w, h, area_w / 2, h / 2, h / 2 - RIM_BAND, true, theme::radius::card}, 0, 0);
     place_corners(area_w, h);
     paint_chips(true);
-    lv_obj_set_hidden(s_screw, true);
     lv_obj_set_hidden(s_map_chip, true);  // the dock's tabs go back
     place_summary(area_w, h);
 
@@ -2971,10 +3036,6 @@ void show_radar(const radar::Snapshot &snapshot)
     plot_traffic(range_km);
     paint_legend();
 
-    // A minute without a touch and it follows again, whatever was chosen.
-    if (!s_following && lv_display_get_inactive_time(nullptr) >= REFOLLOW_MS) {
-        s_following = true;
-    }
     if (s_following) {
         follow_nearest();
     }
