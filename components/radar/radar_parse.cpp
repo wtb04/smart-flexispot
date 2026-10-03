@@ -1,6 +1,7 @@
 #include "radar_parse.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 
 #include <cstdlib>
@@ -564,6 +565,19 @@ double dot(const Unit &a, const Unit &b)
     return a.x * b.x + a.y * b.y + a.z * b.z;
 }
 }  // namespace
+
+bool interesting(const Aircraft &aircraft)
+{
+    if (aircraft.on_ground) {
+        return false;
+    }
+    const auto  *call    = reinterpret_cast<const unsigned char *>(aircraft.flight);
+    const bool   airline = std::isupper(call[0]) && std::isupper(call[1]) && std::isupper(call[2]) &&
+                           std::isdigit(call[3]);
+    const char  *kind    = aircraft.category;
+    const bool   big     = kind[0] == 'A' && (kind[1] == '3' || kind[1] == '4' || kind[1] == '5');
+    return airline || big;
+}
 
 bool route_fits(const Details &details, float lat, float lon)
 {

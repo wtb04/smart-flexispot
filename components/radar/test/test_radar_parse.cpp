@@ -307,3 +307,21 @@ TEST(RadarParse, route_fits)
     unplaced.has_origin_at  = false;
     EXPECT_TRUE(radar::route_fits(unplaced, 51.46f, 7.03f)) << "nothing to say it is wrong";
 }
+
+TEST(RadarParse, interesting)
+{
+    const auto aircraft = [](const char *flight, const char *category, bool on_ground = false) {
+        Aircraft a{};
+        std::snprintf(a.flight, sizeof(a.flight), "%s", flight);
+        std::snprintf(a.category, sizeof(a.category), "%s", category);
+        a.on_ground = on_ground;
+        return a;
+    };
+    EXPECT_TRUE(interesting(aircraft("KLM90G", "A3"))) << "an airline's flight";
+    EXPECT_TRUE(interesting(aircraft("RYR15P", ""))) << "by its callsign alone";
+    EXPECT_TRUE(interesting(aircraft("", "A5"))) << "a heavy without a callsign";
+    EXPECT_FALSE(interesting(aircraft("PHAHJ", "A1"))) << "a light aircraft by its registration";
+    EXPECT_FALSE(interesting(aircraft("N217SR", "A1"))) << "nor an American one";
+    EXPECT_FALSE(interesting(aircraft("", "A7"))) << "a helicopter";
+    EXPECT_FALSE(interesting(aircraft("KLM90G", "A3", true))) << "nothing on the ground";
+}

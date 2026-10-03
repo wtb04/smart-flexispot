@@ -76,6 +76,11 @@ bool parse_photo(const char *json, std::size_t length, char *out, std::size_t si
  *  known, as nothing then says it is wrong. */
 bool route_fits(const Details &details, float lat, float lon);
 
+/** Worth following of its own accord: in the air, and an airline's flight, by
+ *  a callsign of three letters and then a number, or large or heavy by its
+ *  ADS-B category. Not a light aircraft calling by its registration. */
+bool interesting(const Aircraft &aircraft);
+
 /** Reads an adsb.fi v2 response, which is far too large to hand to a DOM
  *  parser on this part: the allocator keeps anything under sixteen kilobytes
  *  in internal RAM, and a JSON tree of forty kilobytes is thousands of small

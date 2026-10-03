@@ -95,6 +95,7 @@ constexpr int          DOT_SIZE           = 5;
 // Stays with the aircraft it follows until another is clearly nearer, so the
 // card does not flick between two at much the same distance.
 constexpr float FOLLOW_MARGIN = 1.2f;
+constexpr std::uint32_t REFOLLOW_MS = 60 * 1000;  // untouched this long, Home follows again
 
 constexpr int SQUAWK_HIJACK    = 7500;
 constexpr int SQUAWK_NO_RADIO  = 7600;
@@ -2254,18 +2255,32 @@ int plot_of(const char *hex)
     return -1;
 }
 
+// The nearest in view worth following, an airliner over a light aircraft;
+// the nearest of all when none is.
+int nearest_interesting()
+{
+    for (int i = 0; i < s_shown; ++i) {
+        if (radar::interesting(*s_plots[i].aircraft)) {
+            return i;
+        }
+    }
+    return 0;
+}
+
 void follow_nearest()
 {
     if (s_shown == 0) {
         s_chosen[0] = '\0';
         return;
     }
+    const int  best = nearest_interesting();
     const int  held = plot_of(s_chosen);
-    const bool keep = held >= 0 && s_plots[held].aircraft->distance_nm <
-                                       s_plots[0].aircraft->distance_nm * FOLLOW_MARGIN;
-    const int at = keep ? held : 0;
+    const bool keep = held >= 0 &&
+                      (radar::interesting(*s_plots[held].aircraft) || !radar::interesting(*s_plots[best].aircraft)) &&
+                      s_plots[held].aircraft->distance_nm < s_plots[best].aircraft->distance_nm * FOLLOW_MARGIN;
+    const int at = keep ? held : best;
     if (!keep) {
-        remember_chosen(*s_plots[0].aircraft);
+        remember_chosen(*s_plots[best].aircraft);
     }
     if (std::strcmp(s_details_hex, s_chosen) != 0) {
         await_picture();
@@ -2947,6 +2962,10 @@ void show_radar(const radar::Snapshot &snapshot)
     plot_traffic(range_km);
     paint_legend();
 
+    // On Home, a minute without a touch and it follows again whatever was chosen.
+    if (!s_following && !s_mapped && lv_display_get_inactive_time(nullptr) >= REFOLLOW_MS) {
+        s_following = true;
+    }
     if (s_following) {
         follow_nearest();
     }
