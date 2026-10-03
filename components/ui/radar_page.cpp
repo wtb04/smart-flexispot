@@ -2063,6 +2063,9 @@ void show_picture()
     }
     lv_obj_set_hidden(s_photo_frame, s_picture == Picture::Idle);
     lv_obj_set_hidden(s_photo, !shown);
+    if (!shown) {
+        lv_obj_set_hidden(s_credit, true);  // the last photo's, while the next is fetched
+    }
     show_waiting(s_picture == Picture::Looking || s_picture == Picture::Loading);
     lv_obj_set_hidden(s_photo_none, s_picture != Picture::Missing);
     lv_obj_set_y(s_identity, s_picture == Picture::Idle ? 0 : PHOTO_H + theme::space::m);

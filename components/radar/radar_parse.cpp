@@ -750,6 +750,87 @@ double degrees_apart(double a, double b)
 }
 }  // namespace
 
+bool parse_route_codes(const char *text, std::size_t length, char *from, char *to, std::size_t size)
+{
+    constexpr std::size_t ICAO_LEN = 4;
+    if (text == nullptr || size <= ICAO_LEN) {
+        return false;
+    }
+    // Four letters, a dash, four letters, maybe with a line end.
+    std::size_t start = 0;
+    while (start < length && std::isspace(static_cast<unsigned char>(text[start]))) {
+        ++start;
+    }
+    if (length - start < 2 * ICAO_LEN + 1 || text[start + ICAO_LEN] != '-') {
+        return false;
+    }
+    for (std::size_t i = 0; i < ICAO_LEN; ++i) {
+        if (!std::isalnum(static_cast<unsigned char>(text[start + i])) ||
+            !std::isalnum(static_cast<unsigned char>(text[start + ICAO_LEN + 1 + i]))) {
+            return false;
+        }
+    }
+    std::snprintf(from, size, "%.4s", text + start);
+    std::snprintf(to, size, "%.4s", text + start + ICAO_LEN + 1);
+    return true;
+}
+
+namespace {
+// What an airport's name says of being one, which a town under its code does not need.
+void cut_airport_words(char *name)
+{
+    static constexpr const char *WORDS[] = {" International Airport", " Airport", " International", "Airport "};
+    for (const char *word : WORDS) {
+        if (char *at = std::strstr(name, word); at != nullptr) {
+            std::memmove(at, at + std::strlen(word), std::strlen(at + std::strlen(word)) + 1);
+        }
+    }
+}
+}  // namespace
+
+bool parse_airport(const char *json, std::size_t length, Airport &out)
+{
+    out = Airport{};
+    if (json == nullptr) {
+        return false;
+    }
+    Scanner in{json, json + length};
+    if (!in.take('{')) {
+        return false;
+    }
+    bool has_lat = false, has_lon = false;
+    for (bool first = true; !in.take('}'); first = false) {
+        if (!first && !in.take(',')) {
+            return false;
+        }
+        const char *key     = nullptr;
+        std::size_t key_len = 0;
+        if (!in.key(key, key_len)) {
+            return false;
+        }
+        double value = 0.0;
+        bool   read  = true;
+        if (key_is(key, key_len, "iata") && in.peek('"')) {
+            read = read_text(in, out.code, sizeof(out.code));
+        } else if (key_is(key, key_len, "airport") && in.peek('"')) {
+            read = read_text(in, out.name, sizeof(out.name));
+        } else if (key_is(key, key_len, "latitude") && in.number(value)) {
+            out.lat = static_cast<float>(value);
+            has_lat = true;
+        } else if (key_is(key, key_len, "longitude") && in.number(value)) {
+            out.lon = static_cast<float>(value);
+            has_lon = true;
+        } else {
+            read = in.skip_value();
+        }
+        if (!read) {
+            return false;
+        }
+    }
+    cut_airport_words(out.name);
+    return has_lat && has_lon;
+}
+
 bool route_backwards(const Details &details, float lat, float lon, float track_deg)
 {
     constexpr double TOWARD_DEG = 60.0;   // flying at it, give or take an airway's bend

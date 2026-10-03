@@ -88,6 +88,21 @@ bool parse_photo(const char *json, std::size_t length, char *out, std::size_t si
  *  known, as nothing then says it is wrong. */
 bool route_fits(const Details &details, float lat, float lon);
 
+/** Reads hexdb.io's /callsign-route answer, "LIPE-EGGW", into the two
+ *  airports' ICAO codes. */
+bool parse_route_codes(const char *text, std::size_t length, char *from, char *to, std::size_t size);
+
+/** An airport as hexdb.io's /api/v1/airport/icao/{code} has it: its IATA code,
+ *  its name cut down to what a town under a code needs ("London Luton" for
+ *  London Luton Airport), and where it is. */
+struct Airport {
+    char  code[kAirportCodeLen];
+    char  name[kCityLen];
+    float lat;
+    float lon;
+};
+bool parse_airport(const char *json, std::size_t length, Airport &out);
+
 /** Whether an aircraft on the route's line flies toward its origin rather
  *  than its destination: the database's route for the callsign is the same
  *  pair the other way round. False when its track is not known. */

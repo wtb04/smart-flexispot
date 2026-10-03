@@ -5,6 +5,7 @@ The versions are the points where the panel was a step further on my desk. None 
 ## Unreleased
 
 - The radar's plane column as a boarding pass: the flight number as sold with the airline beside it, the route's two ends with how far along the flight is and the kilometres to go, "On approach" when the autopilot's approach is on, a Military chip and the country of an aircraft without a route, then altitude with where it is climbing or descending to, speed, which way it heads and where it is from you, with the aircraft and its registration last. The photographer is named on the photo, as Planespotters asks.
+- Routes for low-cost airlines: where adsbdb's route for a callsign does not fit where the aircraft is, as it often does not for Ryanair's and easyJet's, hexdb.io's is asked for and taken when it fits. One with the same airport at both ends is left out, and one flown the other way round is turned round.
 
 ## v0.8.0, 3 October 2026
 

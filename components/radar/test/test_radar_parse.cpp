@@ -439,3 +439,30 @@ TEST(RadarParse, approach_and_progress)
     route.has_dest_at = false;
     EXPECT_FALSE(route_progress(route, 51.9f, 2.15f, share, left_km)) << "nothing without both airports";
 }
+
+TEST(RadarParse, hexdb)
+{
+    char from[8] = {}, to[8] = {};
+    const std::string route = "LIPE-EGGW\n";
+    ASSERT_TRUE(parse_route_codes(route.c_str(), route.size(), from, to, sizeof(from)));
+    EXPECT_STREQ(from, "LIPE");
+    EXPECT_STREQ(to, "EGGW");
+    const std::string nothing = "n/a";
+    EXPECT_FALSE(parse_route_codes(nothing.c_str(), nothing.size(), from, to, sizeof(from)));
+
+    const std::string json = R"({"country_code": "GB", "region_name": "England", "iata": "LTN", "icao": "EGGW", )"
+                             R"("airport": "London Luton Airport", "latitude": 51.8747, "longitude": -0.368333})";
+    Airport luton{};
+    ASSERT_TRUE(parse_airport(json.c_str(), json.size(), luton));
+    EXPECT_STREQ(luton.code, "LTN");
+    EXPECT_STREQ(luton.name, "London Luton") << "without saying it is an airport";
+    EXPECT_NEAR(luton.lat, 51.8747f, 0.0001f);
+    EXPECT_NEAR(luton.lon, -0.3683f, 0.0001f);
+
+    const std::string schiphol = R"({"iata": "AMS", "airport": "Amsterdam Airport Schiphol", "latitude": 52.3, "longitude": 4.76})";
+    Airport ams{};
+    ASSERT_TRUE(parse_airport(schiphol.c_str(), schiphol.size(), ams));
+    EXPECT_STREQ(ams.name, "Amsterdam Schiphol");
+    const std::string unplaced = R"({"iata": "XXX", "airport": "Nowhere"})";
+    EXPECT_FALSE(parse_airport(unplaced.c_str(), unplaced.size(), ams)) << "no place, no use";
+}
