@@ -64,17 +64,7 @@ It is built Home Assistant first: every light and thermostat is one of its entit
 
 ### The desk
 
-One button goes between Stand and Sit, showing which way while the desk moves, and a tap on the height folds out up, down and the other presets. There are six presets instead of the control box's four, the desk is wired straight to the Tab5 or reached over Bluetooth, and it is safe by default: a move from Home Assistant stops unless it keeps being asked for, and the byte that would factory-reset the box is pinned by a test.
-
-### The companion board
-
-| Top | Bottom |
-|---|---|
-| ![The carrier board, top](pcb/img/board-top.png) | ![The carrier board, bottom](pcb/img/board-bottom.png) |
-
-![The carrier board in 3D, with the DevKit socket and the RJ45 jack](pcb/img/board-3d.png)
-
-To leave the cable at the desk, an ESP32 DevKit sits on a small carrier board of my own in the desk's RJ45 line and talks to the panel over Bluetooth. It is powered by the desk, shifts the box's 5 V signal down for the ESP32, and has two LEDs in the jack for the Bluetooth and desk links. The KiCad project and everything to have it made are in [pcb/](pcb/), and how to wire and flash it in [getting started](docs/getting-started.md#option-2-over-bluetooth-with-a-companion).
+One button goes between Stand and Sit, showing which way while the desk moves, and a tap on the height folds out up, down and the other presets. There are six presets instead of the control box's four, the desk is [wired straight to the Tab5 or reached over Bluetooth](#connecting-the-desk), and it is safe by default: a move from Home Assistant stops unless it keeps being asked for, and the byte that would factory-reset the box is pinned by a test.
 
 ### Films and series
 
@@ -129,6 +119,28 @@ Brightness, accent colour, which side the dock is on, the focus lengths, and a c
 Probably, if the control box speaks the HS01B / HS13B dialect, which most LoctekMotion boxes (and so most Flexispots) do. The HCB2xx series does not.
 
 The protocol and pinouts come from [iMicknl/LoctekMotion_IoT](https://github.com/iMicknl/LoctekMotion_IoT), which did the hard work of figuring out what the control box says. If your box is not covered there, it will not work here either.
+
+## Connecting the desk
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/overview-dark.svg">
+  <img alt="Block diagram: the Tab5's ESP32-P4 and ESP32-C6, and the two links to the control box, a UART cable or Bluetooth to a companion" src="docs/diagrams/overview-light.svg">
+</picture>
+
+The panel takes the keypad's place on the control box's RJ45 line, in one of two ways:
+
+- **A cable to the Tab5.** Four wires from the line to the Tab5's M5-Bus, and nothing else to build. The panel stays where the cable reaches.
+- **Over Bluetooth, with a companion.** A small ESP32 stays on the line at the desk and the panel talks to it, so the panel can go anywhere in the room on its battery, and updates the companion over the air too.
+
+The companion is an ESP32 DevKit on a carrier board of my own: powered by the desk, shifting the box's 5 V signal down for the ESP32, with two LEDs in its RJ45 jack for the Bluetooth and desk links.
+
+| Top | Bottom |
+|---|---|
+| ![The carrier board, top](pcb/img/board-top.png) | ![The carrier board, bottom](pcb/img/board-bottom.png) |
+
+![The carrier board in 3D, with the DevKit socket and the RJ45 jack](pcb/img/board-3d.png)
+
+The KiCad project and everything to have it made are in [pcb/](pcb/), and the wiring for both ways in [getting started](docs/getting-started.md#2-connect-the-desk).
 
 ## Getting started
 
