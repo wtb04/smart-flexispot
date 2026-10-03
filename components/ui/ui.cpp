@@ -359,6 +359,7 @@ struct PhotoArgs {
     const void *pixels;
     int         width;
     int         height;
+    char        credit[radar::kPhotographerLen];
 };
 
 Slot<bool>           p_preset_active[kPresetCount];
@@ -759,7 +760,7 @@ void apply_page_updates()
         radar_take_details(details.hex, details.details);
     }
     if (PhotoArgs photo{}; take(p_photo, photo)) {
-        radar_take_photo(photo.hex, photo.pixels, photo.width, photo.height);
+        radar_take_photo(photo.hex, photo.pixels, photo.width, photo.height, photo.credit);
     }
 }
 
@@ -1109,10 +1110,11 @@ esp_err_t set_radar_details(const char *hex, const radar::Details &details)
     return ESP_OK;
 }
 
-esp_err_t set_radar_photo(const char *hex, const void *pixels, int width, int height)
+esp_err_t set_radar_photo(const char *hex, const void *pixels, int width, int height, const char *credit)
 {
     PhotoArgs args{};
     copy_text(args.hex, sizeof(args.hex), hex);
+    copy_text(args.credit, sizeof(args.credit), credit);
     args.pixels = pixels;
     args.width  = width;
     args.height = height;

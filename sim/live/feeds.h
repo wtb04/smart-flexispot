@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <vector>
+#include <string>
 
 // What live.cpp's threads call, one fetch at a time.
 namespace live {
@@ -24,5 +25,5 @@ bool fetch_details(const char *hex, const char *callsign, radar::Details &out);
 bool fetch_trace(const char *hex);
 
 /** Its photo as RGB565, no larger than the panel shows it; empty for none. */
-std::vector<std::uint16_t> fetch_photo(const char *hex, int &width, int &height);
+std::vector<std::uint16_t> fetch_photo(const char *hex, int &width, int &height, std::string &credit);
 }  // namespace live

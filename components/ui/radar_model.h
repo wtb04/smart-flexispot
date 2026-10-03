@@ -20,12 +20,13 @@ struct RadarLookup {
     const void     *photo        = nullptr;  // RGB565, or null when there is none
     int             photo_width  = 0;
     int             photo_height = 0;
+    char            photo_credit[radar::kPhotographerLen] = "";  // who took it
     std::uint32_t   photo_stamp  = 0;
 };
 
 const RadarLookup &radar_lookup();
 
 void radar_take_details(const char *hex, const radar::Details &details);
-void radar_take_photo(const char *hex, const void *pixels, int width, int height);
+void radar_take_photo(const char *hex, const void *pixels, int width, int height, const char *credit);
 
 }  // namespace ui::detail

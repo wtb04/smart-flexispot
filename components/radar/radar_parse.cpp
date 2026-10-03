@@ -200,6 +200,8 @@ bool read_number_field(Scanner &in, const char *key, std::size_t key_len, Aircra
         out.speed_kt = static_cast<float>(value);
     } else if (key_is(key, key_len, "baro_rate") && in.number(value)) {
         out.vertical_fpm = static_cast<int>(value);
+    } else if (key_is(key, key_len, "nav_altitude_mcp") && in.number(value)) {
+        out.selected_ft = static_cast<int>(value);
     } else if (key_is(key, key_len, "dbFlags") && in.number(value)) {
         out.military = (static_cast<int>(value) & DB_MILITARY) != 0;
     } else {
@@ -215,6 +217,7 @@ bool read_aircraft(Scanner &in, Aircraft &out, bool &usable)
     out.altitude_ft = -1;
     out.track_deg   = -1.0f;
     out.squawk      = -1;
+    out.selected_ft = -1;
     bool has_lat    = false;
     bool has_lon    = false;
 
@@ -251,6 +254,17 @@ bool read_aircraft(Scanner &in, Aircraft &out, bool &usable)
                 return false;
             }
             out.squawk = static_cast<int>(std::strtol(digits, nullptr, 10));
+        } else if (key_is(key, key_len, "nav_modes") && in.peek('[')) {
+            in.take('[');
+            while (!in.take(']')) {
+                const char *mode   = nullptr;
+                std::size_t length = 0;
+                if (!in.string(mode, length)) {
+                    return false;
+                }
+                out.approach = out.approach || key_is(mode, length, "approach");
+                in.take(',');
+            }
         } else if (key_is(key, key_len, "alt_baro") && in.peek('"')) {
             const char *text   = nullptr;
             std::size_t length = 0;
@@ -434,9 +448,12 @@ bool parse_route(const char *json, std::size_t length, Details &out)
         }
 
         bool handled = false;
-        if (in.peek('{')) {
+        if (key_is(key, key_len, "callsign_iata") && in.peek('"')) {
+            handled = read_text(in, out.flight_iata, sizeof(out.flight_iata));
+        } else if (in.peek('{')) {
             if (key_is(key, key_len, "airline")) {
-                const Field fields[] = {{"name", out.airline, sizeof(out.airline)}};
+                const Field fields[] = {{"name", out.airline, sizeof(out.airline)},
+                                        {"country", out.airline_country, sizeof(out.airline_country)}};
                 handled              = in.take('{') && read_fields(in, fields);
             } else if (key_is(key, key_len, "origin")) {
                 const Place place{out.origin_code, sizeof(out.origin_code), out.origin_city,
@@ -463,27 +480,43 @@ bool parse_route(const char *json, std::size_t length, Details &out)
     return out.has_route;
 }
 
-bool parse_photo(const char *json, std::size_t length, char *out, std::size_t size)
+bool parse_photo(const char *json, std::size_t length, char *out, std::size_t size, char *photographer,
+                 std::size_t photographer_size)
 {
     if (json == nullptr || out == nullptr || size == 0) {
         return false;
     }
     out[0] = '\0';
+    if (photographer != nullptr && photographer_size > 0) {
+        photographer[0] = '\0';
+    }
 
     Scanner in{json, json + length};
-    if (!in.take('{') || !seek_key(in, "photos")) {
+    if (!in.take('{') || !seek_key(in, "photos") || !in.take('[') || !in.take('{')) {
         return false;
     }
-    if (!in.take('[') || !in.take('{')) {
-        return false;
-    }
-    if (!enter_object(in, "thumbnail_large")) {
-        return false;
-    }
-
-    const Field fields[] = {{"src", out, size}};
-    if (!read_fields(in, fields)) {
-        return false;
+    // The first photo's keys, in whatever order they come.
+    for (bool first = true; !in.take('}'); first = false) {
+        if (!first && !in.take(',')) {
+            return false;
+        }
+        const char *key     = nullptr;
+        std::size_t key_len = 0;
+        if (!in.key(key, key_len)) {
+            return false;
+        }
+        bool read = true;
+        if (key_is(key, key_len, "thumbnail_large") && in.take('{')) {
+            const Field fields[] = {{"src", out, size}};
+            read                 = read_fields(in, fields);
+        } else if (key_is(key, key_len, "photographer") && in.peek('"') && photographer != nullptr) {
+            read = read_text(in, photographer, photographer_size);
+        } else {
+            read = in.skip_value();
+        }
+        if (!read) {
+            return false;
+        }
     }
     unescape_in_place(out);
     return out[0] != '\0';
@@ -503,6 +536,7 @@ bool parse_aircraft(const char *json, std::size_t length, Details &out)
         {"manufacturer", out.manufacturer, sizeof(out.manufacturer)},
         {"type", out.model, sizeof(out.model)},
         {"registered_owner", out.owner, sizeof(out.owner)},
+        {"registered_owner_country_name", out.owner_country, sizeof(out.owner_country)},
         {"url_photo_thumbnail", out.photo_url, sizeof(out.photo_url)},
     };
     if (!read_fields(in, fields)) {
@@ -680,6 +714,9 @@ int merge_reading(Aircraft *now, int count, int capacity, const Aircraft *before
         }
         if (same != nullptr) {
             same->military = same->military || old.military;
+            if (same->selected_ft < 0) {
+                same->selected_ft = old.selected_ft;
+            }
             fill(same->type, old.type, sizeof(same->type));
             fill(same->category, old.category, sizeof(same->category));
             fill(same->desc, old.desc, sizeof(same->desc));
@@ -690,6 +727,144 @@ int merge_reading(Aircraft *now, int count, int capacity, const Aircraft *before
         }
     }
     return count;
+}
+
+namespace {
+// The direction to fly from one place to another, in degrees from north.
+double bearing_to(double lat, double lon, double to_lat, double to_lon)
+{
+    constexpr double RAD = 3.14159265358979 / 180.0;
+    const double     p1  = lat * RAD;
+    const double     p2  = to_lat * RAD;
+    const double     dl  = (to_lon - lon) * RAD;
+    const double     deg = std::atan2(std::sin(dl) * std::cos(p2),
+                                      std::cos(p1) * std::sin(p2) - std::sin(p1) * std::cos(p2) * std::cos(dl)) /
+                       RAD;
+    return std::fmod(deg + 360.0, 360.0);
+}
+
+double degrees_apart(double a, double b)
+{
+    const double d = std::fabs(std::fmod(a - b + 540.0, 360.0) - 180.0);
+    return d;
+}
+}  // namespace
+
+bool parse_route_codes(const char *text, std::size_t length, char *from, char *to, std::size_t size)
+{
+    constexpr std::size_t ICAO_LEN = 4;
+    if (text == nullptr || size <= ICAO_LEN) {
+        return false;
+    }
+    // Four letters, a dash, four letters, maybe with a line end.
+    std::size_t start = 0;
+    while (start < length && std::isspace(static_cast<unsigned char>(text[start]))) {
+        ++start;
+    }
+    if (length - start < 2 * ICAO_LEN + 1 || text[start + ICAO_LEN] != '-') {
+        return false;
+    }
+    for (std::size_t i = 0; i < ICAO_LEN; ++i) {
+        if (!std::isalnum(static_cast<unsigned char>(text[start + i])) ||
+            !std::isalnum(static_cast<unsigned char>(text[start + ICAO_LEN + 1 + i]))) {
+            return false;
+        }
+    }
+    std::snprintf(from, size, "%.4s", text + start);
+    std::snprintf(to, size, "%.4s", text + start + ICAO_LEN + 1);
+    return true;
+}
+
+namespace {
+// What an airport's name says of being one, which a town under its code does not need.
+void cut_airport_words(char *name)
+{
+    static constexpr const char *WORDS[] = {" International Airport", " Airport", " International", "Airport "};
+    for (const char *word : WORDS) {
+        if (char *at = std::strstr(name, word); at != nullptr) {
+            std::memmove(at, at + std::strlen(word), std::strlen(at + std::strlen(word)) + 1);
+        }
+    }
+}
+}  // namespace
+
+bool parse_airport(const char *json, std::size_t length, Airport &out)
+{
+    out = Airport{};
+    if (json == nullptr) {
+        return false;
+    }
+    Scanner in{json, json + length};
+    if (!in.take('{')) {
+        return false;
+    }
+    bool has_lat = false, has_lon = false;
+    for (bool first = true; !in.take('}'); first = false) {
+        if (!first && !in.take(',')) {
+            return false;
+        }
+        const char *key     = nullptr;
+        std::size_t key_len = 0;
+        if (!in.key(key, key_len)) {
+            return false;
+        }
+        double value = 0.0;
+        bool   read  = true;
+        if (key_is(key, key_len, "iata") && in.peek('"')) {
+            read = read_text(in, out.code, sizeof(out.code));
+        } else if (key_is(key, key_len, "airport") && in.peek('"')) {
+            read = read_text(in, out.name, sizeof(out.name));
+        } else if (key_is(key, key_len, "latitude") && in.number(value)) {
+            out.lat = static_cast<float>(value);
+            has_lat = true;
+        } else if (key_is(key, key_len, "longitude") && in.number(value)) {
+            out.lon = static_cast<float>(value);
+            has_lon = true;
+        } else {
+            read = in.skip_value();
+        }
+        if (!read) {
+            return false;
+        }
+    }
+    cut_airport_words(out.name);
+    return has_lat && has_lon;
+}
+
+bool route_backwards(const Details &details, float lat, float lon, float track_deg)
+{
+    constexpr double TOWARD_DEG = 60.0;   // flying at it, give or take an airway's bend
+    constexpr double AWAY_DEG   = 120.0;  // and plainly not at the other end
+    if (track_deg < 0.0f || !details.has_route || !details.has_origin_at || !details.has_dest_at) {
+        return false;
+    }
+    const double to_origin = bearing_to(lat, lon, details.origin_lat, details.origin_lon);
+    const double to_dest   = bearing_to(lat, lon, details.dest_lat, details.dest_lon);
+    return degrees_apart(track_deg, to_origin) <= TOWARD_DEG && degrees_apart(track_deg, to_dest) >= AWAY_DEG;
+}
+
+bool route_progress(const Details &details, float lat, float lon, float &share, float &left_km)
+{
+    constexpr double EARTH_KM = 6371.0;
+    if (!details.has_route || !details.has_origin_at || !details.has_dest_at) {
+        return false;
+    }
+    const Unit from   = unit_at(details.origin_lat, details.origin_lon);
+    const Unit to     = unit_at(details.dest_lat, details.dest_lon);
+    const Unit here   = unit_at(lat, lon);
+    Unit       normal = cross(from, to);
+    const double length = std::sqrt(dot(normal, normal));
+    if (length < 1e-9) {
+        return false;
+    }
+    normal = {normal.x / length, normal.y / length, normal.z / length};
+    const double route_km = std::atan2(length, dot(from, to)) * EARTH_KM;
+    const double off      = dot(here, normal);
+    const Unit   on{here.x - off * normal.x, here.y - off * normal.y, here.z - off * normal.z};
+    const double along_km = std::atan2(dot(cross(from, on), normal), dot(from, on)) * EARTH_KM;
+    share   = static_cast<float>(std::clamp(along_km / route_km, 0.0, 1.0));
+    left_km = static_cast<float>(std::max(route_km - along_km, 0.0));
+    return true;
 }
 
 bool route_fits(const Details &details, float lat, float lon)
@@ -706,7 +881,7 @@ bool route_fits(const Details &details, float lat, float lon)
     Unit         normal = cross(from, to);
     const double length = std::sqrt(dot(normal, normal));
     if (length < 1e-9) {
-        return true;  // the same airport twice, or the far side of the world
+        return false;  // the same airport at both ends: the database is wrong about one of them
     }
     normal = {normal.x / length, normal.y / length, normal.z / length};
     const double route_km = std::atan2(length, dot(from, to)) * EARTH_KM;

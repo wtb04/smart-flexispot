@@ -94,7 +94,7 @@ constexpr int          DOT_SIZE           = 5;
 
 // Turns between the few most notable in view, this often; one held drops out
 // only once it is outside a few more than that.
-constexpr std::uint32_t ROTATE_MS    = 5 * 60 * 1000;
+constexpr std::uint32_t ROTATE_MS    = 3 * 60 * 1000;
 constexpr int           ROTATE_AMONG = 3;
 constexpr int           ROTATE_KEEP  = ROTATE_AMONG + 1;
 constexpr std::uint32_t REFOLLOW_MS = 60 * 1000;  // untouched this long, it follows again
@@ -169,12 +169,23 @@ constexpr lv_opa_t      WAITING_PLANE_OPA = LV_OPA_30;
 constexpr int           SPINNER_SWEEP_DEG = 90;
 constexpr std::uint32_t SPINNER_TURN_MS   = 900;
 
-constexpr int ALTITUDE_READING = 0;
-constexpr int SPEED_READING    = 1;
-constexpr int DISTANCE_READING = 2;
-constexpr int READINGS         = 3;
+// The facts two by two above the aircraft at the column's foot: altitude and
+// speed, then which way it heads and where it is from you.
+constexpr int ALTITUDE_FACT = 0;
+constexpr int SPEED_FACT    = 1;
+constexpr int HEADING_FACT  = 2;
+constexpr int AWAY_FACT     = 3;
+constexpr int FACTS         = 4;
 
-constexpr std::int32_t READING_MIN_GAP = 8;
+constexpr std::int32_t FACT_GAP     = theme::space::m;
+constexpr std::int32_t FACT_WIDE    = 150;  // the altitude's column, with where it is going, and the heading's
+constexpr std::int32_t ROUTE_END_W  = 78;   // a code and its town at either end of the route
+constexpr std::int32_t TRACK_H      = 4;
+constexpr std::int32_t TRACK_PLANE  = 18;   // the plane on the route, a little larger than the track is wide
+constexpr std::int32_t CREDIT_PAD   = 4;
+constexpr std::size_t  CREDIT_MAX   = 24;   // characters of the photographer's name, to keep to the photo's width
+constexpr std::int32_t HEADING_PLANE = 22;  // the plane beside the heading, as tall as its letters
+constexpr int          SEPARATE_FT  = 500;  // a selected altitude this far off is where it is going
 
 constexpr const char *NO_READING = "--";
 
@@ -213,9 +224,12 @@ struct Blip {
     lv_obj_t *label;
 };
 
-struct Row {
+struct Fact {
+    lv_obj_t *box;
     lv_obj_t *name;
+    lv_obj_t *mark;  // the heading's plane, turned as it flies
     lv_obj_t *value;
+    lv_obj_t *unit;
 };
 
 struct Plot {
@@ -324,10 +338,18 @@ Plot *s_plots = nullptr;
 int   s_shown = 0;
 
 lv_obj_t *s_title       = nullptr;
-lv_obj_t *s_operator    = nullptr;
+lv_obj_t *s_title_side  = nullptr;  // the airline beside a flight number
+lv_obj_t *s_operator    = nullptr;  // or on a line of its own beside a callsign
 lv_obj_t *s_airframe    = nullptr;
-lv_obj_t *s_route       = nullptr;
-lv_obj_t *s_cities      = nullptr;
+lv_obj_t *s_route       = nullptr;  // the two ends, and how far between them
+lv_obj_t *s_ends[2][2]  = {};       // from and to, each its code and its town
+lv_obj_t *s_track_fill  = nullptr;
+lv_obj_t *s_track_plane = nullptr;
+lv_obj_t *s_progress    = nullptr;
+lv_obj_t *s_chips       = nullptr;
+lv_obj_t *s_chip_military = nullptr;
+lv_obj_t *s_chip_country  = nullptr;
+lv_obj_t *s_credit      = nullptr;  // the photographer, on the photo's corner
 lv_obj_t *s_summary     = nullptr;
 lv_obj_t *s_photo       = nullptr;
 lv_obj_t *s_photo_frame = nullptr;
@@ -338,7 +360,7 @@ lv_obj_t *s_identity    = nullptr;
 lv_obj_t *s_nearby      = nullptr;
 
 lv_image_dsc_t s_photo_dsc      = {};
-Row            s_rows[READINGS] = {};
+Fact           s_facts[FACTS]   = {};
 
 radar::Snapshot *s_last                        = nullptr;
 char             s_chosen[radar::kHexLen]      = {};
@@ -1773,6 +1795,16 @@ void build_photo(lv_obj_t *card)
     lv_obj_set_pos(s_photo, 0, 0);
     lv_image_set_inner_align(s_photo, LV_IMAGE_ALIGN_CONTAIN);
     quiet(s_photo);
+
+    // Who took it, on a dark patch in its corner, as Planespotters asks.
+    s_credit = theme::make_label(s_photo_frame, "", theme::text, theme::type_label());
+    theme::style_panel(s_credit, theme::background, theme::radius::row);
+    lv_obj_set_style_bg_opa(s_credit, LV_OPA_60, 0);
+    lv_obj_set_style_pad_hor(s_credit, CREDIT_PAD * 2, 0);
+    lv_obj_set_style_pad_ver(s_credit, CREDIT_PAD / 2, 0);
+    lv_obj_align(s_credit, LV_ALIGN_BOTTOM_RIGHT, -CREDIT_PAD, -CREDIT_PAD);
+    lv_obj_set_hidden(s_credit, true);
+    quiet(s_credit);
 }
 
 // Not LVGL's spinner: its eased ends stutter whenever a frame is late. And
@@ -1825,6 +1857,67 @@ lv_obj_t *identity_line(std::uint32_t colour, const lv_font_t *font)
     return label;
 }
 
+lv_obj_t *box_in(lv_obj_t *parent, lv_flex_flow_t flow)
+{
+    lv_obj_t *box = theme::make_box(parent);
+    lv_obj_set_size(box, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(box, flow);
+    return box;
+}
+
+lv_obj_t *make_chip_label(lv_obj_t *parent, std::uint32_t ink)
+{
+    lv_obj_t *chip = theme::make_label(parent, "", ink, theme::type_label());
+    theme::style_panel(chip, theme::panel, theme::radius::pill);
+    lv_obj_set_style_bg_opa(chip, LV_OPA_COVER, 0);
+    lv_obj_set_style_pad_hor(chip, theme::space::s, 0);
+    lv_obj_set_style_pad_ver(chip, 2, 0);
+    quiet(chip);
+    return chip;
+}
+
+// The route as a boarding pass has it: a code and its town at either end, and
+// between them a track filled as far as the flight has come.
+void build_route()
+{
+    s_route = theme::make_box(s_identity);
+    const std::int32_t code_h = theme::type_value()->line_height;
+    lv_obj_set_size(s_route, INNER_W, code_h + theme::type_label()->line_height);
+    lv_obj_set_style_margin_top(s_route, theme::space::s, 0);
+    for (int end = 0; end < 2; ++end) {
+        lv_obj_t *code = theme::make_label(s_route, "", theme::text, theme::type_value());
+        lv_obj_t *town = theme::make_label(s_route, "", theme::secondary, theme::type_label());
+        lv_obj_set_width(town, INNER_W / 2 - theme::space::xs);  // under the track, which keeps to the codes' line
+        lv_label_set_long_mode(town, LV_LABEL_LONG_MODE_DOTS);
+        lv_obj_set_height(town, theme::type_label()->line_height);
+        const lv_align_t side = end == 0 ? LV_ALIGN_TOP_LEFT : LV_ALIGN_TOP_RIGHT;
+        lv_obj_align(code, side, 0, 0);
+        lv_obj_align(town, side, 0, code_h);
+        lv_obj_set_style_text_align(town, end == 0 ? LV_TEXT_ALIGN_LEFT : LV_TEXT_ALIGN_RIGHT, 0);
+        quiet(code);
+        quiet(town);
+        s_ends[end][0] = code;
+        s_ends[end][1] = town;
+    }
+    lv_obj_t *track = lv_obj_create(s_route);
+    theme::style_panel(track, theme::panel, TRACK_H / 2);
+    lv_obj_set_size(track, INNER_W - 2 * ROUTE_END_W, TRACK_H);
+    lv_obj_set_pos(track, ROUTE_END_W, code_h / 2);
+    quiet(track);
+    s_track_fill = lv_obj_create(track);
+    theme::style_panel(s_track_fill, theme::panel, TRACK_H / 2);
+    theme::fill_accent(s_track_fill);
+    lv_obj_set_size(s_track_fill, 0, TRACK_H);
+    quiet(s_track_fill);
+    s_track_plane = lv_image_create(s_route);
+    lv_image_set_src(s_track_plane, &icons::plane_icon);
+    lv_image_set_scale(s_track_plane, LV_SCALE_NONE * TRACK_PLANE / icons::plane_icon.header.w);
+    lv_image_set_rotation(s_track_plane, 900);  // along the track, to the right
+    lv_obj_set_style_image_recolor(s_track_plane, lv_color_hex(theme::text), 0);
+    lv_obj_set_style_image_recolor_opa(s_track_plane, LV_OPA_COVER, 0);
+    quiet(s_track_plane);
+}
+
 void build_identity(lv_obj_t *card)
 {
     s_identity = lv_obj_create(card);
@@ -1836,13 +1929,32 @@ void build_identity(lv_obj_t *card)
     lv_obj_set_style_pad_row(s_identity, theme::space::xs, 0);
     quiet(s_identity);
 
-    s_title = identity_line(theme::text, theme::type_title());
+    // The flight number, and the airline beside it on its baseline.
+    lv_obj_t *head = box_in(s_identity, LV_FLEX_FLOW_ROW);
+    lv_obj_set_width(head, INNER_W);
+    lv_obj_set_flex_align(head, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
+    lv_obj_set_style_pad_column(head, theme::space::s, 0);
+    s_title = theme::make_label(head, "", theme::text, theme::type_title());
     theme::ink_accent(s_title);
+    quiet(s_title);
+    s_title_side = theme::make_label(head, "", theme::secondary, theme::type_label());
+    lv_obj_set_flex_grow(s_title_side, 1);
+    lv_label_set_long_mode(s_title_side, LV_LABEL_LONG_MODE_DOTS);
+    lv_obj_set_height(s_title_side, theme::type_label()->line_height);
+    lv_obj_set_style_margin_bottom(s_title_side, 4, 0);  // on the title's baseline
+    quiet(s_title_side);
     s_operator = identity_line(theme::text, theme::type_body());
-    s_airframe = identity_line(theme::secondary, theme::type_label());
-    s_route    = identity_line(theme::text, theme::type_value());
-    lv_obj_set_style_margin_top(s_route, theme::space::m, 0);
-    s_cities = identity_line(theme::secondary, theme::type_label());
+
+    build_route();
+    s_progress = identity_line(theme::secondary, theme::type_label());
+    lv_obj_set_style_text_align(s_progress, LV_TEXT_ALIGN_CENTER, 0);
+
+    s_chips = box_in(s_identity, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(s_chips, theme::space::s, 0);
+    lv_obj_set_style_margin_top(s_chips, theme::space::s, 0);
+    s_chip_military = make_chip_label(s_chips, theme::green);
+    theme::set_text(s_chip_military, "MILITARY");
+    s_chip_country = make_chip_label(s_chips, theme::secondary);
 
     s_nearby = theme::make_label(s_identity, "", theme::secondary, theme::type_body());
     lv_obj_set_width(s_nearby, INNER_W);
@@ -1852,25 +1964,51 @@ void build_identity(lv_obj_t *card)
     quiet(s_nearby);
 }
 
-// Along the column's foot, wherever that is.
+// The facts two by two, and the aircraft under them, along the column's foot,
+// wherever that is.
 void place_readings_at(std::int32_t height)
 {
-    const std::int32_t name_y  = height - 2 * INSET - theme::type_label()->line_height;
-    const std::int32_t value_y = name_y - theme::type_value()->line_height;
-    for (const Row &row : s_rows) {
-        lv_obj_set_y(row.value, value_y);
-        lv_obj_set_y(row.name, name_y);
+    const std::int32_t foot   = height - 2 * INSET;
+    const std::int32_t line_y = foot - theme::type_label()->line_height;
+    lv_obj_set_y(s_airframe, line_y);
+    lv_obj_update_layout(s_facts[0].box);
+    const std::int32_t cell_h = lv_obj_get_height(s_facts[0].box);
+    for (int i = 0; i < FACTS; ++i) {
+        const std::int32_t row = i / 2;
+        lv_obj_set_pos(s_facts[i].box, (i % 2) * (FACT_WIDE + FACT_GAP),
+                       line_y - FACT_GAP - (2 - row) * cell_h - (1 - row) * theme::space::s);
     }
 }
 
 void build_readings(lv_obj_t *card, std::int32_t height)
 {
-    for (int i = 0; i < READINGS; ++i) {
-        s_rows[i].value = theme::make_label(card, NO_READING, theme::text, theme::type_value());
-        quiet(s_rows[i].value);
-        s_rows[i].name = theme::make_label(card, "", theme::secondary, theme::type_label());
-        quiet(s_rows[i].name);
+    for (Fact &fact : s_facts) {
+        fact.box = box_in(card, LV_FLEX_FLOW_COLUMN);
+        fact.name = theme::make_label(fact.box, "", theme::secondary, theme::type_label());
+        quiet(fact.name);
+        lv_obj_t *line = box_in(fact.box, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(line, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_style_pad_column(line, theme::space::xs, 0);
+        fact.mark = lv_image_create(line);
+        lv_image_set_src(fact.mark, &icons::plane_icon);
+        lv_image_set_scale(fact.mark, LV_SCALE_NONE * HEADING_PLANE / icons::plane_icon.header.w);
+        lv_obj_set_size(fact.mark, HEADING_PLANE, HEADING_PLANE);
+        lv_image_set_inner_align(fact.mark, LV_IMAGE_ALIGN_CENTER);
+        lv_obj_set_style_image_recolor(fact.mark, lv_color_hex(theme::text), 0);
+        lv_obj_set_style_image_recolor_opa(fact.mark, LV_OPA_COVER, 0);
+        lv_obj_set_hidden(fact.mark, true);
+        quiet(fact.mark);
+        fact.value = theme::make_label(line, NO_READING, theme::text, theme::type_value());
+        quiet(fact.value);
+        fact.unit = theme::make_label(line, "", theme::secondary, theme::type_label());
+        lv_obj_set_style_margin_bottom(fact.unit, 2, 0);
+        quiet(fact.unit);
     }
+    s_airframe = theme::make_label(card, "", theme::secondary, theme::type_label());
+    lv_obj_set_width(s_airframe, INNER_W);
+    lv_label_set_long_mode(s_airframe, LV_LABEL_LONG_MODE_DOTS);
+    lv_obj_set_height(s_airframe, theme::type_label()->line_height);
+    quiet(s_airframe);
     place_readings_at(height);
 }
 
@@ -1925,6 +2063,9 @@ void show_picture()
     }
     lv_obj_set_hidden(s_photo_frame, s_picture == Picture::Idle);
     lv_obj_set_hidden(s_photo, !shown);
+    if (!shown) {
+        lv_obj_set_hidden(s_credit, true);  // the last photo's, while the next is fetched
+    }
     show_waiting(s_picture == Picture::Looking || s_picture == Picture::Loading);
     lv_obj_set_hidden(s_photo_none, s_picture != Picture::Missing);
     lv_obj_set_y(s_identity, s_picture == Picture::Idle ? 0 : PHOTO_H + theme::space::m);
@@ -2078,30 +2219,32 @@ void draw_rim(lv_obj_t *dot, const radar::Aircraft &aircraft)
 // Each reading as wide as its value or its name, the three spread across the
 // column: the quiet sky's names are longer than an aircraft's, and fixed
 // columns ran them into each other.
-void place_readings()
+void set_fact(int index, const char *name, const char *value, const char *unit, std::uint32_t colour = theme::text)
 {
-    lv_obj_update_layout(lv_obj_get_parent(s_rows[0].value));
-    std::int32_t width[READINGS];
-    std::int32_t used = 0;
-    for (int i = 0; i < READINGS; ++i) {
-        width[i] = std::max(lv_obj_get_width(s_rows[i].value), lv_obj_get_width(s_rows[i].name));
-        used += width[i];
-    }
-    const std::int32_t gap = std::max(READING_MIN_GAP, (INNER_W - used) / (READINGS - 1));
-    std::int32_t       x   = 0;
-    for (int i = 0; i < READINGS; ++i) {
-        lv_obj_set_x(s_rows[i].value, x);
-        lv_obj_set_x(s_rows[i].name, x);
-        x += width[i] + gap;
+    Fact &fact = s_facts[index];
+    theme::set_text(fact.name, name);
+    theme::set_text(fact.value, value);
+    theme::set_text(fact.unit, unit);
+    theme::set_text_color(fact.value, colour);
+}
+
+// 12,345, as the eye reads altitudes.
+void thousands(char *out, std::size_t size, int value)
+{
+    if (value >= 1000) {
+        std::snprintf(out, size, "%d,%03d", value / 1000, value % 1000);
+    } else {
+        std::snprintf(out, size, "%d", value);
     }
 }
 
-void set_row(int index, const char *name, const char *value, std::uint32_t colour = theme::text)
+const char *compass(float degrees, bool fine)
 {
-    theme::set_text(s_rows[index].name, name);
-    theme::set_text(s_rows[index].value, value);
-    theme::set_text_color(s_rows[index].value, colour);
-    place_readings();
+    static constexpr const char *SIXTEEN[] = {"N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+                                              "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"};
+    const int steps = fine ? 16 : 8;
+    const int at    = static_cast<int>(std::lround(std::fmod(degrees + 360.0f, 360.0f) / (360.0f / steps))) % steps;
+    return SIXTEEN[at * (16 / steps)];
 }
 
 void show_summary_heading()
@@ -2109,13 +2252,12 @@ void show_summary_heading()
     char text[SUMMARY_TEXT_LEN];
     std::snprintf(text, sizeof(text), "%d aircraft", s_shown);
     theme::set_text(s_title, s_shown > 0 ? text : "Quiet sky");
+    theme::set_text(s_title_side, "");
     theme::set_text(s_operator, s_shown > 0 ? "Tap one for its details" : "Nothing within range");
-    theme::set_text(s_airframe, "");
-    theme::set_text(s_route, "");
-    theme::set_text(s_cities, "");
-    lv_obj_set_hidden(s_route, true);
-    lv_obj_set_hidden(s_cities, true);
-    lv_obj_set_hidden(s_airframe, true);
+    lv_obj_set_hidden(s_operator, false);
+    for (lv_obj_t *part : {s_route, s_progress, s_chips, s_airframe}) {
+        lv_obj_set_hidden(part, true);
+    }
 }
 
 void show_summary_readings()
@@ -2131,21 +2273,22 @@ void show_summary_readings()
             fastest = a;
         }
     }
-
+    lv_obj_set_hidden(s_facts[HEADING_FACT].mark, true);
     char text[SUMMARY_TEXT_LEN];
     if (highest != nullptr) {
-        std::snprintf(text, sizeof(text), "%d", highest->altitude_ft);
+        thousands(text, sizeof(text), highest->altitude_ft);
     }
-    set_row(ALTITUDE_READING, "feet, top", highest != nullptr ? text : NO_READING);
+    set_fact(ALTITUDE_FACT, "Highest", highest != nullptr ? text : NO_READING, highest != nullptr ? "ft" : "");
     if (fastest != nullptr) {
         std::snprintf(text, sizeof(text), "%.0f", static_cast<double>(fastest->speed_kt));
     }
-    set_row(SPEED_READING, "knots, top", fastest != nullptr ? text : NO_READING);
+    set_fact(SPEED_FACT, "Fastest", fastest != nullptr ? text : NO_READING, fastest != nullptr ? "kt" : "");
+    std::snprintf(text, sizeof(text), "%d", s_shown);
+    set_fact(HEADING_FACT, "In view", text, s_shown == 1 ? "plane" : "planes");
     if (s_shown > 0) {
-        std::snprintf(text, sizeof(text), "%.1f",
-                      static_cast<double>(distance_km(*s_plots[0].aircraft)));
+        std::snprintf(text, sizeof(text), "%.1f", static_cast<double>(distance_km(*s_plots[0].aircraft)));
     }
-    set_row(DISTANCE_READING, "km, closest", s_shown > 0 ? text : NO_READING);
+    set_fact(AWAY_FACT, "Closest", s_shown > 0 ? text : NO_READING, s_shown > 0 ? "km" : "");
 }
 
 void show_nearby()
@@ -2202,75 +2345,138 @@ void describe_shape(const radar::Aircraft &aircraft, bool mine, char *shape, std
     }
 }
 
+// The aircraft and its registration, last and small.
 void show_airframe(const radar::Aircraft &aircraft, bool mine)
 {
     char shape[AIRFRAME_TEXT_LEN] = {};
     describe_shape(aircraft, mine, shape, sizeof(shape));
-
     char text[SELECTED_TEXT_LEN];
     if (aircraft.reg[0] != '\0' && shape[0] != '\0') {
-        std::snprintf(text, sizeof(text), "%s, %s", aircraft.reg, shape);
+        std::snprintf(text, sizeof(text), "%s, %s", shape, aircraft.reg);
     } else {
-        std::snprintf(text, sizeof(text), "%s",
-                      aircraft.reg[0] != '\0' ? aircraft.reg
-                                              : (shape[0] != '\0' ? shape : aircraft.hex));
+        std::snprintf(text, sizeof(text), "%s", shape[0] != '\0' ? shape : aircraft.reg);
     }
     theme::set_text(s_airframe, text);
+    lv_obj_set_hidden(s_airframe, text[0] == '\0');
 }
 
-void show_route(bool mine)
+// The flight number as sold, "EK 147", over the callsign the radio uses, and
+// the airline beside it; without one, the callsign and the airline under it.
+void show_title(const radar::Aircraft &aircraft, bool mine)
 {
-    if (mine && s_details.has_route) {
-        char text[SELECTED_TEXT_LEN];
-        std::snprintf(text, sizeof(text), "%s  " LV_SYMBOL_RIGHT "  %s",
-                      s_details.origin_code[0] != '\0' ? s_details.origin_code : "?",
-                      s_details.dest_code[0] != '\0' ? s_details.dest_code : "?");
-        theme::set_text(s_route, text);
-        std::snprintf(text, sizeof(text), "%s to %s", s_details.origin_city, s_details.dest_city);
-        theme::set_text(s_cities, text);
-    } else {
-        theme::set_text(s_route, mine ? "No route known" : "");
-        theme::set_text(s_cities, "");
+    const char *number = mine ? s_details.flight_iata : "";
+    if (std::strlen(number) > 2) {
+        char text[radar::kFlightLen + 2];
+        std::snprintf(text, sizeof(text), "%.2s %.*s", number, radar::kFlightLen - 3, number + 2);
+        theme::set_text(s_title, text);
+        theme::set_text(s_title_side, operator_name(mine));
+        lv_obj_set_hidden(s_operator, true);
+        return;
     }
-    lv_obj_set_hidden(s_route, lv_label_get_text(s_route)[0] == '\0');
-    lv_obj_set_hidden(s_cities, lv_label_get_text(s_cities)[0] == '\0');
+    theme::set_text(s_title, blip_name(aircraft));
+    theme::set_text(s_title_side, "");
+    theme::set_text(s_operator, operator_name(mine));
+    lv_obj_set_hidden(s_operator, operator_name(mine)[0] == '\0');
+}
+
+void show_route(const radar::Aircraft &aircraft, bool mine)
+{
+    const bool known = mine && s_details.has_route;
+    lv_obj_set_hidden(s_route, !known);
+    float share = 0.0f, left_km = 0.0f;
+    const bool along = known && radar::route_progress(s_details, aircraft.lat, aircraft.lon, share, left_km);
+    char text[SELECTED_TEXT_LEN] = "";
+    if (known) {
+        theme::set_text(s_ends[0][0], s_details.origin_code[0] != '\0' ? s_details.origin_code : "?");
+        theme::set_text(s_ends[0][1], s_details.origin_city);
+        theme::set_text(s_ends[1][0], s_details.dest_code[0] != '\0' ? s_details.dest_code : "?");
+        theme::set_text(s_ends[1][1], s_details.dest_city);
+        const std::int32_t span = INNER_W - 2 * ROUTE_END_W;
+        const std::int32_t at   = static_cast<std::int32_t>(std::lround(share * span));
+        lv_obj_set_width(s_track_fill, at);
+        lv_obj_set_hidden(s_track_plane, !along);
+        lv_obj_set_pos(s_track_plane, ROUTE_END_W + at - icons::plane_icon.header.w / 2,
+                       theme::type_value()->line_height / 2 + TRACK_H / 2 - icons::plane_icon.header.h / 2);
+        if (along) {
+            char km[16];
+            thousands(km, sizeof(km), static_cast<int>(std::lround(left_km)));
+            std::snprintf(text, sizeof(text), "%d%%, %s km to go", static_cast<int>(std::lround(share * 100.0f)), km);
+        }
+    }
+    theme::set_text(s_progress, aircraft.approach ? "On approach" : text);
+    theme::set_text_color(s_progress, aircraft.approach ? theme::amber : theme::secondary);
+    lv_obj_set_hidden(s_progress, lv_label_get_text(s_progress)[0] == '\0');
+}
+
+// Military, and where an aircraft without an airline's route is registered.
+void show_chips(const radar::Aircraft &aircraft, bool mine)
+{
+    lv_obj_set_hidden(s_chip_military, !aircraft.military);
+    const bool country = mine && !s_details.has_route && s_details.owner_country[0] != '\0';
+    theme::set_text(s_chip_country, country ? s_details.owner_country : "");
+    lv_obj_set_hidden(s_chip_country, !country);
+    lv_obj_set_hidden(s_chips, !aircraft.military && !country);
 }
 
 const char *climb_trend(int vertical_fpm)
 {
-    return vertical_fpm > LEVEL_FLIGHT_FPM    ? " " LV_SYMBOL_UP
-           : vertical_fpm < -LEVEL_FLIGHT_FPM ? " " LV_SYMBOL_DOWN
+    return vertical_fpm > LEVEL_FLIGHT_FPM    ? LV_SYMBOL_UP
+           : vertical_fpm < -LEVEL_FLIGHT_FPM ? LV_SYMBOL_DOWN
                                               : "";
 }
 
 void show_selected_readings(const radar::Aircraft &aircraft)
 {
-    char text[SELECTED_TEXT_LEN];
+    char value[SELECTED_TEXT_LEN];
+    char unit[SELECTED_TEXT_LEN] = "ft";
     if (aircraft.altitude_ft >= 0) {
-        std::snprintf(text, sizeof(text), "%d%s", aircraft.altitude_ft,
-                      climb_trend(aircraft.vertical_fpm));
+        thousands(value, sizeof(value), aircraft.altitude_ft);
+        // Where it is going, once its autopilot is set well away from here and
+        // it is on its way there: a setting not yet caught up is not shown.
+        const int  apart   = aircraft.selected_ft - aircraft.altitude_ft;
+        const bool going   = (apart >= SEPARATE_FT && aircraft.vertical_fpm > LEVEL_FLIGHT_FPM) ||
+                             (apart <= -SEPARATE_FT && aircraft.vertical_fpm < -LEVEL_FLIGHT_FPM);
+        if (aircraft.selected_ft >= 0 && going) {
+            // The autopilot's setting read through the local pressure: 10,016 is 10,000 meant.
+            constexpr int ROUND_FT = 100;
+            char          to[16];
+            thousands(to, sizeof(to), (aircraft.selected_ft + ROUND_FT / 2) / ROUND_FT * ROUND_FT);
+            std::snprintf(unit, sizeof(unit), "%s%s",
+                          aircraft.selected_ft > aircraft.altitude_ft ? LV_SYMBOL_UP : LV_SYMBOL_DOWN, to);
+        } else if (climb_trend(aircraft.vertical_fpm)[0] != '\0') {
+            std::snprintf(unit, sizeof(unit), "ft %s", climb_trend(aircraft.vertical_fpm));
+        }
     } else {
-        std::snprintf(text, sizeof(text), "%s", NO_READING);
+        std::snprintf(value, sizeof(value), "%s", NO_READING);
+        unit[0] = '\0';
     }
-    set_row(ALTITUDE_READING, "feet", text, altitude_ink(aircraft.altitude_ft));
+    set_fact(ALTITUDE_FACT, "Altitude", value, unit, altitude_ink(aircraft.altitude_ft));
 
-    std::snprintf(text, sizeof(text), "%.0f", static_cast<double>(aircraft.speed_kt));
-    set_row(SPEED_READING, "knots", text);
+    std::snprintf(value, sizeof(value), "%.0f", static_cast<double>(aircraft.speed_kt));
+    set_fact(SPEED_FACT, "Speed", value, "kt");
 
-    std::snprintf(text, sizeof(text), "%.1f", static_cast<double>(distance_km(aircraft)));
-    set_row(DISTANCE_READING, "km away", text);
+    const bool heads = aircraft.track_deg >= 0.0f;
+    Fact      &heading = s_facts[HEADING_FACT];
+    lv_obj_set_hidden(heading.mark, !heads);
+    if (heads) {
+        lv_image_set_rotation(heading.mark, static_cast<std::int32_t>(std::lround(aircraft.track_deg * ROTATION_UNITS_PER_DEG)));
+    }
+    set_fact(HEADING_FACT, "Heading", heads ? compass(aircraft.track_deg, true) : NO_READING, "");
+
+    const float km = distance_km(aircraft);
+    std::snprintf(value, sizeof(value), km < 10.0f ? "%.1f" : "%.0f", static_cast<double>(km));
+    std::snprintf(unit, sizeof(unit), "km %s", compass(aircraft.bearing_deg, false));
+    set_fact(AWAY_FACT, "From you", value, unit);
 }
 
 void show_selected(const radar::Aircraft &aircraft)
 {
     lv_obj_set_hidden(s_nearby, true);
-    lv_obj_set_hidden(s_airframe, false);
-    theme::set_text(s_title, blip_name(aircraft));
-
     const bool mine = std::strcmp(s_details_hex, aircraft.hex) == 0;
-    theme::set_text(s_operator, operator_name(mine));
+    show_title(aircraft, mine);
+    show_route(aircraft, mine);
+    show_chips(aircraft, mine);
     show_airframe(aircraft, mine);
-    show_route(mine);
     show_selected_readings(aircraft);
 
     const char *shout = emergency(aircraft.squawk);
@@ -3045,7 +3251,8 @@ void build_radar_page(lv_obj_t *page, std::int32_t width, std::int32_t height)
         }
         if (lookup.photo_stamp != s_photo_shown) {
             s_photo_shown = lookup.photo_stamp;
-            show_radar_photo(lookup.photo_hex, lookup.photo, lookup.photo_width, lookup.photo_height);
+            show_radar_photo(lookup.photo_hex, lookup.photo, lookup.photo_width, lookup.photo_height,
+                             lookup.photo_credit);
         }
     });
 }
@@ -3129,7 +3336,7 @@ void refresh_radar()
     show_radar(*s_last);
 }
 
-void show_radar_photo(const char *hex, const void *pixels, int width, int height)
+void show_radar_photo(const char *hex, const void *pixels, int width, int height, const char *credit)
 {
     if (s_photo == nullptr || hex == nullptr || std::strcmp(hex, s_chosen) != 0) {
         return;  // the tap has moved on
@@ -3154,6 +3361,22 @@ void show_radar_photo(const char *hex, const void *pixels, int width, int height
     lv_obj_set_y(s_photo, std::min<std::int32_t>(0, (PHOTO_H - fit_h) / 2));
 
     lv_image_set_src(s_photo, &s_photo_dsc);
+    // Their name, without the handle many add after a bar.
+    char by[radar::kPhotographerLen + 8] = "";
+    if (credit != nullptr && credit[0] != '\0') {
+        std::size_t name = std::strcspn(credit, "|");
+        while (name > 0 && credit[name - 1] == ' ') {
+            --name;
+        }
+        if (name > CREDIT_MAX) {
+            std::snprintf(by, sizeof(by), "\u00a9 %.*s...", static_cast<int>(CREDIT_MAX - 3), credit);
+        } else {
+            std::snprintf(by, sizeof(by), "\u00a9 %.*s", static_cast<int>(name), credit);
+        }
+    }
+    theme::set_text(s_credit, by);
+    lv_obj_set_hidden(s_credit, by[0] == '\0');
+    lv_obj_move_foreground(s_credit);
     s_picture = Picture::Shown;
     show_picture();
     lv_obj_invalidate(s_photo);

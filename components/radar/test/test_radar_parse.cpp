@@ -63,6 +63,8 @@ void check_capture(const std::string &json)
     EXPECT_EQ(std::strcmp(first.reg, "PH-EZF"), 0) << "registration";
     EXPECT_EQ(std::strcmp(first.desc, "EMBRAER ERJ-190-100"), 0) << "description";
     EXPECT_EQ(first.squawk, 6335) << "squawk, sent as a string";
+    EXPECT_EQ(first.selected_ft, 4000) << "the altitude its autopilot is set to";
+    EXPECT_FALSE(first.approach) << "autopilot and TCAS, no approach";
 
     int on_ground = 0;
     for (int i = 0; i < count; ++i) {
@@ -168,6 +170,8 @@ void check_route(const std::string &json)
     EXPECT_TRUE(details.has_dest_at && std::fabs(details.dest_lat - 52.3086f) < 0.001f &&
               std::fabs(details.dest_lon - 4.76389f) < 0.001f) << "where the destination is";
     EXPECT_NE(std::strcmp(details.airline, "Newcastle Airport"), 0) << "a nested name does not overwrite the airline";
+    EXPECT_STREQ(details.flight_iata, "KL90G") << "the flight number as sold";
+    EXPECT_STREQ(details.airline_country, "Netherlands") << "the airline's country";
 }
 
 void check_aircraft(const std::string &json)
@@ -177,6 +181,7 @@ void check_aircraft(const std::string &json)
     EXPECT_EQ(std::strcmp(details.manufacturer, "Embraer"), 0) << "manufacturer";
     EXPECT_EQ(std::strcmp(details.model, "EMB-190 STD"), 0) << "model";
     EXPECT_EQ(std::strcmp(details.owner, "KLM cityhopper"), 0) << "owner";
+    EXPECT_STREQ(details.owner_country, "Netherlands") << "where it is registered";
     EXPECT_EQ(std::strncmp(details.photo_url, "https://airport-data.com/images/", 32), 0) << "photo url";
     EXPECT_TRUE(details.has_aircraft) << "aircraft half marked present";
     EXPECT_TRUE(!details.has_route) << "route half left alone";
@@ -206,6 +211,9 @@ void check_photo(const std::string &json, const std::string &none)
     EXPECT_EQ(std::strncmp(url, "https://", 8), 0) << "the photo address is a url";
     EXPECT_EQ(std::strstr(url, "\\"), nullptr) << "the escapes are gone";
     EXPECT_NE(std::strstr(url, "_280.jpg"), nullptr) << "the larger thumbnail is taken";
+    char by[40] = {};
+    EXPECT_TRUE(parse_photo(json.c_str(), json.size(), url, sizeof(url), by, sizeof(by)));
+    EXPECT_STREQ(by, "ZSSSAvi.H") << "the photographer, to credit";
 
     url[0] = 'x';
     EXPECT_TRUE(!parse_photo(none.c_str(), none.size(), url, sizeof(url))) << "an aircraft nobody has photographed";
@@ -306,6 +314,15 @@ TEST(RadarParse, route_fits)
     radar::Details unplaced = route(0, 0, 0, 0);
     unplaced.has_origin_at  = false;
     EXPECT_TRUE(radar::route_fits(unplaced, 51.46f, 7.03f)) << "nothing to say it is wrong";
+    // EWG40F, Hamburg to Fuerteventura, which the database has as Fuerteventura both ends.
+    EXPECT_FALSE(radar::route_fits(route(28.45f, -13.86f, 28.45f, -13.86f), 52.3f, 5.0f)) << "the same airport twice";
+
+    // RYR1RX east of Stansted flying west, which the database has as Stansted to Szczecin.
+    const radar::Details stansted_szczecin = route(51.885f, 0.235f, 53.585f, 14.902f);
+    EXPECT_TRUE(radar::route_fits(stansted_szczecin, 51.90f, 1.81f));
+    EXPECT_TRUE(radar::route_backwards(stansted_szczecin, 51.90f, 1.81f, 295.0f)) << "flying at its origin";
+    EXPECT_FALSE(radar::route_backwards(stansted_szczecin, 51.90f, 1.81f, 80.0f)) << "on its way";
+    EXPECT_FALSE(radar::route_backwards(stansted_szczecin, 51.90f, 1.81f, -1.0f)) << "no track, no say";
 }
 
 TEST(RadarParse, notability)
@@ -396,4 +413,56 @@ TEST(RadarParse, merge_reading)
     Aircraft flagged[2] = {aircraft("44c1e8", "EXPL", false)};
     merge_reading(flagged, 1, 2, before, 2, 6000, 12000);
     EXPECT_TRUE(flagged[0].military) << "military by either feed";
+}
+
+TEST(RadarParse, approach_and_progress)
+{
+    const std::string json = R"({"aircraft":[{"hex":"485f3a","flight":"KLM1938 ","lat":52.25,"lon":4.76,)"
+                             R"("nav_altitude_mcp":2000,"nav_modes":["autopilot","approach","lnav"]}]})";
+    Aircraft one[1];
+    ASSERT_EQ(parse(json.c_str(), json.size(), one, 1), 1);
+    EXPECT_TRUE(one[0].approach) << "the approach mode among the others";
+    EXPECT_EQ(one[0].selected_ft, 2000);
+
+    // London to Amsterdam, over the North Sea's middle: about half way.
+    Details route{};
+    route.has_route    = true;
+    route.has_origin_at = route.has_dest_at = true;
+    route.origin_lat = 51.47f, route.origin_lon = -0.4543f;
+    route.dest_lat   = 52.3086f, route.dest_lon = 4.7639f;
+    float share = 0.0f, left_km = 0.0f;
+    ASSERT_TRUE(route_progress(route, 51.9f, 2.15f, share, left_km));
+    EXPECT_NEAR(share, 0.5f, 0.05f);
+    EXPECT_NEAR(left_km, 185.0f, 20.0f);
+    ASSERT_TRUE(route_progress(route, 52.3f, 4.7f, share, left_km));
+    EXPECT_GT(share, 0.95f) << "nearly in";
+    route.has_dest_at = false;
+    EXPECT_FALSE(route_progress(route, 51.9f, 2.15f, share, left_km)) << "nothing without both airports";
+}
+
+TEST(RadarParse, hexdb)
+{
+    char from[8] = {}, to[8] = {};
+    const std::string route = "LIPE-EGGW\n";
+    ASSERT_TRUE(parse_route_codes(route.c_str(), route.size(), from, to, sizeof(from)));
+    EXPECT_STREQ(from, "LIPE");
+    EXPECT_STREQ(to, "EGGW");
+    const std::string nothing = "n/a";
+    EXPECT_FALSE(parse_route_codes(nothing.c_str(), nothing.size(), from, to, sizeof(from)));
+
+    const std::string json = R"({"country_code": "GB", "region_name": "England", "iata": "LTN", "icao": "EGGW", )"
+                             R"("airport": "London Luton Airport", "latitude": 51.8747, "longitude": -0.368333})";
+    Airport luton{};
+    ASSERT_TRUE(parse_airport(json.c_str(), json.size(), luton));
+    EXPECT_STREQ(luton.code, "LTN");
+    EXPECT_STREQ(luton.name, "London Luton") << "without saying it is an airport";
+    EXPECT_NEAR(luton.lat, 51.8747f, 0.0001f);
+    EXPECT_NEAR(luton.lon, -0.3683f, 0.0001f);
+
+    const std::string schiphol = R"({"iata": "AMS", "airport": "Amsterdam Airport Schiphol", "latitude": 52.3, "longitude": 4.76})";
+    Airport ams{};
+    ASSERT_TRUE(parse_airport(schiphol.c_str(), schiphol.size(), ams));
+    EXPECT_STREQ(ams.name, "Amsterdam Schiphol");
+    const std::string unplaced = R"({"iata": "XXX", "airport": "Nowhere"})";
+    EXPECT_FALSE(parse_airport(unplaced.c_str(), unplaced.size(), ams)) << "no place, no use";
 }

@@ -22,9 +22,10 @@ void radar_take_details(const char *hex, const radar::Details &details)
     publish(Topic::Lookup);
 }
 
-void radar_take_photo(const char *hex, const void *pixels, int width, int height)
+void radar_take_photo(const char *hex, const void *pixels, int width, int height, const char *credit)
 {
     std::snprintf(s_lookup.photo_hex, sizeof(s_lookup.photo_hex), "%s", hex != nullptr ? hex : "");
+    std::snprintf(s_lookup.photo_credit, sizeof(s_lookup.photo_credit), "%s", credit != nullptr ? credit : "");
     s_lookup.photo        = pixels;
     s_lookup.photo_width  = width;
     s_lookup.photo_height = height;

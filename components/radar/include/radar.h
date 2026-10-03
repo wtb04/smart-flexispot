@@ -38,8 +38,9 @@ using UpdateHandler = void (*)(const Snapshot &snapshot);
 using DetailsHandler = void (*)(const char *hex, const Details &details);
 
 /** RGB565, `width` by `height`. The buffer lives until the next photo
- *  replaces it. Null when the aircraft has no picture on file. */
-using PhotoHandler = void (*)(const char *hex, const void *pixels, int width, int height);
+ *  replaces it. Null when the aircraft has no picture on file. `credit` is
+ *  its photographer, to name with it, or empty. */
+using PhotoHandler = void (*)(const char *hex, const void *pixels, int width, int height, const char *credit);
 
 /** Looks up who is flying and where from and to. One at a time: a request
  *  replaces whatever was waiting, since only the last tap matters. */

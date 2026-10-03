@@ -393,7 +393,7 @@ esp_err_t set_radar(const radar::Snapshot &snapshot);
 esp_err_t set_radar_details(const char *hex, const radar::Details &details);
 
 /** RGB565. Null clears the frame. Ignored unless still selected. */
-esp_err_t set_radar_photo(const char *hex, const void *pixels, int width, int height);
+esp_err_t set_radar_photo(const char *hex, const void *pixels, int width, int height, const char *credit = "");
 
 esp_err_t set_focus(const Focus &focus);
 

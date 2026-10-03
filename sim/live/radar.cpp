@@ -203,7 +203,7 @@ bool fetch_trace(const char *hex)
 }
 
 /** The photo as RGB565, fitted inside the size the panel decodes to; empty for none. */
-std::vector<std::uint16_t> fetch_photo(const char *hex, int &width, int &height)
+std::vector<std::uint16_t> fetch_photo(const char *hex, int &width, int &height, std::string &credit)
 {
     std::vector<std::uint16_t> pixels;
     // SIM_NO_PHOTOS: none, for screenshots that are to be kept: the photos
@@ -216,10 +216,12 @@ std::vector<std::uint16_t> fetch_photo(const char *hex, int &width, int &height)
     std::snprintf(url, sizeof(url), "%s/pub/photos/hex/%s", radar::PHOTO_HOST, hex);
     const Answer lookup = get(url, {}, net::Priority::Tap, radar::PHOTO_AGENT);
     char         found[sizeof(radar::Details::photo_url)];
+    char         by[radar::kPhotographerLen] = "";
     if (lookup.status != 200 ||
-        !radar::parse_photo(lookup.body.data(), lookup.body.size(), found, sizeof(found))) {
+        !radar::parse_photo(lookup.body.data(), lookup.body.size(), found, sizeof(found), by, sizeof(by))) {
         return pixels;
     }
+    credit = by;
     const Answer image = get(found, {}, net::Priority::Tap, radar::PHOTO_AGENT);
     if (image.status != 200) {
         return pixels;

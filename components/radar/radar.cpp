@@ -157,6 +157,7 @@ net::Host s_lookup_host   = net::kNoHost;  // adsbdb: the airframe and the fligh
 net::Host s_photoapi_host = net::kNoHost;  // planespotters: where the photo is
 net::Host s_photo_host    = net::kNoHost;  // and the photo
 net::Host s_trace_host    = net::kNoHost;  // adsb.lol's traces
+net::Host s_hexdb_host    = net::kNoHost;  // hexdb.io: a route where adsbdb's does not fit
 
 void add_hosts()
 {
@@ -198,6 +199,11 @@ void add_hosts()
     photo.name   = "photos";
     photo.base   = "http://t.plnspttrs.net";
     s_photo_host = net::add_host(photo);
+
+    net::HostConfig hexdb = lookup;
+    hexdb.name    = "hexdb";
+    hexdb.base    = "https://hexdb.io";
+    s_hexdb_host  = net::add_host(hexdb);
 
     net::HostConfig trace = lookup;
     trace.name        = "adsb.lol traces";
@@ -343,6 +349,9 @@ struct DetailsJob {
     std::uint32_t tap;  // 0 when prefetched
     bool          want_aircraft = false;
     bool          want_route    = false;
+    bool          tried_hexdb   = false;  // asked for another route, as adsbdb's did not fit
+    char          ends[2][kAirportCodeLen] = {};  // hexdb's route, as ICAO codes
+    Airport       airports[2]   = {};
     bool          failed        = false;
     std::int64_t  began_us      = 0;
 };
@@ -352,7 +361,8 @@ void details_step(const DetailsJobPtr &job);
 
 // A route the database has for the callsign that does not fit where the
 // aircraft is: another of the callsign's days, shown as no route rather than
-// as the wrong one. Under the lock.
+// as the wrong one; and one it fits but flies the other way, turned round.
+// Under the lock.
 void drop_route_unless_fits(Details &details, const char *hex)
 {
     for (int i = 0; i < s_count; ++i) {
@@ -367,6 +377,12 @@ void drop_route_unless_fits(Details &details, const char *hex)
             details.has_dest_at   = false;
             details.origin_code[0] = details.origin_city[0] = '\0';
             details.dest_code[0]   = details.dest_city[0]   = '\0';
+        } else if (route_backwards(details, s_list[i].lat, s_list[i].lon, s_list[i].track_deg)) {
+            ESP_LOGI(TAG, "%s: %s to %s flown the other way round", hex, details.origin_code, details.dest_code);
+            std::swap(details.origin_code, details.dest_code);
+            std::swap(details.origin_city, details.dest_city);
+            std::swap(details.origin_lat, details.dest_lat);
+            std::swap(details.origin_lon, details.dest_lon);
         }
         return;
     }
@@ -395,21 +411,114 @@ void details_done(const DetailsJobPtr &job)
     }
 }
 
-void ask_lookup(const DetailsJobPtr &job, const char *path, const char *what, net::Done done)
+void ask_lookup(const DetailsJobPtr &job, const char *path, const char *what, net::Done done,
+                net::Host host = s_lookup_host)
 {
     net::Request request;
-    request.host        = s_lookup_host;
+    request.host        = host;
     request.path        = path;
     request.priority    = job->priority;
     // Keyed by the aircraft, not by who asks: a tap joins a prefetch already
     // under way, at a tap's priority, rather than ask again.
-    request.key         = std::string("details:") + job->hex;
+    request.key         = std::string("details:") + job->hex + ":" + what;
     request.dedupe      = net::Dedupe::Join;
     request.deadline_ms = job->tap != 0 ? TAP_DEADLINE_MS : 0;
     request.max_body    = LOOKUP_BODY_MAX;
     request.what        = what;
     request.done        = std::move(done);
     net::submit(std::move(request));
+}
+
+// The airports hexdb.io has named, kept for the next route through them.
+constexpr int AIRPORTS_KEPT = 32;
+struct KeptAirport {
+    char    icao[kAirportCodeLen];
+    Airport airport;
+};
+KeptAirport s_airports[AIRPORTS_KEPT] = {};
+int         s_airports_next          = 0;
+
+// Whether the route adsbdb gave, if any, fits where the aircraft is now.
+bool route_holds(const DetailsJobPtr &job)
+{
+    Lock hold;
+    for (int i = 0; i < s_count; ++i) {
+        if (std::strcmp(s_list[i].hex, job->hex) == 0) {
+            return job->details.has_route && route_fits(job->details, s_list[i].lat, s_list[i].lon);
+        }
+    }
+    return true;  // gone from view: nothing to judge it by
+}
+
+// Both of hexdb's airports in hand: its route takes adsbdb's place, to be
+// judged as that one was.
+void take_hexdb_route(const DetailsJobPtr &job)
+{
+    Details &d = job->details;
+    const Airport &from = job->airports[0];
+    const Airport &to   = job->airports[1];
+    std::snprintf(d.origin_code, sizeof(d.origin_code), "%s", from.code[0] != '\0' ? from.code : job->ends[0]);
+    std::snprintf(d.origin_city, sizeof(d.origin_city), "%s", from.name);
+    std::snprintf(d.dest_code, sizeof(d.dest_code), "%s", to.code[0] != '\0' ? to.code : job->ends[1]);
+    std::snprintf(d.dest_city, sizeof(d.dest_city), "%s", to.name);
+    d.origin_lat = from.lat, d.origin_lon = from.lon, d.dest_lat = to.lat, d.dest_lon = to.lon;
+    d.has_origin_at = d.has_dest_at = d.has_route = true;
+    details_step(job);
+}
+
+void ask_hexdb_airport(const DetailsJobPtr &job, int which)
+{
+    if (which == 2) {
+        take_hexdb_route(job);
+        return;
+    }
+    bool kept_here = false;
+    {
+        Lock hold;
+        for (const KeptAirport &kept : s_airports) {
+            if (std::strcmp(kept.icao, job->ends[which]) == 0) {
+                job->airports[which] = kept.airport;
+                kept_here            = true;
+                break;
+            }
+        }
+    }
+    if (kept_here) {  // on from here, outside the lock, which the next steps take
+        ask_hexdb_airport(job, which + 1);
+        return;
+    }
+    char path[PATH_SIZE];
+    std::snprintf(path, sizeof(path), "/api/v1/airport/icao/%s", job->ends[which]);
+    ask_lookup(job, path, which == 0 ? "origin" : "destination", [job, which](const net::Response &answer) {
+        if (answer.status != HTTP_OK || !parse_airport(answer.body, answer.length, job->airports[which])) {
+            details_step(job);  // without it, adsbdb's route is judged as it was
+            return;
+        }
+        {
+            Lock         hold;
+            KeptAirport &kept = s_airports[s_airports_next];
+            s_airports_next   = (s_airports_next + 1) % AIRPORTS_KEPT;
+            std::snprintf(kept.icao, sizeof(kept.icao), "%s", job->ends[which]);
+            kept.airport = job->airports[which];
+        }
+        ask_hexdb_airport(job, which + 1);
+    }, s_hexdb_host);
+}
+
+// adsbdb's route for the callsign is often another leg of a low-cost airline's
+// day: hexdb.io keeps routes of its own, which fit where adsbdb's do not.
+void ask_hexdb_route(const DetailsJobPtr &job)
+{
+    char path[PATH_SIZE];
+    std::snprintf(path, sizeof(path), "/callsign-route?callsign=%s", job->flight);
+    ask_lookup(job, path, "other route", [job](const net::Response &answer) {
+        if (answer.status == HTTP_OK &&
+            parse_route_codes(answer.body, answer.length, job->ends[0], job->ends[1], sizeof(job->ends[0]))) {
+            ask_hexdb_airport(job, 0);
+        } else {
+            details_step(job);
+        }
+    }, s_hexdb_host);
 }
 
 void details_step(const DetailsJobPtr &job)
@@ -449,6 +558,9 @@ void details_step(const DetailsJobPtr &job)
             job->want_route = false;
             details_step(job);
         });
+    } else if (!job->tried_hexdb && !job->failed && job->flight[0] != '\0' && !route_holds(job)) {
+        job->tried_hexdb = true;
+        ask_hexdb_route(job);
     } else {
         details_done(job);
     }
@@ -474,6 +586,7 @@ enum class Photo : std::uint8_t { Unknown, Asked, None, Found };
 struct PhotoEntry {
     char         hex[kHexLen];
     char         url[kPhotoUrlLen];
+    char         credit[kPhotographerLen];
     Photo        state;
     int          slot;  // decoded into, or -1
     std::int64_t used_us;
@@ -551,11 +664,16 @@ void show_photo(const char *hex, std::uint32_t tap, int slot)
         return;
     }
     if (slot < 0) {
-        s_on_photo(hex, nullptr, 0, 0);
+        s_on_photo(hex, nullptr, 0, 0, "");
         return;
     }
+    char credit[kPhotographerLen] = "";
+    {
+        Lock hold;
+        std::snprintf(credit, sizeof(credit), "%s", s_photo_entries[s_photo_slots[slot].entry].credit);
+    }
     const PhotoSlot &photo = s_photo_slots[slot];
-    s_on_photo(hex, photo.pixels, photo.width, photo.height);
+    s_on_photo(hex, photo.pixels, photo.width, photo.height, credit);
 }
 
 void ask_image(const std::string &hex, const std::string &url, std::uint32_t tap)
@@ -625,9 +743,11 @@ void ask_photo_lookup(const char *hex, net::Priority priority, std::uint32_t tap
     request.max_body    = LOOKUP_BODY_MAX;
     request.what        = "photo lookup";
     request.done        = [hex = std::string(hex), tap](const net::Response &answer) {
-        char found[kPhotoUrlLen] = "";
+        char found[kPhotoUrlLen]       = "";
+        char credit[kPhotographerLen] = "";
         const bool answered = answer.status == HTTP_OK || answer.status == HTTP_NOT_FOUND;
-        const bool has      = answer.status == HTTP_OK && parse_photo(answer.body, answer.length, found, sizeof(found));
+        const bool has      = answer.status == HTTP_OK &&
+                         parse_photo(answer.body, answer.length, found, sizeof(found), credit, sizeof(credit));
         std::string url;
         if (has) {
             // Over plain http: the image host takes it, and it saves a handshake.
@@ -638,6 +758,7 @@ void ask_photo_lookup(const char *hex, net::Priority priority, std::uint32_t tap
             PhotoEntry &entry = s_photo_entries[photo_entry(hex.c_str())];
             entry.state       = has ? Photo::Found : answered ? Photo::None : Photo::Unknown;
             std::snprintf(entry.url, sizeof(entry.url), "%s", url.c_str());
+            std::snprintf(entry.credit, sizeof(entry.credit), "%s", credit);
         }
         if (tap == 0 || !tapped(tap)) {
             return;
