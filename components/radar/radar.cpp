@@ -62,6 +62,10 @@ constexpr std::int64_t TRAIL_GAP_US = 3 * units::kUsPerMinute;
 // Measured: three seconds runs into the feed's rate limit and gets 429s.
 constexpr std::int64_t POLL_ACTIVE_US = 5 * units::kUsPerSecond;
 constexpr std::int64_t POLL_IDLE_US   = units::kUsPerMinute;
+// An aircraft one feed has and the other not is kept through the other's
+// turn, two readings apart while the radar shows: blinking out every other
+// reading, it was chosen and dropped again each time.
+constexpr std::int64_t KEEP_UNSEEN_US = 12 * units::kUsPerSecond;
 constexpr int          PLANNER_REST_MS = units::kMsPerSecond;
 
 constexpr std::size_t FEED_BODY_MAX    = 640 * units::kBytesPerKiB;  // uncompressed, about 940 bytes an aircraft
@@ -801,9 +805,10 @@ void take_feed(const net::Response &answer, int feed, int tried, float lat, floa
         }
         return;
     }
-    const int count = parse(answer.body, answer.length, s_scratch, kMaxAircraft);
+    int count = parse(answer.body, answer.length, s_scratch, kMaxAircraft);
     {
         Lock hold;
+        count = merge_reading(s_scratch, count, kMaxAircraft, s_list, s_count, esp_timer_get_time(), KEEP_UNSEEN_US);
         std::memcpy(s_list, s_scratch, sizeof(Aircraft) * static_cast<std::size_t>(count));
         record_trails(s_list, count);
         s_count      = count;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 
 namespace radar {
 inline constexpr int kHexLen      = 8;
@@ -36,6 +37,7 @@ struct Aircraft {
     int   vertical_fpm;
     bool  on_ground;
     bool  military;  // as the feed's database has it
+    std::int64_t seen_us;  // when a reading last had it; set by merge_reading
 };
 
 struct Details {
@@ -93,5 +95,14 @@ inline bool interesting(const Aircraft &aircraft) { return notability(aircraft) 
  *  nodes. Entries without a position are left out. `json` must be
  *  NUL-terminated. Returns how many were stored, never more than capacity. */
 int parse(const char *json, std::size_t length, Aircraft *out, int capacity);
+
+/** A new reading, `now`, taken with what the one before knew, `before`. The
+ *  two feeds are taken in turn and do not see the same aircraft: one placed by
+ *  MLAT can be in one and not the other, and blinked out every other reading.
+ *  So one missing from `now` but seen within `keep_us` is kept where it was
+ *  last seen, and one in both takes from `before` what `now` leaves out, the
+ *  military flag among it. Returns `now`'s count, never more than capacity. */
+int merge_reading(Aircraft *now, int count, int capacity, const Aircraft *before, int before_count,
+                  std::int64_t now_us, std::int64_t keep_us);
 
 }  // namespace radar

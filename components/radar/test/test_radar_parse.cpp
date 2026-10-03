@@ -360,3 +360,35 @@ TEST(RadarParse, notability)
     EXPECT_TRUE(read[0].military) << "dbFlags bit 0";
     EXPECT_FALSE(read[1].military);
 }
+
+TEST(RadarParse, merge_reading)
+{
+    const auto aircraft = [](const char *hex, const char *type, bool military) {
+        Aircraft a{};
+        std::snprintf(a.hex, sizeof(a.hex), "%s", hex);
+        std::snprintf(a.type, sizeof(a.type), "%s", type);
+        a.military = military;
+        return a;
+    };
+    // adsb.fi's reading: a helicopter placed by MLAT, flagged military, and a 777.
+    Aircraft before[4] = {aircraft("44c1e8", "EXPL", true), aircraft("760918", "B772", false)};
+    int      count     = merge_reading(before, 2, 4, nullptr, 0, 1000, 12000);
+    // adsb.lol's, five seconds on: the 777 alone, without its type.
+    Aircraft now[4] = {aircraft("760918", "", false)};
+    count           = merge_reading(now, 1, 4, before, count, 6000, 12000);
+    ASSERT_EQ(count, 2) << "the helicopter kept through the reading that lacks it";
+    EXPECT_STREQ(now[1].hex, "44c1e8");
+    EXPECT_TRUE(now[1].military);
+    EXPECT_EQ(now[1].seen_us, 1000) << "as last seen";
+    EXPECT_STREQ(now[0].type, "B772") << "what one feed leaves out, taken from the other";
+
+    Aircraft later[4] = {aircraft("760918", "B772", false)};
+    EXPECT_EQ(merge_reading(later, 1, 4, now, count, 14000, 12000), 1) << "unseen for longer, it is gone";
+
+    Aircraft full[1] = {aircraft("760918", "B772", false)};
+    EXPECT_EQ(merge_reading(full, 1, 1, before, 2, 6000, 12000), 1) << "never past the capacity";
+
+    Aircraft flagged[2] = {aircraft("44c1e8", "EXPL", false)};
+    merge_reading(flagged, 1, 2, before, 2, 6000, 12000);
+    EXPECT_TRUE(flagged[0].military) << "military by either feed";
+}

@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cmath>
 
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
@@ -633,6 +634,40 @@ int notability(const Aircraft &aircraft)
         score += 1;
     }
     return score;
+}
+
+int merge_reading(Aircraft *now, int count, int capacity, const Aircraft *before, int before_count,
+                  std::int64_t now_us, std::int64_t keep_us)
+{
+    const int fresh = count;
+    for (int i = 0; i < fresh; ++i) {
+        now[i].seen_us = now_us;
+    }
+    const auto fill = [](char *into, const char *from, std::size_t size) {
+        if (into[0] == '\0' && from[0] != '\0') {
+            std::snprintf(into, size, "%s", from);
+        }
+    };
+    for (int b = 0; b < before_count; ++b) {
+        const Aircraft &old = before[b];
+        Aircraft       *same = nullptr;
+        for (int i = 0; i < fresh && same == nullptr; ++i) {
+            if (std::strcmp(now[i].hex, old.hex) == 0) {
+                same = &now[i];
+            }
+        }
+        if (same != nullptr) {
+            same->military = same->military || old.military;
+            fill(same->type, old.type, sizeof(same->type));
+            fill(same->category, old.category, sizeof(same->category));
+            fill(same->desc, old.desc, sizeof(same->desc));
+            fill(same->reg, old.reg, sizeof(same->reg));
+            fill(same->flight, old.flight, sizeof(same->flight));
+        } else if (now_us - old.seen_us <= keep_us && count < capacity) {
+            now[count++] = old;
+        }
+    }
+    return count;
 }
 
 bool route_fits(const Details &details, float lat, float lon)
