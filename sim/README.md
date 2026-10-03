@@ -75,7 +75,8 @@ screenshot after S seconds and quits, and `--splash` plays the twelve-second
 splash the panel boots with. `--pick-above FT` chooses the nearest airliner
 flying at least that high, and `--out2 FILE` saves a second screenshot a few
 seconds after the first, after the `--tap2 X,Y` taps, so both show the same
-moment. Together they take a picture of a state without
+moment. `--draw-page P N` draws page P whole N times and prints how long a
+frame took, to run under a profiler such as `sample`. Together they take a picture of a state without
 anyone at the keyboard:
 
 ```sh

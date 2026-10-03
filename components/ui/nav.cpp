@@ -5,6 +5,8 @@
 #include "status_model.h"
 #include "topics.h"
 
+#include "esp_timer.h"
+
 namespace ui::detail {
 namespace {
 lv_obj_t *s_pages[PAGE_COUNT]    = {};
@@ -143,7 +145,8 @@ lv_obj_t *make_nav_tab(lv_obj_t *dock, int index)
     lv_obj_set_size(tab, lv_pct(100), TAB_H);
     theme::style_button(tab, theme::panel_light);
     theme::fill_accent(tab, LV_STATE_CHECKED);
-    lv_obj_add_event_cb(tab, nav_event_cb, LV_EVENT_CLICKED,
+    // As the finger lands rather than as it lifts: the page is there a tap's length sooner.
+    lv_obj_add_event_cb(tab, nav_event_cb, LV_EVENT_PRESSED,
                         reinterpret_cast<void *>(static_cast<std::intptr_t>(index)));
 
     lv_obj_center(make_tab_icon(tab, NAV_ITEMS[index]));
@@ -230,3 +233,83 @@ void follow_pages()
     });
 }
 }  // namespace ui::detail
+
+namespace ui {
+namespace {
+constexpr std::int64_t SETTLE_US = 700'000;  // what follows a switch: the tab easing in, a feed's answer
+
+std::int64_t s_render_began = 0;
+std::int64_t s_render_us    = 0;  // of a frame, the drawing; the rest is turning it onto the panel
+
+void render_timed(lv_event_t *e)
+{
+    const std::int64_t now = esp_timer_get_time();
+    if (lv_event_get_code(e) == LV_EVENT_RENDER_START) {
+        s_render_began = now;
+    } else {
+        s_render_us += now - s_render_began;
+    }
+}
+
+struct Switch {
+    std::int64_t select_us = 0;  // select_page() itself, before anything is drawn
+    std::int64_t first_us  = 0;  // the frame that shows the page
+    std::int64_t drawn_us  = 0;  // and of it, the drawing
+    std::int64_t busy_us   = 0;  // the LVGL work while it settles
+    std::int64_t worst_us  = 0;
+    int          calls     = 0;  // of those taking a millisecond or more
+};
+
+Switch time_switch(int page)
+{
+    Switch t;
+    std::int64_t at = esp_timer_get_time();
+    detail::select_page(page);
+    t.select_us = esp_timer_get_time() - at;
+    at          = esp_timer_get_time();
+    s_render_us = 0;
+    lv_refr_now(nullptr);
+    t.first_us              = esp_timer_get_time() - at;
+    t.drawn_us              = s_render_us;
+    const std::int64_t till = esp_timer_get_time() + SETTLE_US;
+    while (esp_timer_get_time() < till) {
+        at = esp_timer_get_time();
+        lv_timer_handler();
+        const std::int64_t took = esp_timer_get_time() - at;
+        if (took >= 1000) {
+            t.busy_us += took;
+            t.worst_us = std::max(t.worst_us, took);
+            ++t.calls;
+        }
+    }
+    return t;
+}
+}  // namespace
+
+int bench_pages(char *out, std::size_t size)
+{
+    using namespace detail;
+    const int  page = s_page;
+    const bool gate = s_presence_gate;
+    s_presence_gate = false;  // every page, the phone there or not
+    lv_display_t *display = lv_display_get_default();
+    lv_display_add_event_cb(display, render_timed, LV_EVENT_RENDER_START, nullptr);
+    lv_display_add_event_cb(display, render_timed, LV_EVENT_RENDER_READY, nullptr);
+    time_switch(HOME_PAGE);
+    static constexpr const char *NAMES[PAGE_COUNT] = {"home", "radar", "calendar", "setup"};
+    static constexpr int         ORDER[]           = {RADAR_PAGE, CALENDAR_PAGE, SETUP_PAGE, HOME_PAGE,
+                                                      CALENDAR_PAGE, HOME_PAGE, RADAR_PAGE, HOME_PAGE};
+    int n = std::snprintf(out, size, "%-9s %7s %7s %7s %13s %7s\n", "to", "select", "frame", "drawn", "then (calls)",
+                          "worst");
+    for (const int to : ORDER) {
+        const Switch t = time_switch(to);
+        n += std::snprintf(out + n, size - n, "%-9s %5.1fms %5.1fms %5.1fms %7.1fms (%2d) %5.1fms\n", NAMES[to],
+                           t.select_us / 1000.0, t.first_us / 1000.0, t.drawn_us / 1000.0, t.busy_us / 1000.0,
+                           t.calls, t.worst_us / 1000.0);
+    }
+    lv_display_remove_event_cb_with_user_data(display, render_timed, nullptr);
+    s_presence_gate = gate;
+    select_page(page);
+    return n;
+}
+}  // namespace ui

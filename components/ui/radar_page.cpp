@@ -1563,7 +1563,6 @@ void build_picture(lv_obj_t *scope, std::int32_t w, std::int32_t h)
     work_out_rings();
     paint_base();
     draw_rings_and_spokes();  // there before any map is
-    std::memcpy(s_frame, s_ground, n * RGB565_BYTES_PER_PX);
     s_canvas = lv_canvas_create(scope);
     lv_canvas_set_buffer(s_canvas, s_frame, w, h, LV_COLOR_FORMAT_RGB565);
     lv_obj_set_pos(s_canvas, 0, 0);
@@ -2769,6 +2768,11 @@ void build_scope_in(const Frame &frame, std::int32_t x, std::int32_t y)
     build_key(s_scope);
     if (map_located()) {
         draw_map(s_map_lat, s_map_lon, static_cast<float>(RANGES[s_range_step]));
+    }
+    // A reading shown next, as both layouts do, puts all of the map into the
+    // frame with the planes; copying it here as well cost the map 20 ms.
+    if (s_frame != nullptr && (s_last == nullptr || s_fast_zooming)) {
+        std::memcpy(s_frame, s_ground, ground_pixels() * RGB565_BYTES_PER_PX);
     }
 }
 

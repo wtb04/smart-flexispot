@@ -69,6 +69,11 @@ constexpr int          RECV_TIMEOUT_S   = 30;
 // These and a development build's pages, with room for more; the default is 8.
 constexpr int MAX_ROUTES = 20;
 constexpr std::uint32_t SERVER_STACK    = 8 * units::kBytesPerKiB;
+// Under the screen's task (4) and its drawing (3), and off its core (1): an
+// update arriving waits on the flash with the CPU, which at the default 5 left
+// the screen a frame a second while it came in.
+constexpr UBaseType_t   SERVER_PRIORITY = 2;
+constexpr BaseType_t    SERVER_CORE     = 0;
 constexpr std::uint32_t INSTALL_STACK   = 6 * units::kBytesPerKiB;
 constexpr UBaseType_t   INSTALL_PRIORITY = 3;
 constexpr TickType_t    STILL_CHECK     = pdMS_TO_TICKS(500);
@@ -535,6 +540,8 @@ esp_err_t start(const Hooks &hooks)
     config.recv_wait_timeout = RECV_TIMEOUT_S;
     config.send_wait_timeout = RECV_TIMEOUT_S;
     config.max_uri_handlers  = MAX_ROUTES;
+    config.task_priority     = SERVER_PRIORITY;
+    config.core_id           = SERVER_CORE;
     ESP_RETURN_ON_ERROR(httpd_start(&s_server, &config), TAG, "server");
 
     const httpd_uri_t routes[] = {

@@ -356,6 +356,8 @@ struct Options {
     int         pick_ft = -1;
     std::vector<SDL_Point> taps2;
     std::string out2;
+    int         draw_page  = -1;  // --draw-page P N: page P drawn whole N times, timed, to profile drawing
+    int         draw_times = 0;
 };
 
 Options options(int argc, char **argv)
@@ -408,6 +410,10 @@ Options options(int argc, char **argv)
             ++i;
         } else if (name == "--splash") {
             o.splash = true;
+        } else if (name == "--draw-page" && i + 2 < argc) {
+            o.draw_page  = std::atoi(argv[i + 1]);
+            o.draw_times = std::atoi(argv[i + 2]);
+            i += 2;
         }
     }
     return o;
@@ -509,6 +515,19 @@ int main(int argc, char **argv)
         swipe(from, to);
     }
     press_all(opts.then);
+    if (opts.draw_page >= 0) {
+        ui::detail::select_page(opts.draw_page);
+        run_for(3000);  // its feeds in, its tab eased
+        const std::uint64_t began = SDL_GetPerformanceCounter();
+        for (int i = 0; i < opts.draw_times; ++i) {
+            lv_obj_invalidate(lv_screen_active());
+            lv_refr_now(nullptr);
+        }
+        const double ms = static_cast<double>(SDL_GetPerformanceCounter() - began) * 1000.0 /
+                          static_cast<double>(SDL_GetPerformanceFrequency()) / std::max(opts.draw_times, 1);
+        std::printf("page %d drawn whole: %.2f ms a frame\n", opts.draw_page, ms);
+        return 0;
+    }
 
     const std::uint32_t shot_at   = opts.shot_s >= 0 ? SDL_GetTicks() + opts.shot_s * 1000u : 0;
     std::uint32_t       second_at = 0;

@@ -590,6 +590,7 @@ esp_err_t bench_page(httpd_req_t *req)
             : std::strcmp(query, "zoomed") == 0 ? ui::bench_radar_zoom_frame(text, sizeof(text))
             : std::strcmp(query, "rotate") == 0 ? board::bench_rotation(text, sizeof(text))
             : std::strcmp(query, "desk") == 0   ? ui::bench_desk_card(text, sizeof(text))
+            : std::strcmp(query, "pages") == 0  ? ui::bench_pages(text, sizeof(text))
                                                 : ui::bench_radar(text, sizeof(text));
         lvgl_port_unlock();
     }

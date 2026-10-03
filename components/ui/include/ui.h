@@ -416,6 +416,9 @@ int bench_radar_map(char *out, std::size_t size, bool open);
 int bench_radar_zoom_frame(char *out, std::size_t size);  // a zoom's frame, held until put back
 /** A development build's: what each frame of the desk's card unfolding costs. */
 int bench_desk_card(char *out, std::size_t size);
+/** A development build's: each page switched to in turn, what the switch, its
+ *  frame and what follows cost. With the LVGL lock. */
+int bench_pages(char *out, std::size_t size);
 
 /** A development build's: preset `index` tapped, as a finger on its button. With the LVGL lock. */
 void desk_tap(int index);
