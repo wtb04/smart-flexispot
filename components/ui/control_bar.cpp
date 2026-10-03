@@ -32,6 +32,8 @@ constexpr int          BULB_SCALE   = 200;  // of LV_SCALE_NONE: the bulb a litt
 constexpr std::int32_t THUMB_RADIUS = 6;   // small enough to leave a narrow poster its corners
 constexpr std::int32_t PLAY_D       = 48;
 constexpr std::int32_t TEXT_GAP     = 12;
+constexpr std::int32_t TITLE_RISE   = 11;  // the title over the middle, who it is by under it
+constexpr std::int32_t ARTIST_DROP  = 13;
 constexpr std::int32_t HEAT_DOT     = 12;
 
 constexpr std::uint32_t CARD_IDLE_MS = 20 * 1000;
@@ -118,13 +120,11 @@ void build_cover(Cover &cover, lv_obj_t *parent, std::int32_t side, std::int32_t
     lv_obj_center(cover.image);
     lv_obj_set_clickable(cover.image, false);
     lv_obj_set_hidden(cover.image, true);
-    if (side >= COVER) {
-        // Large enough for the speaker itself, as Home's card showed it.
-        cover.mark = lv_image_create(cover.frame);
-        lv_image_set_src(cover.mark, speaker_picture(side));
-    } else {
-        cover.mark = theme::make_label(cover.frame, LV_SYMBOL_AUDIO, theme::secondary, fonts::size_22());
-    }
+    // While nothing plays, the speaker itself: painted once at the card's size, scaled for the bar's.
+    cover.mark = lv_image_create(cover.frame);
+    lv_image_set_src(cover.mark, speaker_picture(COVER));
+    lv_obj_set_size(cover.mark, side, side);
+    lv_image_set_inner_align(cover.mark, LV_IMAGE_ALIGN_CONTAIN);
     lv_obj_center(cover.mark);
     lv_obj_set_clickable(cover.mark, false);
 }
@@ -173,6 +173,7 @@ lv_obj_t *s_media_slot  = nullptr;
 Cover     s_slot_cover;
 lv_obj_t *s_slot_title  = nullptr;
 lv_obj_t *s_slot_artist = nullptr;
+std::int32_t s_slot_text_x = 0;
 lv_obj_t *s_slot_play   = nullptr;
 lv_obj_t *s_slot_skip   = nullptr;  // Skip intro, or Next episode, over the text while it is offered
 bool      s_media_held  = false;    // a hold fires LONG_PRESSED and then CLICKED on release
@@ -236,6 +237,8 @@ void paint_media()
     theme::set_text(s_slot_title, media.has_track ? media.title : "Nothing playing");
     theme::set_text_color(s_slot_title, media.has_track ? theme::text : theme::secondary);
     theme::set_text(s_slot_artist, media.has_track ? artist : "");
+    // Alone, the title stands in the middle; with who it is by, over it.
+    lv_obj_align(s_slot_title, LV_ALIGN_LEFT_MID, s_slot_text_x, artist[0] != '\0' && media.has_track ? -TITLE_RISE : 0);
     show_play(s_slot_play, media.has_track && media.playing);
     // With nothing playing, play offers the favourites.
     theme::set_usable(s_slot_play, !media.has_track || media.remote);
@@ -393,10 +396,10 @@ void build_media_slot(lv_obj_t *bar)
 
     const std::int32_t text_x = inset + THUMB + TEXT_GAP;
     const std::int32_t text_w = MEDIA_W - 2 * SLOT_PAD - text_x - PLAY_D - TEXT_GAP;
+    s_slot_text_x             = text_x;
     s_slot_title              = one_line(s_media_slot, theme::text, fonts::size_20(), text_w);
-    lv_obj_align(s_slot_title, LV_ALIGN_LEFT_MID, text_x, -11);
-    s_slot_artist = one_line(s_media_slot, theme::secondary, fonts::size_16(), text_w);
-    lv_obj_align(s_slot_artist, LV_ALIGN_LEFT_MID, text_x, 13);
+    s_slot_artist             = one_line(s_media_slot, theme::secondary, fonts::size_16(), text_w);
+    lv_obj_align(s_slot_artist, LV_ALIGN_LEFT_MID, text_x, ARTIST_DROP);
 
     s_slot_play = round_button(s_media_slot, LV_SYMBOL_PLAY, PLAY_D);
     lv_obj_align(s_slot_play, LV_ALIGN_RIGHT_MID, 0, 0);
