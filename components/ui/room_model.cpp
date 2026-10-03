@@ -35,6 +35,7 @@ lv_timer_t   *s_still_timer = nullptr;
 int           s_held        = -1;  // the preset waiting for the desk to stand still
 std::uint32_t s_stopped_at  = 0;   // when a tap here last stopped the desk
 lv_timer_t   *s_held_timer  = nullptr;
+lv_timer_t   *s_motion_timer = nullptr;  // to see the height stand still again
 
 void copy(char *to, std::size_t size, const char *from)
 {
@@ -118,11 +119,31 @@ void desk_take_active(int index, bool active)
     publish(Topic::Desk);
 }
 
+namespace {
+// Still once the height has not changed for as long as a start takes.
+void motion_check(lv_timer_t *)
+{
+    if (lv_tick_elaps(s_height_at) < HALTED_MS) {
+        return;
+    }
+    lv_timer_delete(s_motion_timer);
+    s_motion_timer = nullptr;
+    s_desk.moving  = 0;
+    publish(Topic::Desk);
+}
+}  // namespace
+
 void desk_take_height(int height_mm)
 {
     if (height_mm != s_desk.height_mm) {
         s_moved_at  = lv_tick_get();
         s_height_at = s_moved_at;
+        if (s_desk.height_mm >= 0 && height_mm >= 0) {
+            s_desk.moving = height_mm > s_desk.height_mm ? 1 : -1;
+            if (s_motion_timer == nullptr) {
+                s_motion_timer = lv_timer_create(motion_check, HALTED_MS / 3, nullptr);
+            }
+        }
     }
     s_desk.height_mm = height_mm;
     publish(Topic::Desk);

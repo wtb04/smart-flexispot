@@ -66,15 +66,13 @@ adds pages to the panel's web server, all asking for the update key.
 | --- | --- |
 | `/log` | The recent log |
 | `/screen` | A picture of the screen |
-| `/panel` | The frame the panel itself shows, as its buffer holds it |
 | `/heap`, `/power` | Memory, and the pack's draw on battery |
 | `/streams` | Each live connection and how it is doing; `?restart=N` begins one again |
 | `/jobs` | Each shared worker's jobs; `?poke=N` runs one now |
 | `/restart` | Why this run started, and what the last one left behind |
 | `/coredump` | The last crash, whole, for `idf.py coredump-info` with the build's ELF |
-| `/bench` | The radar's map timed: whole frames, a tile, a trail growing, a zoom; `?rotate` the PPA, `?map` and `?back` leave the Radar page open and put it back; `?desk` the desk card coming out, frame by frame |
+| `/bench` | The radar's map timed: whole frames, a tile, a trail growing, a zoom; `?map` and `?back` leave the Radar page open and put it back; `?desk` the desk card coming out, frame by frame; `?pages` each page switched to, with the work before its frame, the frame, its drawing and what follows |
 | `/desk` | What the desk heard and was asked lately, a line each with its milliseconds since boot; `?tap=N` taps preset N as a finger on its button would, `?clear` starts the trace over |
-| `/stall`, `/crash` | A held-off interrupt, a crash on purpose |
 
 ## How it is put together
 

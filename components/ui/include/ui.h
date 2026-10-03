@@ -100,6 +100,7 @@ using ScreenHandler = void (*)(bool on);
 
 /** True while the dock is against the right edge. */
 using DockSideHandler = void (*)(bool right);
+using RadarZoomHandler = void (*)(int km);  // the radar zoomed to, to keep
 
 /** True while the panel is hung the other way up. */
 enum class Orientation : std::uint8_t { Normal, Flipped, Auto };
@@ -304,6 +305,7 @@ struct Handlers {
     PickHandler        pick;
     SeekHandler        seek;
     MediaVolumeHandler media_volume;
+    RadarZoomHandler   radar_zoom;
 };
 
 /** Requires the LVGL port to be running. A zero accent keeps the built-in
@@ -312,6 +314,10 @@ struct Handlers {
  *  already turned the display, and turns it again as the choice asks. */
 esp_err_t init(const Handlers &handlers, int initial_brightness, std::uint32_t accent,
                bool dock_right, Orientation orientation);
+
+/** The radar's range as it was last left, in km, the nearest of its steps;
+ *  between init() and build(). */
+void set_radar_range(int km);
 
 /** After init() has put up the splash and the screen is lit: everything else,
  *  built behind the splash a part at a time so that it keeps moving. Nothing
@@ -413,9 +419,11 @@ int bench_radar_open(char *out, std::size_t size);
  *  following the nearest aircraft; or, with `open` false, the screen put back
  *  as it was before. */
 int bench_radar_map(char *out, std::size_t size, bool open);
-int bench_radar_zoom_frame(char *out, std::size_t size);  // a zoom's frame, held until put back
 /** A development build's: what each frame of the desk's card unfolding costs. */
 int bench_desk_card(char *out, std::size_t size);
+/** A development build's: each page switched to in turn, what the switch, its
+ *  frame and what follows cost. With the LVGL lock. */
+int bench_pages(char *out, std::size_t size);
 
 /** A development build's: preset `index` tapped, as a finger on its button. With the LVGL lock. */
 void desk_tap(int index);

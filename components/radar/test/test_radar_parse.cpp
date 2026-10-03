@@ -307,3 +307,88 @@ TEST(RadarParse, route_fits)
     unplaced.has_origin_at  = false;
     EXPECT_TRUE(radar::route_fits(unplaced, 51.46f, 7.03f)) << "nothing to say it is wrong";
 }
+
+TEST(RadarParse, notability)
+{
+    const auto aircraft = [](const char *flight, const char *category, const char *type = "", int feet = 3000,
+                             int squawk = -1, bool on_ground = false) {
+        Aircraft a{};
+        std::snprintf(a.flight, sizeof(a.flight), "%s", flight);
+        std::snprintf(a.category, sizeof(a.category), "%s", category);
+        std::snprintf(a.type, sizeof(a.type), "%s", type);
+        a.altitude_ft = feet;
+        a.squawk      = squawk;
+        a.on_ground   = on_ground;
+        return a;
+    };
+    EXPECT_TRUE(interesting(aircraft("KLM90G", "A3"))) << "an airline's flight";
+    EXPECT_TRUE(interesting(aircraft("RYR15P", ""))) << "by its callsign alone";
+    EXPECT_TRUE(interesting(aircraft("", "A5"))) << "a heavy without a callsign";
+    EXPECT_FALSE(interesting(aircraft("PHAHJ", "A1"))) << "a light aircraft by its registration";
+    EXPECT_FALSE(interesting(aircraft("N217SR", "A1"))) << "nor an American one";
+    EXPECT_FALSE(interesting(aircraft("", "A7"))) << "a helicopter";
+    EXPECT_FALSE(interesting(aircraft("KLM90G", "A3", "B738", 3000, -1, true))) << "nothing on the ground";
+
+    const int narrow_low  = notability(aircraft("KLM90G", "A3", "B738", 3000));
+    const int narrow_high = notability(aircraft("RYR15P", "A3", "B738", 36000));
+    const int wide_high   = notability(aircraft("KLM691", "A5", "B77W", 36000));
+    const int wide_by_type = notability(aircraft("SIA323", "", "A359", 9000));
+    EXPECT_GT(narrow_high, narrow_low) << "cruising over climbing out";
+    EXPECT_GT(wide_high, narrow_high) << "a heavy over a 737";
+    EXPECT_GT(wide_by_type, narrow_high) << "a wide-body known by its type, without a category";
+    EXPECT_EQ(notability(aircraft("KLM689", "", "A332", 9000)), notability(aircraft("", "", "A310", 9000)))
+        << "an A330 and an A310 alike";
+    EXPECT_LT(notability(aircraft("EZY12AB", "", "A319", 9000)), notability(aircraft("", "", "A310", 9000)))
+        << "but not an A319";
+    const int a330 = notability(aircraft("KLM689", "A5", "A333", 9000));
+    const int b777 = notability(aircraft("KLM691", "A5", "B77W", 9000));
+    const int a380 = notability(aircraft("UAE147", "A5", "A388", 9000));
+    EXPECT_GT(b777, a330) << "a 777 over an A330";
+    EXPECT_GT(a380, b777) << "an A380 over a 777";
+    EXPECT_GT(a380, notability(aircraft("KLM691", "A5", "B77W", 36000))) << "even one cruising";
+    EXPECT_GT(notability(aircraft("", "", "A337", 9000)), a330) << "the Beluga XL is no A330";
+    EXPECT_GT(notability(aircraft("PHAHJ", "A1", "C172", 2000, 7700)), wide_high) << "an emergency above all";
+
+    Aircraft fighter = aircraft("VIPER1", "A6", "F35", 12000);
+    fighter.military = true;
+    EXPECT_GT(notability(fighter), wide_high) << "a military aircraft over a heavy, whatever its callsign";
+
+    const std::string json = R"({"aircraft":[{"hex":"ae0470","flight":"RCH123  ","dbFlags":1,"lat":52.3,"lon":4.7},)"
+                             R"({"hex":"484bd1","flight":"KLM90G  ","dbFlags":0,"lat":52.4,"lon":4.8}]})";
+    Aircraft read[2];
+    ASSERT_EQ(parse(json.c_str(), json.size(), read, 2), 2);
+    EXPECT_TRUE(read[0].military) << "dbFlags bit 0";
+    EXPECT_FALSE(read[1].military);
+}
+
+TEST(RadarParse, merge_reading)
+{
+    const auto aircraft = [](const char *hex, const char *type, bool military) {
+        Aircraft a{};
+        std::snprintf(a.hex, sizeof(a.hex), "%s", hex);
+        std::snprintf(a.type, sizeof(a.type), "%s", type);
+        a.military = military;
+        return a;
+    };
+    // adsb.fi's reading: a helicopter placed by MLAT, flagged military, and a 777.
+    Aircraft before[4] = {aircraft("44c1e8", "EXPL", true), aircraft("760918", "B772", false)};
+    int      count     = merge_reading(before, 2, 4, nullptr, 0, 1000, 12000);
+    // adsb.lol's, five seconds on: the 777 alone, without its type.
+    Aircraft now[4] = {aircraft("760918", "", false)};
+    count           = merge_reading(now, 1, 4, before, count, 6000, 12000);
+    ASSERT_EQ(count, 2) << "the helicopter kept through the reading that lacks it";
+    EXPECT_STREQ(now[1].hex, "44c1e8");
+    EXPECT_TRUE(now[1].military);
+    EXPECT_EQ(now[1].seen_us, 1000) << "as last seen";
+    EXPECT_STREQ(now[0].type, "B772") << "what one feed leaves out, taken from the other";
+
+    Aircraft later[4] = {aircraft("760918", "B772", false)};
+    EXPECT_EQ(merge_reading(later, 1, 4, now, count, 14000, 12000), 1) << "unseen for longer, it is gone";
+
+    Aircraft full[1] = {aircraft("760918", "B772", false)};
+    EXPECT_EQ(merge_reading(full, 1, 1, before, 2, 6000, 12000), 1) << "never past the capacity";
+
+    Aircraft flagged[2] = {aircraft("44c1e8", "EXPL", false)};
+    merge_reading(flagged, 1, 2, before, 2, 6000, 12000);
+    EXPECT_TRUE(flagged[0].military) << "military by either feed";
+}

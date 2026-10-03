@@ -13,8 +13,8 @@
 #include <utility>
 
 // The dock at the panel's side: at its head the desk's height, which folds the
-// rest of the desk out beside it, then Stand and Sit, and Home under them; from
-// its foot the focus timer, then the other pages standing up.
+// rest of the desk out beside it, then Stand and Sit as one button; Home in its
+// middle; from its foot the focus timer, then the other pages standing up.
 namespace ui::detail {
 namespace {
 constexpr std::int32_t DOCK_PAD      = 12;
@@ -23,7 +23,6 @@ constexpr std::int32_t DOCK_GAP      = 12;
 constexpr std::int32_t DOCK_DESK_ICON = 46;
 constexpr std::int32_t FOCUS_H     = 72;
 constexpr std::int32_t FOCUS_APART = 16;  // from the tabs over it
-constexpr std::int32_t HOME_APART  = 24;  // from Sit over it
 
 constexpr std::int32_t CARD_PAD     = 28;
 constexpr std::int32_t CARD_BTN_GAP = 20;
@@ -35,8 +34,8 @@ constexpr std::int32_t CARD_BTN_H   = 112;
 // Folded out, it goes again once left alone this long.
 constexpr std::uint32_t CARD_IDLE_MS = 20 * 1000;
 
-// The presets the dock has no room for.
-constexpr int CARD_PRESETS[] = {ULTRA_LOW_PRESET, 0, 4, 5};
+// Every preset, Stand and Sit among them to be set by a hold, as the dock has them as one button.
+constexpr int CARD_PRESETS[] = {STAND_PRESET, SIT_PRESET, ULTRA_LOW_PRESET, 0, 4, 5};
 // Presets 5 and 6 are for whoever uses the desk while the phone is away.
 constexpr int GUEST_PRESETS[] = {4, 5};
 
@@ -134,56 +133,56 @@ void paint_presets()
     }
 }
 
-constexpr std::int32_t SHORTCUT_GAP       = theme::space::m;
-constexpr std::int32_t SHORTCUT_ICON      = 30;  // the desk drawn small in a chip
-constexpr int          SHORTCUT_PRESETS[] = {STAND_PRESET, SIT_PRESET};
-constexpr std::size_t  SHORTCUT_COUNT     = std::size(SHORTCUT_PRESETS);
-constexpr int          SHORTCUT_SETS      = kDeskShortcutButtons / static_cast<int>(SHORTCUT_COUNT);
+constexpr std::int32_t SHORTCUT_ICON = 30;  // the desk drawn small in a chip
+constexpr std::int32_t SHORTCUT_TAP  = theme::space::m / 2;
 
-struct Shortcuts {
-    lv_obj_t *box                   = nullptr;
-    lv_obj_t *chips[SHORTCUT_COUNT] = {};
+// Stand and Sit as one button, drawn as the desk it goes to: at Stand it sits,
+// at Sit it stands, and anywhere else it sits. On its way to one, or moving by
+// any keys, it shows which way with the ring breathing, and a tap stops it, as
+// the box's own keys do.
+struct Shortcut {
+    lv_obj_t *chip = nullptr;
+    lv_obj_t *mark = nullptr;
 };
-Shortcuts s_shortcuts[SHORTCUT_SETS];
-int       s_shortcut_sets = 0;
+Shortcut s_shortcuts[kDeskShortcutButtons];
+int      s_shortcut_count = 0;
 
-// Stand and Sit, each a button with the desk drawn on it, lit while the desk
-// is there: round chips over the fullscreen views, squares down the dock.
-Shortcuts *add_shortcuts(lv_obj_t *root, bool column, std::int32_t side, std::int32_t radius,
-                         std::int32_t mark_w, std::uint32_t colour)
+int shortcut_target()
 {
-    if (s_shortcut_sets == SHORTCUT_SETS) {
+    const DeskState &desk = desk_state();
+    if (desk.travelling == STAND_PRESET || desk.travelling == SIT_PRESET) {
+        return desk.travelling;
+    }
+    return desk.preset_active[SIT_PRESET] ? STAND_PRESET : SIT_PRESET;
+}
+
+void shortcut_clicked(lv_event_t *)
+{
+    desk_go_to(shortcut_target());
+}
+
+// A round chip over the fullscreen views, a square in the dock.
+lv_obj_t *add_shortcut(lv_obj_t *root, std::int32_t side, std::int32_t radius, std::int32_t mark_w,
+                       std::uint32_t colour)
+{
+    if (s_shortcut_count == kDeskShortcutButtons) {
         return nullptr;
     }
-    Shortcuts &set = s_shortcuts[s_shortcut_sets++];
-    set.box        = theme::make_box(root);
-    const std::int32_t length = static_cast<std::int32_t>(SHORTCUT_COUNT) * (side + SHORTCUT_GAP) - SHORTCUT_GAP;
-    lv_obj_set_size(set.box, column ? side : length, column ? length : side);
-    for (std::size_t i = 0; i < SHORTCUT_COUNT; ++i) {
-        lv_obj_t *chip = theme::make_icon_chip(set.box, SHORTCUT_PRESETS[i] == STAND_PRESET ? &icons::desk_up_icon
-                                                                                           : &icons::desk_down_icon,
-                                                mark_w);
-        lv_obj_set_size(chip, side, side);
-        lv_obj_set_style_radius(chip, radius, 0);
-        const std::int32_t at = static_cast<std::int32_t>(i) * (side + SHORTCUT_GAP);
-        lv_obj_set_pos(chip, column ? 0 : at, column ? at : 0);
-        lv_obj_set_style_bg_color(chip, lv_color_hex(colour), 0);
-        lv_obj_set_ext_click_area(chip, SHORTCUT_GAP / 2);
-        auto *preset = reinterpret_cast<void *>(static_cast<std::intptr_t>(SHORTCUT_PRESETS[i]));
-        lv_obj_add_event_cb(chip, preset_clicked_cb, LV_EVENT_SHORT_CLICKED, preset);
-        if (column) {
-            // Held, it stores the height as the desk card's do; over a view only taps.
-            lv_obj_add_event_cb(chip, preset_clicked_cb, LV_EVENT_LONG_PRESSED, preset);
-        }
-        register_desk_control(chip);
-        set.chips[i] = chip;
-    }
+    Shortcut &one = s_shortcuts[s_shortcut_count++];
+    one.chip      = theme::make_icon_chip(root, &icons::desk_down_icon, mark_w);
+    one.mark      = lv_obj_get_child(one.chip, -1);
+    lv_obj_set_size(one.chip, side, side);
+    lv_obj_set_style_radius(one.chip, radius, 0);
+    lv_obj_set_style_bg_color(one.chip, lv_color_hex(colour), 0);
+    lv_obj_set_ext_click_area(one.chip, SHORTCUT_TAP);
+    lv_obj_add_event_cb(one.chip, shortcut_clicked, LV_EVENT_CLICKED, nullptr);
+    register_desk_control(one.chip);
     paint_desk_shortcuts();
-    return &set;
+    return one.chip;
 }
 
 lv_obj_t   *s_tabs          = nullptr;  // the dock's column of tabs
-lv_obj_t   *s_head          = nullptr;  // the desk's, at the dock's head, and Home under it
+lv_obj_t   *s_head          = nullptr;  // the desk's, at the dock's head
 lv_obj_t   *s_focus_button  = nullptr;  // the timer, lowest in the dock
 lv_obj_t   *s_focus_mark    = nullptr;  // drawn while it is idle
 lv_obj_t   *s_focus_left    = nullptr;  // how long is left while it runs
@@ -204,7 +203,7 @@ void build_dock_desk(lv_obj_t *dock)
     lv_obj_align(head, LV_ALIGN_TOP_MID, 0, 0);
     lv_obj_set_clickable(head, false);
 
-    // As big as Stand and Sit under it, being as much a button.
+    // As big as the Stand and Sit button under it, being as much a button.
     lv_obj_t *height = lv_button_create(head);
     s_height_button  = height;
     theme::style_button(height, theme::panel_light);
@@ -216,7 +215,7 @@ void build_dock_desk(lv_obj_t *dock)
     s_dock_height = theme::make_label(height, "--", theme::primary, fonts::size_28());
     s_dock_unit   = theme::make_label(height, "cm", theme::secondary, theme::type_label());
 
-    add_shortcuts(head, true, DOCK_INNER_W, theme::radius::control, DOCK_DESK_ICON, theme::panel_light);
+    add_shortcut(head, DOCK_INNER_W, theme::radius::control, DOCK_DESK_ICON, theme::panel_light);
 }
 
 // The timer, idle as itself; running, how long is left in the part's colour,
@@ -324,23 +323,25 @@ void show_guest_presets()
 
 void paint_desk_shortcuts()
 {
-    for (int i = 0; i < s_shortcut_sets; ++i) {
-        for (std::size_t j = 0; j < SHORTCUT_COUNT; ++j) {
-            const bool active = desk_state().preset_active[SHORTCUT_PRESETS[j]];
-            show_desk_travel(s_shortcuts[i].chips[j], desk_state().travelling == SHORTCUT_PRESETS[j]);
-            theme::light_chip(s_shortcuts[i].chips[j], active);
-        }
+    const DeskState &desk    = desk_state();
+    const int        target  = shortcut_target();
+    const bool       going   = desk.travelling == target;
+    // Where it goes; moving by other keys, which way.
+    const bool up = going || desk.moving == 0 ? target == STAND_PRESET : desk.moving > 0;
+    for (int i = 0; i < s_shortcut_count; ++i) {
+        const Shortcut &one = s_shortcuts[i];
+        lv_image_set_src(one.mark, up ? &icons::desk_up_icon : &icons::desk_down_icon);
+        show_desk_travel(one.chip, going || desk.moving != 0);
     }
 }
 
 lv_obj_t *add_desk_shortcuts(lv_obj_t *root, std::int32_t x, std::int32_t y, std::uint32_t chip_colour)
 {
-    Shortcuts *set = add_shortcuts(root, false, theme::chip::size, theme::chip::size / 2, SHORTCUT_ICON, chip_colour);
-    if (set == nullptr) {
-        return nullptr;
+    lv_obj_t *chip = add_shortcut(root, theme::chip::size, theme::chip::size / 2, SHORTCUT_ICON, chip_colour);
+    if (chip != nullptr) {
+        lv_obj_set_pos(chip, x, y);
     }
-    lv_obj_set_pos(set->box, x, y);
-    return set->box;
+    return chip;
 }
 
 lv_obj_t *dock_tabs()
@@ -348,12 +349,13 @@ lv_obj_t *dock_tabs()
     return s_tabs;
 }
 
-// Home under the desk, where a hand finds it first; the other pages stand up
+// Home in the middle, where a hand finds it first; the other pages stand up
 // from the foot, the timer lowest of all, being no page.
 void dock_tabs_done(lv_obj_t *home)
 {
-    lv_obj_set_parent(home, s_head);
-    lv_obj_set_style_margin_top(home, HOME_APART - DOCK_GAP, 0);
+    // In the dock's middle, whatever the desk's head above it holds.
+    lv_obj_set_parent(home, s_dock);
+    lv_obj_center(home);
     build_focus_button(s_tabs);
     lv_obj_move_to_index(s_focus_button, 0);  // first in a column that stands up from the foot, so lowest
 }

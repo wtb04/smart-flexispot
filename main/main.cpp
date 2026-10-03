@@ -141,6 +141,11 @@ void on_dock_side(bool right)
     settings::set(settings::Key::DockSide, right);
 }
 
+void on_radar_zoom(int km)
+{
+    settings::set(settings::Key::RadarRange, km);
+}
+
 void on_orientation(ui::Orientation orientation)
 {
     const bool automatic = orientation == ui::Orientation::Auto;
@@ -418,6 +423,7 @@ extern "C" void app_main(void)
         .pick        = room::on_pick,
         .seek        = room::on_seek,
         .media_volume = room::on_media_volume,
+        .radar_zoom  = on_radar_zoom,
     };
     const int brightness = settings::get(settings::Key::Brightness);
     ui::set_cards(diagnostics::cards(), diagnostics::card_count());
@@ -429,6 +435,7 @@ extern "C" void app_main(void)
                                                                           : ui::Orientation::Normal));
     network::note_brightness(brightness);
     ESP_ERROR_CHECK_WITHOUT_ABORT(board::display_on(brightness));
+    ui::set_radar_range(settings::get(settings::Key::RadarRange));
     ESP_ERROR_CHECK(ui::build());
     ESP_ERROR_CHECK_WITHOUT_ABORT(
         ui::set_setting(ui::Setting::Charging, settings::enabled(settings::Key::Charging)));

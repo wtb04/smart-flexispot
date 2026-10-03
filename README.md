@@ -27,7 +27,7 @@ Smart Flexispot is firmware for an [M5Stack Tab5](https://docs.m5stack.com/en/co
 > **This is a showcase, not a product.** It is built around my desk, my room, my Home Assistant, my calendars and my phone, so a lot of it only makes sense in my setup. Treat it as a demo of what a desk panel can do and take whatever ideas or pieces are useful. Getting it running for yourself will mean changing things.
 
 > [!NOTE]
-> **Built with AI.** I came up with what it should do and it runs on my desk every day, but most of the code was written with the help of AI rather than by hand. For something this big, that is what made it a project of weeks instead of months. Read the code with that in mind.
+> **Built with AI.** Most of the code was written with AI rather than by hand, so this is not so much a showcase of my coding skills (if those still count for much nowadays) as of how I think using something like this should feel. It is also just a fun project for myself, and building it this way made it a matter of weeks instead of months.
 
 I am not affiliated with Flexispot, LoctekMotion or M5Stack.
 
@@ -54,7 +54,7 @@ Once the screen was there, the extra features kept coming, each one making it a 
 
 ![The home page with music on the speaker](docs/screenshots/home-music.png)
 
-This is what the panel shows most of the day. Two things are on every page, in the same place whatever happens. The dock at the side has the desk's height at its head with Stand and Sit under it and Home under those, and from its foot the focus timer, Radar and Calendar standing up. The control bar along the top has what gets touched every day: what is playing with play and pause right there, the heating, the lights, and the time with the phone, Wi-Fi and the battery while it is unplugged. A tap on the track drops its card with skip, the volume, the favourites and the way into the cinema or music view, and while an episode's intro or credits run, Skip intro or Next episode takes the title's place; a tap on the heating drops its dial; a tap on the lights turns them all on or off, and holding it shows each light. A tap on the time opens Setup.
+This is what the panel shows most of the day. Two things are on every page, in the same place whatever happens. The dock at the side has the desk's height at its head with one button for Stand and Sit under it and Home under that, and from its foot the focus timer, Radar and Calendar standing up. The control bar along the top has what gets touched every day: what is playing with play and pause right there, the heating, the lights, and the time with the phone, Wi-Fi and the battery while it is unplugged. A tap on the track drops its card with skip, the volume, the favourites and the way into the cinema or music view, and while an episode's intro or credits run, Skip intro or Next episode takes the title's place; a tap on the heating drops its dial; a tap on the lights turns them all on or off, and holding it shows each light. A tap on the time opens Setup.
 
 Home itself is for looking at: the air across the top, each reading with a dot for how it is doing, the sky overhead with every aircraft in its height's colour, and what comes next on the calendar with the few after it. A tap on either opens its page.
 
@@ -80,7 +80,7 @@ Anything in Home Assistant can put a message on the screen through the panel's *
 
 ### The desk
 
-Stand and Sit are always in the dock, under the height as the control box reports it. Tap the height and the rest of the desk folds out beside it: up and down to hold, and the other presets. It folds away again by itself after a while. Tap a preset to go there, tap it again to stop, hold it to save the current height.
+Stand and Sit are one button in the dock, under the height as the control box reports it: at Stand it goes to Sit, at Sit to Stand, and anywhere else to Sit. While the desk moves it shows which way, and a tap stops it. Tap the height and the rest of the desk folds out beside it: up and down to hold, and the other presets. It folds away again by itself after a while. Tap a preset to go there, tap it again to stop, hold it to save the current height.
 
 - **Six presets instead of four.** The control box has four of its own. The panel drives the desk to the other two itself, and learns how far the desk rolls on after the keys are let go, so it stops where you asked.
 - **No cable across the room, if you want.** The desk can be wired straight to the Tab5, or to a small ESP32 left at the desk that the panel talks to over Bluetooth (see [option 2](#option-2-over-bluetooth-with-a-companion)).

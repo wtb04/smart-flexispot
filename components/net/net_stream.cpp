@@ -23,6 +23,10 @@ constexpr int           MAX_STREAMS   = 6;
 constexpr std::uint32_t TASK_STACK    = 4096;
 constexpr UBaseType_t   TASK_PRIORITY = 3;
 constexpr BaseType_t    TASK_CORE     = 0;
+// Each client's own task, which reads, decrypts and hands on what arrives: the
+// libraries' default of 5 on either core took the screen's (4, on core 1).
+constexpr int           CLIENT_PRIORITY = 3;
+constexpr BaseType_t    CLIENT_CORE     = 0;
 constexpr std::int64_t  LOOK_EVERY_US = 1000 * 1000;  // besides being woken
 constexpr std::int64_t  SOONEST_US    = 10 * 1000;
 constexpr TickType_t    SEND_TIMEOUT  = pdMS_TO_TICKS(5 * 1000);
@@ -346,6 +350,9 @@ esp_err_t open_websocket(Stream &into, const WebsocketConfig &config, StreamHand
     cfg.buffer_size            = config.buffer_size;
     cfg.network_timeout_ms     = config.network_timeout_ms;
     cfg.disable_auto_reconnect = true;
+    cfg.task_prio              = CLIENT_PRIORITY;
+    cfg.task_core_id           = CLIENT_CORE;
+    cfg.task_core_id_set       = true;
     if (config.ping_interval_s > 0) {
         cfg.ping_interval_sec = config.ping_interval_s;
     }
@@ -374,6 +381,7 @@ esp_err_t open_mqtt(Stream &into, const MqttConfig &config, StreamHandlers handl
 
     esp_mqtt_client_config_t cfg          = config.client;
     cfg.network.disable_auto_reconnect    = true;
+    cfg.task.priority                     = CLIENT_PRIORITY;  // its core is in sdkconfig.defaults
     e->mqtt = esp_mqtt_client_init(&cfg);
     if (e->mqtt == nullptr || esp_mqtt_client_register_event(e->mqtt, MQTT_EVENT_ANY, on_mqtt, e) != ESP_OK) {
         ESP_LOGE(config.name, "MQTT would not set up");

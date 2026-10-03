@@ -270,7 +270,7 @@ void create_top_bar(lv_obj_t *parent)
     lv_obj_set_ext_click_area(s_status, TAP_MARGIN);
     lv_obj_set_style_radius(s_status, theme::radius::pill, 0);
     theme::light_when_out(s_status);
-    lv_obj_add_event_cb(s_status, [](lv_event_t *) { toggle_setup(); }, LV_EVENT_CLICKED, nullptr);
+    lv_obj_add_event_cb(s_status, [](lv_event_t *) { toggle_setup(); }, LV_EVENT_PRESSED, nullptr);
     // An update arriving shows with the status it is installed from, at its far
     // end from the time, so the status only grows as it comes and goes.
     build_update(s_status);

@@ -65,17 +65,19 @@ for an aircraft whose own is not on file.
 ```sh
 SIM_HOME=lat,lon   # the radar's centre, in place of zone.home
 SIM_ZOOM=0.75      # the window's scale, for a smaller screen
+SIM_DOCK=left      # the dock at the left, as Setup can put it
 ```
 
 `--page N` opens a page (0 Home to 3 Setup), `--press KEYS` presses keys as
 it starts, `am` for Home Assistant answering and music, `--tap X,Y` taps the
-screen there, as often as given, `--wait MS` waits that long where it stands
+screen there, as often as given, `--hold X,Y,MS` presses there that long, `--wait MS` waits that long where it stands
 among the taps, `--swipe X1,Y1,X2,Y2` swipes after the taps, `--shot S` saves a
 screenshot after S seconds and quits, and `--splash` plays the twelve-second
 splash the panel boots with. `--pick-above FT` chooses the nearest airliner
 flying at least that high, and `--out2 FILE` saves a second screenshot a few
 seconds after the first, after the `--tap2 X,Y` taps, so both show the same
-moment. Together they take a picture of a state without
+moment. `--draw-page P N` draws page P whole N times and prints how long a
+frame took, to run under a profiler such as `sample`. Together they take a picture of a state without
 anyone at the keyboard:
 
 ```sh
@@ -86,7 +88,7 @@ The README's radar and calendar pictures, over Schiphol:
 
 ```sh
 cd sim
-SIM_HOME=52.3105,4.7683 SIM_ROUTE="AMS,Amsterdam,JFK,New York" ./build/sim --press a --page 0 --pick-above 9000 \
-    --shot 20 --out ../docs/screenshots/radar.png --tap2 490,229 --out2 ../docs/screenshots/radar-full.png
-SIM_NO_WORK=1 ./build/sim --page 2 --shot 16 --out ../docs/screenshots/calendar.png
+SIM_HOME=52.3105,4.7683 SIM_DOCK=left SIM_ROUTE="AMS,Amsterdam,JFK,New York" ./build/sim --press a --page 0 --pick-above 9000 \
+    --shot 20 --out ../docs/screenshots/radar.png --tap2 618,229 --out2 ../docs/screenshots/radar-full.png
+SIM_NO_WORK=1 SIM_DOCK=left ./build/sim --page 2 --shot 16 --out ../docs/screenshots/calendar.png
 ```

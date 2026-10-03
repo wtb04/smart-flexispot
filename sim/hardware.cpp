@@ -2,6 +2,8 @@
 
 #include "esp_timer.h"
 #include "focus_plan.h"
+#include "ical.h"
+#include "radar.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -145,6 +147,13 @@ void start()
 
 void tick()
 {
+    // As the panel keeps them, while Setup shows them.
+    constexpr std::int64_t DIAGNOSTICS_EVERY_MS = 2000;
+    static std::int64_t    s_diagnosed_ms       = 0;
+    if (ui::diagnostics_open() && now_ms() - s_diagnosed_ms >= DIAGNOSTICS_EVERY_MS) {
+        s_diagnosed_ms = now_ms();
+        diagnostics();
+    }
     const std::int64_t now = now_ms();
     if (s_linked && now - s_reported_ms >= REPORT_EVERY_MS) {
         move_desk(now);
@@ -247,6 +256,118 @@ void toggle_wifi()
 {
     s_wifi = !s_wifi;
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_links(s_wifi, s_wifi && s_hass));
+}
+
+namespace {
+// The cards in the order sim/main.cpp lays them out, and their rows.
+enum Card { WIFI, HASS, PRESENCE, DESK, LINK, POWER, RADAR, CALENDAR, SYSTEM };
+
+void card(Card card, const char *summary, ui::Level level)
+{
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_card(card, summary, level));
+}
+
+void row(Card card, int row, const char *value, ui::Level level = ui::Level::Neutral)
+{
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_row(card, row, value, level));
+}
+
+int preset_at()
+{
+    for (int i = 0; i < ui::kPresetCount; ++i) {
+        if (s_heights[i] >= 0 && std::abs(s_height_mm - s_heights[i]) <= AT_PRESET_MM) {
+            return i;
+        }
+    }
+    return -1;
+}
+}  // namespace
+
+void diagnostics()
+{
+    using ui::Level;
+    char text[48];
+
+    constexpr int SIGNAL_DBM = -52;
+    std::snprintf(text, sizeof(text), "%d dBm", SIGNAL_DBM);
+    card(WIFI, s_wifi ? text : "offline", s_wifi ? Level::Good : Level::Bad);
+    row(WIFI, 0, s_wifi ? "the simulator's" : "not joined", s_wifi ? Level::Neutral : Level::Bad);
+    row(WIFI, 1, s_wifi ? text : nullptr, Level::Good);
+    row(WIFI, 2, s_wifi ? "127.0.0.1" : nullptr);
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_glance(ui::Glance::Wifi, s_wifi ? text : "offline"));
+
+    card(HASS, s_hass ? "connected" : "offline", s_hass ? Level::Good : Level::Bad);
+    row(HASS, 0, s_hass ? "connected" : "offline", s_hass ? Level::Good : Level::Bad);
+    row(HASS, 1, s_hass ? "connected" : "offline", s_hass ? Level::Good : Level::Bad);
+
+    card(PRESENCE, s_phone ? "home" : "away", Level::Good);
+    row(PRESENCE, 0, s_phone ? "home" : "away", Level::Good);
+    row(PRESENCE, 2, "set", Level::Good);
+
+    std::snprintf(text, sizeof(text), "%d.%d cm", s_height_mm / 10, s_height_mm % 10);
+    card(DESK, s_linked ? text : "--", s_linked ? Level::Good : Level::Neutral);
+    row(DESK, 0, s_linked ? text : nullptr);
+    row(DESK, 1, ui::preset_name(preset_at()));
+    row(DESK, 2, s_target_mm >= 0 || s_moving != ui::Move::Stop ? "moving" : "still");
+
+    card(LINK, s_linked ? "wire" : "box silent", s_linked ? Level::Good : Level::Bad);
+    row(LINK, 0, "wire");
+    row(LINK, 1, s_linked ? "answering" : "silent", s_linked ? Level::Good : Level::Bad);
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_glance(ui::Glance::DeskLink, s_linked ? "wire" : nullptr));
+
+    const Battery &battery = BATTERIES[s_battery];
+    if (!battery.present) {
+        card(POWER, "no battery", Level::Neutral);
+        row(POWER, 0, "cable");
+    } else {
+        std::snprintf(text, sizeof(text), "%d%%", battery.percent);
+        const Level charge = battery.percent >= 50 ? Level::Good : battery.percent >= 20 ? Level::Warn : Level::Bad;
+        card(POWER, text, charge);
+        row(POWER, 0, battery.on_battery ? "battery" : "cable");
+        row(POWER, 1, text, charge);
+        row(POWER, 4, battery.charging ? "charging" : battery.on_battery ? "discharging" : "full");
+    }
+
+    static radar::Snapshot sky;
+    radar::snapshot(sky);
+    if (sky.age_s < 0) {
+        card(RADAR, "--", Level::Neutral);
+    } else {
+        std::snprintf(text, sizeof(text), "%d plane%s", sky.count, sky.count == 1 ? "" : "s");
+        card(RADAR, text, sky.ok ? Level::Good : Level::Warn);
+        row(RADAR, 0, sky.ok ? "answering" : "refusing", sky.ok ? Level::Good : Level::Warn);
+        std::snprintf(text, sizeof(text), "%d", sky.count);
+        row(RADAR, 1, text);
+        std::snprintf(text, sizeof(text), "%d km", sky.range_km);
+        row(RADAR, 2, text);
+        std::snprintf(text, sizeof(text), "%d s ago", sky.age_s);
+        row(RADAR, 3, text);
+    }
+
+    static ical::Event ahead[8];
+    const int          events = ical::upcoming(ahead, static_cast<int>(std::size(ahead)));
+    std::snprintf(text, sizeof(text), "%d", ical::kFeedCount);
+    row(CALENDAR, 0, text);
+    if (events == 0) {
+        card(CALENDAR, "nothing ahead", Level::Neutral);
+        row(CALENDAR, 1, "nothing");
+    } else {
+        std::tm    local{};
+        const auto when = static_cast<std::time_t>(ahead[0].start);
+        localtime_r(&when, &local);
+        std::snprintf(text, sizeof(text), "%02d:%02d", local.tm_hour, local.tm_min);
+        card(CALENDAR, text, Level::Good);
+        row(CALENDAR, 2, text);
+        std::snprintf(text, sizeof(text), "%d event%s", events, events == 1 ? "" : "s");
+        row(CALENDAR, 1, text);
+    }
+
+    const auto up = static_cast<unsigned>(now_ms() / 1000);
+    std::snprintf(text, sizeof(text), "%um %us", up / 60, up % 60);
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_glance(ui::Glance::Uptime, text));
+    card(SYSTEM, "simulator", Level::Good);
+    row(SYSTEM, 0, "simulator");
+    row(SYSTEM, 2, text);
 }
 
 void set_home_assistant(bool up)

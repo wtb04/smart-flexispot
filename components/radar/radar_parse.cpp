@@ -1,8 +1,10 @@
 #include "radar_parse.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
@@ -174,6 +176,8 @@ const Field *text_field(Scanner &in, const Field (&fields)[N], const char *key,
     return nullptr;
 }
 
+constexpr int DB_MILITARY = 1;  // dbFlags, the feeds' readsb database: bit 0 military
+
 bool read_number_field(Scanner &in, const char *key, std::size_t key_len, Aircraft &out,
                        bool &has_lat, bool &has_lon)
 {
@@ -196,6 +200,8 @@ bool read_number_field(Scanner &in, const char *key, std::size_t key_len, Aircra
         out.speed_kt = static_cast<float>(value);
     } else if (key_is(key, key_len, "baro_rate") && in.number(value)) {
         out.vertical_fpm = static_cast<int>(value);
+    } else if (key_is(key, key_len, "dbFlags") && in.number(value)) {
+        out.military = (static_cast<int>(value) & DB_MILITARY) != 0;
     } else {
         return false;
     }
@@ -564,6 +570,105 @@ double dot(const Unit &a, const Unit &b)
     return a.x * b.x + a.y * b.y + a.z * b.z;
 }
 }  // namespace
+
+namespace {
+// Wide-bodies by their ICAO type, by how it starts, and how much more each is
+// worth than an airliner: the giants, the large twins and four-engined, and
+// the rest. The Beluga XL's A337 before the A33 it starts like.
+struct Wide {
+    const char *start;
+    int         extra;
+};
+constexpr Wide WIDE_BODIES[] = {
+    {"A38", 6}, {"B74", 6}, {"A124", 6}, {"A225", 6}, {"A3ST", 6}, {"A337", 6},
+    {"B77", 4}, {"A35", 4}, {"A34", 4},
+    {"A33", 3}, {"B76", 3}, {"B78", 3}, {"A30", 3}, {"A310", 3}, {"MD11", 3}, {"IL96", 3},
+};
+constexpr int HEAVY       = 3;  // ADS-B's A5 of a type not in the list
+constexpr int CRUISING_FT = 20000;
+constexpr int MILITARY    = 9;  // over a giant cruising, 8
+constexpr int EMERGENCY   = kEmergencyNotability;
+
+bool emergency(int squawk)
+{
+    return squawk == 7500 || squawk == 7600 || squawk == 7700;
+}
+
+int wide_extra(const char *type)
+{
+    for (const Wide &wide : WIDE_BODIES) {
+        if (std::strncmp(type, wide.start, std::strlen(wide.start)) == 0) {
+            return wide.extra;
+        }
+    }
+    return 0;
+}
+}  // namespace
+
+int notability(const Aircraft &aircraft)
+{
+    if (aircraft.on_ground) {
+        return 0;
+    }
+    if (emergency(aircraft.squawk)) {
+        return EMERGENCY;
+    }
+    if (aircraft.military) {
+        return MILITARY;
+    }
+    const auto *call    = reinterpret_cast<const unsigned char *>(aircraft.flight);
+    const bool  airline = std::isupper(call[0]) && std::isupper(call[1]) && std::isupper(call[2]) &&
+                          std::isdigit(call[3]);
+    const char  size    = aircraft.category[0] == 'A' ? aircraft.category[1] : '\0';
+    int         extra   = wide_extra(aircraft.type);
+    if (extra == 0 && size == '5') {
+        extra = HEAVY;
+    } else if (extra == 0 && size == '4') {
+        extra = 1;
+    }
+    if (!airline && extra == 0 && size != '3') {
+        return 0;
+    }
+    int score = 1 + extra;
+    if (aircraft.altitude_ft >= CRUISING_FT) {
+        score += 1;
+    }
+    return score;
+}
+
+int merge_reading(Aircraft *now, int count, int capacity, const Aircraft *before, int before_count,
+                  std::int64_t now_us, std::int64_t keep_us)
+{
+    const int fresh = count;
+    for (int i = 0; i < fresh; ++i) {
+        now[i].seen_us = now_us;
+    }
+    const auto fill = [](char *into, const char *from, std::size_t size) {
+        if (into[0] == '\0' && from[0] != '\0') {
+            std::snprintf(into, size, "%s", from);
+        }
+    };
+    for (int b = 0; b < before_count; ++b) {
+        const Aircraft &old = before[b];
+        Aircraft       *same = nullptr;
+        for (int i = 0; i < fresh && same == nullptr; ++i) {
+            if (std::strcmp(now[i].hex, old.hex) == 0) {
+                same = &now[i];
+            }
+        }
+        if (same != nullptr) {
+            same->military = same->military || old.military;
+            fill(same->type, old.type, sizeof(same->type));
+            fill(same->category, old.category, sizeof(same->category));
+            fill(same->desc, old.desc, sizeof(same->desc));
+            fill(same->reg, old.reg, sizeof(same->reg));
+            fill(same->flight, old.flight, sizeof(same->flight));
+        } else if (now_us - old.seen_us <= keep_us && count < capacity) {
+            now[count++] = old;
+        }
+    }
+    return count;
+}
 
 bool route_fits(const Details &details, float lat, float lon)
 {

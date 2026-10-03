@@ -92,9 +92,12 @@ constexpr int          OUTLINE_MAX_POINTS = 20;
 constexpr int          BLIP_MAX_CROSSINGS = 12;
 constexpr int          DOT_SIZE           = 5;
 
-// Stays with the aircraft it follows until another is clearly nearer, so the
-// card does not flick between two at much the same distance.
-constexpr float FOLLOW_MARGIN = 1.2f;
+// Turns between the few most notable in view, this often; one held drops out
+// only once it is outside a few more than that.
+constexpr std::uint32_t ROTATE_MS    = 5 * 60 * 1000;
+constexpr int           ROTATE_AMONG = 3;
+constexpr int           ROTATE_KEEP  = ROTATE_AMONG + 1;
+constexpr std::uint32_t REFOLLOW_MS = 60 * 1000;  // untouched this long, it follows again
 
 constexpr int SQUAWK_HIJACK    = 7500;
 constexpr int SQUAWK_NO_RADIO  = 7600;
@@ -262,7 +265,11 @@ std::int32_t s_map_w    = 0;
 std::int32_t s_map_h    = 0;
 bool         s_mapped    = false;    // laid out as the map, on the radar page
 lv_obj_t    *s_map_chip = nullptr;  // on Home, to the radar page
-lv_obj_t    *s_screw     = nullptr;
+lv_obj_t    *s_track      = nullptr;  // following on its own, or how near it is to again
+lv_obj_t    *s_track_mark = nullptr;
+lv_obj_t    *s_track_ring = nullptr;
+lv_obj_t    *s_track_hold = nullptr;  // the pause sign, while held
+bool         s_held       = false;    // following paused by a long press, until a tap
 
 // The scope is one opaque picture, which the PPA copies to the screen whole:
 // the map, drawn for each range into s_ground, and each reading's planes over a
@@ -336,6 +343,8 @@ Row            s_rows[READINGS] = {};
 radar::Snapshot *s_last                        = nullptr;
 char             s_chosen[radar::kHexLen]      = {};
 bool             s_following                   = true;
+std::uint32_t    s_turn_began                  = 0;  // when the one followed was turned to
+bool             s_turns                       = false;  // there is another to turn to
 radar::Details   s_details                     = {};
 char             s_details_hex[radar::kHexLen] = {};
 char             s_picture_hex[radar::kHexLen] = {};  // whose photo s_picture is about
@@ -1477,6 +1486,9 @@ void range_clicked(lv_event_t *event)
     const int from = static_cast<int>(std::lround(shown_range_km()));
     s_range_step   = next;
     apply_range(from);
+    if (detail::s_handlers.radar_zoom != nullptr) {
+        detail::s_handlers.radar_zoom(RANGES[next]);
+    }
 }
 
 // Round chips in the card's corners, the same as the heating card's: a dot of
@@ -1494,14 +1506,105 @@ lv_obj_t *zoom_chip(lv_obj_t *bezel, const lv_image_dsc_t *mark, int step)
 
 void map_clicked(lv_event_t *);
 
+constexpr std::uint32_t TRACK_TICK_MS = 500;
+constexpr std::int32_t  TRACK_RING_W  = 3;
+constexpr int           TRACK_STEPS   = 100;
+
+void follow_again()
+{
+    s_held      = false;
+    s_following = true;
+    s_chosen[0] = '\0';  // from the most notable, rather than keeping what was chosen by hand
+    if (s_last != nullptr) {
+        show_radar(*s_last);
+    }
+}
+
+// Lit while it follows on its own, its ring in the accent filling over the
+// turn until the next; chosen by hand, faded, the ring filling over the minute
+// untouched after which it follows again; held, a pause sign.
+void paint_track()
+{
+    if (s_track == nullptr) {
+        return;
+    }
+    lv_obj_set_hidden(s_track_ring, s_held || (s_following && !s_turns));
+    const lv_color_t ink = lv_color_hex(s_following ? theme::primary : theme::secondary);
+    if (!lv_color_eq(lv_obj_get_style_arc_color(s_track_ring, LV_PART_INDICATOR), ink)) {
+        lv_obj_set_style_arc_color(s_track_ring, ink, LV_PART_INDICATOR);
+    }
+    lv_obj_set_hidden(s_track_mark, s_held);
+    lv_obj_set_hidden(s_track_hold, !s_held);
+    lv_obj_set_style_image_recolor(s_track_mark, lv_color_hex(s_following ? theme::primary : theme::secondary), 0);
+    lv_obj_set_style_image_opa(s_track_mark, s_following ? static_cast<lv_opa_t>(LV_OPA_COVER) : theme::mark_opa, 0);
+    if (!s_held) {
+        const std::uint32_t whole = s_following ? ROTATE_MS : REFOLLOW_MS;
+        const std::uint32_t gone  = std::min(s_following ? lv_tick_elaps(s_turn_began)
+                                                         : lv_display_get_inactive_time(nullptr),
+                                             whole);
+        const int           step  = static_cast<int>(static_cast<std::uint64_t>(gone) * TRACK_STEPS / whole);
+        if (lv_arc_get_value(s_track_ring) != step) {
+            lv_arc_set_value(s_track_ring, step);
+        }
+    }
+}
+
+void track_tick(lv_timer_t *)
+{
+    if (!s_following && !s_held && lv_display_get_inactive_time(nullptr) >= REFOLLOW_MS) {
+        follow_again();
+    }
+    paint_track();
+}
+
+lv_obj_t *build_track(lv_obj_t *bezel)
+{
+    lv_obj_t *chip = theme::make_chip(bezel, "");
+    lv_obj_set_ext_click_area(chip, (CORNER - ZOOM_D) / 2);
+    // A tap follows again; held, it keeps what is on show until tapped.
+    lv_obj_add_event_cb(chip, [](lv_event_t *) {
+        follow_again();
+        paint_track();
+    }, LV_EVENT_SHORT_CLICKED, nullptr);
+    lv_obj_add_event_cb(chip, [](lv_event_t *) {
+        if (s_held) {
+            follow_again();
+        } else {
+            s_held      = true;
+            s_following = false;
+        }
+        paint_track();
+    }, LV_EVENT_LONG_PRESSED, nullptr);
+    s_track_mark = theme::make_mark(chip, &icons::track_icon, LV_OPA_COVER);
+    s_track_hold = theme::make_label(chip, LV_SYMBOL_PAUSE, theme::secondary, fonts::size_16());
+    lv_obj_center(s_track_hold);
+    lv_obj_set_hidden(s_track_hold, true);
+    quiet(s_track_hold);
+    s_track_ring = lv_arc_create(chip);
+    lv_obj_set_size(s_track_ring, ZOOM_D, ZOOM_D);
+    lv_obj_center(s_track_ring);
+    lv_obj_remove_style(s_track_ring, nullptr, LV_PART_KNOB);
+    lv_obj_set_style_pad_all(s_track_ring, 0, 0);
+    lv_obj_set_style_arc_opa(s_track_ring, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(s_track_ring, TRACK_RING_W, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(s_track_ring, lv_color_hex(theme::secondary), LV_PART_INDICATOR);
+    lv_arc_set_rotation(s_track_ring, 270);  // from the top, as a clock's hand
+    lv_arc_set_bg_angles(s_track_ring, 0, FULL_TURN_DEG);
+    lv_arc_set_range(s_track_ring, 0, TRACK_STEPS);
+    lv_obj_set_clickable(s_track_ring, false);
+    quiet(s_track_ring);
+    lv_timer_create(track_tick, TRACK_TICK_MS, nullptr);
+    return chip;
+}
+
 // Zoom along the bottom, where the thumbs rest; on Home the way to the radar
-// page at the top right, as the cards of the control bar have it; a
-// screw in the last corner.
+// page at the top right, as the cards of the control bar have it; whether it
+// follows on its own in the last corner.
 void build_corners(lv_obj_t *bezel)
 {
     s_zoom_out  = zoom_chip(bezel, &icons::minus_icon, 1);
     s_zoom_in   = zoom_chip(bezel, &icons::plus_icon, -1);
-    s_screw     = theme::make_screw(bezel, ZOOM_D);
+    s_track     = build_track(bezel);
     s_map_chip = theme::make_chip(bezel, "");
     theme::make_mark(s_map_chip, &icons::expand_icon);
     lv_obj_set_ext_click_area(s_map_chip, (CORNER - ZOOM_D) / 2);
@@ -1512,14 +1615,14 @@ void build_corners(lv_obj_t *bezel)
 // page the map is that surface, so they take the black of the margin.
 void paint_chips(bool mapped)
 {
-    for (lv_obj_t *chip : {s_zoom_out, s_zoom_in, s_map_chip}) {
+    for (lv_obj_t *chip : {s_zoom_out, s_zoom_in, s_map_chip, s_track}) {
         lv_obj_set_style_bg_color(chip, lv_color_hex(mapped ? theme::background : theme::panel), 0);
     }
 }
 
 void place_corners(std::int32_t w, std::int32_t h)
 {
-    lv_obj_set_pos(s_screw, EDGE, EDGE);
+    lv_obj_set_pos(s_track, EDGE, EDGE);
     lv_obj_set_pos(s_map_chip, w - ZOOM_D - EDGE, EDGE);
     lv_obj_set_pos(s_zoom_out, EDGE, h - ZOOM_D - EDGE);
     lv_obj_set_pos(s_zoom_in, w - ZOOM_D - EDGE, h - ZOOM_D - EDGE);
@@ -1563,7 +1666,6 @@ void build_picture(lv_obj_t *scope, std::int32_t w, std::int32_t h)
     work_out_rings();
     paint_base();
     draw_rings_and_spokes();  // there before any map is
-    std::memcpy(s_frame, s_ground, n * RGB565_BYTES_PER_PX);
     s_canvas = lv_canvas_create(scope);
     lv_canvas_set_buffer(s_canvas, s_frame, w, h, LV_COLOR_FORMAT_RGB565);
     lv_obj_set_pos(s_canvas, 0, 0);
@@ -2255,18 +2357,61 @@ int plot_of(const char *hex)
     return -1;
 }
 
+// The most notable in view, best first: a heavy cruising over a 737 climbing
+// out of the airport, the nearer of two alike, as the plots go nearest first.
+int most_notable(int *out, int max)
+{
+    int count = 0;
+    for (int i = 0; i < s_shown; ++i) {
+        const int score = radar::notability(*s_plots[i].aircraft);
+        int       at    = count;
+        while (at > 0 && radar::notability(*s_plots[out[at - 1]].aircraft) < score) {
+            --at;
+        }
+        if (at >= max) {
+            continue;
+        }
+        for (int j = std::min(count, max - 1); j > at; --j) {
+            out[j] = out[j - 1];
+        }
+        out[at] = i;
+        count   = std::min(count + 1, max);
+    }
+    return count;
+}
+
+// Followed by turns: the most notable in view first, and every few minutes the
+// next of the few most notable, so Home shows other flights than the one. One
+// that leaves the view or falls out of the few is let go at once, and an
+// emergency is turned to at once.
 void follow_nearest()
 {
     if (s_shown == 0) {
         s_chosen[0] = '\0';
         return;
     }
-    const int  held = plot_of(s_chosen);
-    const bool keep = held >= 0 && s_plots[held].aircraft->distance_nm <
-                                       s_plots[0].aircraft->distance_nm * FOLLOW_MARGIN;
-    const int at = keep ? held : 0;
-    if (!keep) {
-        remember_chosen(*s_plots[0].aircraft);
+    int       ranked[ROTATE_KEEP];
+    const int count = most_notable(ranked, ROTATE_KEEP);
+    s_turns         = count > 1;
+    const int held  = plot_of(s_chosen);
+    int       place = -1;  // of the held one among the ranked
+    for (int i = 0; i < count && held >= 0; ++i) {
+        place = ranked[i] == held ? i : place;
+    }
+    const std::uint32_t now     = lv_tick_get();
+    const bool          urgent  = radar::notability(*s_plots[ranked[0]].aircraft) >= radar::kEmergencyNotability &&
+                                  place != 0;
+    const bool          its_turn = place >= 0 && lv_tick_diff(now, s_turn_began) >= ROTATE_MS;
+    int                 at       = held;
+    if (place < 0 || urgent) {
+        at = ranked[0];
+    } else if (its_turn) {
+        const int among = std::min(count, ROTATE_AMONG);
+        at              = ranked[(std::min(place, among - 1) + 1) % among];
+    }
+    if (at != held) {
+        s_turn_began = now;
+        remember_chosen(*s_plots[at].aircraft);
     }
     if (std::strcmp(s_details_hex, s_chosen) != 0) {
         await_picture();
@@ -2770,6 +2915,11 @@ void build_scope_in(const Frame &frame, std::int32_t x, std::int32_t y)
     if (map_located()) {
         draw_map(s_map_lat, s_map_lon, static_cast<float>(RANGES[s_range_step]));
     }
+    // A reading shown next, as both layouts do, puts all of the map into the
+    // frame with the planes; copying it here as well cost the map 20 ms.
+    if (s_frame != nullptr && (s_last == nullptr || s_fast_zooming)) {
+        std::memcpy(s_frame, s_ground, ground_pixels() * RGB565_BYTES_PER_PX);
+    }
 }
 
 // On the radar page the column floats over the map, on a darkened patch of it.
@@ -2795,7 +2945,6 @@ void lay_out_cards()
                    (s_home_h - disc) / 2);
     place_corners(area_w, s_home_h);
     paint_chips(false);
-    lv_obj_set_hidden(s_screw, false);
     place_summary(area_w, s_home_h);
 
     lv_obj_set_parent(s_column, s_home_area);
@@ -2824,7 +2973,6 @@ void lay_out_map()
     build_scope_in({w, h, area_w / 2, h / 2, h / 2 - RIM_BAND, true, theme::radius::card}, 0, 0);
     place_corners(area_w, h);
     paint_chips(true);
-    lv_obj_set_hidden(s_screw, true);
     lv_obj_set_hidden(s_map_chip, true);  // the dock's tabs go back
     place_summary(area_w, h);
 
@@ -3165,36 +3313,6 @@ int bench_radar_map(char *out, std::size_t size, bool open)
     return std::snprintf(out, size, "open\n");
 }
 
-// One frame of a zoom in, magnified by a quarter, held on the panel until
-// bench_radar_map(false) puts the screen back: to see what a zoom shows.
-int bench_radar_zoom_frame(char *out, std::size_t size)
-{
-#ifdef ESP_PLATFORM
-    if (!s_mapped || s_frame == nullptr) {
-        return std::snprintf(out, size, "not open\n");
-    }
-    lv_refr_now(nullptr);
-    lv_area_t keep[16];
-    int       kept = 0;
-    for (lv_obj_t *control : {s_zoom_out, s_zoom_in, s_map_chip, s_rings[0], s_rings[1], s_rings[2], s_rings[3],
-                              s_compass[0], s_compass[1], s_compass[2], s_compass[3]}) {
-        if (control != nullptr && !lv_obj_is_hidden(control) && kept < 16) {
-            lv_obj_get_coords(control, &keep[kept++]);
-        }
-    }
-    board::zoom_begin(keep, kept);
-    take_rings_out();
-    lv_display_enable_invalidation(lv_display_get_default(), false);
-    s_fast_zooming = true;
-    s_fast_from = s_fast_picture = RANGES[s_range_step];
-    s_fast_to   = static_cast<int>(static_cast<float>(s_fast_from) / 1.25f);
-    show_magnified(static_cast<std::int32_t>(std::lround(1.25f * 16.0f)));
-    return std::snprintf(out, size, "held\n");
-#else
-    return std::snprintf(out, size, "panel only\n");
-#endif
-}
-
 int bench_radar_open(char *out, std::size_t size)
 {
     return std::snprintf(out, size, bench_ready() ? "ready\n" : "waiting for the feed\n");
@@ -3504,6 +3622,17 @@ void radar_home_area(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int3
     s_home_h = h;
     // Away with the radar page while the phone is, as the feed stops then.
     detail::subscribe(detail::Topic::Page, detail::kNoView, [] { lv_obj_set_hidden(s_home_area, detail::owner_away()); });
+}
+
+void set_radar_range(int km)
+{
+    int nearest = INITIAL_RANGE_STEP;
+    for (int i = 0; i < RANGE_COUNT; ++i) {
+        if (std::abs(RANGES[i] - km) < std::abs(RANGES[nearest] - km)) {
+            nearest = i;
+        }
+    }
+    s_range_step = nearest;
 }
 
 }  // namespace ui

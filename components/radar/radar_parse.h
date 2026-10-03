@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 
 namespace radar {
 inline constexpr int kHexLen      = 8;
@@ -35,6 +36,8 @@ struct Aircraft {
     int   altitude_ft;
     int   vertical_fpm;
     bool  on_ground;
+    bool  military;  // as the feed's database has it
+    std::int64_t seen_us;  // when a reading last had it; set by merge_reading
 };
 
 struct Details {
@@ -76,11 +79,31 @@ bool parse_photo(const char *json, std::size_t length, char *out, std::size_t si
  *  known, as nothing then says it is wrong. */
 bool route_fits(const Details &details, float lat, float lon);
 
+/** How much an aircraft is worth following of its own accord, 0 for not at
+ *  all: on the ground, or a light aircraft calling by its registration. An
+ *  airline's flight, by a callsign of three letters and then a number, or one
+ *  large by its ADS-B category, scores 1; a wide-body 3 more, a 777, A350 or
+ *  A340 4 more, a giant as an A380 or 747 6 more, a high-vortex one as a 757
+ *  1 more, and cruising high 1 more. A military aircraft is above those,
+ *  whatever its callsign, and an emergency squawk above all of them. */
+int notability(const Aircraft &aircraft);
+inline constexpr int kEmergencyNotability = 12;  // what an emergency squawk scores
+inline bool interesting(const Aircraft &aircraft) { return notability(aircraft) > 0; }
+
 /** Reads an adsb.fi v2 response, which is far too large to hand to a DOM
  *  parser on this part: the allocator keeps anything under sixteen kilobytes
  *  in internal RAM, and a JSON tree of forty kilobytes is thousands of small
  *  nodes. Entries without a position are left out. `json` must be
  *  NUL-terminated. Returns how many were stored, never more than capacity. */
 int parse(const char *json, std::size_t length, Aircraft *out, int capacity);
+
+/** A new reading, `now`, taken with what the one before knew, `before`. The
+ *  two feeds are taken in turn and do not see the same aircraft: one placed by
+ *  MLAT can be in one and not the other, and blinked out every other reading.
+ *  So one missing from `now` but seen within `keep_us` is kept where it was
+ *  last seen, and one in both takes from `before` what `now` leaves out, the
+ *  military flag among it. Returns `now`'s count, never more than capacity. */
+int merge_reading(Aircraft *now, int count, int capacity, const Aircraft *before, int before_count,
+                  std::int64_t now_us, std::int64_t keep_us);
 
 }  // namespace radar

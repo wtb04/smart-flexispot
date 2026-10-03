@@ -29,8 +29,8 @@ namespace {
 constexpr int WIDTH  = 1280;
 constexpr int HEIGHT = 720;
 
-// As main/diagnostics.cpp lays out the Setup page's cards; their rows stay
-// "--" but for what the simulator knows.
+// As main/diagnostics.cpp lays out the Setup page's cards, which
+// hardware::diagnostics() fills from what the simulator plays and reads.
 constexpr const char *WIFI_ROWS[]     = {"Network", "Signal", "Address", "Channel", "MAC"};
 constexpr const char *HASS_ROWS[]     = {"Broker", "Socket", "Entities", "Cover art", "Last refused"};
 constexpr const char *PRESENCE_ROWS[] = {"Phone", "Signal", "Identity key", "Radio"};
@@ -220,7 +220,8 @@ void step_world()
     SDL_Delay(idle < 5 ? idle : 5);
 }
 
-void tap(SDL_Point at)
+// Held down for `hold_ms` before letting go: a long press past LVGL's 400 ms.
+void tap(SDL_Point at, std::uint32_t hold_ms = 120)
 {
     // Addressed to the window, as LVGL only takes a window's own events.
     const Uint32 window = SDL_GetWindowID(lv_sdl_window_get_window(lv_display_get_default()));
@@ -238,7 +239,7 @@ void tap(SDL_Point at)
         event.button.x        = at.x;
         event.button.y        = at.y;
         SDL_PushEvent(&event);
-        run_for(120);
+        run_for(type == SDL_MOUSEBUTTONDOWN ? hold_ms : 120);
     }
     run_for(300);
 }
@@ -297,6 +298,7 @@ ui::Handlers handlers()
 {
     ui::Handlers h{};
     h.move        = hardware::on_move;
+    h.diagnostics = hardware::diagnostics;
     h.preset      = hardware::on_preset;
     h.focus       = hardware::on_focus;
     h.focus_plan  = hardware::on_focus_plan;
@@ -349,6 +351,7 @@ struct Options {
     struct Step {
         SDL_Point     at{};
         std::uint32_t wait_ms = 0;  // a wait rather than a tap
+        std::uint32_t hold_ms = 0;  // a press held this long rather than a tap
     };
     std::vector<Step> taps;
     std::vector<std::pair<SDL_Point, SDL_Point>> swipes;
@@ -356,6 +359,8 @@ struct Options {
     int         pick_ft = -1;
     std::vector<SDL_Point> taps2;
     std::string out2;
+    int         draw_page  = -1;  // --draw-page P N: page P drawn whole N times, timed, to profile drawing
+    int         draw_times = 0;
 };
 
 Options options(int argc, char **argv)
@@ -388,6 +393,13 @@ Options options(int argc, char **argv)
                 o.taps.push_back({at});
             }
             ++i;
+        } else if (name == "--hold") {
+            SDL_Point at{};
+            unsigned  ms = 0;
+            if (std::sscanf(value, "%d,%d,%u", &at.x, &at.y, &ms) == 3) {
+                o.taps.push_back({at, 0, ms});
+            }
+            ++i;
         } else if (name == "--swipe") {
             SDL_Point from{}, to{};
             if (std::sscanf(value, "%d,%d,%d,%d", &from.x, &from.y, &to.x, &to.y) == 4) {
@@ -408,6 +420,10 @@ Options options(int argc, char **argv)
             ++i;
         } else if (name == "--splash") {
             o.splash = true;
+        } else if (name == "--draw-page" && i + 2 < argc) {
+            o.draw_page  = std::atoi(argv[i + 1]);
+            o.draw_times = std::atoi(argv[i + 2]);
+            i += 2;
         }
     }
     return o;
@@ -454,7 +470,9 @@ int main(int argc, char **argv)
     SDL_AddEventWatch(on_event, nullptr);
 
     ui::set_cards(CARDS, static_cast<int>(std::size(CARDS)));
-    ESP_ERROR_CHECK(ui::init(handlers(), 80, 0, true, ui::Orientation::Normal));
+    const char *dock = std::getenv("SIM_DOCK");
+    ESP_ERROR_CHECK(ui::init(handlers(), 80, 0, dock == nullptr || std::strcmp(dock, "left") != 0,
+                             ui::Orientation::Normal));
     ESP_ERROR_CHECK(ui::build());
     // The settings as a panel fresh from the factory has them, from settings.cpp.
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_setting(ui::Setting::Charging, true));
@@ -502,13 +520,26 @@ int main(int argc, char **argv)
                 step_world();  // the desk and the rest go on meanwhile
             }
         } else {
-            tap(step.at);
+            tap(step.at, step.hold_ms > 0 ? step.hold_ms : 120);
         }
     }
     for (const auto &[from, to] : opts.swipes) {
         swipe(from, to);
     }
     press_all(opts.then);
+    if (opts.draw_page >= 0) {
+        ui::detail::select_page(opts.draw_page);
+        run_for(3000);  // its feeds in, its tab eased
+        const std::uint64_t began = SDL_GetPerformanceCounter();
+        for (int i = 0; i < opts.draw_times; ++i) {
+            lv_obj_invalidate(lv_screen_active());
+            lv_refr_now(nullptr);
+        }
+        const double ms = static_cast<double>(SDL_GetPerformanceCounter() - began) * 1000.0 /
+                          static_cast<double>(SDL_GetPerformanceFrequency()) / std::max(opts.draw_times, 1);
+        std::printf("page %d drawn whole: %.2f ms a frame\n", opts.draw_page, ms);
+        return 0;
+    }
 
     const std::uint32_t shot_at   = opts.shot_s >= 0 ? SDL_GetTicks() + opts.shot_s * 1000u : 0;
     std::uint32_t       second_at = 0;

@@ -30,6 +30,7 @@ enum class Key : std::uint8_t {
     FocusLength,
     FocusEnds,     // seconds since the epoch, 0 when not running or not known
     BatteryCharge, // mAh the gauge counted, kept across a restart; -1 for none
+    RadarRange,    // km the radar was last zoomed to
     Count,
 };
 
