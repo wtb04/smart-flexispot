@@ -17,6 +17,16 @@ void (*s_on_height)(int) = nullptr;
 
 void on_status(const deskproto::Status &status)
 {
+    // Only what changed: the companion's keepalive would push everything else out.
+    static deskproto::Status s_heard{.height_mm = -2};
+    const int motion = deskproto::direction_of(status.motion);
+    if (status.height_mm != s_heard.height_mm || motion != deskproto::direction_of(s_heard.motion)) {
+        trace("heard", status.height_mm, motion);
+    }
+    if (status.driving != s_heard.driving) {
+        trace(status.driving ? "driving" : "not driving", status.height_mm);
+    }
+    s_heard = status;
     s_motion.store(deskproto::direction_of(status.motion), std::memory_order_relaxed);
     s_driving.store(status.driving, std::memory_order_relaxed);
     if (status.height_mm >= 0 && s_on_height != nullptr) {

@@ -117,7 +117,7 @@ void place_notice()
     const Layout l    = layout();
     const bool   full = fullscreen_open();
     const std::int32_t dock = DOCK_W + GAP;
-    lv_obj_set_pos(s_notice_scrim, full || l.rail_right ? 0 : dock, 0);
+    lv_obj_set_pos(s_notice_scrim, full || l.dock_right ? 0 : dock, 0);
     lv_obj_set_size(s_notice_scrim, full ? l.screen_w : l.screen_w - dock, l.screen_h);
     if (full) {
         lv_obj_align(s_notice_card, LV_ALIGN_CENTER, 0, 0);

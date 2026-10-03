@@ -29,7 +29,7 @@ renders the main views, offline and the same each time, to
 The parts that decide and parse — the request scheduler, the stream and job
 schedulers, the watchdog, the desk and companion protocols, the Home Assistant
 and Jellyfin protocols, the calendar, journey and radar parsers, the battery
-gauge, the focus timer — are plain C++ with no ESP-IDF in them, and are tested
+gauge, the focus timer, the Claude Code sessions' table — are plain C++ with no ESP-IDF in them, and are tested
 on the host under GoogleTest:
 
 ```sh
@@ -72,7 +72,8 @@ adds pages to the panel's web server, all asking for the update key.
 | `/jobs` | Each shared worker's jobs; `?poke=N` runs one now |
 | `/restart` | Why this run started, and what the last one left behind |
 | `/coredump` | The last crash, whole, for `idf.py coredump-info` with the build's ELF |
-| `/bench` | The fullscreen radar timed: whole frames, a tile, a trail growing, a zoom; `?rotate` the PPA, `?full` and `?back` leave it open and put it back |
+| `/bench` | The radar's map timed: whole frames, a tile, a trail growing, a zoom; `?rotate` the PPA, `?map` and `?back` leave the Radar page open and put it back; `?desk` the desk card coming out, frame by frame |
+| `/desk` | What the desk heard and was asked lately, a line each with its milliseconds since boot; `?tap=N` taps preset N as a finger on its button would, `?clear` starts the trace over |
 | `/stall`, `/crash` | A held-off interrupt, a crash on purpose |
 
 ## How it is put together
@@ -96,6 +97,7 @@ and returns; everything after that runs on tasks of its own.
 | `components/hass/`, `room/` | Home Assistant, and the home page's presenter |
 | `components/jellyfin/`, `media/`, `jpeg/` | Jellyfin, cover art, the JPEG engine and its software fallback |
 | `components/radar/`, `ical/`, `travel/` | Planes overhead, calendars, journeys |
+| `components/claude/` | The laptops' Claude Code sessions, as `tools/claude-hook` posts them to `/claude` |
 | `components/ble/`, `wifi/`, `ota/` | Presence and the companion's link, Wi-Fi, updates |
 | `components/power/`, `rtc/`, `sound/`, `logbuf/`, `focus/`, `imu/` | Battery, backup clock, chime, the log ring, the focus timer, the accelerometer |
 | `components/esp_hosted/` | The Wi-Fi co-processor's driver, with one change to its receive buffers |
@@ -138,7 +140,7 @@ the portrait panel with the PPA is 42. So as little as possible is drawn
 again. There are three frame buffers, so a frame is drawn while the panel is
 still taking up the last, which it does a frame or two after it is asked to;
 each buffer is brought up to date only where it is behind, by the CPU, which
-copies PSRAM faster than the PPA. The fullscreen radar keeps track of which
+copies PSRAM faster than the PPA. The radar's map keeps track of which
 32 px tiles of its picture the planes and the trail were drawn into, puts the
 map back only there, and draws again only the tiles whose pixels changed; a
 trail growing redraws only where it runs.

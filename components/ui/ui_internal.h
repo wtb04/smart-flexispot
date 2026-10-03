@@ -17,10 +17,9 @@
 #include "modal_overlay.h"
 #include "views.h"
 #include "calendar_page.h"
-#include "focus_page.h"
+#include "focus_view.h"
 #include "screenshot.h"
 #include "radar_page.h"
-#include "segment_display.h"
 #include "icons.h"
 #include "theme.h"
 #include "units.h"
@@ -45,9 +44,11 @@ constexpr std::uint32_t LOCK_TIMEOUT_MS = 500;
 constexpr std::int32_t GAP        = 16;
 // The frame: a dock at one side with the tabs and the desk, a row along the
 // top with the time and what goes on elsewhere, and the page in the rest.
-constexpr std::int32_t DOCK_W      = 96;
-constexpr std::int32_t TOP_INSET   = 24;   // the top row's chips from the top, as over the fullscreen views
-constexpr std::int32_t CONTENT_Y   = 96;   // the page under that row
+constexpr std::int32_t DOCK_W      = 112;
+constexpr std::int32_t TOP_H       = 72;   // the control bar's slots, centred over the pages
+constexpr std::int32_t CONTENT_Y   = 92;   // the page under it
+constexpr std::int32_t BAR_GAP     = 10;   // between the control bar's slots
+constexpr std::int32_t FROM_DOCK   = 24;   // a card unfolding from the dock, from its edge
 
 constexpr std::int32_t PANEL_PAD  = 16;
 constexpr std::int32_t BUTTON_GAP = 16;
@@ -59,8 +60,8 @@ struct Layout {
     std::int32_t content_y;
     std::int32_t content_w;
     std::int32_t content_h;
-    std::int32_t rail_x;      // the dock's
-    bool         rail_right;  // the dock at the right, as the panel is bolted on the desk's right
+    std::int32_t dock_x;
+    bool         dock_right;  // the dock at the right, as the panel is bolted on the desk's right
 };
 
 constexpr int          NOTIFY_QUEUE_LEN  = 4;
@@ -78,50 +79,24 @@ constexpr const char *PRESET_NAMES[kPresetCount] = {
     "Preset 1", "Ultra low", "Stand", "Sit", "Sit 2", "Stand 2",
 };
 
-constexpr std::int32_t DRAWER_W  = 520;  // the desk's fold-out beside the dock
 
-constexpr int   DIAL_SCALE     = 10;
-constexpr float DEFAULT_STEP_C = 0.5f;
-
-struct Pill {
-    lv_obj_t *root   = nullptr;
-    lv_obj_t *dot    = nullptr;
-    lv_obj_t *column = nullptr;
-    lv_obj_t *label  = nullptr;
-    lv_obj_t *value  = nullptr;
-    bool      shown  = false;
-};
-struct LightButton {
-    lv_obj_t *root  = nullptr;
-    lv_obj_t *name  = nullptr;
-    lv_obj_t *state = nullptr;
-};
-
-struct TextBox {
-    std::int32_t x;
-    std::int32_t w;
-};
-constexpr int PROGRESS_SCALE   = 10;  // bar units per second
 
 constexpr std::uint32_t PAUSE_SETTLE_MS = 1500;
 
-// The tabs, in the order they stand down the dock.
+// The pages, in the order the dock's tabs are made.
 constexpr int HOME_PAGE     = 0;
 constexpr int RADAR_PAGE    = 1;
 constexpr int CALENDAR_PAGE = 2;
-constexpr int FOCUS_PAGE    = 3;
-constexpr int SETUP_PAGE    = 4;
-constexpr int PAGE_COUNT    = 5;
+constexpr int SETUP_PAGE    = 3;  // opened from the control bar's status
+constexpr int PAGE_COUNT    = 4;
 
 
 constexpr int SETTING_COUNT = static_cast<int>(Setting::Count);
 
 // A choice card offers one way or the other; orientation offers each Orientation.
-constexpr int CHOICE_COUNT      = 2;
-constexpr int ORIENTATION_COUNT = static_cast<int>(Orientation::Auto) + 1;
 
 // The focus plan the panel shows until the timer reports one, and the limits
-// the Setup steppers keep it to, which the focus page is sized for.
+// the Setup steppers keep it to, which the fullscreen timer is sized for.
 constexpr int FOCUS_WORK_MIN_DEFAULT       = 25;
 constexpr int FOCUS_BREAK_MIN_DEFAULT      = 5;
 constexpr int FOCUS_LONG_BREAK_MIN_DEFAULT = 20;
@@ -145,24 +120,21 @@ inline std::int32_t modal_body_y()
 constexpr std::int32_t ROW_CARD_PAD_X = 22;
 constexpr std::int32_t ROW_CARD_GAP   = 18;
 
-extern bool s_rail_right;
+extern bool s_dock_right;
 extern Orientation s_orientation;
 extern Handlers s_handlers;
 extern bool s_notice_lit_screen;
 extern int s_initial_brightness;
-extern std::optional<SegmentDisplay> s_height;
-extern lv_obj_t *s_rail;
+extern lv_obj_t *s_dock;
 extern lv_obj_t *s_content;
-extern lv_obj_t *s_side_buttons[CHOICE_COUNT];
-extern lv_obj_t *s_flip_buttons[ORIENTATION_COUNT];
 extern lv_obj_t *s_notice_scrim;
 extern lv_obj_t *s_notice_card;
 extern lv_obj_t *s_preset_buttons[kPresetCount];
-extern lv_obj_t *s_dial;
 extern int s_page;
 extern std::atomic<bool> s_setup_visible;
 extern bool s_presence_gate;
-extern lv_obj_t *s_brightness_value;
+/** The phone away with the gate on: the owner's pages, and what shows of them elsewhere, are away. */
+bool owner_away();
 extern lv_obj_t *s_settings_view;
 extern lv_obj_t *s_appearance_view;
 extern lv_obj_t *s_diag_view;
@@ -170,7 +142,7 @@ extern lv_obj_t *s_diag_view;
 /** The focus plan as the timer has it, onto the settings that change it. */
 void paint_focus_plan(const Focus &focus);
 
-/** An update arriving or ready: the top row's icon, the dot on Setup and the
+/** An update arriving or ready: the control bar's icon, the dot on Setup and the
  *  tile that installs it. Each with the LVGL lock held. */
 void paint_update_icon(const UpdateState &state);
 /** The symbol for what is updating: the screen or companion arriving, or going on. */
@@ -189,8 +161,8 @@ void screen_off_cb(lv_event_t *);
 void register_desk_control(lv_obj_t *obj);
 
 /** Stand and Sit as two small chips at x, y over a fullscreen view's root,
- *  which covers the rail; lit as the rail's are. */
-inline constexpr int kDeskShortcutButtons = 10;  // the dock's, and over the radar, focus, music and cinema views
+ *  which covers the dock; lit as the dock's are. */
+inline constexpr int kDeskShortcutButtons = 8;  // the dock's, and over the focus, music and cinema views
 lv_obj_t *add_desk_shortcuts(lv_obj_t *root, std::int32_t x, std::int32_t y,  // what holds them
                              std::uint32_t chip_colour);
 void paint_desk_shortcuts();
@@ -204,27 +176,28 @@ void place_notice();
 /** The dock: the tabs, Stand and Sit, the height that folds the desk out. */
 void create_dock(lv_obj_t *parent);
 lv_obj_t *dock_tabs();  // the column the tabs go in
+/** After the last tab: Home goes under the desk, the timer under the tabs. */
+void dock_tabs_done(lv_obj_t *home);
 /** The desk folded out beside the dock: its height, every preset, up and down. */
-void create_desk_sheet(lv_obj_t *parent);
-void open_desk_sheet(bool open);
+void create_desk_card(lv_obj_t *parent);
+void open_desk_card(bool open);
+void place_desk_card();
 /** The row along the top of the pages: what goes on elsewhere, the battery, the status, the time. */
 void create_top_bar(lv_obj_t *parent);
 void place_top_bar();
-void paint_choice(lv_obj_t *const buttons[2], bool second);
-void paint_pick(lv_obj_t *const *buttons, int count, int picked);
-void paint_side_buttons();
-void apply_rail_side(bool right);
-void write_temperature(lv_obj_t *label, float celsius, bool with_unit);
-void paint_dial(Hvac state);
-void reflow_pills();
+/** The control bar's slots for what plays, the heating and the lights, and the
+ *  cards they drop, kept over the scrim by `bar` while one is out. */
+void build_bar_slots(lv_obj_t *bar);
+void build_bar_cards(lv_obj_t *screen, lv_obj_t *bar);
+/** The laptops' Claude Code sessions, beside the lights while any is about, and their card. */
+void build_claude_slot(lv_obj_t *bar);
+void build_claude_card(lv_obj_t *screen, lv_obj_t *bar);
+/** The thermostat, `w` by `h` at the top left of `parent`: the heating slot's card. */
+void build_thermostat_card(lv_obj_t *parent, std::int32_t w, std::int32_t h);
+void place_for_side();  // the dock, the page, the bar and its cards, after the dock changes side
 std::uint32_t level_ink(Level level);
-void paint_light(lv_obj_t *root, lv_obj_t *name, lv_obj_t *state, bool on);
-void layout_media_text();
-/** The speaker drawn in the card's cover frame while nothing plays. */
-void show_speaker_face(bool shown);
-/** Where the card's text starts while idle, to sit level with the speaker. */
-std::int32_t idle_media_text_top();
-/** The HK Citation One the card shows then, `side` square, painted once. */
+/** The HK Citation One the control bar's covers show while nothing plays,
+ *  `side` square, painted once at the size first asked for. */
 const lv_image_dsc_t *speaker_picture(std::int32_t side);
 void write_clock(lv_obj_t *label, int seconds);
 void build_home_page(lv_obj_t *page);
@@ -236,14 +209,13 @@ constexpr int ULTRA_LOW_PRESET = 1;  // Preset 2, as the cinema view sends the d
 
 // The favourites' picker, when there are any, as the music view opens it.
 void open_favourites();
+void build_favourites(lv_obj_t *screen);  // over the pages and the music view, which open it
 
 // Jellyfin fullscreen: the film, its controls, the desk and the lights.
 void build_cinema(lv_obj_t *screen);
 void open_cinema();
-bool cinema_open();
 void build_music(lv_obj_t *screen);
 void open_music();
-bool music_open();
 // The time beside a fullscreen view's chip back, faded with its other buttons,
 // and the focus timer beside it while it runs, unless the view is the timer's.
 struct ViewClock {
@@ -264,15 +236,12 @@ struct Chrome {
 };
 Chrome    add_fullscreen_chrome(ViewId view, lv_obj_t *root, lv_event_cb_t on_close, bool focus_badge = true);
 lv_obj_t *add_chrome_chip(Chrome &chrome, const lv_image_dsc_t *icon, lv_event_cb_t on_click);
-void      light_chrome_chip(lv_obj_t *chip, bool on);  // in the accent while on
 void show_guest_presets();
 void select_page(int index);
+/** Setup from the control bar's status, and back to where it was opened from. */
+void toggle_setup();
 /** The owner's pages come and go with their phone, and with the setting that hides them. */
 void follow_pages();
-/** The Focus tab's icon in `ink` while the timer runs, faded while paused; a
- *  null caption puts it back. */
-void show_focus_tab(const char *caption, std::uint32_t ink, bool paused);
-void brightness_event_cb(lv_event_t *e);
 std::uint32_t info_ink(Level level);
 /** The diagnostics page follows the diagnostics model. */
 void follow_diagnostics();

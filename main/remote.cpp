@@ -12,6 +12,7 @@
 #include "freertos/task.h"
 #include "last_words.h"
 #include "board.h"
+#include "desk.h"
 #include "logbuf.h"
 #include "app_state.h"
 #include "jobs.h"
@@ -537,7 +538,41 @@ esp_err_t crash_page(httpd_req_t *req)
     return ESP_OK;
 }
 
-// How long the radar takes to open fullscreen, draw, zoom and close. With
+// The desk's trace, of what it heard and was asked; ?clear starts it over,
+// ?tap=N taps preset N (1 to 6) as a finger on its button would.
+esp_err_t desk_page(httpd_req_t *req)
+{
+    if (!ota::authorised(req)) {
+        return refuse(req);
+    }
+    constexpr std::size_t TEXT_SIZE = 16 * 1024;  // 400 lines of 36
+    static char *text = static_cast<char *>(heap_caps_malloc(TEXT_SIZE, MALLOC_CAP_SPIRAM));  // internal RAM is short
+    if (text == nullptr) {
+        return httpd_resp_sendstr(req, "no room\n");
+    }
+    char query[24] = "";
+    char value[8]  = "";
+    httpd_req_get_url_query_str(req, query, sizeof(query));
+    int n = 0;
+    if (httpd_query_key_value(query, "tap", value, sizeof(value)) == ESP_OK) {
+        const int preset = std::atoi(value);
+        if (preset < 1 || preset > ui::kPresetCount) {
+            n = std::snprintf(text, TEXT_SIZE, "no such preset\n");
+        } else if (!lvgl_port_lock(PANEL_LOCK_MS)) {
+            n = std::snprintf(text, TEXT_SIZE, "screen busy\n");
+        } else {
+            ui::desk_tap(preset - 1);
+            lvgl_port_unlock();
+            n = std::snprintf(text, TEXT_SIZE, "tapped preset %d\n", preset);
+        }
+    } else {
+        n = desk::trace_text(text, TEXT_SIZE, std::strcmp(query, "clear") == 0);
+    }
+    httpd_resp_set_type(req, "text/plain");
+    return httpd_resp_send(req, text, n);
+}
+
+// How long the radar takes to open its map, draw, zoom and close. With
 // ?open it is only shown, so its feed can start before the bench.
 esp_err_t bench_page(httpd_req_t *req)
 {
@@ -550,10 +585,11 @@ esp_err_t bench_page(httpd_req_t *req)
         char query[8] = "";
         httpd_req_get_url_query_str(req, query, sizeof(query));
         n = std::strcmp(query, "open") == 0     ? ui::bench_radar_open(text, sizeof(text))
-            : std::strcmp(query, "full") == 0   ? ui::bench_radar_full(text, sizeof(text), true)
-            : std::strcmp(query, "back") == 0   ? ui::bench_radar_full(text, sizeof(text), false)
+            : std::strcmp(query, "map") == 0    ? ui::bench_radar_map(text, sizeof(text), true)
+            : std::strcmp(query, "back") == 0   ? ui::bench_radar_map(text, sizeof(text), false)
             : std::strcmp(query, "zoomed") == 0 ? ui::bench_radar_zoom_frame(text, sizeof(text))
             : std::strcmp(query, "rotate") == 0 ? board::bench_rotation(text, sizeof(text))
+            : std::strcmp(query, "desk") == 0   ? ui::bench_desk_card(text, sizeof(text))
                                                 : ui::bench_radar(text, sizeof(text));
         lvgl_port_unlock();
     }
@@ -577,6 +613,7 @@ esp_err_t start()
         {.uri = "/heap", .method = HTTP_GET, .handler = heap_page, .user_ctx = nullptr},
         {.uri = "/power", .method = HTTP_GET, .handler = power_page, .user_ctx = nullptr},
         {.uri = "/bench", .method = HTTP_GET, .handler = bench_page, .user_ctx = nullptr},
+        {.uri = "/desk", .method = HTTP_GET, .handler = desk_page, .user_ctx = nullptr},
         {.uri = "/crash", .method = HTTP_GET, .handler = crash_page, .user_ctx = nullptr},
         {.uri = "/restart", .method = HTTP_GET, .handler = restart_page, .user_ctx = nullptr},
         {.uri = "/stall", .method = HTTP_GET, .handler = stall_page, .user_ctx = nullptr},

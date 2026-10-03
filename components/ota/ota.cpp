@@ -67,7 +67,7 @@ constexpr std::int64_t PROVE_WITHIN_US  = 3 * units::kUsPerMinute;
 constexpr std::int64_t RESTART_AFTER_US = units::kUsPerSecond;  // for the answer to get out
 constexpr int          RECV_TIMEOUT_S   = 30;
 // These and a development build's pages, with room for more; the default is 8.
-constexpr int MAX_ROUTES = 15;
+constexpr int MAX_ROUTES = 20;
 constexpr std::uint32_t SERVER_STACK    = 8 * units::kBytesPerKiB;
 constexpr std::uint32_t INSTALL_STACK   = 6 * units::kBytesPerKiB;
 constexpr UBaseType_t   INSTALL_PRIORITY = 3;

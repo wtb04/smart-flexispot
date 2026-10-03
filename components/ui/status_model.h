@@ -1,7 +1,7 @@
 #pragma once
 
 // The panel's own state, as last told: whether the owner's phone is here, the
-// network, the time the rail shows and whether the screen is lit. What applies
+// network, the time the control bar shows and whether the screen is lit. What applies
 // the updates writes it and publishes Topic::Status. On the LVGL task only.
 namespace ui::detail {
 

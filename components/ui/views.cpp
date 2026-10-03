@@ -157,15 +157,6 @@ void open_view(ViewId view)
     deliver_to_view(view);  // what changed while it was closed, now it is laid out
 }
 
-void toggle_view(ViewId view)
-{
-    if (view_open(view)) {
-        close_view(view);
-    } else {
-        open_view(view);
-    }
-}
-
 bool view_open(ViewId view)
 {
     const Entry *entry = find(view);
@@ -187,11 +178,6 @@ void fade_when_idle(ViewId view, lv_obj_t *obj)
     if (obj != nullptr) {
         watch(view, [obj](bool shown, bool animate) { fade(obj, shown, animate); });
     }
-}
-
-void when_buttons_change(ViewId view, std::function<void(bool shown)> changed)
-{
-    watch(view, [changed = std::move(changed)](bool shown, bool) { changed(shown); });
 }
 
 }  // namespace ui::detail

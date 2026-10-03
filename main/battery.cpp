@@ -17,11 +17,15 @@ namespace {
 constexpr char TAG[] = "battery";
 
 // Each reading adds its current to the charge counted, so they come often; the
-// rest, the charger and what the screen shows, only every CHECK_EVERY of them.
+// rest, the charger and the charge shown, only every CHECK_EVERY of them.
 constexpr int POLL_MS     = units::kMsPerSecond;
 constexpr int        CHECK_EVERY   = 30;
 
 constexpr float RESUME_VOLTS = 8.00f;
+
+// Unplugged or plugged in shows at once rather than at the next check, once
+// this many readings in a row agree, so a current near nothing does not flicker.
+constexpr int AGREEING_READINGS = 2;
 
 // A reading is logged when it moves this far, rather than every poll: the log
 // is for what changed.
@@ -69,6 +73,41 @@ void steer_charger(const power::State &state, bool &topped_off)
     }
 }
 
+// What the screen was last told, and what the readings since have agreed on
+// otherwise, and how many of them in a row.
+struct Source {
+    bool on_battery = false;
+    bool charging   = false;
+    bool operator==(const Source &) const = default;
+};
+Source s_shown;
+Source s_seen;
+int    s_agreeing = 0;
+
+Source source_of(const power::State &state)
+{
+    return {state.on_battery, state.charging};
+}
+
+void tell_screen(const power::State &state)
+{
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_battery(state.present, state.percent, state.charging, state.on_battery));
+    s_shown    = source_of(state);
+    s_agreeing = 0;
+}
+
+bool power_source_moved(const power::State &state)
+{
+    const Source now = source_of(state);
+    if (now == s_shown) {
+        s_agreeing = 0;
+        return false;
+    }
+    s_agreeing = now == s_seen ? s_agreeing + 1 : 1;
+    s_seen     = now;
+    return s_agreeing >= AGREEING_READINGS;
+}
+
 jobs::Result poll()
 {
     static bool topped_off   = false;
@@ -96,6 +135,9 @@ jobs::Result poll()
     } else {
         // Poked by refresh(), or at the turn of a round: the rest too.
         const bool check = s_check_now.exchange(false) || ++pass % CHECK_EVERY == 0;
+        if (read && !check && power_source_moved(state)) {
+            tell_screen(state);
+        }
         if (!read || !check) {
             return jobs::done();
         }
@@ -108,7 +150,7 @@ jobs::Result poll()
     }
     if (read) {
         log_if_changed(state, present, was_present, logged);
-        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_battery(state.present, state.percent, state.charging, state.on_battery));
+        tell_screen(state);
         steer_charger(state, topped_off);
     }
     return jobs::done();

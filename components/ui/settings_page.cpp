@@ -36,6 +36,42 @@ constexpr std::int32_t LOG_BUTTON_W = 150;
 
 constexpr std::int32_t STEPPER_VALUE_W = 130;
 
+constexpr int CHOICE_COUNT      = 2;
+constexpr int ORIENTATION_COUNT = static_cast<int>(Orientation::Auto) + 1;
+
+lv_obj_t *s_side_buttons[CHOICE_COUNT]      = {};
+lv_obj_t *s_flip_buttons[ORIENTATION_COUNT] = {};
+lv_obj_t *s_brightness_value                = nullptr;
+
+void paint_pick(lv_obj_t *const *buttons, int count, int picked)
+{
+    for (int i = 0; i < count; ++i) {
+        const bool chosen = i == picked;
+        lv_obj_set_state(buttons[i], LV_STATE_CHECKED, chosen);
+        theme::set_text_color(lv_obj_get_child(buttons[i], 0),
+                              chosen ? theme::text : theme::secondary);
+    }
+}
+
+void paint_choice(lv_obj_t *const buttons[CHOICE_COUNT], bool second)
+{
+    paint_pick(buttons, CHOICE_COUNT, second ? 1 : 0);
+}
+
+void brightness_event_cb(lv_event_t *e)
+{
+    auto      *slider  = static_cast<lv_obj_t *>(lv_event_get_target(e));
+    const int  percent = static_cast<int>(lv_slider_get_value(slider));
+
+    char text[8];
+    std::snprintf(text, sizeof(text), "%d%%", percent);
+    theme::set_text(s_brightness_value, text);
+
+    if (s_handlers.brightness != nullptr) {
+        s_handlers.brightness(percent);
+    }
+}
+
 std::optional<ModalOverlay> s_colour_picker;
 lv_obj_t                   *s_swatch_tick[theme::primaries.size()] = {};
 
@@ -70,12 +106,14 @@ void accent_card_cb(lv_event_t *)
 void side_clicked_cb(lv_event_t *e)
 {
     const bool right = lv_event_get_user_data(e) != nullptr;
-    if (right == s_rail_right) {
+    if (right == s_dock_right) {
         return;
     }
-    apply_rail_side(right);
-    if (s_handlers.rail_side != nullptr) {
-        s_handlers.rail_side(right);
+    s_dock_right = right;
+    place_for_side();
+    paint_choice(s_side_buttons, right);
+    if (s_handlers.dock_side != nullptr) {
+        s_handlers.dock_side(right);
     }
 }
 
@@ -609,7 +647,7 @@ void build_appearance_view(lv_obj_t *parent, std::int32_t w, std::int32_t h)
     y += ROW_PITCH;
     build_choice_card(view, y, w, LV_SYMBOL_BARS, "Dock", "LEFT", "RIGHT", side_clicked_cb,
                       s_side_buttons);
-    paint_side_buttons();
+    paint_choice(s_side_buttons, s_dock_right);
     y += ROW_PITCH;
     // Auto turns the screen to however the panel stands, by the IMU.
     const char *const facing[ORIENTATION_COUNT] = {"NORMAL", "FLIPPED", "AUTO"};

@@ -60,13 +60,15 @@ set_source_files_properties(${CJSON_DIR}/cJSON.c PROPERTIES COMPILE_OPTIONS -w)
 set(NET_CORE ${ROOT}/components/net/net_core.cpp)  # the panel's own, under net_desktop.cpp
 set(PARSERS ${ROOT}/components/ical/ical_parse.cpp ${ROOT}/components/travel/travel_parse.cpp
     ${ROOT}/components/radar/radar_parse.cpp ${ROOT}/components/radar/radar_trail.cpp
-    ${ROOT}/components/hass/hass_protocol.cpp ${CJSON_DIR}/cJSON.c)
+    ${ROOT}/components/hass/hass_protocol.cpp ${CJSON_DIR}/cJSON.c
+    ${ROOT}/components/claude/claude.cpp ${ROOT}/components/claude/claude_sessions.cpp)
 
 add_executable(sim ${SIM_SOURCES} ${UI_SOURCES} ${ROOM_LAYOUT} ${PARSERS} ${NET_CORE})
 target_include_directories(sim PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/shim
     ${ROOT}/components/ui ${ROOT}/components/ui/include ${ROOT}/components/ui/fonts
     ${ROOT}/components/board/include
+    ${ROOT}/components/claude/include
     ${ROOT}/components/deskproto/include
     ${ROOT}/components/focus/include
     ${ROOT}/components/hass/include

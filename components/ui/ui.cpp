@@ -1,6 +1,6 @@
 #include "ui_internal.h"
 #include "focus_model.h"
-#include "focus_page.h"
+#include "focus_view.h"
 #include "diagnostics_model.h"
 #include "home_model.h"
 #include "notices_model.h"
@@ -10,8 +10,8 @@
 #include "status_model.h"
 #include "topics.h"
 
-#ifndef SHOT_DRAWER
-#define SHOT_DRAWER 0
+#ifndef SHOT_DESK_CARD
+#define SHOT_DESK_CARD 0
 #endif
 #ifndef SHOT_ENABLED
 #define SHOT_ENABLED 0
@@ -27,7 +27,7 @@ constexpr std::uint32_t SHOT_START_MS = 25000;
 constexpr std::uint32_t SHOT_PAGE_MS  = 2000;
 }  // namespace
 
-bool s_rail_right = true;
+bool s_dock_right = true;
 
 Orientation s_orientation = Orientation::Normal;
 
@@ -38,12 +38,12 @@ Layout layout()
     const std::int32_t h    = lv_display_get_vertical_resolution(disp);
     return Layout{w,
                   h,
-                  s_rail_right ? GAP : GAP + DOCK_W + GAP,
+                  s_dock_right ? GAP : GAP + DOCK_W + GAP,
                   CONTENT_Y,
                   w - DOCK_W - 3 * GAP,
                   h - CONTENT_Y - GAP,
-                  s_rail_right ? w - GAP - DOCK_W : GAP,
-                  s_rail_right};
+                  s_dock_right ? w - GAP - DOCK_W : GAP,
+                  s_dock_right};
 }
 
 Handlers s_handlers{};
@@ -112,11 +112,18 @@ void register_desk_control(lv_obj_t *obj)
 }
 int               s_initial_brightness = DEFAULT_BRIGHTNESS_PERCENT;
 
-std::optional<SegmentDisplay> s_height;
-lv_obj_t *s_rail          = nullptr;  // the dock
+lv_obj_t *s_dock          = nullptr;  // the dock
 lv_obj_t *s_content       = nullptr;
-lv_obj_t *s_side_buttons[CHOICE_COUNT]      = {};
-lv_obj_t *s_flip_buttons[ORIENTATION_COUNT] = {};
+
+void place_for_side()
+{
+    const Layout l = layout();
+    lv_obj_set_x(s_dock, l.dock_x);
+    lv_obj_set_pos(s_content, l.content_x, l.content_y);
+    place_desk_card();
+    place_top_bar();
+    place_notice();
+}
 namespace {
 // One page per tick rather than all at once: a tab's colour eases in, and a
 // picture taken straight after the switch shows the old tab lit. Pages hidden
@@ -136,8 +143,8 @@ void take_screenshots(lv_timer_t *timer)
     }
     if (++step < static_cast<int>(std::size(PAGES))) {
         select_page(PAGES[step]);
-        if (SHOT_DRAWER) {
-            open_desk_sheet(true);
+        if (SHOT_DESK_CARD) {
+            open_desk_card(true);
         }
         lv_timer_set_period(timer, SHOT_PAGE_MS);
         return;
@@ -184,11 +191,11 @@ bool build_next_part()
             if (SHOT_ENABLED) {
                 lv_timer_create(take_screenshots, SHOT_START_MS, nullptr);
             }
-            create_desk_sheet(scr);  // after the content, so it overlays it when open
+            create_desk_card(scr);
             build_cinema(scr);
             build_music(scr);
+            build_favourites(scr);
             build_focus_full(scr);
-            lv_obj_move_foreground(s_rail);  // and under the dock, which it slides out from
             create_notice_card();
             follow_pages();
             return true;
@@ -370,6 +377,7 @@ Slot<std::uint8_t>   p_subtitles;  // 1 for some to show, 2 for shown
 Slot<const void *>   p_still;
 Slot<const void *>   p_art_large;
 Slot<std::uint8_t>   p_neighbours;  // bit 0 an episode before, bit 1 one after
+Slot<std::uint8_t>   p_tracks;      // bit 0 a track back, bit 1 one on
 Slot<PillArgs>       p_pill[kPillCount];
 Slot<LightsArgs>     p_lights;
 Slot<LightArgs>      p_light[kLightCount];
@@ -393,6 +401,7 @@ Slot<Focus>          p_focus;
 Slot<UpdateState>    p_update;
 Slot<BatteryArgs>    p_battery;
 Slot<bool>           p_radar;
+Slot<bool>           p_claude;
 Slot<DetailsArgs>    p_details;
 Slot<PhotoArgs>      p_photo;
 
@@ -636,6 +645,9 @@ void apply_media_updates()
     if (std::uint8_t around = 0; take(p_neighbours, around)) {
         media_take_neighbours((around & 1) != 0, (around & 2) != 0);
     }
+    if (std::uint8_t tracks = 0; take(p_tracks, tracks)) {
+        media_take_tracks((tracks & 1) != 0, (tracks & 2) != 0);
+    }
     for (int i = 0; i < media::kPickCount; ++i) {
         if (PickArgs pick{}; take(p_pick[i], pick)) {
             media_take_pick(i, pick.name.get());
@@ -689,7 +701,7 @@ void apply_home_updates()
     }
 }
 
-void apply_rail_updates()
+void apply_status_updates()
 {
     if (TimeText time{}; take(p_time, time)) {
         apply_time(time.get());
@@ -739,6 +751,9 @@ void apply_page_updates()
     if (bool radar = false; take(p_radar, radar)) {
         publish(Topic::Radar);
     }
+    if (bool claude = false; take(p_claude, claude)) {
+        publish(Topic::Claude);
+    }
     static DetailsArgs details;
     if (take(p_details, details)) {
         radar_take_details(details.hex, details.details);
@@ -774,7 +789,7 @@ void apply_pending(lv_timer_t *)
     apply_desk_updates();
     apply_media_updates();
     apply_home_updates();
-    apply_rail_updates();
+    apply_status_updates();
     apply_diagnostics_updates();
     apply_glances();
     apply_page_updates();
@@ -859,6 +874,12 @@ esp_err_t set_media_segments(const MediaSegment *segments, int count)
 esp_err_t set_media_neighbours(bool previous, bool next)
 {
     put(p_neighbours, static_cast<std::uint8_t>((previous ? 1 : 0) | (next ? 2 : 0)));
+    return ESP_OK;
+}
+
+esp_err_t set_media_tracks(bool back, bool on)
+{
+    put(p_tracks, static_cast<std::uint8_t>((back ? 1 : 0) | (on ? 2 : 0)));
     return ESP_OK;
 }
 
@@ -1062,6 +1083,12 @@ esp_err_t set_update(const UpdateState &state)
     return ESP_OK;
 }
 
+esp_err_t set_claude()
+{
+    put(p_claude, true);
+    return ESP_OK;
+}
+
 esp_err_t set_radar(const radar::Snapshot &snapshot)
 {
     (void)snapshot;  // too big to copy here; the page takes radar's own copy
@@ -1144,7 +1171,7 @@ esp_err_t notify(const char *source, const char *title, const char *message, Lev
 }
 
 esp_err_t init(const Handlers &handlers, int initial_brightness, std::uint32_t accent,
-               bool rail_right, Orientation orientation)
+               bool dock_right, Orientation orientation)
 {
     ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
     fonts::init();
@@ -1152,7 +1179,7 @@ esp_err_t init(const Handlers &handlers, int initial_brightness, std::uint32_t a
     if (accent != 0) {
         theme::set_primary(accent);
     }
-    s_rail_right         = rail_right;
+    s_dock_right         = dock_right;
     s_orientation        = orientation;
     s_handlers           = handlers;
     s_initial_brightness = initial_brightness;

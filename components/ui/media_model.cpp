@@ -212,6 +212,13 @@ void media_take_neighbours(bool before, bool after)
     publish(Topic::Media);
 }
 
+void media_take_tracks(bool back, bool on)
+{
+    s_media.tracks_back = back;
+    s_media.tracks_on   = on;
+    publish(Topic::Media);
+}
+
 void media_take_hold_preset(int preset)
 {
     s_media.hold_preset = preset;
@@ -239,10 +246,20 @@ bool media_is_video()
     return s_media.video && s_media.has_track;
 }
 
+bool media_shows_volume()
+{
+    return s_media.remote || s_media.volume >= 0;
+}
+
+bool media_shows_subtitles()
+{
+    return s_media.remote || s_media.subtitles_available;
+}
+
 MediaSkip media_skip_offer()
 {
     MediaSkip offer;
-    if (!media_is_video() || s_media.duration_s <= 0) {
+    if (!s_media.remote || !media_is_video() || s_media.duration_s <= 0) {
         return offer;
     }
     const int at            = media_position_now();
@@ -318,9 +335,6 @@ void media_seek_by(int delta_s)
 void media_skip()
 {
     const MediaSkip offer = media_skip_offer();
-    if (!s_media.remote) {
-        return;
-    }
     if (offer.next) {
         media_action(MediaAction::Next);
     } else if (offer.to_s >= 0) {

@@ -1,5 +1,6 @@
 #include "ui_internal.h"
 
+#include "popout.h"
 #include "settings_model.h"
 #include "status_model.h"
 #include "topics.h"
@@ -8,62 +9,59 @@ namespace ui::detail {
 namespace {
 lv_obj_t *s_pages[PAGE_COUNT]    = {};
 lv_obj_t *s_nav_tabs[PAGE_COUNT] = {};
-lv_obj_t *s_setup_dot            = nullptr;  // an update is waiting in Setup
-
-// While the timer is on, the Focus tab's icon has the part's colour, so it can
-// be seen from any page; the top row has how long is left.
-constexpr std::size_t FOCUS_CAPTION_SIZE = 16;
-char                  s_focus_caption[FOCUS_CAPTION_SIZE] = {};  // empty when idle
-std::uint32_t         s_focus_ink    = 0;
-bool                  s_focus_paused = false;
-
-constexpr std::int32_t SETUP_DOT        = 12;
-constexpr std::int32_t SETUP_DOT_INSET  = 10;
 
 struct NavItem {
     const char           *icon;
-    const char           *name;
     bool                  needs_presence;
     const lv_image_dsc_t *image = nullptr;  // drawn here, where the fonts have no glyph
 };
+// In the pages' order; Setup has no tab, the status opening it.
 constexpr NavItem NAV_ITEMS[PAGE_COUNT] = {
-    [HOME_PAGE]     = {LV_SYMBOL_HOME, "Home", false},
-    [RADAR_PAGE]    = {"", "Radar", true, &icons::plane_icon},
-    [CALENDAR_PAGE] = {"", "Calendar", true, &icons::calendar_icon},
-    [FOCUS_PAGE]    = {"", "Focus", true, &icons::timer_icon},
-    [SETUP_PAGE]    = {LV_SYMBOL_SETTINGS, "Setup", false},
+    {LV_SYMBOL_HOME, false},
+    {"", true, &icons::plane_icon},
+    {"", true, &icons::calendar_icon},
+    {"", false},
 };
+static_assert(HOME_PAGE == 0 && RADAR_PAGE == 1 && CALENDAR_PAGE == 2 && SETUP_PAGE == 3);
 
-constexpr std::int32_t TAB_H    = 64;
+constexpr std::int32_t TAB_H    = 72;
 constexpr std::int32_t PAGE_PAD = 20;
 
 }  // namespace
 
 int  s_page           = HOME_PAGE;
+namespace {
+int s_before_setup = HOME_PAGE;  // where Setup goes back to
+}  // namespace
 
 std::atomic<bool> s_setup_visible{false};
 
 bool s_presence_gate = true;
 
+bool owner_away()
+{
+    return s_presence_gate && !status_state().present;
+}
+
 namespace {
 bool page_available(int index)
 {
-    return !NAV_ITEMS[index].needs_presence || !s_presence_gate || status_state().present;
+    return !NAV_ITEMS[index].needs_presence || !owner_away();
 }
 
 void paint_tab(int index, bool active)
 {
     lv_obj_t *tab = s_nav_tabs[index];
+    if (tab == nullptr) {
+        return;  // Setup has none: the control bar's status opens it
+    }
     lv_obj_set_state(tab, LV_STATE_CHECKED, active);
-    const std::uint32_t ink   = active ? theme::text : theme::secondary;
-    const bool          timer = index == FOCUS_PAGE && s_focus_caption[0] != '\0';
-    const std::uint32_t mark  = timer && !active ? s_focus_ink : ink;
-    lv_obj_t           *icon  = lv_obj_get_child(tab, 0);
+    const std::uint32_t ink  = active ? theme::text : theme::secondary;
+    lv_obj_t           *icon = lv_obj_get_child(tab, 0);
     if (NAV_ITEMS[index].image != nullptr) {
-        lv_obj_set_style_image_recolor(icon, lv_color_hex(mark), 0);
-        lv_obj_set_style_image_opa(icon, timer && s_focus_paused ? LV_OPA_50 : LV_OPA_COVER, 0);
+        lv_obj_set_style_image_recolor(icon, lv_color_hex(ink), 0);
     } else {
-        theme::set_text_color(icon, mark);
+        theme::set_text_color(icon, ink);
     }
 }
 
@@ -72,31 +70,18 @@ void tell_page_opened(int index)
     if (index == SETUP_PAGE && s_handlers.diagnostics != nullptr) {
         s_handlers.diagnostics();
     }
-    if (index == RADAR_PAGE) {
+    if (index == RADAR_PAGE || index == HOME_PAGE) {
         radar_page_opened();
     }
     if (index == CALENDAR_PAGE) {
         show_calendar();
     }
     if (s_handlers.radar != nullptr) {
-        s_handlers.radar(index == RADAR_PAGE, page_available(RADAR_PAGE));
+        // Home's radar cards follow the sky as closely as the page does.
+        s_handlers.radar(index == RADAR_PAGE || index == HOME_PAGE, page_available(RADAR_PAGE));
     }
 }
 }  // namespace
-
-void show_focus_tab(const char *caption, std::uint32_t ink, bool paused)
-{
-    const char *text = caption != nullptr ? caption : "";
-    if (std::strcmp(text, s_focus_caption) == 0 && ink == s_focus_ink && paused == s_focus_paused) {
-        return;
-    }
-    std::snprintf(s_focus_caption, sizeof(s_focus_caption), "%s", text);
-    s_focus_ink    = ink;
-    s_focus_paused = paused;
-    if (s_nav_tabs[FOCUS_PAGE] != nullptr) {
-        paint_tab(FOCUS_PAGE, s_page == FOCUS_PAGE);
-    }
-}
 
 void select_page(int index)
 {
@@ -104,17 +89,28 @@ void select_page(int index)
         index = HOME_PAGE;
     }
     s_page = index;
+    if (index != SETUP_PAGE) {
+        s_before_setup = index;
+    }
     s_setup_visible.store(index == SETUP_PAGE, std::memory_order_relaxed);
 
     tell_page_opened(index);
     show_guest_presets();
     for (int i = 0; i < PAGE_COUNT; ++i) {
-        lv_obj_set_hidden(s_nav_tabs[i], !page_available(i));
+        if (s_nav_tabs[i] != nullptr) {
+            lv_obj_set_hidden(s_nav_tabs[i], !page_available(i));
+        }
         lv_obj_set_hidden(s_pages[i], i != index);
         paint_tab(i, i == index);
     }
+    close_popout();
     publish(Topic::Page);
 }
+void toggle_setup()
+{
+    select_page(s_page == SETUP_PAGE ? s_before_setup : SETUP_PAGE);
+}
+
 namespace {
 void nav_event_cb(lv_event_t *e)
 {
@@ -122,21 +118,6 @@ void nav_event_cb(lv_event_t *e)
 }
 }  // namespace
 
-lv_obj_t *s_brightness_value = nullptr;
-
-void brightness_event_cb(lv_event_t *e)
-{
-    auto      *slider  = static_cast<lv_obj_t *>(lv_event_get_target(e));
-    const int  percent = static_cast<int>(lv_slider_get_value(slider));
-
-    char text[8];
-    std::snprintf(text, sizeof(text), "%d%%", percent);
-    theme::set_text(s_brightness_value, text);
-
-    if (s_handlers.brightness != nullptr) {
-        s_handlers.brightness(percent);
-    }
-}
 namespace {
 lv_obj_t *make_bare_box(lv_obj_t *parent)
 {
@@ -153,11 +134,7 @@ lv_obj_t *make_tab_icon(lv_obj_t *tab, const NavItem &item)
     if (item.image == nullptr) {
         return theme::make_label(tab, item.icon, theme::secondary, fonts::size_28());
     }
-    lv_obj_t *icon = lv_image_create(tab);
-    lv_image_set_src(icon, item.image);
-    lv_obj_set_style_image_recolor(icon, lv_color_hex(theme::secondary), 0);
-    lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
-    return icon;
+    return theme::make_icon(tab, item.image, theme::secondary);
 }
 
 lv_obj_t *make_nav_tab(lv_obj_t *dock, int index)
@@ -203,18 +180,12 @@ void create_content(lv_obj_t *parent)
     lv_obj_set_size(area, l.content_w, l.content_h);
 
     for (int i = 0; i < PAGE_COUNT; ++i) {
-        s_nav_tabs[i] = make_nav_tab(dock_tabs(), i);
-        if (i == SETUP_PAGE) {
-            s_setup_dot = lv_obj_create(s_nav_tabs[i]);
-            theme::style_panel(s_setup_dot, theme::panel, SETUP_DOT / 2);
-            theme::fill_accent(s_setup_dot);
-            lv_obj_set_clickable(s_setup_dot, false);
-            lv_obj_set_size(s_setup_dot, SETUP_DOT, SETUP_DOT);
-            lv_obj_align(s_setup_dot, LV_ALIGN_TOP_RIGHT, -SETUP_DOT_INSET, SETUP_DOT_INSET);
-            lv_obj_set_hidden(s_setup_dot, true);
+        if (i != SETUP_PAGE) {
+            s_nav_tabs[i] = make_nav_tab(dock_tabs(), i);
         }
-        s_pages[i]    = make_page(area, l);
+        s_pages[i] = make_page(area, l);
     }
+    dock_tabs_done(s_nav_tabs[HOME_PAGE]);
 }
 
 bool build_next_page()
@@ -223,10 +194,14 @@ bool build_next_page()
     const Layout l   = layout();
     switch (next++) {
         case 0: build_home_page(s_pages[HOME_PAGE]); return true;
-        case 1: build_padded_page(RADAR_PAGE, build_radar_page, l); return true;
+        case 1:
+            // The map is the page's panel itself, to its rounded edge on the screen's black.
+            lv_obj_set_style_bg_opa(s_pages[RADAR_PAGE], LV_OPA_TRANSP, 0);
+            lv_obj_set_style_pad_all(s_pages[RADAR_PAGE], 0, 0);
+            build_radar_page(s_pages[RADAR_PAGE], l.content_w, l.content_h);
+            return true;
         case 2: build_padded_page(CALENDAR_PAGE, build_calendar_page, l); return true;
-        case 3: build_padded_page(FOCUS_PAGE, build_focus_page, l); return true;
-        case 4:
+        case 3:
             build_settings_page(s_pages[SETUP_PAGE]);
             select_page(HOME_PAGE);
             return false;
@@ -234,16 +209,7 @@ bool build_next_page()
     }
 }
 
-void paint_setup_dot(bool ready)
-{
-    if (s_setup_dot != nullptr) {
-        lv_obj_set_hidden(s_setup_dot, !ready);
-    }
-}
 
-}  // namespace ui::detail
-
-namespace ui::detail {
 void follow_pages()
 {
     const auto pages = [] {

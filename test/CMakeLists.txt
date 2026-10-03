@@ -59,6 +59,8 @@ endfunction()
 set(UNITS ${COMPONENTS}/units/include)
 set(DESKPROTO ${COMPONENTS}/deskproto/include)
 
+host_test(claude_sessions_test COMPONENT claude SOURCES test/test_claude_sessions.cpp claude_sessions.cpp
+    LIBS cjson)
 host_test(deskproto_test COMPONENT deskproto SOURCES test/test_deskproto.cpp)
 host_test(focus_test COMPONENT focus SOURCES test/test_focus.cpp INCLUDES ${UNITS})
 host_test(hass_protocol_test COMPONENT hass SOURCES test/test_hass_protocol.cpp hass_protocol.cpp

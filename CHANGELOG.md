@@ -2,6 +2,20 @@
 
 The versions are the points where the panel was a step further on my desk. None of them is a stable release, it is still a project in progress.
 
+## Unreleased
+
+One frame for every page, with what is touched every day in it.
+
+- A dock at the side, right by default and left in Setup: the desk's height, which folds the rest of the desk out beside it, Stand and Sit, Home, and from its foot the focus timer, Radar and Calendar.
+- A control bar along the top: what plays, with play and pause and a small music view under it; the heating, which drops the thermostat; the lights, all at once or each when held; and the status, which opens Setup and shows an update arriving.
+- Cards that unfold from a corner and draw only what is newly shown, at the panel's full frame rate, and fold away by themselves.
+- Home is the air, the radar as its page had it, and what comes next; the Radar page is the map to its every edge.
+- The desk's presets act as the control box's own keys: one tapped while the desk moves stops it, and a start just after a stop waits until the box will take it.
+- The panel shows it has been unplugged or plugged in within two seconds.
+- What the player playing would not act on is left out rather than faded: a Jellyfin player that is only followed has no play or skip, and the speaker shows only what the app on it takes, from its supported features in Home Assistant.
+- Claude Code on the laptops: a pill beside the lights while a session works, a ring of one piece per session with their count inside it, amber with a chime and a notice while one waits on you, and gone ten minutes after the last event. Its card has each session's project and laptop, what it does, its steps and what it did last. The laptops post to `/claude` from Claude Code's hooks with `tools/claude-hook`, names only, under a key of their own.
+- `/desk` on a development build: what the desk heard and was asked, and a preset tapped from afar.
+
 ## v0.7.0, 30 September 2026
 
 Tested and built in CI.

@@ -5,6 +5,9 @@
 
 namespace desk::detail {
 
+/** A line of the desk's trace: what the link heard or was asked, with when. */
+void trace(const char *what, int a, int b = 0);
+
 // What a link reports about itself, shown and logged as is. The supervisor
 // compares against these pointers, so each link returns these very strings.
 inline constexpr char kConnected[] = "connected";

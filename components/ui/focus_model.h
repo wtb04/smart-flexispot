@@ -6,7 +6,8 @@
 #include <cstdint>
 
 // The focus timer as last told, and what follows from it, for whatever shows
-// it: the focus page, its tab, the settings and the badge over other views.
+// it: the fullscreen timer, its card, the dock's button, the settings and the
+// badge over other views.
 // Changing it publishes Topic::Focus. On the LVGL task only.
 namespace ui::detail {
 

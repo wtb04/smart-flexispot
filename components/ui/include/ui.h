@@ -98,8 +98,8 @@ using PrimaryHandler = void (*)(std::uint32_t colour);
  *  only asks; what that means for the backlight is the board's business. */
 using ScreenHandler = void (*)(bool on);
 
-/** True while the rail is against the right edge. */
-using RailSideHandler = void (*)(bool right);
+/** True while the dock is against the right edge. */
+using DockSideHandler = void (*)(bool right);
 
 /** True while the panel is hung the other way up. */
 enum class Orientation : std::uint8_t { Normal, Flipped, Auto };
@@ -233,9 +233,13 @@ esp_err_t set_media_seeks(bool seeks);
 esp_err_t set_media_neighbours(bool previous, bool next);
 
 /** Whether the player takes pause, seek and skip from here. Some, such as
- *  Streamyfin, only report: the card and the cinema view then fade what the
- *  player would not act on. */
+ *  Streamyfin, only report: the bar, the card and the views then leave out
+ *  what the player would not act on. */
 esp_err_t set_media_remote(bool remote);
+
+/** Whether the player takes a track back, and on: the app playing on a speaker
+ *  may take neither, as a radio station does. Both until said otherwise. */
+esp_err_t set_media_tracks(bool back, bool on);
 
 /** Whether a video has subtitles to show, and whether they show. */
 esp_err_t set_media_subtitles(bool available, bool shown);
@@ -290,7 +294,7 @@ struct Handlers {
     RadarHandler       radar;
     LogHandler         log;
     PrimaryHandler     primary;
-    RailSideHandler    rail_side;
+    DockSideHandler    dock_side;
     OrientationHandler orientation;
     ScreenHandler      screen;
     DetailsHandler     details;
@@ -303,11 +307,11 @@ struct Handlers {
 };
 
 /** Requires the LVGL port to be running. A zero accent keeps the built-in
- *  colour; rail_right puts the rail against the right edge instead of the left.
+ *  colour; dock_right puts the dock against the right edge instead of the left.
  *  orientation only tells the page which choice to show; board::init() has
  *  already turned the display, and turns it again as the choice asks. */
 esp_err_t init(const Handlers &handlers, int initial_brightness, std::uint32_t accent,
-               bool rail_right, Orientation orientation);
+               bool dock_right, Orientation orientation);
 
 /** After init() has put up the splash and the screen is lit: everything else,
  *  built behind the splash a part at a time so that it keeps moving. Nothing
@@ -372,6 +376,10 @@ esp_err_t set_screen(bool on);
 
 esp_err_t set_notification_volume(int percent);
 
+/** The laptops' Claude Code sessions changed: the pill reads them again from
+ *  the claude component. Thread-safe. */
+esp_err_t set_claude();
+
 /** The scope redraws from this; between readings it is left alone. */
 esp_err_t set_radar(const radar::Snapshot &snapshot);
 
@@ -393,18 +401,23 @@ esp_err_t set_update(const UpdateState &state);
 esp_err_t notify(const char *source, const char *title, const char *message, Level level,
                  int timeout_ms);
 
-/** A development build's: how long the radar takes to open fullscreen, draw,
- *  zoom and close, written to `out`. With the LVGL lock. */
+/** A development build's: how long the radar takes to go from Home to its page,
+ *  draw, zoom and go back, written to `out`. With the LVGL lock. */
 int bench_radar(char *out, std::size_t size);
 
-/** A development build's: the radar shown for bench_radar, with the phone away
- *  too, and whether its feed has answered yet. With the LVGL lock. */
+/** A development build's: Home shown with the radar for bench_radar, with the
+ *  phone away too, and whether its feed has answered yet. With the LVGL lock. */
 int bench_radar_open(char *out, std::size_t size);
 
-/** A development build's: the radar left open over the whole screen, running
- *  as it does, following the nearest aircraft; or, with `open` false, the
- *  screen put back as it was before. */
-int bench_radar_full(char *out, std::size_t size, bool open);
+/** A development build's: the radar page left open, running as it does,
+ *  following the nearest aircraft; or, with `open` false, the screen put back
+ *  as it was before. */
+int bench_radar_map(char *out, std::size_t size, bool open);
 int bench_radar_zoom_frame(char *out, std::size_t size);  // a zoom's frame, held until put back
+/** A development build's: what each frame of the desk's card unfolding costs. */
+int bench_desk_card(char *out, std::size_t size);
+
+/** A development build's: preset `index` tapped, as a finger on its button. With the LVGL lock. */
+void desk_tap(int index);
 
 }  // namespace ui

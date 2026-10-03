@@ -12,7 +12,7 @@
 namespace ui::detail {
 
 enum class ViewKind : std::uint8_t {
-    Fullscreen,  // over the whole screen, the rail and tabs too
+    Fullscreen,  // over the whole screen, the dock and the control bar too
     Popup,       // a card on a scrim over part of it
 };
 
@@ -32,7 +32,6 @@ ViewId add_view(ViewSpec spec);
 /** Shown and on top; opening a fullscreen view closes any other. */
 void open_view(ViewId view);
 void close_view(ViewId view);
-void toggle_view(ViewId view);
 bool view_open(ViewId view);
 
 /** Whether a fullscreen view covers the screen, for what places itself round it. */
@@ -43,9 +42,5 @@ bool fullscreen_open();
  *  whole again as the view closes. Faded out, it is hidden, so a tap there goes
  *  to what is under it. */
 void fade_when_idle(ViewId view, lv_obj_t *obj);
-
-/** Tells `changed` as the buttons over `view` fade out (false) and come back
- *  (true), and true as it closes, for what a view does more than fade. */
-void when_buttons_change(ViewId view, std::function<void(bool shown)> changed);
 
 }  // namespace ui::detail

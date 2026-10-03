@@ -24,6 +24,8 @@ constexpr int REPORT_EVERY_MS              = 100;
 int          s_height_mm  = HEIGHTS_MM[3];
 int          s_heights[ui::kPresetCount];
 int          s_target_mm  = -1;  // on its way to a preset
+std::int64_t s_stopped_ms = -1'000'000;  // when a key last stopped it
+constexpr std::int64_t BOX_REST_MS = 1200;  // measured on the desk
 ui::Move     s_moving     = ui::Move::Stop;  // held in the desk fold-out
 bool         s_linked     = true;
 std::int64_t s_reported_ms = 0;
@@ -178,8 +180,20 @@ void on_preset(int index, bool store)
         desk_notice("Preset saved", true, SAVED_NOTICE_MS);
     } else if (s_heights[index] < 0) {
         desk_notice("Hold it to save the height it goes to", false, HINT_NOTICE_MS);
+    } else if (s_target_mm >= 0 || now_ms() - s_stopped_ms < BOX_REST_MS) {
+        // As the box: any key while the desk moves stops it, and for a while after
+        // it stopped, a start is taken as one more stop.
+        std::printf("desk: preset %d pressed while moving or just stopped, stops\n", index + 1);
+        if (s_target_mm >= 0) {
+            s_stopped_ms = now_ms();
+        }
+        s_target_mm = -1;
     } else {
+        std::printf("desk: preset %d pressed, goes to %d mm\n", index + 1, s_heights[index]);
         s_target_mm = s_heights[index];
+        for (int i = 0; i < ui::kPresetCount; ++i) {
+            ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_preset_active(i, false));  // off it, as the desk says once told to go
+        }
     }
 }
 

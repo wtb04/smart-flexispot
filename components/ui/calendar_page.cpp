@@ -1040,6 +1040,32 @@ void show_big_number(const char *name, const char *value, std::uint32_t colour, 
     theme::set_text(s_side, "");
 }
 
+// What kind of event, and today, now, or which day: the line over its title.
+void kind_text(const ical::Event &event, std::int64_t now, char *out, std::size_t size)
+{
+    if (event.start <= now) {
+        std::snprintf(out, size, "%s, now", feed_kind(event.feed));
+        return;
+    }
+    char day[24];
+    day_name(now, event.start, day, sizeof(day));
+    std::snprintf(out, size, "%s, %s", feed_kind(event.feed), day);
+}
+
+// From and to, and where.
+void meta_text(const ical::Event &event, char *out, std::size_t size)
+{
+    char from[16];
+    char to[16];
+    clock_of(event.start, from, sizeof(from));
+    clock_of(event.end, to, sizeof(to));
+    if (has_place(event)) {
+        std::snprintf(out, size, "%s \xe2\x80\x93 %s, %s", from, to, place_of(event));
+    } else {
+        std::snprintf(out, size, "%s \xe2\x80\x93 %s", from, to);
+    }
+}
+
 void show_next(const ical::Event *first, std::int64_t now)
 {
     if (first == nullptr) {
@@ -1051,13 +1077,7 @@ void show_next(const ical::Event *first, std::int64_t now)
     const bool ongoing = first->start <= now;
     lv_obj_set_hidden(s_kind_dot, false);
     lv_obj_set_style_bg_color(s_kind_dot, lv_color_hex(feed_ink(first->feed)), 0);
-    if (ongoing) {
-        std::snprintf(text, sizeof(text), "%s, now", feed_kind(first->feed));
-    } else {
-        char day[24];
-        day_name(now, first->start, day, sizeof(day));
-        std::snprintf(text, sizeof(text), "%s, %s", feed_kind(first->feed), day);
-    }
+    kind_text(*first, now, text, sizeof(text));
     theme::set_text(s_kind, text);
     theme::set_text(s_title, first->summary);
     fit_lines(s_title, s_title_w, TITLE_LINES_MAX);
@@ -1066,12 +1086,7 @@ void show_next(const ical::Event *first, std::int64_t now)
     char to[16];
     clock_of(first->start, from, sizeof(from));
     clock_of(first->end, to, sizeof(to));
-    if (has_place(*first)) {
-        std::snprintf(text, sizeof(text), "%s \xe2\x80\x93 %s, %s", from, to,
-                      place_of(*first));
-    } else {
-        std::snprintf(text, sizeof(text), "%s \xe2\x80\x93 %s", from, to);
-    }
+    meta_text(*first, text, sizeof(text));
     theme::set_text(s_meta, text);
 
     // The big number is what to act on: leaving if there is a route, otherwise the
@@ -1872,6 +1887,127 @@ void build_calendar_page(lv_obj_t *page, std::int32_t width, std::int32_t height
 
     lv_timer_create([](lv_timer_t *) { show_calendar(); }, REFRESH_MS, nullptr);
     detail::subscribe(detail::Topic::Calendar, detail::kNoView, show_calendar);
+}
+
+
+// ---- Home's tile: what comes next, and the few after it ----
+namespace {
+constexpr int          TILE_AFTER    = 4;
+constexpr std::int32_t TILE_PAD      = 22;
+constexpr std::int32_t TILE_WHEN_W   = 150;
+constexpr std::int32_t TILE_SIDE_W   = 360;  // narrower, when stands over what rather than beside it
+
+struct TileRow {
+    lv_obj_t *row;
+    lv_obj_t *when;
+    lv_obj_t *what;
+};
+lv_obj_t    *s_tile       = nullptr;
+std::int32_t s_tile_w     = 0;  // inside its padding
+lv_obj_t    *s_tile_kind  = nullptr;
+lv_obj_t    *s_tile_title = nullptr;
+lv_obj_t    *s_tile_meta  = nullptr;
+lv_obj_t    *s_tile_big   = nullptr;
+lv_obj_t    *s_tile_span  = nullptr;
+lv_obj_t    *s_tile_after = nullptr;  // the heading over the rest
+TileRow      s_tile_rows[TILE_AFTER]{};
+
+void show_tile()
+{
+    if (s_tile == nullptr) {
+        return;
+    }
+    // Away with the calendar's own page while the phone is.
+    lv_obj_set_hidden(s_tile, detail::owner_away());
+    if (detail::s_page != detail::HOME_PAGE) {
+        return;
+    }
+    static ical::Event ahead[TILE_AFTER + 1];
+    const int          count = ical::upcoming(ahead, TILE_AFTER + 1);
+    const auto         now   = static_cast<std::int64_t>(std::time(nullptr));
+    char               text[96];
+    const bool         any   = count > 0;
+    const ical::Event &next  = ahead[0];
+    const bool         ongoing = any && next.start <= now;
+    if (any) {
+        kind_text(next, now, text, sizeof(text));
+    }
+    theme::set_text(s_tile_kind, any ? text : "NEXT");
+    theme::set_text(s_tile_title, any ? next.summary : "Nothing coming up");
+    theme::set_text_color(s_tile_title, any ? theme::text : theme::secondary);
+    fit_lines(s_tile_title, s_tile_w, 2);
+    if (any) {
+        meta_text(next, text, sizeof(text));
+    }
+    theme::set_text(s_tile_meta, any ? text : "");
+    char time[16] = "";
+    char span[32] = "";
+    text[0]       = '\0';
+    if (any) {
+        clock_of(ongoing ? next.end : next.start, time, sizeof(time));
+        span_of(now, ongoing ? next.end : next.start, span, sizeof(span));
+        std::snprintf(text, sizeof(text), "%s%s", ongoing ? "ends " : "", span);
+    }
+    theme::set_text(s_tile_big, time);
+    theme::set_text(s_tile_span, text);
+
+    lv_obj_set_hidden(s_tile_after, count < 2);
+    for (int i = 0; i < TILE_AFTER; ++i) {
+        TileRow &row = s_tile_rows[i];
+        lv_obj_set_hidden(row.row, i + 1 >= count);
+        if (i + 1 >= count) {
+            continue;
+        }
+        const ical::Event &event = ahead[i + 1];
+        const auto         at    = static_cast<std::time_t>(event.start);
+        std::tm            local{};
+        localtime_r(&at, &local);
+        std::strftime(text, sizeof(text), "%a %H:%M", &local);
+        theme::set_text(row.when, text);
+        theme::set_text(row.what, event.summary);
+    }
+}
+}  // namespace
+
+// One column, each part under the last however many lines it takes, the card
+// clipping whatever of the rest has no room.
+void build_next_tile(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int32_t w, std::int32_t h)
+{
+    s_tile = lv_button_create(parent);
+    theme::style_button(s_tile, theme::panel_light);
+    lv_obj_set_pos(s_tile, x, y);
+    lv_obj_set_size(s_tile, w, h);
+    lv_obj_set_style_radius(s_tile, theme::radius::card, 0);
+    lv_obj_set_style_pad_all(s_tile, TILE_PAD, 0);
+    lv_obj_set_scrollable(s_tile, false);
+    lv_obj_set_flex_flow(s_tile, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(s_tile, space::s, 0);
+    lv_obj_add_event_cb(s_tile, [](lv_event_t *) { detail::select_page(detail::CALENDAR_PAGE); }, LV_EVENT_CLICKED,
+                        nullptr);
+    s_tile_w     = w - 2 * TILE_PAD;
+    s_tile_kind  = line_label(s_tile, theme::secondary, theme::type_label());
+    s_tile_title = dotted_label(s_tile, theme::text, fonts::size_28());
+    s_tile_meta  = line_label(s_tile, theme::secondary, theme::type_body());
+    // The time, and how far off it is under it, where it cannot jump beside it as it changes.
+    s_tile_big  = theme::make_label(s_tile, "", theme::text, fonts::size_48());
+    s_tile_span = line_label(s_tile, theme::secondary, theme::type_body());
+    for (lv_obj_t *part : {s_tile_kind, s_tile_title, s_tile_meta, s_tile_span}) {
+        lv_obj_set_width(part, s_tile_w);
+    }
+
+    s_tile_after = theme::make_eyebrow(s_tile, "AFTER THAT");
+    lv_obj_set_style_margin_top(s_tile_after, space::l, 0);
+    const bool stacked = s_tile_w < TILE_SIDE_W;
+    for (TileRow &row : s_tile_rows) {
+        row.row = stacked ? column_of(s_tile, 0) : row_of(s_tile, theme::type_body()->line_height, 0);
+        row.when = line_label(row.row, theme::secondary, theme::type_body());
+        row.what = line_label(row.row, theme::text, theme::type_body());
+        lv_obj_set_width(row.when, stacked ? s_tile_w : TILE_WHEN_W);
+        lv_obj_set_width(row.what, stacked ? s_tile_w : s_tile_w - TILE_WHEN_W);
+    }
+    detail::subscribe(detail::Topic::Calendar, detail::kNoView, show_tile);
+    detail::subscribe(detail::Topic::Page, detail::kNoView, show_tile);
+    lv_timer_create([](lv_timer_t *) { show_tile(); }, REFRESH_MS, nullptr);
 }
 
 }  // namespace ui
