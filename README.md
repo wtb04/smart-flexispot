@@ -90,7 +90,7 @@ Stand and Sit are always in the dock, under the height as the control box report
 
 ![The cinema view](docs/screenshots/cinema.png)
 
-When something plays on Jellyfin the media card follows it, and holding the card sends the desk to its viewing height. The cinema view has the episode's still, when it ends, skip intro, next episode, subtitles, volume, and the lights and the desk within reach. Players that cannot be controlled from elsewhere (the Streamyfin app, for one) are still followed, their buttons just fade out.
+When something plays on Jellyfin the control bar follows it, and holding it there sends the desk to its viewing height. The cinema view has the episode's still, when it ends, skip intro, next episode, subtitles, volume, and the lights and the desk within reach. Players that cannot be controlled from elsewhere (the Streamyfin app, for one) are still followed, just without the buttons they would not act on. The speaker is the same: whatever app plays on it, only what that app takes is there, so a radio station has no track back or on.
 
 ### Planes overhead
 
@@ -124,7 +124,7 @@ Each laptop tells the panel through Claude Code's own hooks, with `tools/claude-
 
 ### Away from the desk
 
-The panel knows my phone over Bluetooth, by its identity key, and the phone in the control bar shows whether it is there. While it is away, Radar, Calendar and the focus timer are hidden, leaving Home and Setup, and presets 5 and 6 show for whoever uses the desk then. *Pages while away* in Setup turns that off.
+The panel knows my phone over Bluetooth, by its identity key, and the phone in the control bar shows whether it is there. While it is away, Radar, Calendar and the focus timer are hidden, Home keeps only the air, and presets 5 and 6 show for whoever uses the desk then. *Pages while away* in Setup turns that off.
 
 The screen can be switched off from Home Assistant, and a tap wakes it. While it is dark, the panel fetches nothing that only the screen would show. With Orientation on Auto, turning the panel upside down turns the picture with it.
 
