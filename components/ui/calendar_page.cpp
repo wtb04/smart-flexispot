@@ -52,8 +52,8 @@ constexpr int WEEK_EVENTS     = 48;
 constexpr int WEEK_DAYS       = units::kDaysPerWeek;
 constexpr int WORKDAYS        = 5;
 constexpr int HOURS_MAX       = units::kHoursPerDay;
-constexpr int POINTS          = travel::kLegsMax + 1;
 constexpr int TITLE_LINES_MAX = 2;
+constexpr int ALSO_ITEMS      = 3;  // the rest of the next event's day, under it
 
 // The hours the strip and the week show however little is on them.
 constexpr float WORKDAY_FIRST_HOUR = 8.0f;
@@ -64,43 +64,20 @@ constexpr int SPARSE_MARK_STEP = 2;
 
 constexpr std::int64_t SHOW_WAYS_WITHIN = 3 * units::kSecondsPerHour;  // hours off is nothing to act on yet
 
-constexpr std::int32_t LIST_W        = 410;
+constexpr std::int32_t LIST_W        = 500;
 constexpr std::int32_t DOT           = 10;
 constexpr std::int32_t TIME_W        = 64;
-constexpr std::int32_t EVENT_H       = 170;  // the event card, until it has been measured
-constexpr std::int32_t BASELINE_LIFT = 6;    // the side numbers, onto the big number's baseline
 constexpr std::int32_t SCROLLBAR_W   = 4;
-constexpr std::int32_t CHOICE_H      = 64;
 constexpr std::int32_t NOW_LINE_W    = 2;
 // How far a corner chip reaches up into a card's padding, with a gap over it.
 constexpr std::int32_t CHIP_CLEARANCE =
     theme::chip::size + theme::chip::inset - space::l + space::s;
 
-constexpr std::int32_t STOP_TIME_W    = 64;
-constexpr std::int32_t NODE           = 16;
-constexpr std::int32_t NODE_BORDER_W  = 3;
-constexpr std::int32_t RAIL_W         = 4;
-constexpr std::int32_t PATH_W         = 2;   // walking and cycling get the thin line maps use for them
-constexpr std::int32_t STOP_PITCH_MAX = 84;
-constexpr std::int32_t STOP_TEXT_TRIM = 48;  // off a stop's words, for the line beside them
-constexpr std::int32_t RIDE_TEXT_TRIM = 80;  // and off a ride's, for its icon too
-
-constexpr int          DAY_BLOCKS        = 12;
-constexpr int          DAY_TICKS         = 13;
-constexpr int          DAY_LANES         = 2;
-constexpr std::int32_t DAY_LANE_MIN_H    = 64;
-constexpr std::int32_t DAY_LANE_MAX_H    = 132;
-constexpr std::int32_t TICK_W            = 24;
-constexpr std::int32_t TICK_LEAD         = 8;  // the digits start before their hour, to sit over it
-constexpr std::int32_t TICK_DIGITS_W     = 20;
-constexpr std::int32_t DAY_BLOCK_GAP     = 3;
-constexpr std::int32_t DAY_BLOCK_MIN_W   = 10;
-constexpr std::int32_t DAY_BLOCK_PAD_TOP = 6;
-constexpr std::int32_t DAY_TIME_MIN_W    = 48;
-constexpr std::int32_t DAY_TITLE_MIN_W   = 96;
-// How much of the feed's colour goes into the card's.
-constexpr std::uint8_t NEXT_BLOCK_MIX = 150;
-constexpr std::uint8_t DAY_BLOCK_MIX  = 90;
+constexpr std::int32_t BAR_W         = 4;   // an event's colour, beside its words
+constexpr std::int32_t STEP_TIME_W   = 64;
+constexpr std::int32_t STEP_ICON     = 40;  // the square a step's icon sits in
+constexpr std::int32_t CHOICE_CHIP_H = 40;
+constexpr std::int64_t LONG_EVENT    = 4 * units::kSecondsPerHour;  // said with its end, as a day at work
 
 constexpr std::int32_t BLOCK_EDGE_W     = 3;
 constexpr std::int32_t BLOCK_PAD_LEFT   = 8;
@@ -150,25 +127,21 @@ const char *feed_kind(std::uint8_t feed)
     }
 }
 
-struct Item {  // one entry of the overview list: a day's name, or an event
+struct Item {  // one row of the agenda, or of the next event's day: a day's name, or an event
     lv_obj_t *root  = nullptr;
-    lv_obj_t *dot   = nullptr;
     lv_obj_t *time  = nullptr;
+    lv_obj_t *bar   = nullptr;  // in the feed's colour
     lv_obj_t *title = nullptr;
     lv_obj_t *place = nullptr;
+    lv_obj_t *date  = nullptr;  // a day's date, at the right
 };
 
-struct Stop {  // a place on the route, on the line
-    lv_obj_t *node = nullptr;
-    lv_obj_t *when = nullptr;
-    lv_obj_t *name = nullptr;
-    lv_obj_t *note = nullptr;  // the time to change, or to spare at the end
-};
-
-struct Ride {  // the line between two stops, and how it is travelled
-    lv_obj_t *rail = nullptr;
-    lv_obj_t *icon = nullptr;
-    lv_obj_t *what = nullptr;
+struct Step {  // one thing to do on the way there
+    lv_obj_t *root   = nullptr;
+    lv_obj_t *time   = nullptr;
+    lv_obj_t *icon   = nullptr;
+    lv_obj_t *what   = nullptr;
+    lv_obj_t *detail = nullptr;
 };
 
 struct Block {  // one event in the strip or the week
@@ -186,37 +159,24 @@ lv_obj_t *s_kind_dot  = nullptr;
 lv_obj_t *s_kind      = nullptr;
 lv_obj_t *s_title     = nullptr;
 lv_obj_t *s_meta      = nullptr;
-lv_obj_t *s_big_name  = nullptr;
-lv_obj_t *s_big       = nullptr;
-lv_obj_t *s_big_note  = nullptr;
-lv_obj_t *s_side      = nullptr;
+lv_obj_t *s_session   = nullptr;  // the part of the title after " - "
+lv_obj_t *s_place     = nullptr;
+lv_obj_t *s_count     = nullptr;  // how long until it
+lv_obj_t *s_count_note = nullptr;
 lv_obj_t *s_next      = nullptr;
-lv_obj_t *s_journey   = nullptr;
-lv_obj_t *s_after     = nullptr;  // the rest of the week, where the route is when there is one
-lv_obj_t *s_route     = nullptr;
-Stop      s_stop[POINTS];
-Ride      s_ride[travel::kLegsMax];
+lv_obj_t *s_after     = nullptr;  // the rest of the week
 std::int32_t s_page_h  = 0;
-std::int32_t s_route_h = 0;
 
-struct Choice {  // one of the ways there, to pick between
-    lv_obj_t *root = nullptr;
-    lv_obj_t *time = nullptr;
-    lv_obj_t *via  = nullptr;
-};
-Choice       s_choice[travel::kOptionsMax];
-lv_obj_t    *s_choices    = nullptr;
-lv_obj_t    *s_route_name = nullptr;  // over the route when there is nothing to pick
-
-std::int32_t s_day_lane_h = DAY_LANE_MIN_H;  // as tall as the card has room for
-bool         s_day_two    = false;
-lv_obj_t *s_day       = nullptr;
-lv_obj_t *s_day_track = nullptr;
-lv_obj_t *s_day_now   = nullptr;
-lv_obj_t *s_day_tick[DAY_TICKS];
-Block     s_day_block[DAY_BLOCKS];
-ical::Event s_day_event[DAY_BLOCKS];  // what each of the strip's blocks shows
-std::int32_t s_day_w = 0;
+lv_obj_t *s_foot      = nullptr;  // the way there, or the rest of the day
+lv_obj_t *s_foot_head = nullptr;
+lv_obj_t *s_leave     = nullptr;
+lv_obj_t *s_there     = nullptr;
+lv_obj_t *s_spare     = nullptr;
+lv_obj_t *s_leave_row = nullptr;
+Step      s_step[travel::kLegsMax];
+lv_obj_t *s_choices   = nullptr;  // the other times to leave
+lv_obj_t *s_choice[travel::kOptionsMax];
+Item      s_also[ALSO_ITEMS];       // the rest of the next event's day
 
 lv_obj_t *s_list = nullptr;
 Item      s_item[LIST_ITEMS];
@@ -236,7 +196,6 @@ std::int32_t s_grid_w = 0;
 std::int32_t s_grid_h = 0;
 
 std::int32_t s_title_w = 0;
-std::int32_t s_item_w  = 0;  // an overview entry's title
 
 void quiet(lv_obj_t *obj)
 {
@@ -433,35 +392,6 @@ const char *line_name(const char *line)
 // The backend writes a trip with changes as "SPR +1".
 constexpr char CHANGES_MARK[] = " +";
 
-void mode_of(const travel::Leg &leg, char *out, std::size_t size)
-{
-    const bool train = is_mode(leg.mode, "train");
-    const bool walk  = is_mode(leg.mode, "walk");
-    const int  mins  = minutes_rounded_up(leg.arrive - leg.depart);
-    // Not timed yet, only allowed for: said as about so long.
-    const char *about = leg.estimated ? "about " : "";
-    if (is_walk_or_bike(leg.mode)) {
-        std::snprintf(out, size, "%s, %s%d min", walk ? "Walk" : "Bike", about, mins);
-    } else if (train && leg.line[0] != '\0') {
-        char        kind[travel::kLineMax];
-        const char *plus    = std::strstr(leg.line, CHANGES_MARK);
-        const int   changes = plus != nullptr ? std::atoi(plus + std::strlen(CHANGES_MARK)) : 0;
-        std::snprintf(kind, sizeof(kind), "%.*s",
-                      static_cast<int>(plus != nullptr ? plus - leg.line : std::strlen(leg.line)),
-                      leg.line);
-        if (changes > 0) {
-            std::snprintf(out, size, "%s, %d min, %d change%s", line_name(kind), mins, changes,
-                          changes == 1 ? "" : "s");
-        } else {
-            std::snprintf(out, size, "%s, %d min", line_name(kind), mins);
-        }
-    } else if (leg.line[0] != '\0') {
-        std::snprintf(out, size, "Bus %s, %s%d min", leg.line, about, mins);
-    } else {
-        std::snprintf(out, size, "%s, %s%d min", train ? "Train" : "Bus", about, mins);
-    }
-}
-
 // The ways there still worth taking, latest first as the backend answers, and
 // the one on show: the best, which is the first that is not late, unless
 // another was picked by hand. A pick is held by when it leaves, so it stays
@@ -527,18 +457,6 @@ void pick_journey(bool wanted, std::int64_t now)
         s_going        = best_way();
     }
     order_ways_by_leaving();
-}
-
-// Where the train takes you, which is what tells one way from another: the
-// station a bus goes on from, or the one you walk from.
-const char *via_of(const travel::Option &way)
-{
-    for (int i = 0; i < way.leg_count; ++i) {
-        if (is_mode(way.legs[i].mode, "train")) {
-            return way.legs[i].to;
-        }
-    }
-    return way.leg_count > 0 ? way.legs[0].to : "";
 }
 
 // A tap on an event anywhere shows it whole: the strip and the week draw a
@@ -628,322 +546,11 @@ void tappable(lv_obj_t *block, const ical::Event *events, int index)
         LV_EVENT_CLICKED, const_cast<ical::Event *>(&events[index]));
 }
 
-// Without a route the event card keeps the column, its lines centred rather than
-// spread to the corners.
-bool         s_day_shown = false;
-std::int64_t s_day_until = 0;  // the end of the day the strip shows
-bool s_day_relayout = false;  // the strip needs drawing again at the card's size
-
-struct DayBounds {
-    std::int64_t from;
-    std::int64_t to;
-};
-
-DayBounds day_around(std::int64_t at)
-{
-    std::tm day = local(at);
-    day.tm_hour = day.tm_min = day.tm_sec = 0;
-    day.tm_isdst = -1;
-    const std::int64_t from = static_cast<std::int64_t>(std::mktime(&day));
-    day.tm_mday += 1;
-    day.tm_isdst = -1;
-    const std::int64_t to = static_cast<std::int64_t>(std::mktime(&day));
-    return {from, to};
-}
-
-// The hours of one day laid across the strip's width.
-struct DayScale {
-    std::int64_t from;
-    float        first;
-    float        last;
-    float        span;
-
-    float hour_at(std::int64_t at) const
-    {
-        return static_cast<float>(std::clamp<std::int64_t>(at - from, 0, units::kSecondsPerDay)) /
-               static_cast<float>(units::kSecondsPerHour);
-    }
-
-    std::int32_t x_of_hour(float hour) const
-    {
-        return static_cast<std::int32_t>((hour - first) / span * static_cast<float>(s_day_w));
-    }
-
-    std::int32_t x_of(std::int64_t at) const { return x_of_hour(hour_at(at)); }
-};
-
-DayScale scale_for(std::int64_t from, const ical::Event *events, int count)
-{
-    DayScale scale{from, WORKDAY_FIRST_HOUR, WORKDAY_LAST_HOUR, 0.0f};
-    for (int i = 0; i < count; ++i) {
-        scale.first = std::min(scale.first, std::floor(scale.hour_at(events[i].start)));
-        scale.last  = std::max(scale.last, std::ceil(scale.hour_at(events[i].end)));
-    }
-    scale.span = std::max(1.0f, scale.last - scale.first);
-    return scale;
-}
-
-std::int32_t day_ticks_h()
-{
-    return theme::type_label()->line_height + space::s;
-}
-
-int day_lane_count()
-{
-    return s_day_two ? DAY_LANES : 1;
-}
-
-void show_day_ticks(const DayScale &scale)
-{
-    const int step = scale.span > HOURLY_MARKS_MAX ? SPARSE_MARK_STEP : 1;
-    int       tick = 0;
-    char      text[40];
-    for (int h = static_cast<int>(scale.first); h <= static_cast<int>(scale.last) && tick < DAY_TICKS;
-         h += step) {
-        std::snprintf(text, sizeof(text), "%02d", h);
-        theme::set_text(s_day_tick[tick], text);
-        const std::int32_t at = scale.x_of_hour(static_cast<float>(h));
-        lv_obj_set_pos(s_day_tick[tick], std::clamp<std::int32_t>(at - TICK_LEAD, 0, s_day_w - TICK_DIGITS_W),
-                       0);
-        lv_obj_set_hidden(s_day_tick[tick++], false);
-    }
-    for (; tick < DAY_TICKS; ++tick) {
-        lv_obj_set_hidden(s_day_tick[tick], true);
-    }
-}
-
-void show_day_block(Block &block, const ical::Event &event, int lane, const DayScale &scale,
-                    const ical::Event &next, std::int64_t now)
-{
-    const std::int32_t x = scale.x_of(event.start);
-    const std::int32_t w = std::max<std::int32_t>(scale.x_of(event.end) - x - DAY_BLOCK_GAP, DAY_BLOCK_MIN_W);
-    lv_obj_set_pos(block.root, x, day_ticks_h() + lane * (s_day_lane_h + space::s));
-    lv_obj_set_size(block.root, w, s_day_lane_h);
-
-    const bool coming = event.start == next.start && std::strcmp(event.summary, next.summary) == 0;
-    const bool over   = event.end < now;
-    const auto ink    = feed_ink(event.feed);
-    lv_obj_set_style_bg_color(block.root,
-                              lv_color_mix(lv_color_hex(ink), lv_color_hex(theme::panel),
-                                           coming ? NEXT_BLOCK_MIX : DAY_BLOCK_MIX),
-                              0);
-    lv_obj_set_style_border_color(block.root, lv_color_hex(ink), 0);
-    lv_obj_set_style_opa(block.root, over ? LV_OPA_50 : LV_OPA_COVER, 0);
-
-    char text[40];
-    clock_of(event.start, text, sizeof(text));
-    theme::set_text(block.time, text);
-    theme::set_text(block.title, event.summary);
-    theme::set_text(block.place, place_of(event));
-    const std::int32_t text_w = w - BLOCK_TEXT_INSET;
-    lv_obj_set_width(block.time, text_w);
-    lv_obj_set_width(block.title, text_w);
-    lv_obj_set_width(block.place, text_w);
-    // A title in a sliver breaks every word apart; the time is enough there.
-    const std::int32_t line  = theme::type_label()->line_height;
-    const std::int32_t room  = s_day_lane_h - 2 * DAY_BLOCK_PAD_TOP - line;
-    const bool         wide  = w >= DAY_TIME_MIN_W;
-    const bool         words = w >= DAY_TITLE_MIN_W;
-    lv_obj_set_hidden(block.time, !wide);
-    lv_obj_set_hidden(block.title, !words || room < line);
-    fit_lines(block.title, text_w, std::max<std::int32_t>(1, room / line - 1));
-    lv_obj_set_hidden(block.place, !words || !has_place(event) || room < 2 * line);
-    lv_obj_set_hidden(block.root, false);
-}
-
-void show_day(const ical::Event *next, std::int64_t now)
-{
-    s_day_shown = false;
-    if (next == nullptr) {
-        return;
-    }
-    const DayBounds day = day_around(next->start);
-
-    static ical::Event events[DAY_BLOCKS];
-    const int count = ical::between(day.from, day.to, events, DAY_BLOCKS);
-    if (count == 0) {
-        return;
-    }
-    s_day_shown = true;
-    s_day_until = day.to;
-
-    const DayScale scale = scale_for(day.from, events, count);
-    show_day_ticks(scale);
-
-    std::int64_t lane_end[DAY_LANES] = {0, 0};
-    for (int i = 0; i < DAY_BLOCKS; ++i) {
-        if (i >= count) {
-            lv_obj_set_hidden(s_day_block[i].root, true);
-            continue;
-        }
-        const ical::Event &event = events[i];
-        s_day_event[i]           = event;
-        const int lane = event.start >= lane_end[0] ? 0 : 1;
-        lane_end[lane] = std::max(lane_end[lane], event.end);
-        show_day_block(s_day_block[i], event, lane, scale, *next, now);
-    }
-    s_day_two = lane_end[1] != 0;
-    const int          lanes   = day_lane_count();
-    const std::int32_t lanes_y = day_ticks_h();
-    const std::int32_t track_h = lanes_y + lanes * s_day_lane_h + (lanes - 1) * space::s;
-    lv_obj_set_height(s_day_track, track_h);
-
-    const bool today = now >= day.from && now < day.to && scale.hour_at(now) >= scale.first &&
-                       scale.hour_at(now) <= scale.last;
-    lv_obj_set_hidden(s_day_now, !today);
-    if (today) {
-        lv_obj_set_pos(s_day_now, scale.x_of(now) - NOW_LINE_W / 2, lanes_y);
-        lv_obj_set_height(s_day_now, track_h - lanes_y);
-    }
-}
-
-// The next event keeps the left, with the rest of its day under it when there
-// is one. The right is the way there while there is one to take, otherwise the
-// rest of the week.
-void place_left()
-{
-    const bool route = s_going != nullptr;
-    const bool day   = s_day_shown;
-    lv_obj_set_hidden(s_journey, !route);
-    lv_obj_set_hidden(s_after, route);
-    lv_obj_set_hidden(s_day, !day);
-    lv_obj_set_flex_align(s_next, day ? LV_FLEX_ALIGN_START : LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_set_height(s_next, day ? LV_SIZE_CONTENT : s_page_h);
-    if (!day) {
-        return;
-    }
-    lv_obj_update_layout(s_next);
-    const std::int32_t top = lv_obj_get_height(s_next) + space::m;
-    lv_obj_set_y(s_day, top);
-    lv_obj_set_height(s_day, s_page_h - top);
-    const std::int32_t inner = s_page_h - top - 2 * space::l;
-    const int          lanes = day_lane_count();
-    s_day_lane_h = std::clamp<std::int32_t>((inner - day_ticks_h() - (lanes - 1) * space::s) / lanes,
-                                            DAY_LANE_MIN_H, DAY_LANE_MAX_H);
-    s_day_relayout = true;
-}
-
-void show_choice(const Choice &choice, const travel::Option &way, std::int64_t starts)
-{
-    const bool on = &way == s_going;
-    lv_obj_set_state(choice.root, LV_STATE_CHECKED, on);
-    char text[16];
-    clock_of(way.leave, text, sizeof(text));
-    theme::set_text(choice.time, text);
-    theme::set_text_color(choice.time, way.cancelled ? theme::red : theme::text);
-    if (way.late && starts > 0) {
-        std::snprintf(text, sizeof(text), "%d min late", minutes_rounded_up(way.arrive - starts));
-        theme::set_text(choice.via, text);
-    } else {
-        theme::set_text(choice.via, via_of(way));
-    }
-    theme::set_text_color(choice.via, on          ? theme::text
-                                      : way.late ? theme::amber
-                                                 : theme::secondary);
-}
-
-// The ways there, side by side, when there is more than one to choose from.
-void show_choices(std::int64_t starts)
-{
-    const bool pick = s_way_count > 1;
-    lv_obj_set_hidden(s_choices, !pick);
-    lv_obj_set_hidden(s_route_name, pick);
-    for (int i = 0; i < travel::kOptionsMax; ++i) {
-        const bool real = pick && i < s_way_count;
-        lv_obj_set_hidden(s_choice[i].root, !real);
-        if (real) {
-            show_choice(s_choice[i], s_ways[s_way_order[i]], starts);
-        }
-    }
-
-    // The route takes what is left of the card, clear of the corner chip.
-    const std::int32_t head = pick ? CHOICE_H + space::l
-                                   : theme::type_label()->line_height + space::l;
-    lv_obj_set_y(s_route, head);
-    s_route_h = s_page_h - 2 * space::l - head - CHIP_CLEARANCE;
-    lv_obj_set_height(s_route, s_route_h);
-}
-
-struct RouteLayout {
-    std::int32_t pitch;
-    std::int32_t line;
-    std::int32_t rail_x;
-    std::int32_t text_x;
-};
-
-// Returns whether the note says the way arrives late.
-bool note_of(int stop, std::int64_t starts, char *out, std::size_t size)
-{
-    const int  legs   = s_going->leg_count;
-    const bool leaves = stop < legs;
-    // Walking or riding onto a train is not a change, nor getting off to walk on.
-    if (stop > 0 && leaves && !is_walk_or_bike(s_going->legs[stop - 1].mode) &&
-        !is_walk_or_bike(s_going->legs[stop].mode)) {
-        const int wait = whole_minutes(s_going->legs[stop].depart - s_going->legs[stop - 1].arrive);
-        std::snprintf(out, size, "change, %d min", wait);
-        return false;
-    }
-    if (!leaves && starts > 0) {
-        // Counted from being there, the walk at the far end and all, as the
-        // choices count late: from the last stop it said early and late at once.
-        const int spare = whole_minutes(starts - s_going->arrive);
-        if (spare >= 0) {
-            std::snprintf(out, size, "%d min before it starts", spare);
-        } else {
-            std::snprintf(out, size, "%d min late", -spare);
-        }
-        return spare < 0;
-    }
-    out[0] = '\0';
-    return false;
-}
-
 // Where the walk at the end goes, which the backend leaves to be named: the
 // room the event is in, or just there.
 const char *end_name(const char *place)
 {
     return place != nullptr && place[0] != '\0' ? place : "There";
-}
-
-void show_stop(int i, const RouteLayout &layout, std::int64_t starts, const char *place)
-{
-    const Stop &stop = s_stop[i];
-    const int   legs = s_going->leg_count;
-    const bool  real = i <= legs;
-    lv_obj_set_hidden(stop.node, !real);
-    lv_obj_set_hidden(stop.when, !real);
-    lv_obj_set_hidden(stop.name, !real);
-    lv_obj_set_hidden(stop.note, !real);
-    if (!real) {
-        return;
-    }
-    const std::int32_t y         = i * layout.pitch;
-    const bool         leaves    = i < legs;
-    const bool         ends      = i == 0 || i == legs;
-    const bool         cancelled = leaves && s_going->legs[i].cancelled;
-
-    lv_obj_set_pos(stop.node, layout.rail_x - NODE / 2, y + (layout.line - NODE) / 2);
-    lv_obj_set_style_bg_color(stop.node, lv_color_hex(ends ? theme::secondary : theme::panel_light),
-                              0);
-
-    char text[64];
-    clock_of(leaves ? s_going->legs[i].depart : s_going->legs[legs - 1].arrive, text,
-             sizeof(text));
-    theme::set_text(stop.when, text);
-    // A time only allowed for, not known, is said more quietly.
-    const bool guessed = leaves ? s_going->legs[i].estimated : s_going->legs[legs - 1].estimated;
-    theme::set_text_color(stop.when, cancelled ? theme::red : guessed ? theme::secondary : theme::text);
-    lv_obj_set_pos(stop.when, 0, y);
-
-    const char *last = s_going->legs[legs - 1].to;
-    theme::set_text(stop.name, leaves ? s_going->legs[i].from : last[0] != '\0' ? last : end_name(place));
-    lv_obj_set_pos(stop.name, layout.text_x, y);
-
-    const bool late = note_of(i, starts, text, sizeof(text));
-    theme::set_text(stop.note, text);
-    theme::set_text_color(stop.note, late ? theme::amber : theme::secondary);
-    lv_obj_set_pos(stop.note, layout.text_x, y + layout.line);
 }
 
 const lv_image_dsc_t *icon_of(const char *mode)
@@ -955,89 +562,6 @@ const lv_image_dsc_t *icon_of(const char *mode)
         return &icons::bike_icon;
     }
     return is_mode(mode, "train") ? &icons::train_icon : &icons::bus_icon;
-}
-
-void show_ride(int i, const RouteLayout &layout)
-{
-    const Ride &ride = s_ride[i];
-    const bool  real = i < s_going->leg_count;
-    lv_obj_set_hidden(ride.rail, !real);
-    lv_obj_set_hidden(ride.icon, !real);
-    lv_obj_set_hidden(ride.what, !real);
-    if (!real) {
-        return;
-    }
-    const travel::Leg &leg  = s_going->legs[i];
-    const std::int32_t top  = i * layout.pitch + layout.line / 2;
-    const bool         path = is_walk_or_bike(leg.mode);
-    const std::int32_t rail = path ? PATH_W : RAIL_W;
-    lv_obj_set_pos(ride.rail, layout.rail_x - rail / 2, top);
-    lv_obj_set_size(ride.rail, rail, layout.pitch);
-    lv_obj_set_style_bg_color(ride.rail, lv_color_hex(leg.cancelled ? theme::red : theme::panel),
-                              0);
-
-    const std::int32_t label_h = theme::type_label()->line_height;
-    const bool         noted   = lv_label_get_text(s_stop[i].note)[0] != '\0';
-    const std::int32_t mid     = top + ((noted ? label_h : 0) + layout.pitch) / 2;
-    lv_image_set_src(ride.icon, icon_of(leg.mode));
-    lv_obj_set_style_image_recolor(ride.icon,
-                                   lv_color_hex(leg.cancelled ? theme::red : theme::secondary), 0);
-    lv_obj_set_pos(ride.icon, layout.text_x, mid - icons::bus_icon.header.h / 2);
-
-    char text[64];
-    mode_of(leg, text, sizeof(text));
-    if (leg.cancelled) {
-        std::strncat(text, ", cancelled", sizeof(text) - std::strlen(text) - 1);
-    }
-    theme::set_text(ride.what, text);
-    theme::set_text_color(ride.what, leg.cancelled ? theme::red : theme::secondary);
-    lv_obj_set_pos(ride.what,
-                   layout.text_x + static_cast<std::int32_t>(icons::bus_icon.header.w) + space::s,
-                   mid - label_h / 2);
-}
-
-void show_journey(std::int64_t starts, const char *place)
-{
-    if (s_going == nullptr) {
-        return;
-    }
-    show_choices(starts);
-
-    RouteLayout layout{};
-    layout.line   = theme::type_body()->line_height;
-    layout.pitch  = std::min<std::int32_t>(
-        STOP_PITCH_MAX,
-        (s_route_h - layout.line - theme::type_label()->line_height) / std::max(s_going->leg_count, 1));
-    layout.rail_x = STOP_TIME_W + space::s + NODE / 2;
-    layout.text_x = layout.rail_x + NODE / 2 + space::m;
-
-    for (int i = 0; i < POINTS; ++i) {
-        show_stop(i, layout, starts, place);
-    }
-    for (int i = 0; i < travel::kLegsMax; ++i) {
-        show_ride(i, layout);
-    }
-}
-
-void show_nothing_next()
-{
-    lv_obj_set_hidden(s_kind_dot, true);
-    theme::set_text(s_kind, "");
-    theme::set_text(s_title, "Nothing coming up");
-    theme::set_text(s_meta, "");
-    theme::set_text(s_big_name, "");
-    theme::set_text(s_big, "");
-    theme::set_text(s_big_note, "");
-    theme::set_text(s_side, "");
-}
-
-void show_big_number(const char *name, const char *value, std::uint32_t colour, const char *note)
-{
-    theme::set_text(s_big_name, name);
-    theme::set_text(s_big, value);
-    theme::set_text_color(s_big, colour);
-    theme::set_text(s_big_note, note);
-    theme::set_text(s_side, "");
 }
 
 // What kind of event, and today, now, or which day: the line over its title.
@@ -1066,81 +590,351 @@ void meta_text(const ical::Event &event, char *out, std::size_t size)
     }
 }
 
+// A timetable's title is the course and the session, "Course - Session": each
+// gets a line of its own rather than both being cut off.
+void split_title(const char *summary, char *course, std::size_t course_size, char *session,
+                 std::size_t session_size)
+{
+    const char *dash = std::strstr(summary, " - ");
+    if (dash == nullptr) {
+        std::snprintf(course, course_size, "%s", summary);
+        session[0] = '\0';
+        return;
+    }
+    std::snprintf(course, course_size, "%.*s", static_cast<int>(dash - summary), summary);
+    std::snprintf(session, session_size, "%s", dash + 3);
+}
+
+bool is_digit(char c)
+{
+    return std::isdigit(static_cast<unsigned char>(c)) != 0;
+}
+
+bool is_upper(char c)
+{
+    return std::isupper(static_cast<unsigned char>(c)) != 0;
+}
+
+// An address as street and town: "Voorbeeldstraat 12 1234AB Plaats Nederland" is
+// Voorbeeldstraat 12, Plaats. A room is left as it is.
+void short_place(const char *place, char *out, std::size_t size)
+{
+    std::snprintf(out, size, "%s", place);
+    for (char *at = out; at[0] != '\0'; ++at) {
+        const bool postcode = (at == out || at[-1] == ' ') && is_digit(at[0]) && is_digit(at[1]) &&
+                              is_digit(at[2]) && is_digit(at[3]) && is_upper(at[4]) && is_upper(at[5]);
+        if (!postcode) {
+            continue;
+        }
+        char rest[64];
+        std::snprintf(rest, sizeof(rest), "%s", at + 6 + (at[6] == ' ' ? 1 : 0));
+        // The country after the town, whole or as far as the location was kept.
+        if (char *last = std::strrchr(rest, ' '); last != nullptr && std::strlen(last + 1) >= 2 &&
+                                                  (std::strncmp("Nederland", last + 1, std::strlen(last + 1)) == 0 ||
+                                                   std::strncmp("Netherlands", last + 1, std::strlen(last + 1)) == 0)) {
+            *last = '\0';
+        }
+        while (at > out && at[-1] == ' ') {
+            --at;
+        }
+        std::snprintf(at, size - static_cast<std::size_t>(at - out), ", %s", rest);
+        return;
+    }
+}
+
+// An event's line in a list: its course, and for a long one, until when.
+void list_title(const ical::Event &event, char *out, std::size_t size)
+{
+    char course[ical::kSummaryMax];
+    char session[ical::kSummaryMax];
+    split_title(event.summary, course, sizeof(course), session, sizeof(session));
+    if (event.end - event.start >= LONG_EVENT) {
+        char until[16];
+        clock_of(event.end, until, sizeof(until));
+        std::snprintf(out, size, "%s, until %s", course, until);
+    } else {
+        std::snprintf(out, size, "%s", course);
+    }
+}
+
+// And under it, the session and the place.
+void list_place(const ical::Event &event, char *out, std::size_t size)
+{
+    char course[ical::kSummaryMax];
+    char session[ical::kSummaryMax];
+    char place[64];
+    split_title(event.summary, course, sizeof(course), session, sizeof(session));
+    short_place(place_of(event), place, sizeof(place));
+    if (session[0] != '\0' && place[0] != '\0') {
+        std::snprintf(out, size, "%s, %s", session, place);
+    } else {
+        std::snprintf(out, size, "%s", session[0] != '\0' ? session : place);
+    }
+}
+
+void show_item_event(Item &item, const ical::Event &event, const char *note)
+{
+    char text[ical::kSummaryMax + 96];  // a title or a session with its place, whole
+    clock_of(event.start, text, sizeof(text));
+    lv_obj_set_hidden(item.time, false);
+    lv_obj_set_hidden(item.bar, false);
+    lv_obj_set_hidden(item.date, true);
+    theme::set_text(item.time, text);
+    lv_obj_set_style_bg_color(item.bar, lv_color_hex(feed_ink(event.feed)), 0);
+    list_title(event, text, sizeof(text));
+    theme::set_text(item.title, text);
+    theme::set_text_color(item.title, theme::text);
+    lv_obj_set_style_text_font(item.title, theme::type_body(), 0);
+    lv_obj_set_height(item.title, theme::type_body()->line_height);
+    if (note != nullptr) {
+        theme::set_text(item.place, note);
+    } else {
+        list_place(event, text, sizeof(text));
+        theme::set_text(item.place, text);
+    }
+    lv_obj_set_hidden(item.place, lv_label_get_text(item.place)[0] == '\0');
+    lv_obj_set_style_margin_top(item.root, 0, 0);
+    lv_obj_set_hidden(item.root, false);
+}
+
+// What else is on the next event's day, under it, a clash said in words.
+void show_also(const ical::Event *ahead, int count, std::int64_t now)
+{
+    const ical::Event &next  = ahead[0];
+    const int          day   = days_from(now, next.start);
+    int                shown = 0;
+    for (int i = 1; i < count && shown < ALSO_ITEMS; ++i) {
+        if (days_from(now, ahead[i].start) != day) {
+            break;
+        }
+        char note[96];
+        char place[64];
+        short_place(place_of(ahead[i]), place, sizeof(place));
+        const bool clash = ahead[i].start < next.end;
+        std::snprintf(note, sizeof(note), "%s%s%s%s", feed_kind(ahead[i].feed), place[0] != '\0' ? ", " : "", place,
+                      clash ? ", at the same time" : "");
+        show_item_event(s_also[shown++], ahead[i], note);
+    }
+    for (int i = shown; i < ALSO_ITEMS; ++i) {
+        lv_obj_set_hidden(s_also[i].root, true);
+    }
+    char name[24];
+    day_name(now, next.start, name, sizeof(name));
+    char head[40];
+    std::snprintf(head, sizeof(head), "Also %s%s", day <= 1 ? "" : "on ", name);
+    for (char *c = head; *c != '\0'; ++c) {
+        *c = static_cast<char>(std::toupper(static_cast<unsigned char>(*c)));
+    }
+    theme::set_text(s_foot_head, head);
+    lv_obj_set_hidden(s_foot, shown == 0);
+}
+
+// What to do at a step: the train and where it goes, or where to walk or ride to.
+void step_text(const travel::Leg &leg, bool last, const char *place, char *what, std::size_t what_size,
+               char *detail, std::size_t detail_size)
+{
+    const int   mins  = minutes_rounded_up(leg.arrive - leg.depart);
+    const char *about = leg.estimated ? "about " : "";
+    const char *to    = last ? end_name(place) : leg.to;
+    char        out_at[16];
+    clock_of(leg.arrive, out_at, sizeof(out_at));
+    if (is_walk_or_bike(leg.mode)) {
+        std::snprintf(what, what_size, "%s to %s", is_mode(leg.mode, "walk") ? "Walk" : "Bike", to);
+        std::snprintf(detail, detail_size, "%s%d min", about, mins);
+    } else {
+        char        kind[travel::kLineMax];
+        const char *plus = std::strstr(leg.line, CHANGES_MARK);
+        std::snprintf(kind, sizeof(kind), "%.*s",
+                      static_cast<int>(plus != nullptr ? plus - leg.line : std::strlen(leg.line)), leg.line);
+        if (is_mode(leg.mode, "train")) {
+            std::snprintf(what, what_size, "%s to %s", kind[0] != '\0' ? line_name(kind) : "Train", leg.to);
+        } else {
+            std::snprintf(what, what_size, "Bus%s%s to %s", kind[0] != '\0' ? " " : "", kind, leg.to);
+        }
+        const int changes = plus != nullptr ? std::atoi(plus + std::strlen(CHANGES_MARK)) : 0;
+        if (changes > 0) {
+            std::snprintf(detail, detail_size, "from %s, %d change%s, out at %s", leg.from, changes,
+                          changes == 1 ? "" : "s", out_at);
+        } else {
+            std::snprintf(detail, detail_size, "from %s, out at %s", leg.from, out_at);
+        }
+    }
+    if (leg.cancelled) {
+        std::snprintf(detail, detail_size, "cancelled");
+    }
+}
+
+// The other times to leave, a tap taking one.
+void show_choices(std::int64_t starts)
+{
+    const bool pick = s_way_count > 1;
+    lv_obj_set_hidden(s_choices, !pick);
+    for (int i = 0; i < travel::kOptionsMax; ++i) {
+        const bool real = pick && i < s_way_count;
+        lv_obj_set_hidden(s_choice[i], !real);
+        if (!real) {
+            continue;
+        }
+        const travel::Option &way = s_ways[s_way_order[i]];
+        char                  text[32];
+        clock_of(way.leave, text, sizeof(text));
+        if (way.late && starts > 0) {
+            const std::size_t at = std::strlen(text);
+            std::snprintf(text + at, sizeof(text) - at, ", %d min late", minutes_rounded_up(way.arrive - starts));
+        }
+        lv_obj_t *label = lv_obj_get_child(s_choice[i], 0);
+        theme::set_text(label, text);
+        const bool on = &way == s_going;
+        lv_obj_set_state(s_choice[i], LV_STATE_CHECKED, on);
+        theme::set_text_color(label, on            ? theme::text
+                                     : way.cancelled ? theme::red
+                                     : way.late      ? theme::amber
+                                                     : theme::secondary);
+    }
+}
+
+// The way there as what to do: when to leave, then each step.
+void show_journey(std::int64_t starts, const char *place)
+{
+    char text[64];
+    theme::set_text(s_foot_head, s_going->cancelled ? "LEAVE AT, CANCELLED" : "LEAVE AT");
+    clock_of(s_going->leave, text, sizeof(text));
+    theme::set_text(s_leave, text);
+    theme::set_text_color(s_leave, s_going->cancelled ? theme::red : theme::primary);
+    char there[sizeof(text) + 8];
+    clock_of(s_going->arrive, text, sizeof(text));
+    std::snprintf(there, sizeof(there), "there %s", text);
+    theme::set_text(s_there, there);
+    const int spare = whole_minutes(starts - s_going->arrive);
+    std::snprintf(text, sizeof(text), "%d min %s", spare >= 0 ? spare : -spare, spare >= 0 ? "early" : "late");
+    theme::set_text(s_spare, text);
+    theme::set_text_color(s_spare, spare >= 0 ? theme::green : theme::amber);
+
+    for (int i = 0; i < travel::kLegsMax; ++i) {
+        Step      &step = s_step[i];
+        const bool real = i < s_going->leg_count;
+        lv_obj_set_hidden(step.root, !real);
+        if (!real) {
+            continue;
+        }
+        const travel::Leg &leg = s_going->legs[i];
+        clock_of(leg.depart, text, sizeof(text));
+        theme::set_text(step.time, text);
+        theme::set_text_color(step.time, leg.cancelled   ? theme::red
+                                         : leg.estimated ? theme::secondary
+                                                         : theme::text);
+        lv_image_set_src(step.icon, icon_of(leg.mode));
+        lv_obj_set_style_image_recolor(step.icon, lv_color_hex(leg.cancelled ? theme::red : theme::text), 0);
+        char what[96];
+        char detail[96];
+        step_text(leg, i == s_going->leg_count - 1, place, what, sizeof(what), detail, sizeof(detail));
+        theme::set_text(step.what, what);
+        theme::set_text(step.detail, detail);
+        theme::set_text_color(step.detail, leg.cancelled ? theme::red : theme::secondary);
+    }
+    show_choices(starts);
+    lv_obj_set_hidden(s_foot, false);
+}
+
+// Under the next event: the way there while there is one, else the rest of its day.
+void show_foot(const ical::Event *ahead, int count, std::int64_t now)
+{
+    const bool way = s_going != nullptr && count > 0;
+    lv_obj_set_hidden(s_leave_row, !way);
+    for (Step &step : s_step) {
+        lv_obj_set_hidden(step.root, true);
+    }
+    lv_obj_set_hidden(s_choices, true);
+    for (Item &item : s_also) {
+        lv_obj_set_hidden(item.root, true);
+    }
+    if (way) {
+        show_journey(ahead[0].start, place_of(ahead[0]));
+        // A long route takes the session's line.
+        if (s_going->leg_count > 3) {
+            lv_obj_set_hidden(s_session, true);
+        }
+    } else if (count > 0) {
+        show_also(ahead, count, now);
+    } else {
+        lv_obj_set_hidden(s_foot, true);
+    }
+}
+
 void show_next(const ical::Event *first, std::int64_t now)
 {
     if (first == nullptr) {
-        show_nothing_next();
+        lv_obj_set_hidden(s_kind_dot, true);
+        theme::set_text(s_kind, "");
+        theme::set_text(s_title, "Nothing coming up");
+        fit_lines(s_title, s_title_w, TITLE_LINES_MAX);
+        lv_obj_set_hidden(s_session, true);
+        theme::set_text(s_meta, "");
+        theme::set_text(s_place, "");
+        theme::set_text(s_count, "");
+        theme::set_text(s_count_note, "");
         return;
     }
-
-    char       text[96];
-    const bool ongoing = first->start <= now;
+    char text[ical::kSummaryMax];
     lv_obj_set_hidden(s_kind_dot, false);
     lv_obj_set_style_bg_color(s_kind_dot, lv_color_hex(feed_ink(first->feed)), 0);
     kind_text(*first, now, text, sizeof(text));
     theme::set_text(s_kind, text);
-    theme::set_text(s_title, first->summary);
+
+    char session[ical::kSummaryMax];
+    split_title(first->summary, text, sizeof(text), session, sizeof(session));
+    theme::set_text(s_title, text);
     fit_lines(s_title, s_title_w, TITLE_LINES_MAX);
+    theme::set_text(s_session, session);
+    lv_obj_set_hidden(s_session, session[0] == '\0');
 
     char from[16];
     char to[16];
     clock_of(first->start, from, sizeof(from));
     clock_of(first->end, to, sizeof(to));
-    meta_text(*first, text, sizeof(text));
+    std::snprintf(text, sizeof(text), "%s \xe2\x80\x93 %s", from, to);
     theme::set_text(s_meta, text);
+    short_place(place_of(*first), text, sizeof(text));
+    theme::set_text(s_place, text);
 
-    // The big number is what to act on: leaving if there is a route, otherwise the
-    // start, or while it runs, the end.
     char span[32];
-    if (s_going != nullptr && !ongoing) {
-        clock_of(s_going->leave, text, sizeof(text));
-        span_of(now, s_going->leave, span, sizeof(span));
-        show_big_number(s_going->cancelled ? "Leave, cancelled" : "Leave", text,
-                        s_going->cancelled ? theme::red : theme::text, span);
-    } else if (ongoing) {
+    if (first->start <= now) {
         span_of(now, first->end, span, sizeof(span));
-        show_big_number("Ends", to, theme::text, span);
+        theme::set_text(s_count, "on now");
+        std::snprintf(text, sizeof(text), "until %s, %s", to, span);
+        theme::set_text(s_count_note, text);
     } else {
         span_of(now, first->start, span, sizeof(span));
-        show_big_number("Starts", from, theme::text, span);
+        theme::set_text(s_count, span);
+        theme::set_text(s_count_note, "");
     }
 }
 
-void show_day_heading(Item &head, const char *name, bool first)
+void show_day_heading(Item &head, std::int64_t now, std::int64_t at, bool first)
 {
-    lv_obj_set_hidden(head.dot, true);
+    char name[24];
+    day_name(now, at, name, sizeof(name));
+    const std::tm when = local(at);
+    char          date[16];
+    std::strftime(date, sizeof(date), "%e %b", &when);
     lv_obj_set_hidden(head.time, true);
+    lv_obj_set_hidden(head.bar, true);
+    lv_obj_set_hidden(head.place, true);
+    lv_obj_set_hidden(head.date, false);
     theme::set_text(head.title, name);
+    theme::set_text(head.date, date[0] == ' ' ? date + 1 : date);
     theme::set_text_color(head.title, theme::secondary);
     lv_obj_set_style_text_font(head.title, theme::type_label(), 0);
     lv_obj_set_height(head.title, theme::type_label()->line_height);
-    lv_obj_set_hidden(head.place, true);
     lv_obj_set_style_margin_top(head.root, first ? 0 : space::s, 0);
     lv_obj_set_hidden(head.root, false);
 }
 
-void show_list_event(Item &item, const ical::Event &event)
-{
-    char clock[16];
-    clock_of(event.start, clock, sizeof(clock));
-    lv_obj_set_hidden(item.dot, false);
-    lv_obj_set_style_bg_color(item.dot, lv_color_hex(feed_ink(event.feed)), 0);
-    lv_obj_set_hidden(item.time, false);
-    theme::set_text(item.time, clock);
-    theme::set_text(item.title, event.summary);
-    theme::set_text_color(item.title, theme::text);
-    lv_obj_set_style_text_font(item.title, theme::type_body(), 0);
-    fit_lines(item.title, s_item_w, TITLE_LINES_MAX);
-    theme::set_text(item.place, place_of(event));
-    lv_obj_set_hidden(item.place, !has_place(event));
-    lv_obj_set_style_margin_top(item.root, 0, 0);
-    lv_obj_set_hidden(item.root, false);
-}
-
 void show_nothing_listed(Item &none)
 {
-    lv_obj_set_hidden(none.dot, true);
     lv_obj_set_hidden(none.time, true);
+    lv_obj_set_hidden(none.bar, true);
+    lv_obj_set_hidden(none.date, true);
     theme::set_text(none.title, "Nothing else in the coming week");
     theme::set_text_color(none.title, theme::secondary);
     lv_obj_set_style_text_font(none.title, theme::type_body(), 0);
@@ -1149,31 +943,30 @@ void show_nothing_listed(Item &none)
     lv_obj_set_hidden(none.root, false);
 }
 
+// The coming seven days, rather than what is left of the calendar week, which
+// on a Friday is nothing; the next event's day is under it unless the way
+// there is.
 void show_list(const ical::Event *ahead, int count, std::int64_t now)
 {
-    // The coming seven days rather than what is left of the calendar week,
-    // which on a Friday is nothing.
     const std::int64_t week_end = now + SECONDS_PER_WEEK;
-    int used     = 0;
-    int last_day = -1;
-    // While the strip shows the next event's day, the list starts after it.
-    const std::int64_t skip_until = s_going == nullptr && s_day_shown ? s_day_until : 0;
+    const int          next_day = count > 0 ? days_from(now, ahead[0].start) : -1;
+    const bool         skip     = s_going == nullptr;
+    int                used     = 0;
+    int                last_day = -1;
     for (int i = 1; i < count && used < LIST_ITEMS && ahead[i].start < week_end; ++i) {
-        if (ahead[i].start < skip_until) {
+        const int day = days_from(now, ahead[i].start);
+        if (skip && day == next_day) {
             continue;
         }
-        const int day = days_from(now, ahead[i].start);
         if (day != last_day) {
             if (used + 1 >= LIST_ITEMS) {
                 break;  // a day's name with nothing under it
             }
-            char name[24];
-            day_name(now, ahead[i].start, name, sizeof(name));
-            const bool first = used == 0;
-            show_day_heading(s_item[used++], name, first);
+            show_day_heading(s_item[used], now, ahead[i].start, used == 0);
+            ++used;
             last_day = day;
         }
-        show_list_event(s_item[used++], ahead[i]);
+        show_item_event(s_item[used++], ahead[i], nullptr);
     }
     if (used == 0) {
         show_nothing_listed(s_item[used++]);
@@ -1181,7 +974,6 @@ void show_list(const ical::Event *ahead, int count, std::int64_t now)
     for (int i = used; i < LIST_ITEMS; ++i) {
         lv_obj_set_hidden(s_item[i].root, true);
     }
-
     lv_obj_update_layout(s_list);
 }
 
@@ -1360,11 +1152,17 @@ void show_week_block_words(const Block &block, const ical::Event &event, std::in
     theme::set_text(block.time, text);
     theme::set_text_color(block.time, over ? theme::secondary : theme::text);
     lv_obj_set_hidden(block.time, !timed);
-    theme::set_text(block.title, event.summary);
+    // The course alone, as the agenda has it: the session is a tap away.
+    char course[ical::kSummaryMax];
+    char session[ical::kSummaryMax];
+    split_title(event.summary, course, sizeof(course), session, sizeof(session));
+    theme::set_text(block.title, course);
     theme::set_text_color(block.title, over ? theme::secondary : theme::text);
 
     // The room under the title, when a line is left over for it.
-    const char        *where  = place_of(event);
+    char place[64];
+    short_place(place_of(event), place, sizeof(place));
+    const char        *where  = place;
     const std::int32_t spare  = std::max<std::int32_t>(1, (h - 2 * WEEK_BLOCK_PAD_TOP - line) / line);
     const bool         placed = words && where[0] != '\0' && spare >= TITLE_AND_PLACE_LINES;
     const std::int32_t lines  = placed ? std::min<std::int32_t>(spare - 1, TITLE_LINES_MAX) : spare;
@@ -1494,6 +1292,112 @@ void toggle_clicked(lv_event_t *)
     show_calendar();
 }
 
+void choice_clicked(lv_event_t *e)
+{
+    const auto index = static_cast<int>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e)));
+    if (index < s_way_count) {
+        s_picked_leave = s_ways[s_way_order[index]].leave;
+        show_calendar();
+    }
+}
+
+// A row of a list: the time, the event's colour, its title and place; or a
+// day's name with its date at the right.
+void build_item(Item &item, lv_obj_t *parent)
+{
+    const std::int32_t line = theme::type_body()->line_height;
+    item.root = row_of(parent, LV_SIZE_CONTENT, space::m);
+    lv_obj_set_flex_align(item.root, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    item.time = line_label(item.root, theme::text, theme::type_body());
+    lv_obj_set_width(item.time, TIME_W);
+    item.bar = bare(item.root);
+    lv_obj_set_size(item.bar, BAR_W, line + theme::type_label()->line_height);
+    lv_obj_set_style_radius(item.bar, BAR_W / 2, 0);
+    lv_obj_set_style_bg_opa(item.bar, LV_OPA_COVER, 0);
+    lv_obj_t *what = column_of(item.root, 0);
+    lv_obj_set_width(what, 0);
+    lv_obj_set_flex_grow(what, 1);
+    item.title = dotted_label(what, theme::text, theme::type_body());
+    lv_obj_set_width(item.title, LV_PCT(100));
+    item.place = line_label(what, theme::secondary, theme::type_label());
+    lv_obj_set_width(item.place, LV_PCT(100));
+    item.date = line_label(item.root, theme::secondary, theme::type_label());
+    lv_obj_set_hidden(item.root, true);
+}
+
+// One step of the way there: its time, what it is by, and what to do.
+void build_step(Step &step)
+{
+    step.root = row_of(s_foot, LV_SIZE_CONTENT, space::m);
+    step.time = line_label(step.root, theme::text, theme::type_body());
+    lv_obj_set_width(step.time, STEP_TIME_W);
+    lv_obj_t *tile = bare(step.root);
+    lv_obj_set_size(tile, STEP_ICON, STEP_ICON);
+    theme::style_panel(tile, theme::panel, theme::radius::control);
+    step.icon = lv_image_create(tile);
+    lv_obj_center(step.icon);
+    lv_obj_set_style_image_recolor_opa(step.icon, LV_OPA_COVER, 0);
+    quiet(step.icon);
+    lv_obj_t *words = column_of(step.root, 0);
+    lv_obj_set_width(words, 0);
+    lv_obj_set_flex_grow(words, 1);
+    step.what   = line_label(words, theme::text, theme::type_body());
+    lv_obj_set_width(step.what, LV_PCT(100));
+    step.detail = line_label(words, theme::secondary, theme::type_label());
+    lv_obj_set_width(step.detail, LV_PCT(100));
+    lv_obj_set_hidden(step.root, true);
+}
+
+void build_choices()
+{
+    s_choices = row_of(s_foot, CHOICE_CHIP_H, space::s);
+    lv_obj_t *lead = line_label(s_choices, theme::secondary, theme::type_label());
+    theme::set_text(lead, "Or leave at");
+    for (int i = 0; i < travel::kOptionsMax; ++i) {
+        lv_obj_t *chip = lv_button_create(s_choices);
+        theme::style_button(chip, theme::panel);
+        theme::fill_accent(chip, LV_STATE_CHECKED);
+        lv_obj_set_size(chip, LV_SIZE_CONTENT, CHOICE_CHIP_H);
+        lv_obj_set_style_radius(chip, theme::radius::pill, 0);
+        lv_obj_set_style_pad_hor(chip, space::m, 0);
+        lv_obj_t *label = line_label(chip, theme::secondary, theme::type_label());
+        lv_obj_center(label);
+        lv_obj_add_event_cb(chip, choice_clicked, LV_EVENT_CLICKED,
+                            reinterpret_cast<void *>(static_cast<std::intptr_t>(i)));
+        s_choice[i] = chip;
+    }
+    lv_obj_set_hidden(s_choices, true);
+}
+
+// Under the next event, set off by a line: the way there, or the rest of its day.
+void build_foot()
+{
+    s_foot = column_of(s_next, space::s);
+    lv_obj_set_style_border_side(s_foot, LV_BORDER_SIDE_TOP, 0);
+    lv_obj_set_style_border_width(s_foot, 1, 0);
+    lv_obj_set_style_border_color(s_foot, lv_color_hex(theme::panel), 0);
+    lv_obj_set_style_pad_top(s_foot, space::m, 0);
+    s_foot_head = theme::make_eyebrow(s_foot, "");
+    quiet(s_foot_head);
+
+    s_leave_row = row_of(s_foot, LV_SIZE_CONTENT, space::m);
+    lv_obj_set_flex_align(s_leave_row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
+    s_leave = line_label(s_leave_row, theme::primary, theme::type_display());
+    lv_obj_t *there = column_of(s_leave_row, 0);
+    lv_obj_set_width(there, LV_SIZE_CONTENT);
+    lv_obj_set_flex_align(there, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
+    s_there = line_label(there, theme::text, theme::type_value());
+    s_spare = line_label(there, theme::green, theme::type_label());
+
+    for (Step &step : s_step) {
+        build_step(step);
+    }
+    build_choices();
+    for (Item &item : s_also) {
+        build_item(item, s_foot);
+    }
+}
+
 void build_next_card(std::int32_t left_w)
 {
     s_next = theme::make_card(s_overview);
@@ -1510,70 +1414,30 @@ void build_next_card(std::int32_t left_w)
 
     s_title = dotted_label(s_next, theme::text, theme::type_title());
     lv_obj_set_width(s_title, LV_PCT(100));
+    s_session = line_label(s_next, theme::secondary, theme::type_body());
+    lv_obj_set_width(s_session, LV_PCT(100));
 
-    s_meta = line_label(s_next, theme::secondary, theme::type_body());
+    // When and where on the left, how long until it on the right.
+    lv_obj_t *when = row_of(s_next, LV_SIZE_CONTENT, space::m);
+    lv_obj_set_style_margin_top(when, space::m, 0);
+    lv_obj_set_flex_align(when, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
+    lv_obj_t *at = column_of(when, 0);
+    lv_obj_set_width(at, 0);
+    lv_obj_set_flex_grow(at, 1);
+    s_meta  = line_label(at, theme::text, theme::type_value());
     lv_obj_set_width(s_meta, LV_PCT(100));
+    s_place = line_label(at, theme::secondary, theme::type_label());
+    lv_obj_set_width(s_place, LV_PCT(100));
+    lv_obj_t *until = column_of(when, 0);
+    lv_obj_set_width(until, LV_SIZE_CONTENT);
+    lv_obj_set_flex_align(until, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
+    s_count      = line_label(until, theme::text, fonts::size_32());
+    s_count_note = line_label(until, theme::secondary, theme::type_label());
 
-    lv_obj_t *spread = bare(s_next);
-    lv_obj_set_size(spread, 1, space::l);
-
-    lv_obj_t *numbers = row_of(s_next, LV_SIZE_CONTENT, space::xl);
-    lv_obj_set_flex_align(numbers, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
-    lv_obj_t *big = column_of(numbers, 0);
-    lv_obj_set_width(big, LV_SIZE_CONTENT);
-    s_big_name = line_label(big, theme::secondary, theme::type_label());
-    s_big      = line_label(big, theme::text, theme::type_display());
-    lv_obj_t *side = column_of(numbers, 0);
-    lv_obj_set_width(side, LV_SIZE_CONTENT);
-    s_big_note = line_label(side, theme::text, theme::type_value());
-    s_side     = line_label(side, theme::secondary, theme::type_body());
-    lv_obj_set_style_margin_bottom(side, BASELINE_LIFT, 0);
-}
-
-void choice_clicked(lv_event_t *e)
-{
-    const auto index = static_cast<int>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e)));
-    if (index < s_way_count) {
-        s_picked_leave = s_ways[s_way_order[index]].leave;
-        show_calendar();
-    }
-}
-
-void build_choices(std::int32_t route_w)
-{
-    s_choices = row_of(s_journey, CHOICE_H, space::s);
-    for (int i = 0; i < travel::kOptionsMax; ++i) {
-        Choice &choice = s_choice[i];
-        choice.root    = lv_button_create(s_choices);
-        theme::style_button(choice.root, theme::panel);
-        theme::fill_accent(choice.root, LV_STATE_CHECKED);
-        lv_obj_set_height(choice.root, CHOICE_H);
-        lv_obj_set_flex_grow(choice.root, 1);
-        lv_obj_set_flex_flow(choice.root, LV_FLEX_FLOW_COLUMN);
-        lv_obj_set_flex_align(choice.root, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
-                              LV_FLEX_ALIGN_CENTER);
-        choice.time = line_label(choice.root, theme::text, theme::type_value());
-        choice.via  = line_label(choice.root, theme::secondary, theme::type_label());
-        lv_obj_set_width(choice.via, (route_w - 2 * space::s) / travel::kOptionsMax - space::s);
-        lv_obj_set_style_text_align(choice.via, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_add_event_cb(choice.root, choice_clicked, LV_EVENT_CLICKED,
-                            reinterpret_cast<void *>(static_cast<std::intptr_t>(i)));
-    }
-}
-
-void build_journey_card(std::int32_t x, std::int32_t route_w)
-{
-    s_journey = theme::make_card(s_overview);
-    lv_obj_set_pos(s_journey, x, 0);
-    lv_obj_set_size(s_journey, LIST_W, s_page_h);
-    lv_obj_set_hidden(s_journey, true);
-    quiet(s_journey);
-
-    s_route_name = theme::make_eyebrow(s_journey, "THE WAY THERE");
-    build_choices(route_w);
-
-    s_route = bare(s_journey);
-    lv_obj_set_size(s_route, route_w, s_page_h - 2 * space::l);
+    lv_obj_t *give = bare(s_next);  // the foot at the card's bottom
+    lv_obj_set_size(give, 1, 1);
+    lv_obj_set_flex_grow(give, 1);
+    build_foot();
 }
 
 lv_obj_t *event_block(lv_obj_t *parent, std::int32_t radius, std::int32_t pad_top)
@@ -1588,82 +1452,7 @@ lv_obj_t *event_block(lv_obj_t *parent, std::int32_t radius, std::int32_t pad_to
     return block;
 }
 
-void build_day_strip(std::int32_t left_w)
-{
-    s_day = theme::make_card(s_overview);
-    lv_obj_set_pos(s_day, 0, EVENT_H + space::m);
-    lv_obj_set_size(s_day, left_w, s_page_h - EVENT_H - space::m);
-    lv_obj_set_hidden(s_day, true);
-    quiet(s_day);
-    s_day_w     = left_w - 2 * space::l;
-    s_day_track = bare(s_day);
-    lv_obj_set_size(s_day_track, s_day_w, DAY_LANES * DAY_LANE_MIN_H);
-    for (lv_obj_t *&tick : s_day_tick) {
-        tick = line_label(s_day_track, theme::secondary, theme::type_label());
-        lv_obj_set_width(tick, TICK_W);
-    }
-    for (Block &block : s_day_block) {
-        block.root = event_block(s_day_track, theme::radius::row, DAY_BLOCK_PAD_TOP);
-        lv_obj_set_flex_flow(block.root, LV_FLEX_FLOW_COLUMN);
-        block.time  = line_label(block.root, theme::text, theme::type_label());
-        block.title = dotted_label(block.root, theme::text, theme::type_label());
-        block.place = line_label(block.root, theme::secondary, theme::type_label());
-        lv_obj_set_hidden(block.root, true);
-        tappable(block.root, s_day_event, static_cast<int>(&block - s_day_block));
-    }
-    s_day_now = bare(s_day_track);
-    lv_obj_set_width(s_day_now, NOW_LINE_W);
-    lv_obj_set_style_bg_opa(s_day_now, LV_OPA_COVER, 0);
-    theme::fill_accent(s_day_now);
-}
-
-void build_route(std::int32_t route_w)
-{
-    for (Ride &ride : s_ride) {  // first, so the stops sit on top of the line
-        ride.rail = bare(s_route);
-        lv_obj_set_size(ride.rail, RAIL_W, 0);
-        lv_obj_set_style_bg_opa(ride.rail, LV_OPA_COVER, 0);
-        ride.icon = lv_image_create(s_route);
-        lv_obj_set_style_image_recolor_opa(ride.icon, LV_OPA_COVER, 0);
-        quiet(ride.icon);
-        ride.what = line_label(s_route, theme::secondary, theme::type_label());
-        lv_obj_set_width(ride.what, route_w - STOP_TIME_W - RIDE_TEXT_TRIM);
-    }
-    for (Stop &stop : s_stop) {
-        stop.node = bare(s_route);
-        lv_obj_set_size(stop.node, NODE, NODE);
-        lv_obj_set_style_radius(stop.node, LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_bg_opa(stop.node, LV_OPA_COVER, 0);
-        lv_obj_set_style_border_width(stop.node, NODE_BORDER_W, 0);
-        lv_obj_set_style_border_color(stop.node, lv_color_hex(theme::secondary), 0);
-        stop.when = line_label(s_route, theme::text, theme::type_body());
-        lv_obj_set_width(stop.when, STOP_TIME_W);
-        stop.name = line_label(s_route, theme::text, theme::type_body());
-        lv_obj_set_width(stop.name, route_w - STOP_TIME_W - STOP_TEXT_TRIM);
-        stop.note = line_label(s_route, theme::secondary, theme::type_label());
-        lv_obj_set_width(stop.note, route_w - STOP_TIME_W - STOP_TEXT_TRIM);
-    }
-}
-
-void build_list_item(Item &item)
-{
-    const std::int32_t line = theme::type_body()->line_height;
-    item.root = row_of(s_list, LV_SIZE_CONTENT, space::s);
-    lv_obj_set_flex_align(item.root, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    item.dot = dot_of(item.root);
-    lv_obj_set_style_margin_top(item.dot, (line - DOT) / 2, 0);
-    item.time = line_label(item.root, theme::secondary, theme::type_body());
-    lv_obj_set_width(item.time, TIME_W);
-    lv_obj_t *what = column_of(item.root, 0);
-    lv_obj_set_width(what, 0);
-    lv_obj_set_flex_grow(what, 1);
-    item.title = dotted_label(what, theme::text, theme::type_body());
-    lv_obj_set_width(item.title, LV_PCT(100));
-    item.place = line_label(what, theme::secondary, theme::type_label());
-    lv_obj_set_width(item.place, LV_PCT(100));
-    lv_obj_set_hidden(item.root, true);
-}
-
+// The rest of the week as an agenda, clear of the corner chip.
 void build_coming_up(std::int32_t x)
 {
     s_after = theme::make_card(s_overview);
@@ -1671,11 +1460,9 @@ void build_coming_up(std::int32_t x)
     lv_obj_set_size(s_after, LIST_W, s_page_h);
     quiet(s_after);
 
-    theme::make_eyebrow(s_after, "COMING UP");
-    const std::int32_t list_y = theme::type_label()->line_height + space::l;
+    const std::int32_t list_h = s_page_h - 2 * space::l - theme::chip::size;
     s_list = column_of(s_after, space::s);
-    lv_obj_set_y(s_list, list_y);
-    lv_obj_set_height(s_list, s_page_h - 2 * space::l - list_y - theme::chip::size);
+    lv_obj_set_height(s_list, list_h);
     lv_obj_set_clickable(s_list, true);
     lv_obj_set_scrollable(s_list, true);
     lv_obj_set_scroll_dir(s_list, LV_DIR_VER);
@@ -1683,15 +1470,14 @@ void build_coming_up(std::int32_t x)
     lv_obj_set_style_bg_color(s_list, lv_color_hex(theme::secondary), LV_PART_SCROLLBAR);
     lv_obj_set_style_width(s_list, SCROLLBAR_W, LV_PART_SCROLLBAR);
     for (Item &item : s_item) {
-        build_list_item(item);
+        build_item(item, s_list);
     }
-    s_item_w = LIST_W - 2 * space::l - DOT - TIME_W - 2 * space::s;
 
     // The list scrolls on below; its last lines fade into the card, rather than
     // stop at a day's name whose events are out of sight.
     lv_obj_t *fade = lv_obj_create(s_after);
     lv_obj_set_size(fade, LIST_W - 2 * space::l, LIST_FADE_H);
-    lv_obj_set_pos(fade, 0, list_y + lv_obj_get_style_height(s_list, LV_PART_MAIN) - LIST_FADE_H);
+    lv_obj_set_pos(fade, 0, list_h - LIST_FADE_H);
     theme::style_panel(fade, theme::panel_light, 0);
     lv_obj_set_style_bg_main_opa(fade, LV_OPA_TRANSP, 0);
     lv_obj_set_style_bg_grad_color(fade, lv_color_hex(theme::panel_light), 0);
@@ -1704,15 +1490,8 @@ void build_overview(lv_obj_t *parent, std::int32_t width, std::int32_t height)
     s_overview = bare(parent);
     lv_obj_set_size(s_overview, width, height);
     s_page_h = height;
-
-    const std::int32_t left_w  = width - LIST_W - space::m;
-    const std::int32_t right_x = width - LIST_W;
-    const std::int32_t route_w = LIST_W - 2 * space::l;
-    build_next_card(left_w);
-    build_journey_card(right_x, route_w);
-    build_day_strip(left_w);
-    build_route(route_w);
-    build_coming_up(right_x);
+    build_next_card(width - LIST_W - space::m);
+    build_coming_up(width - LIST_W);
 }
 
 void build_week_heads(std::int32_t day_head_h)
@@ -1857,12 +1636,7 @@ void show_calendar()
 
     pick_journey(want, now);
     show_next(next, now);
-    show_day(next, now);
-    place_left();
-    if (std::exchange(s_day_relayout, false)) {
-        show_day(next, now);
-    }
-    show_journey(next != nullptr ? next->start : 0, next != nullptr ? place_of(*next) : "");
+    show_foot(ahead, count, now);
     if (s_detailed) {
         show_week(now);
     } else {
@@ -1933,7 +1707,11 @@ void show_tile()
         kind_text(next, now, text, sizeof(text));
     }
     theme::set_text(s_tile_kind, any ? text : "NEXT");
-    theme::set_text(s_tile_title, any ? next.summary : "Nothing coming up");
+    // The course alone, as the calendar's agenda has it.
+    char course[ical::kSummaryMax];
+    char session[ical::kSummaryMax];
+    split_title(any ? next.summary : "", course, sizeof(course), session, sizeof(session));
+    theme::set_text(s_tile_title, any ? course : "Nothing coming up");
     theme::set_text_color(s_tile_title, any ? theme::text : theme::secondary);
     fit_lines(s_tile_title, s_tile_w, 2);
     if (any) {
