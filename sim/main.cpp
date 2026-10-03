@@ -318,7 +318,8 @@ std::uint32_t ticks_past_splash()
 }
 
 // --page N opens page N; --press KEYS presses those keys, as "am" for Home
-// Assistant answering and music; --tap X,Y taps there, as often as given;
+// Assistant answering and music; --tap X,Y taps there, as often as given, and
+// --wait MS waits that long where it stands among them;
 // --swipe X1,Y1,X2,Y2 swipes from one to the other, after the taps;
 // --then KEYS presses those after the taps, as a notice over a view they opened;
 // --shot S saves a screenshot after S seconds and quits, to --out FILE if
@@ -331,7 +332,11 @@ struct Options {
     int         shot_s = -1;
     bool        splash = false;
     std::string keys;
-    std::vector<SDL_Point> taps;
+    struct Step {
+        SDL_Point     at{};
+        std::uint32_t wait_ms = 0;  // a wait rather than a tap
+    };
+    std::vector<Step> taps;
     std::vector<std::pair<SDL_Point, SDL_Point>> swipes;
     std::string then;
     int         pick_ft = -1;
@@ -360,12 +365,13 @@ Options options(int argc, char **argv)
         } else if (name == "--then") {
             o.then = value;
             ++i;
-        } else if (name == "--wait" && i + 1 < argc) {
-            o.taps.push_back({-1, std::atoi(argv[++i])});  // a pause between taps, in ms
+        } else if (name == "--wait") {
+            o.taps.push_back({{}, static_cast<std::uint32_t>(std::atoi(value))});
+            ++i;
         } else if (name == "--tap") {
             SDL_Point at{};
             if (std::sscanf(value, "%d,%d", &at.x, &at.y) == 2) {
-                o.taps.push_back(at);
+                o.taps.push_back({at});
             }
             ++i;
         } else if (name == "--swipe") {
@@ -476,11 +482,11 @@ int main(int argc, char **argv)
         ui::detail::select_page(opts.page);
         run_for(50);
     }
-    for (const SDL_Point &at : opts.taps) {
-        if (at.x < 0) {
-            run_for(static_cast<std::uint32_t>(at.y));
+    for (const Options::Step &step : opts.taps) {
+        if (step.wait_ms > 0) {
+            run_for(step.wait_ms);
         } else {
-            tap(at);
+            tap(step.at);
         }
     }
     for (const auto &[from, to] : opts.swipes) {

@@ -545,7 +545,7 @@ esp_err_t desk_page(httpd_req_t *req)
     if (!ota::authorised(req)) {
         return refuse(req);
     }
-    constexpr std::size_t TEXT_SIZE = 24 * 1024;
+    constexpr std::size_t TEXT_SIZE = 16 * 1024;  // 400 lines of 36
     static char *text = static_cast<char *>(heap_caps_malloc(TEXT_SIZE, MALLOC_CAP_SPIRAM));  // internal RAM is short
     if (text == nullptr) {
         return httpd_resp_sendstr(req, "no room\n");
@@ -556,12 +556,14 @@ esp_err_t desk_page(httpd_req_t *req)
     int n = 0;
     if (httpd_query_key_value(query, "tap", value, sizeof(value)) == ESP_OK) {
         const int preset = std::atoi(value);
-        if (preset >= 1 && preset <= 6 && lvgl_port_lock(STATS_LOCK_MS)) {
+        if (preset < 1 || preset > ui::kPresetCount) {
+            n = std::snprintf(text, TEXT_SIZE, "no such preset\n");
+        } else if (!lvgl_port_lock(PANEL_LOCK_MS)) {
+            n = std::snprintf(text, TEXT_SIZE, "screen busy\n");
+        } else {
             ui::desk_tap(preset - 1);
             lvgl_port_unlock();
             n = std::snprintf(text, TEXT_SIZE, "tapped preset %d\n", preset);
-        } else {
-            n = std::snprintf(text, TEXT_SIZE, "no such preset\n");
         }
     } else {
         n = desk::trace_text(text, TEXT_SIZE, std::strcmp(query, "clear") == 0);

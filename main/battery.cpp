@@ -17,7 +17,7 @@ namespace {
 constexpr char TAG[] = "battery";
 
 // Each reading adds its current to the charge counted, so they come often; the
-// rest, the charger and what the screen shows, only every CHECK_EVERY of them.
+// rest, the charger and the charge shown, only every CHECK_EVERY of them.
 constexpr int POLL_MS     = units::kMsPerSecond;
 constexpr int        CHECK_EVERY   = 30;
 
@@ -73,27 +73,39 @@ void steer_charger(const power::State &state, bool &topped_off)
     }
 }
 
-// What the screen was last told, and how many readings since have said otherwise.
-struct Shown {
+// What the screen was last told, and what the readings since have agreed on
+// otherwise, and how many of them in a row.
+struct Source {
     bool on_battery = false;
     bool charging   = false;
-    int  differing  = 0;
+    bool operator==(const Source &) const = default;
 };
-Shown s_shown;
+Source s_shown;
+Source s_seen;
+int    s_agreeing = 0;
+
+Source source_of(const power::State &state)
+{
+    return {state.on_battery, state.charging};
+}
 
 void tell_screen(const power::State &state)
 {
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_battery(state.present, state.percent, state.charging, state.on_battery));
-    s_shown = {state.on_battery, state.charging, 0};
+    s_shown    = source_of(state);
+    s_agreeing = 0;
 }
 
 bool power_source_moved(const power::State &state)
 {
-    if (state.on_battery == s_shown.on_battery && state.charging == s_shown.charging) {
-        s_shown.differing = 0;
+    const Source now = source_of(state);
+    if (now == s_shown) {
+        s_agreeing = 0;
         return false;
     }
-    return ++s_shown.differing >= AGREEING_READINGS;
+    s_agreeing = now == s_seen ? s_agreeing + 1 : 1;
+    s_seen     = now;
+    return s_agreeing >= AGREEING_READINGS;
 }
 
 jobs::Result poll()

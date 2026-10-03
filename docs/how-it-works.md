@@ -72,7 +72,7 @@ adds pages to the panel's web server, all asking for the update key.
 | `/jobs` | Each shared worker's jobs; `?poke=N` runs one now |
 | `/restart` | Why this run started, and what the last one left behind |
 | `/coredump` | The last crash, whole, for `idf.py coredump-info` with the build's ELF |
-| `/bench` | The fullscreen radar timed: whole frames, a tile, a trail growing, a zoom; `?rotate` the PPA, `?full` and `?back` leave it open and put it back; `?sheet` the desk's fold-out coming out, frame by frame |
+| `/bench` | The radar's map timed: whole frames, a tile, a trail growing, a zoom; `?rotate` the PPA, `?full` and `?back` leave it open and put it back; `?sheet` the desk's fold-out coming out, frame by frame |
 | `/desk` | What the desk heard and was asked lately, a line each with its milliseconds since boot; `?tap=N` taps preset N as a finger on its button would, `?clear` starts the trace over |
 | `/stall`, `/crash` | A held-off interrupt, a crash on purpose |
 
@@ -139,7 +139,7 @@ the portrait panel with the PPA is 42. So as little as possible is drawn
 again. There are three frame buffers, so a frame is drawn while the panel is
 still taking up the last, which it does a frame or two after it is asked to;
 each buffer is brought up to date only where it is behind, by the CPU, which
-copies PSRAM faster than the PPA. The fullscreen radar keeps track of which
+copies PSRAM faster than the PPA. The radar's map keeps track of which
 32 px tiles of its picture the planes and the trail were drawn into, puts the
 map back only there, and draws again only the tiles whose pixels changed; a
 trail growing redraws only where it runs.

@@ -174,16 +174,6 @@ void desk_go_to(int index)
     press(index);
 }
 
-}  // namespace ui::detail
-
-namespace ui {
-void desk_tap(int index)
-{
-    detail::desk_go_to(index);
-}
-}  // namespace ui
-
-namespace ui::detail {
 void lights_take(const char *label, const char *state, bool on)
 {
     copy(s_lights.label, sizeof(s_lights.label), label);
@@ -202,3 +192,8 @@ void lights_take_light(int index, const char *name, const char *state, bool on)
 }
 
 }  // namespace ui::detail
+
+void ui::desk_tap(int index)
+{
+    detail::desk_go_to(index);
+}

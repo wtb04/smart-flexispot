@@ -2,6 +2,18 @@
 
 The versions are the points where the panel was a step further on my desk. None of them is a stable release, it is still a project in progress.
 
+## Unreleased
+
+One frame for every page, with what is touched every day in it.
+
+- A dock at the side, right by default and left in Setup: the desk's height, which folds the rest of the desk out beside it, Stand and Sit, Home, and from its foot the focus timer, Radar and Calendar.
+- A control bar along the top: what plays, with play and pause and a small music view under it; the heating, which drops the thermostat; the lights, all at once or each when held; and the status, which opens Setup and shows an update arriving.
+- Cards that unfold from a corner and draw only what is newly shown, at the panel's full frame rate, and fold away by themselves.
+- Home is the air, the radar as its page had it, and what comes next; the Radar page is the map to its every edge.
+- The desk's presets act as the control box's own keys: one tapped while the desk moves stops it, and a start just after a stop waits until the box will take it.
+- The panel shows it has been unplugged or plugged in within two seconds.
+- `/desk` on a development build: what the desk heard and was asked, and a preset tapped from afar.
+
 ## v0.7.0, 30 September 2026
 
 Tested and built in CI.

@@ -62,7 +62,8 @@ SIM_ZOOM=0.75      # the window's scale, for a smaller screen
 
 `--page N` opens a page (0 Home to 3 Setup), `--press KEYS` presses keys as
 it starts, `am` for Home Assistant answering and music, `--tap X,Y` taps the
-screen there, as often as given, `--wait MS` pauses between taps, `--swipe X1,Y1,X2,Y2` swipes after the taps, `--shot S` saves a
+screen there, as often as given, `--wait MS` waits that long where it stands
+among the taps, `--swipe X1,Y1,X2,Y2` swipes after the taps, `--shot S` saves a
 screenshot after S seconds and quits, and `--splash` plays the twelve-second
 splash the panel boots with. `--pick-above FT` chooses the nearest airliner
 flying at least that high, and `--out2 FILE` saves a second screenshot a few

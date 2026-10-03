@@ -19,9 +19,15 @@
 #include <cstring>
 #include <cstdlib>
 
+#ifndef REMOTE_ENABLED
+#define REMOTE_ENABLED 0
+#endif
+
 namespace desk {
 namespace detail {
 namespace {
+// What the desk heard and was asked, for a development build's /desk page; in
+// PSRAM, made as the desk starts.
 struct TraceLine {
     std::uint32_t ms;
     const char   *what;
@@ -29,28 +35,25 @@ struct TraceLine {
     int           b;
 };
 constexpr int TRACE_LINES = 400;
-TraceLine    *s_trace = nullptr;  // in PSRAM, made on the first line: internal RAM is short
+TraceLine    *s_trace       = nullptr;
 int           s_trace_next  = 0;
 int           s_trace_count = 0;
 portMUX_TYPE  s_trace_lock  = portMUX_INITIALIZER_UNLOCKED;
+
+void start_trace()
+{
+    if (REMOTE_ENABLED) {
+        s_trace = static_cast<TraceLine *>(heap_caps_calloc(TRACE_LINES, sizeof(TraceLine), MALLOC_CAP_SPIRAM));
+    }
+}
 }  // namespace
 
 void trace(const char *what, int a, int b)
 {
-    const auto ms = static_cast<std::uint32_t>(xTaskGetTickCount() * portTICK_PERIOD_MS);
     if (s_trace == nullptr) {
-        auto *lines = static_cast<TraceLine *>(heap_caps_calloc(TRACE_LINES, sizeof(TraceLine), MALLOC_CAP_SPIRAM));
-        if (lines == nullptr) {
-            return;
-        }
-        portENTER_CRITICAL(&s_trace_lock);
-        if (s_trace == nullptr) {
-            s_trace = lines;
-            lines   = nullptr;
-        }
-        portEXIT_CRITICAL(&s_trace_lock);
-        heap_caps_free(lines);  // another task made it first
+        return;
     }
+    const auto ms = static_cast<std::uint32_t>(xTaskGetTickCount() * portTICK_PERIOD_MS);
     portENTER_CRITICAL(&s_trace_lock);
     s_trace[s_trace_next] = {ms, what, a, b};
     s_trace_next          = (s_trace_next + 1) % TRACE_LINES;
@@ -61,25 +64,24 @@ void trace(const char *what, int a, int b)
 
 int trace_text(char *out, std::size_t size, bool clear)
 {
-    static auto *copy = static_cast<detail::TraceLine *>(
-        heap_caps_calloc(detail::TRACE_LINES, sizeof(detail::TraceLine), MALLOC_CAP_SPIRAM));
-    if (copy == nullptr || detail::s_trace == nullptr) {
+    if (detail::s_trace == nullptr) {
         return 0;
     }
     portENTER_CRITICAL(&detail::s_trace_lock);
     const int count = detail::s_trace_count;
     const int first = (detail::s_trace_next - count + detail::TRACE_LINES) % detail::TRACE_LINES;
-    for (int i = 0; i < count; ++i) {
-        copy[i] = detail::s_trace[(first + i) % detail::TRACE_LINES];
-    }
     if (clear) {
         detail::s_trace_count = 0;
     }
     portEXIT_CRITICAL(&detail::s_trace_lock);
+    // A line at a time under the lock, so it is held only as long as a copy.
     int n = 0;
     for (int i = 0; i < count && n < static_cast<int>(size) - 1; ++i) {
-        n += std::snprintf(out + n, size - n, "%8u %-14s %6d %4d\n", static_cast<unsigned>(copy[i].ms), copy[i].what,
-                           copy[i].a, copy[i].b);
+        portENTER_CRITICAL(&detail::s_trace_lock);
+        const detail::TraceLine line = detail::s_trace[(first + i) % detail::TRACE_LINES];
+        portEXIT_CRITICAL(&detail::s_trace_lock);
+        n += std::snprintf(out + n, size - n, "%8u %-14s %6d %4d\n", static_cast<unsigned>(line.ms), line.what, line.a,
+                           line.b);
     }
     return std::min(n, static_cast<int>(size) - 1);
 }
@@ -288,21 +290,26 @@ void run_preset(const PresetCommand &cmd)
         return;
     }
 
+    // Any preset tapped while the panel steers the desk to one of its own stops
+    // it, as any of the box's keys stops the box's.
+    if (s_link->travelling()) {
+        detail::trace("let go", cmd.index + 1);
+        let_go();
+        return;
+    }
     const TickType_t now = xTaskGetTickCount();
     if (cmd.index >= deskproto::kBoxPresets) {
         if (s_preset_mm[cmd.index] < 0) {
             show_notice("Hold it to save the height it goes to", Tone::Hint, HINT_NOTICE_MS);
             return;
         }
-        if (s_link->travelling() && s_travel_index == cmd.index) {
-            let_go();  // tapping it again is how a travel is cancelled, as with the box's own
-            return;
-        }
         if (!travel_to(s_preset_mm[cmd.index])) {
             return;
         }
+        detail::trace("sent height", s_preset_mm[cmd.index]);
         s_travel_index = cmd.index;
     } else {
+        detail::trace("sent preset", cmd.index + 1);
         s_link->preset(cmd.index);
     }
     clear_active();
@@ -461,6 +468,7 @@ esp_err_t start(Link link, const View &view)
     s_preset_queue = presets;
 
     load_presets();
+    detail::start_trace();
 
     s_link = link == Link::Bluetooth ? &detail::bluetooth() : &detail::wire();
     ESP_LOGI(TAG, "driving the desk over %s", s_link->name());
