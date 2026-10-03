@@ -1,0 +1,148 @@
+# Getting started
+
+Everything to build the panel for your own desk, from the hardware to the first flash. What it does is in the [README](../README.md), and how it is put together inside in [how it works](how-it-works.md).
+
+## 1. Get the hardware
+
+- An M5Stack Tab5. Early units have an ESP32-P4 v1.x chip, which `sdkconfig.defaults` targets. Check yours with `esptool.py --port <port> chip_id`. Both display revisions (ILI9881C and ST7123) work.
+- A Flexispot with a supported control box (see [Will it work with my desk?](../README.md#will-it-work-with-my-desk)) and an RJ45 cable you do not mind cutting.
+- Optionally, any ESP32 as the companion.
+
+## 2. Connect the desk
+
+There are two ways to reach the control box. Either the Tab5 is wired to it directly, or a small ESP32 stays at the desk on the wire and the Tab5 talks to that over Bluetooth, so the panel can go anywhere in the room on its battery.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="diagrams/overview-dark.svg">
+  <img alt="Block diagram: the Tab5's ESP32-P4 and ESP32-C6, and the two links to the control box, a UART cable or Bluetooth to a companion" src="diagrams/overview-light.svg">
+</picture>
+
+> [!WARNING]
+> **The control box talks at 5 V and the Tab5's pins are 3.3 V**, with no level shifter anywhere on the M5-Bus ([measured here](https://github.com/iMicknl/LoctekMotion_IoT/issues/34)). People wire it directly and it works for them, but it is out of spec. A level shifter, or at least a series resistor on RX and the wake line, is cheap insurance.
+
+### Option 1: a cable to the Tab5
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="diagrams/wiring-1-dark.svg">
+  <img alt="Option 1 wiring: the Tab5's M5-Bus pins to RJ45 pins 4 to 7" src="diagrams/wiring-1-light.svg">
+</picture>
+
+### Option 2: over Bluetooth, with a companion
+
+The companion is an ESP32 DevKit V1 (30-pin) on a small carrier board of my own with an RJ45 jack. The board takes its power from the desk, shifts the box's 5 V signal down to 3.3 V for the ESP32, and lights the two LEDs in the jack for Bluetooth (`BT`) and the desk link (`LINK`).
+
+| Top | Bottom |
+|---|---|
+| ![The carrier board, top](../pcb/img/board-top.png) | ![The carrier board, bottom](../pcb/img/board-bottom.png) |
+
+![The carrier board in 3D, with the DevKit socket and the RJ45 jack](../pcb/img/board-3d.png)
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="diagrams/wiring-2-dark.svg">
+  <img alt="Option 2 wiring: the DevKit's pins, the carrier board's parts and the RJ45 jack" src="diagrams/wiring-2-light.svg">
+</picture>
+
+The two LEDs in the jack say how the companion is doing, so you can tell at a glance without a laptop:
+
+| LED | Solid | Blinking | Off |
+|---|---|---|---|
+| `BT`, yellow | the panel is connected | a short blink every 2 s: running, waiting for the panel | not running |
+| `LINK`, green | the control box answers | fast: bytes arrive but nothing decodes, so a wiring or baud fault | the box is silent |
+
+At start-up each LED blinks twice on its own and then both light together, which shows both work.
+
+<details>
+<summary>The schematic</summary>
+
+![The carrier board's schematic](../pcb/img/schematic.png)
+
+</details>
+
+Everything to have it made is in [pcb/](../pcb/): the KiCad project, the [schematic as a PDF](../pcb/fab/tab5-desk-ctrl-schematic.pdf), and the gerbers, BOM and placement files for JLCPCB.
+
+Flash `proxy/` onto the DevKit with `cd proxy && idf.py build flash monitor`. Its defaults are for the breadboard it was first built on, which had TX and RX the other way round, so for the board set `CONFIG_LOCTEK_TX_GPIO=17` and `CONFIG_LOCTEK_RX_GPIO=16` under `idf.py menuconfig`, *Loctek desk control*.
+
+## 3. Install ESP-IDF
+
+```sh
+brew install cmake ninja dfu-util python3
+mkdir -p ~/esp && cd ~/esp
+git clone -b v5.5.5 --recursive https://github.com/espressif/esp-idf.git
+cd esp-idf && ./install.sh esp32p4 esp32
+. ~/esp/esp-idf/export.sh     # in every new shell
+```
+
+`esp32` is only needed for the companion.
+
+## 4. Fill in your secrets
+
+Everything the panel talks to has a `*_secrets.example.h` template next to where its real one goes. Copy each to `*_secrets.h` in the same folder and fill in what you have. Anything left empty is just not started, so the desk alone works with no secrets at all.
+
+| File | What goes in it |
+|---|---|
+| `components/wifi/include/wifi_secrets.h` | Your Wi-Fi |
+| `components/hass/include/hass_secrets.h` | Home Assistant's address and a token, and the MQTT broker |
+| `components/jellyfin/include/jellyfin_secrets.h` | The Jellyfin server and an API key |
+| `components/ical/include/ical_secrets.h` | Your calendar feeds |
+| `components/travel/include/travel_secrets.h` | The journey planner and its key |
+| `components/ble/include/ble_secrets.h` | Your phone's Bluetooth identity key, for presence |
+| `components/ota/include/ota_secrets.h` | A key for updates over Wi-Fi |
+| `components/claude/include/claude_secrets.h` | A key for the laptops' Claude Code sessions, if you want them |
+
+## 5. Flash it
+
+Plug the Tab5 in over USB-C and:
+
+```sh
+idf.py build
+idf.py -p /dev/cu.usbmodem* flash monitor
+```
+
+Ctrl-] leaves the monitor. If the port does not show up, hold BOOT while plugging in.
+
+It boots into a splash that shows the desk, the network and Home Assistant coming up, and is on the home page in about ten seconds.
+
+Every CI run also keeps a `smart_flexispot-full.bin` that can be written at 0x0 without building anything:
+
+```sh
+esptool.py --chip esp32p4 -p /dev/cu.usbmodem* write_flash 0x0 smart_flexispot-full.bin
+```
+
+Those are built from the templates though, so they have no network: enough to try the screen and the desk, not the rest.
+
+## 6. Update over Wi-Fi
+
+After the first cable flash, neither board needs the cable again:
+
+```sh
+tools/ota.sh panel            # the panel, over Wi-Fi
+tools/ota.sh companion        # the companion, passed on by the panel over Bluetooth
+tools/ota.sh both             # both, companion first
+tools/ota.sh panel --now      # install right away instead of when you tap Update now
+```
+
+An update waits on the Setup page until you tap it, and is refused while the desk moves. A new firmware is on trial until it gets back on Wi-Fi. If it does not within three minutes, the panel goes back to the version before and tells you so.
+
+## 7. Claude Code on your laptops
+
+Optional. Each laptop needs `jq` and `curl`, which macOS has, and this repository's `tools/claude-hook`. In `~/.claude/settings.json`, give it the key from `claude_secrets.h` and run it on every event that changes what the panel shows; `async` keeps Claude Code from ever waiting on it:
+
+```json
+{
+  "env": { "CLAUDE_PANEL_KEY": "the key in claude_secrets.h" },
+  "hooks": {
+    "SessionStart":      [{ "hooks": [{ "type": "command", "command": "~/tab5-hello/tools/claude-hook", "async": true }] }],
+    "UserPromptSubmit":  [{ "hooks": [{ "type": "command", "command": "~/tab5-hello/tools/claude-hook", "async": true }] }],
+    "PreToolUse":        [{ "hooks": [{ "type": "command", "command": "~/tab5-hello/tools/claude-hook", "async": true }] }],
+    "PostToolUse":       [{ "hooks": [{ "type": "command", "command": "~/tab5-hello/tools/claude-hook", "async": true }] }],
+    "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "~/tab5-hello/tools/claude-hook", "async": true }] }],
+    "SubagentStart":     [{ "hooks": [{ "type": "command", "command": "~/tab5-hello/tools/claude-hook", "async": true }] }],
+    "SubagentStop":      [{ "hooks": [{ "type": "command", "command": "~/tab5-hello/tools/claude-hook", "async": true }] }],
+    "Stop":              [{ "hooks": [{ "type": "command", "command": "~/tab5-hello/tools/claude-hook", "async": true }] }],
+    "StopFailure":       [{ "hooks": [{ "type": "command", "command": "~/tab5-hello/tools/claude-hook", "async": true }] }],
+    "SessionEnd":        [{ "hooks": [{ "type": "command", "command": "~/tab5-hello/tools/claude-hook", "async": true }] }]
+  }
+}
+```
+
+It finds the panel at `smart-flexispot`, the name it gives the router; `CLAUDE_PANEL` in `env` points it elsewhere, and `CLAUDE_MACHINE` sets what the panel calls the laptop, its host name otherwise. Away from the panel's network it gives up after two seconds, unseen.
