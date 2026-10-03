@@ -162,8 +162,8 @@ void register_desk_control(lv_obj_t *obj);
 
 /** Stand and Sit as two small chips at x, y over a fullscreen view's root,
  *  which covers the dock; lit as the dock's are. */
-inline constexpr int kDeskShortcutButtons = 8;  // the dock's, and over the focus, music and cinema views
-lv_obj_t *add_desk_shortcuts(lv_obj_t *root, std::int32_t x, std::int32_t y,  // what holds them
+inline constexpr int kDeskShortcutButtons = 4;  // Stand and Sit: the dock's, and over the focus, music and cinema views
+lv_obj_t *add_desk_shortcuts(lv_obj_t *root, std::int32_t x, std::int32_t y,  // the button
                              std::uint32_t chip_colour);
 void paint_desk_shortcuts();
 /** A ring in the accent round a preset's button, breathing while the desk is on its way there. */

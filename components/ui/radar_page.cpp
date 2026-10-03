@@ -344,6 +344,7 @@ radar::Snapshot *s_last                        = nullptr;
 char             s_chosen[radar::kHexLen]      = {};
 bool             s_following                   = true;
 std::uint32_t    s_turn_began                  = 0;  // when the one followed was turned to
+bool             s_turns                       = false;  // there is another to turn to
 radar::Details   s_details                     = {};
 char             s_details_hex[radar::kHexLen] = {};
 char             s_picture_hex[radar::kHexLen] = {};  // whose photo s_picture is about
@@ -1519,21 +1520,29 @@ void follow_again()
     }
 }
 
-// Lit while it follows on its own; chosen by hand, faded, its ring filling over
-// the minute untouched after which it follows again; held, a pause sign.
+// Lit while it follows on its own, its ring in the accent filling over the
+// turn until the next; chosen by hand, faded, the ring filling over the minute
+// untouched after which it follows again; held, a pause sign.
 void paint_track()
 {
     if (s_track == nullptr) {
         return;
     }
-    lv_obj_set_hidden(s_track_ring, s_following || s_held);
+    lv_obj_set_hidden(s_track_ring, s_held || (s_following && !s_turns));
+    const lv_color_t ink = lv_color_hex(s_following ? theme::primary : theme::secondary);
+    if (!lv_color_eq(lv_obj_get_style_arc_color(s_track_ring, LV_PART_INDICATOR), ink)) {
+        lv_obj_set_style_arc_color(s_track_ring, ink, LV_PART_INDICATOR);
+    }
     lv_obj_set_hidden(s_track_mark, s_held);
     lv_obj_set_hidden(s_track_hold, !s_held);
     lv_obj_set_style_image_recolor(s_track_mark, lv_color_hex(s_following ? theme::primary : theme::secondary), 0);
     lv_obj_set_style_image_opa(s_track_mark, s_following ? static_cast<lv_opa_t>(LV_OPA_COVER) : theme::mark_opa, 0);
-    if (!s_following && !s_held) {
-        const std::uint32_t idle = std::min(lv_display_get_inactive_time(nullptr), REFOLLOW_MS);
-        const int           step = static_cast<int>(idle * TRACK_STEPS / REFOLLOW_MS);
+    if (!s_held) {
+        const std::uint32_t whole = s_following ? ROTATE_MS : REFOLLOW_MS;
+        const std::uint32_t gone  = std::min(s_following ? lv_tick_elaps(s_turn_began)
+                                                         : lv_display_get_inactive_time(nullptr),
+                                             whole);
+        const int           step  = static_cast<int>(static_cast<std::uint64_t>(gone) * TRACK_STEPS / whole);
         if (lv_arc_get_value(s_track_ring) != step) {
             lv_arc_set_value(s_track_ring, step);
         }
@@ -2383,6 +2392,7 @@ void follow_nearest()
     }
     int       ranked[ROTATE_KEEP];
     const int count = most_notable(ranked, ROTATE_KEEP);
+    s_turns         = count > 1;
     const int held  = plot_of(s_chosen);
     int       place = -1;  // of the held one among the ranked
     for (int i = 0; i < count && held >= 0; ++i) {

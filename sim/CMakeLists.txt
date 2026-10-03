@@ -88,15 +88,16 @@ endif()
 
 # `cmake --build sim/build --target screenshots`: the main views, offline and
 # the same each time, into sim/build/screenshots, as CI keeps them.
+# With the dock at the left, as the README's pictures have it.
 set(SCENES
     "home|--press amm --shot 2"
     "radar|--page 1 --shot 2"
     "calendar|--page 2 --shot 2"
-    "focus|--page 3 --shot 2"
-    "setup|--page 4 --shot 2"
-    "diagnostics|--page 4 --tap 800,310 --shot 3"
-    "cinema|--press amm --tap 1200,548 --shot 3"
-    "notice|--press amm --tap 1200,548 --then n --shot 4"
+    "focus|--press amm --tap 72,656 --shot 2"
+    "setup|--page 3 --shot 3"
+    "diagnostics|--page 3 --tap 704,400 --shot 3"
+    "cinema|--press amm --tap 870,46 --tap 1210,152 --shot 3"
+    "notice|--press amm --then n --shot 4"
     "splash|--splash --shot 5")
 set(SHOTS ${CMAKE_BINARY_DIR}/screenshots)
 set(SHOT_COMMANDS COMMAND ${CMAKE_COMMAND} -E make_directory ${SHOTS})
@@ -105,7 +106,7 @@ foreach(scene IN LISTS SCENES)
     list(GET parts 0 name)
     list(GET parts 1 args)
     separate_arguments(args UNIX_COMMAND "${args}")
-    list(APPEND SHOT_COMMANDS COMMAND ${CMAKE_COMMAND} -E env SIM_OFFLINE=1
+    list(APPEND SHOT_COMMANDS COMMAND ${CMAKE_COMMAND} -E env SIM_OFFLINE=1 SIM_DOCK=left
          $<TARGET_FILE:sim> ${args} --out ${SHOTS}/${name}.png)
 endforeach()
 add_custom_target(screenshots ${SHOT_COMMANDS}

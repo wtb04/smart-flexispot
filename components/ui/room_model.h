@@ -13,6 +13,7 @@ struct DeskState {
     bool available = true; // the desk answers, so its controls are worth tapping
     bool preset_active[kPresetCount] = {};  // the one it stands at, if any
     int  travelling = -1;  // the preset tapped and not yet reached, or -1
+    int  moving     = 0;   // 1 up, -1 down, 0 still: the height changing lately, by whichever keys
 };
 
 struct LightState {

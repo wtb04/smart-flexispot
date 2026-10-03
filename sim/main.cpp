@@ -29,8 +29,8 @@ namespace {
 constexpr int WIDTH  = 1280;
 constexpr int HEIGHT = 720;
 
-// As main/diagnostics.cpp lays out the Setup page's cards; their rows stay
-// "--" but for what the simulator knows.
+// As main/diagnostics.cpp lays out the Setup page's cards, which
+// hardware::diagnostics() fills from what the simulator plays and reads.
 constexpr const char *WIFI_ROWS[]     = {"Network", "Signal", "Address", "Channel", "MAC"};
 constexpr const char *HASS_ROWS[]     = {"Broker", "Socket", "Entities", "Cover art", "Last refused"};
 constexpr const char *PRESENCE_ROWS[] = {"Phone", "Signal", "Identity key", "Radio"};
@@ -298,6 +298,7 @@ ui::Handlers handlers()
 {
     ui::Handlers h{};
     h.move        = hardware::on_move;
+    h.diagnostics = hardware::diagnostics;
     h.preset      = hardware::on_preset;
     h.focus       = hardware::on_focus;
     h.focus_plan  = hardware::on_focus_plan;

@@ -25,4 +25,8 @@ void toggle_wifi();
 
 /** Whether Home Assistant answers, which the control bar shows beside Wi-Fi. */
 void set_home_assistant(bool up);
+
+/** Setup's diagnostics, as main/diagnostics.cpp fills them, from what is
+ *  played here and from the feeds the simulator really reads. */
+void diagnostics();
 }  // namespace hardware
