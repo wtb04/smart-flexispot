@@ -1478,6 +1478,9 @@ void range_clicked(lv_event_t *event)
     const int from = static_cast<int>(std::lround(shown_range_km()));
     s_range_step   = next;
     apply_range(from);
+    if (detail::s_handlers.radar_zoom != nullptr) {
+        detail::s_handlers.radar_zoom(RANGES[next]);
+    }
 }
 
 // Round chips in the card's corners, the same as the heating card's: a dot of
@@ -3533,6 +3536,17 @@ void radar_home_area(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int3
     s_home_h = h;
     // Away with the radar page while the phone is, as the feed stops then.
     detail::subscribe(detail::Topic::Page, detail::kNoView, [] { lv_obj_set_hidden(s_home_area, detail::owner_away()); });
+}
+
+void set_radar_range(int km)
+{
+    int nearest = INITIAL_RANGE_STEP;
+    for (int i = 0; i < RANGE_COUNT; ++i) {
+        if (std::abs(RANGES[i] - km) < std::abs(RANGES[nearest] - km)) {
+            nearest = i;
+        }
+    }
+    s_range_step = nearest;
 }
 
 }  // namespace ui
