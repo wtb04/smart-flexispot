@@ -9,13 +9,12 @@
 #include "focus_model.h"
 
 #include <cctype>
-#include <climits>
 #include <cstdio>
 #include <utility>
 
 // The dock at the panel's side: at its head the desk's height, which folds the
-// rest of the desk out beside it, then Stand and Sit; the tabs stand up from
-// its foot, Home lowest.
+// rest of the desk out beside it, then Stand and Sit, and Home under them; from
+// its foot the focus timer, then the other pages standing up.
 namespace ui::detail {
 namespace {
 constexpr std::int32_t DOCK_PAD      = 12;
@@ -29,7 +28,8 @@ constexpr std::int32_t HOME_APART  = 24;  // from Sit over it
 constexpr std::int32_t SHEET_PAD     = 28;
 constexpr std::int32_t SHEET_GAP     = 24;  // from the dock
 constexpr std::int32_t SHEET_BTN_GAP = 20;
-constexpr std::int32_t SHEET_INNER_W = DRAWER_W - 2 * SHEET_PAD;
+constexpr std::int32_t SHEET_W       = 520;
+constexpr std::int32_t SHEET_INNER_W = SHEET_W - 2 * SHEET_PAD;
 constexpr std::int32_t SHEET_COLS    = 2;
 constexpr std::int32_t SHEET_BTN_W   = (SHEET_INNER_W - (SHEET_COLS - 1) * SHEET_BTN_GAP) / SHEET_COLS;
 constexpr std::int32_t SHEET_BTN_H   = 112;
@@ -130,11 +130,9 @@ void paint_presets()
         lv_obj_t  *button = s_preset_buttons[index];
         const bool active = desk_state().preset_active[index];
         show_desk_travel(button, desk_state().travelling == index);
-        if (button == nullptr || lv_obj_has_state(button, LV_STATE_CHECKED) == active) {
-            continue;
+        if (button != nullptr) {
+            lv_obj_set_state(button, LV_STATE_CHECKED, active);
         }
-        lv_obj_set_state(button, LV_STATE_CHECKED, active);
-        theme::set_text_color(lv_obj_get_child(button, 0), theme::text);
     }
 }
 
@@ -183,7 +181,7 @@ Shortcuts *add_shortcuts(lv_obj_t *root, bool column, std::int32_t side, std::in
         auto *preset = reinterpret_cast<void *>(static_cast<std::intptr_t>(SHORTCUT_PRESETS[i]));
         lv_obj_add_event_cb(chip, preset_clicked_cb, LV_EVENT_SHORT_CLICKED, preset);
         if (column) {
-            // Held, it stores the height as the fold-out's do; over a view only taps.
+            // Held, it stores the height as the desk card's do; over a view only taps.
             lv_obj_add_event_cb(chip, preset_clicked_cb, LV_EVENT_LONG_PRESSED, preset);
         }
         register_desk_control(chip);
@@ -196,7 +194,7 @@ Shortcuts *add_shortcuts(lv_obj_t *root, bool column, std::int32_t side, std::in
 
 lv_obj_t   *s_tabs          = nullptr;  // the dock's column of tabs
 lv_obj_t   *s_head          = nullptr;  // the desk's, at the dock's head, and Home under it
-lv_obj_t   *s_focus_button  = nullptr;  // the timer, between the desk and the pages
+lv_obj_t   *s_focus_button  = nullptr;  // the timer, lowest in the dock
 lv_obj_t   *s_focus_mark    = nullptr;  // drawn while it is idle
 lv_obj_t   *s_focus_left    = nullptr;  // how long is left while it runs
 lv_obj_t   *s_dock_height   = nullptr;  // the height, at the dock's head
@@ -281,11 +279,12 @@ void build_focus_button(lv_obj_t *tabs)
     subscribe(Topic::Status, kNoView, paint_focus_button);
 }
 
-void show_dock_height(int tenths)
+// In centimetres, as the box's own display says it.
+void show_dock_height(int mm)
 {
     char text[12] = "--";
-    if (tenths >= 0) {
-        std::snprintf(text, sizeof(text), "%d.%d", tenths / 10, tenths % 10);
+    if (mm >= 0) {
+        std::snprintf(text, sizeof(text), "%d.%d", mm / 10, mm % 10);
     }
     theme::set_text(s_dock_height, text);
 }
@@ -396,11 +395,7 @@ void create_dock(lv_obj_t *parent)
     subscribe(Topic::Desk, kNoView, [] {
         paint_presets();
         paint_desk_shortcuts();
-        static int s_height_shown = INT_MIN;
-        const int  height         = desk_state().height_mm;
-        if (std::exchange(s_height_shown, height) != height) {
-            show_dock_height(height);
-        }
+        show_dock_height(desk_state().height_mm);
     });
 }
 
@@ -411,7 +406,7 @@ void open_desk_sheet(bool open)
 
 void create_desk_sheet(lv_obj_t *parent)
 {
-    s_sheet       = build_popout(s_desk, parent, DRAWER_W, SHEET_GAP, GAP, SHEET_IDLE_MS);
+    s_sheet       = build_popout(s_desk, parent, SHEET_W, SHEET_GAP, GAP, SHEET_IDLE_MS);
     s_desk.button = s_height_button;
     s_desk.above  = s_rail;
     // On the accent while out, the height on it in the text's colour.
@@ -481,7 +476,7 @@ namespace ui {
 namespace {
 constexpr std::int64_t BENCH_GIVE_UP_US = 2'000'000;
 
-// The fold-out coming or going as it does, each frame drawn as soon as its
+// The desk card coming or going as it does, each frame drawn as soon as its
 // animation has moved on.
 int time_fold(bool open, char *out, std::size_t size)
 {

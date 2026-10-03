@@ -78,7 +78,6 @@ constexpr const char *PRESET_NAMES[kPresetCount] = {
     "Preset 1", "Ultra low", "Stand", "Sit", "Sit 2", "Stand 2",
 };
 
-constexpr std::int32_t DRAWER_W  = 520;  // the desk's fold-out beside the dock
 
 constexpr int   DIAL_SCALE     = 10;
 constexpr float DEFAULT_STEP_C = 0.5f;
@@ -92,19 +91,14 @@ struct Pill {
     bool      shown  = false;
 };
 
-struct TextBox {
-    std::int32_t x;
-    std::int32_t w;
-};
-constexpr int PROGRESS_SCALE   = 10;  // bar units per second
 
 constexpr std::uint32_t PAUSE_SETTLE_MS = 1500;
 
-// The tabs, in the order they stand down the dock.
+// The pages, in the order the dock's tabs are made.
 constexpr int HOME_PAGE     = 0;
 constexpr int RADAR_PAGE    = 1;
 constexpr int CALENDAR_PAGE = 2;
-constexpr int SETUP_PAGE    = 3;  // opened from the top row's status
+constexpr int SETUP_PAGE    = 3;  // opened from the control bar's status
 constexpr int PAGE_COUNT    = 4;
 
 
@@ -115,7 +109,7 @@ constexpr int CHOICE_COUNT      = 2;
 constexpr int ORIENTATION_COUNT = static_cast<int>(Orientation::Auto) + 1;
 
 // The focus plan the panel shows until the timer reports one, and the limits
-// the Setup steppers keep it to, which the focus page is sized for.
+// the Setup steppers keep it to, which the fullscreen timer is sized for.
 constexpr int FOCUS_WORK_MIN_DEFAULT       = 25;
 constexpr int FOCUS_BREAK_MIN_DEFAULT      = 5;
 constexpr int FOCUS_LONG_BREAK_MIN_DEFAULT = 20;
@@ -165,7 +159,7 @@ extern lv_obj_t *s_diag_view;
 /** The focus plan as the timer has it, onto the settings that change it. */
 void paint_focus_plan(const Focus &focus);
 
-/** An update arriving or ready: the top row's icon, the dot on Setup and the
+/** An update arriving or ready: the control bar's icon, the dot on Setup and the
  *  tile that installs it. Each with the LVGL lock held. */
 void paint_update_icon(const UpdateState &state);
 /** The symbol for what is updating: the screen or companion arriving, or going on. */
@@ -184,8 +178,8 @@ void screen_off_cb(lv_event_t *);
 void register_desk_control(lv_obj_t *obj);
 
 /** Stand and Sit as two small chips at x, y over a fullscreen view's root,
- *  which covers the rail; lit as the rail's are. */
-inline constexpr int kDeskShortcutButtons = 10;  // the dock's, and over the radar, focus, music and cinema views
+ *  which covers the dock; lit as the dock's are. */
+inline constexpr int kDeskShortcutButtons = 8;  // the dock's, and over the focus, music and cinema views
 lv_obj_t *add_desk_shortcuts(lv_obj_t *root, std::int32_t x, std::int32_t y,  // what holds them
                              std::uint32_t chip_colour);
 void paint_desk_shortcuts();
@@ -221,7 +215,8 @@ void write_temperature(lv_obj_t *label, float celsius, bool with_unit);
 void paint_dial(Hvac state);
 void reflow_pills();
 std::uint32_t level_ink(Level level);
-/** The HK Citation One the music card shows while nothing plays, `side` square, painted once. */
+/** The HK Citation One the control bar's covers show while nothing plays,
+ *  `side` square, painted once at the size first asked for. */
 const lv_image_dsc_t *speaker_picture(std::int32_t side);
 void write_clock(lv_obj_t *label, int seconds);
 void build_home_page(lv_obj_t *page);
@@ -237,10 +232,8 @@ void open_favourites();
 // Jellyfin fullscreen: the film, its controls, the desk and the lights.
 void build_cinema(lv_obj_t *screen);
 void open_cinema();
-bool cinema_open();
 void build_music(lv_obj_t *screen);
 void open_music();
-bool music_open();
 // The time beside a fullscreen view's chip back, faded with its other buttons,
 // and the focus timer beside it while it runs, unless the view is the timer's.
 struct ViewClock {
@@ -264,7 +257,7 @@ lv_obj_t *add_chrome_chip(Chrome &chrome, const lv_image_dsc_t *icon, lv_event_c
 void      light_chrome_chip(lv_obj_t *chip, bool on);  // in the accent while on
 void show_guest_presets();
 void select_page(int index);
-/** Setup from the top row's status, and back to where it was opened from. */
+/** Setup from the control bar's status, and back to where it was opened from. */
 void toggle_setup();
 /** The owner's pages come and go with their phone, and with the setting that hides them. */
 void follow_pages();

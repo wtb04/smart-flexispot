@@ -98,7 +98,7 @@ using PrimaryHandler = void (*)(std::uint32_t colour);
  *  only asks; what that means for the backlight is the board's business. */
 using ScreenHandler = void (*)(bool on);
 
-/** True while the rail is against the right edge. */
+/** True while the dock is against the right edge. */
 using RailSideHandler = void (*)(bool right);
 
 /** True while the panel is hung the other way up. */
@@ -303,7 +303,7 @@ struct Handlers {
 };
 
 /** Requires the LVGL port to be running. A zero accent keeps the built-in
- *  colour; rail_right puts the rail against the right edge instead of the left.
+ *  colour; rail_right puts the dock against the right edge instead of the left.
  *  orientation only tells the page which choice to show; board::init() has
  *  already turned the display, and turns it again as the choice asks. */
 esp_err_t init(const Handlers &handlers, int initial_brightness, std::uint32_t accent,
@@ -393,20 +393,20 @@ esp_err_t set_update(const UpdateState &state);
 esp_err_t notify(const char *source, const char *title, const char *message, Level level,
                  int timeout_ms);
 
-/** A development build's: how long the radar takes to open fullscreen, draw,
- *  zoom and close, written to `out`. With the LVGL lock. */
+/** A development build's: how long the radar takes to go from Home to its page,
+ *  draw, zoom and go back, written to `out`. With the LVGL lock. */
 int bench_radar(char *out, std::size_t size);
 
-/** A development build's: the radar shown for bench_radar, with the phone away
- *  too, and whether its feed has answered yet. With the LVGL lock. */
+/** A development build's: Home shown with the radar for bench_radar, with the
+ *  phone away too, and whether its feed has answered yet. With the LVGL lock. */
 int bench_radar_open(char *out, std::size_t size);
 
-/** A development build's: the radar left open over the whole screen, running
- *  as it does, following the nearest aircraft; or, with `open` false, the
- *  screen put back as it was before. */
+/** A development build's: the radar page left open, running as it does,
+ *  following the nearest aircraft; or, with `open` false, the screen put back
+ *  as it was before. */
 int bench_radar_full(char *out, std::size_t size, bool open);
 int bench_radar_zoom_frame(char *out, std::size_t size);  // a zoom's frame, held until put back
-/** A development build's: what each frame of the desk's fold-out sliding costs. */
+/** A development build's: what each frame of the desk's card unfolding costs. */
 int bench_sheet(char *out, std::size_t size);
 
 /** A development build's: preset `index` tapped, as a finger on its button. With the LVGL lock. */

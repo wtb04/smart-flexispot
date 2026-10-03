@@ -2,7 +2,6 @@
 
 #include "media_model.h"
 #include "home_model.h"
-#include "room_model.h"
 #include "topics.h"
 
 #include "esp_heap_caps.h"
@@ -303,10 +302,6 @@ void build_pills(lv_obj_t *parent, std::int32_t w)
         pill = make_pill(strip);
     }
 }
-}  // namespace
-
-namespace {
-constexpr int SECONDS_PER_MINUTE = 60;
 
 // LV_LABEL_LONG_MODE_DOTS only truncates once the text exceeds the label's
 // height, and a label left at content height simply grows.
@@ -317,9 +312,6 @@ void one_line(lv_obj_t *label, const lv_font_t *font, std::int32_t width)
     lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_DOTS);
 }
 
-}  // namespace
-
-namespace {
 // Favourites, from the bar's play while nothing plays: a cover each with its
 // name, as many columns as there are favourites up to a row's worth.
 constexpr std::int32_t PICK_COLUMNS  = 4;
@@ -532,8 +524,8 @@ void write_clock(lv_obj_t *label, int seconds)
         seconds = 0;
     }
     char text[16];
-    std::snprintf(text, sizeof(text), "%d:%02d", seconds / SECONDS_PER_MINUTE,
-                  seconds % SECONDS_PER_MINUTE);
+    std::snprintf(text, sizeof(text), "%d:%02d", seconds / units::kSecondsPerMinute,
+                  seconds % units::kSecondsPerMinute);
     theme::set_text(label, text);
 }
 

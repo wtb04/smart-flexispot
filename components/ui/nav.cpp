@@ -12,16 +12,17 @@ lv_obj_t *s_nav_tabs[PAGE_COUNT] = {};
 
 struct NavItem {
     const char           *icon;
-    const char           *name;
     bool                  needs_presence;
     const lv_image_dsc_t *image = nullptr;  // drawn here, where the fonts have no glyph
 };
+// In the pages' order; Setup has no tab, the status opening it.
 constexpr NavItem NAV_ITEMS[PAGE_COUNT] = {
-    [HOME_PAGE]     = {LV_SYMBOL_HOME, "Home", false},
-    [RADAR_PAGE]    = {"", "Radar", true, &icons::plane_icon},
-    [CALENDAR_PAGE] = {"", "Calendar", true, &icons::calendar_icon},
-    [SETUP_PAGE]    = {LV_SYMBOL_SETTINGS, "Setup", false},
+    {LV_SYMBOL_HOME, false},
+    {"", true, &icons::plane_icon},
+    {"", true, &icons::calendar_icon},
+    {"", false},
 };
+static_assert(HOME_PAGE == 0 && RADAR_PAGE == 1 && CALENDAR_PAGE == 2 && SETUP_PAGE == 3);
 
 constexpr std::int32_t TAB_H    = 72;
 constexpr std::int32_t PAGE_PAD = 20;
@@ -52,7 +53,7 @@ void paint_tab(int index, bool active)
 {
     lv_obj_t *tab = s_nav_tabs[index];
     if (tab == nullptr) {
-        return;  // Setup has none: the top row's status opens it
+        return;  // Setup has none: the control bar's status opens it
     }
     lv_obj_set_state(tab, LV_STATE_CHECKED, active);
     const std::uint32_t ink  = active ? theme::text : theme::secondary;
@@ -76,7 +77,7 @@ void tell_page_opened(int index)
         show_calendar();
     }
     if (s_handlers.radar != nullptr) {
-        // Home's tile follows the sky as closely as the page does.
+        // Home's radar cards follow the sky as closely as the page does.
         s_handlers.radar(index == RADAR_PAGE || index == HOME_PAGE, page_available(RADAR_PAGE));
     }
 }
@@ -228,9 +229,6 @@ bool build_next_page()
 }
 
 
-}  // namespace ui::detail
-
-namespace ui::detail {
 void follow_pages()
 {
     const auto pages = [] {

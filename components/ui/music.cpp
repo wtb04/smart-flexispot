@@ -13,7 +13,6 @@
 // together, as the card's do, and how far it is glides rather than ticks.
 namespace ui::detail {
 namespace {
-constexpr std::int32_t PAD          = 40;
 constexpr std::int32_t COVER        = media::kLargeArtSize;
 constexpr std::int32_t COVER_RADIUS = 22;  // as the cinema view's still
 constexpr std::int32_t TEXT_GAP     = 72;
@@ -472,11 +471,6 @@ void build_music(lv_obj_t *screen)
     subscribe(Topic::Media, s_music, show_media);
     s_chrome = add_fullscreen_chrome(s_music, s_view, [](lv_event_t *) { close_music(); });
     paint(pages_palette());
-}
-
-bool music_open()
-{
-    return view_open(s_music);
 }
 
 void open_music()

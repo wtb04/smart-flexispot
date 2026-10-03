@@ -15,9 +15,9 @@
 
 // What every fullscreen view has over it: Stand and Sit at the left, the time
 // and the way back at the right, there while the screen is being touched; and
-// beside the time, the focus timer while it runs, there all the while. The
-// pages have the same row over them, with the network, the phone and any
-// update beside the time.
+// beside the time, the focus timer while it runs, there all the while. Over
+// the pages, the control bar's status: the time, the network, the phone, the
+// battery and any update, opening Setup.
 namespace ui::detail {
 namespace {
 constexpr std::int32_t  INSET     = 24;  // near the corners, leaving the middle to the view
@@ -134,9 +134,9 @@ void show_focus(const Clock &clock)
     lv_obj_set_style_opa(clock.badge, focus_paused(focus) ? PAUSED_OPA : static_cast<lv_opa_t>(LV_OPA_COVER), 0);
 }
 
-// The focus timer, as the tab shows it: its colour and how long is left, and a
+// The focus timer, as the dock's button shows it: its colour and how long is left, and a
 // tap opens it.
-void build_badge(Clock &clock, lv_obj_t *root, lv_event_cb_t on_click)
+void build_badge(Clock &clock, lv_obj_t *root)
 {
     clock.badge = lv_obj_create(root);
     theme::style_panel(clock.badge, theme::panel, theme::radius::pill);
@@ -148,7 +148,7 @@ void build_badge(Clock &clock, lv_obj_t *root, lv_event_cb_t on_click)
     lv_obj_set_style_pad_column(clock.badge, BADGE_GAP, 0);
     lv_obj_set_scrollable(clock.badge, false);
     lv_obj_set_ext_click_area(clock.badge, theme::space::s);
-    lv_obj_add_event_cb(clock.badge, on_click, LV_EVENT_CLICKED, nullptr);
+    lv_obj_add_event_cb(clock.badge, [](lv_event_t *) { open_focus_full(); }, LV_EVENT_CLICKED, nullptr);
     clock.dot = lv_obj_create(clock.badge);
     theme::style_panel(clock.dot, theme::primary, theme::radius::pill);
     lv_obj_set_size(clock.dot, BADGE_DOT, BADGE_DOT);
@@ -167,12 +167,9 @@ void build_badge(Clock &clock, lv_obj_t *root, lv_event_cb_t on_click)
     lv_obj_set_width(clock.badge, 2 * BADGE_PAD + BADGE_DOT + BADGE_GAP + widest);
     lv_obj_set_hidden(clock.badge, true);
 }
-}  // namespace
-
-namespace {
 constexpr std::int32_t SLOT_W           = 34;  // each of the status's marks, centred in one as wide
 constexpr std::int32_t SLOT_GAP         = 10;
-constexpr std::int32_t TAP_MARGIN       = 20;  // round the badge and the status, to be hit easily
+constexpr std::int32_t TAP_MARGIN       = 20;  // round the status, to be hit easily
 constexpr std::int32_t UPDATE_ICON_SIDE = 28;
 constexpr std::int32_t UPDATE_BAR_H     = 3;
 constexpr std::int32_t UPDATE_BAR_GAP   = 4;
@@ -265,8 +262,8 @@ void create_top_bar(lv_obj_t *parent)
     s_top_bar = lv_obj_create(parent);
     lv_obj_remove_style_all(s_top_bar);
     // The whole strip over the pages, from the screen's edge: LVGL looks for
-    // what a touch hit only inside its parent, so the room round the badge and
-    // the status takes taps only where the row reaches.
+    // what a touch hit only inside its parent, so the room round the slots
+    // and the status takes taps only where the row reaches.
     lv_obj_set_height(s_top_bar, CONTENT_Y);
     lv_obj_set_flex_flow(s_top_bar, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(s_top_bar, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -395,7 +392,7 @@ ViewClock add_view_clock(ViewId view, lv_obj_t *root, lv_obj_t *chip, bool focus
     build_power(clock, root);
     fade_when_idle(view, clock.power);
     if (focus_badge) {
-        build_badge(clock, root, [](lv_event_t *) { open_focus_full(); });
+        build_badge(clock, root);
     }
     subscribe(Topic::Status, view, [&clock] {
         show_power(clock);

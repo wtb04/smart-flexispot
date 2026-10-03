@@ -10,8 +10,8 @@
 #include "status_model.h"
 #include "topics.h"
 
-#ifndef SHOT_DRAWER
-#define SHOT_DRAWER 0
+#ifndef SHOT_DESK_CARD
+#define SHOT_DESK_CARD 0
 #endif
 #ifndef SHOT_ENABLED
 #define SHOT_ENABLED 0
@@ -135,7 +135,7 @@ void take_screenshots(lv_timer_t *timer)
     }
     if (++step < static_cast<int>(std::size(PAGES))) {
         select_page(PAGES[step]);
-        if (SHOT_DRAWER) {
+        if (SHOT_DESK_CARD) {
             open_desk_sheet(true);
         }
         lv_timer_set_period(timer, SHOT_PAGE_MS);

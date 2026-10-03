@@ -14,8 +14,8 @@
 
 // The timer fullscreen: a dial of ticks, one for every minute of the part,
 // round a flip clock's two leaves, with nothing else but how far it has got.
-// And a small card dropping from the top row's badge, with the time, how far
-// the part is, and what to do.
+// And a small card folding out of the dock, with the time, how far the part is,
+// and what to do.
 namespace ui {
 namespace {
 constexpr int TICKS_MAX  = detail::FOCUS_WORK_MIN_MAX;  // no part runs longer
@@ -384,9 +384,9 @@ void open_full()
     detail::open_view(s_full_view);
 }
 
-// The dial without its card, larger and on the background: the same ticks and
-// leaves, the part over them, and under them until when and the set's rounds.
-// The leaves pause and carry on, as on the page; the corner chip goes back.
+// A dial on the background: ticks round two leaves, the part over them, and
+// under them until when and the set's rounds. A tap on the leaves pauses and
+// carries on; the corner chip goes back.
 void build_full(lv_obj_t *screen)
 {
     const detail::Layout l = detail::layout();
@@ -422,7 +422,7 @@ void build_full(lv_obj_t *screen)
     }
 }
 
-// The card from the top row: what the part is, how long is left of it, until
+// The card from the dock: what the part is, how long is left of it, until
 // when and how far it has got, and the controls the fullscreen view has none of.
 constexpr std::int32_t POP_W      = 440;
 constexpr std::int32_t POP_PAD    = 24;
@@ -561,11 +561,6 @@ void on_focus()
 void open_focus_full()
 {
     open_full();
-}
-
-bool focus_full_open()
-{
-    return detail::view_open(s_full_view);
 }
 
 void toggle_focus_popout(lv_obj_t *button, lv_obj_t *dock, void (*lit)(bool open))

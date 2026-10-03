@@ -4,8 +4,9 @@
 
 #include <cstdint>
 
-// A card that unfolds from a corner over the screen, as the desk folds out of
-// the dock and the focus timer drops from the top row. It stays where it ends
+// A card that unfolds from a corner over the screen, as the desk and the focus
+// timer fold out of the dock and what plays, the heating and the lights drop
+// from the control bar. It stays where it ends
 // up while what shows of it grows across and down, so each frame draws only
 // what is newly shown or hidden; sliding a card drew all of it, and what it
 // passed over, on every frame. A tap anywhere else folds it away, and so does

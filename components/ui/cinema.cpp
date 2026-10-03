@@ -491,11 +491,6 @@ void build_cinema(lv_obj_t *screen)
     });
 }
 
-bool cinema_open()
-{
-    return view_open(s_cinema);
-}
-
 void open_cinema()
 {
     open_view(s_cinema);

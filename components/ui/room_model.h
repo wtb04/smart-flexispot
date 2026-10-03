@@ -2,7 +2,7 @@
 
 #include "ui.h"
 
-// The desk and the lights, as last told: what the rail, the home page and the
+// The desk and the lights, as last told: what the dock, the control bar and the
 // quick actions over the fullscreen views show. Updates come in through the
 // take_ functions, and a preset tapped through desk_go_to; each publishes
 // Topic::Desk or Topic::Lights. On the LVGL task only.

@@ -16,10 +16,9 @@
 // good, and says so in the same place when there is nothing to say.
 namespace ui::detail {
 namespace {
-constexpr std::int32_t BTN_H        = 56;  // a button inside a slot
 constexpr std::int32_t SLOT_PAD     = 10;
 constexpr std::int32_t SLOT_TAP     = BAR_GAP / 2;  // half the gap to the next slot, which takes the rest
-// With the timer and the status, as wide as the bar is with the battery and an
+// With the status beside them, as wide as the bar is with the battery and an
 // update both showing, so nothing ever runs off its end.
 constexpr std::int32_t MEDIA_W      = 440;
 constexpr std::int32_t HEAT_W       = 140;
@@ -80,8 +79,7 @@ lv_obj_t *one_line(lv_obj_t *parent, std::uint32_t ink, const lv_font_t *font, s
     return label;
 }
 
-// Under the slot, its edge level with the slot's on the page's side, unfolding
-// away from the dock as the timer's card does towards it.
+// Under the slot, from its edge away from the dock, unfolding towards the dock.
 void open_under(Popout &p, lv_obj_t *slot)
 {
     if (!p.open) {
@@ -401,7 +399,7 @@ void build_media_slot(lv_obj_t *bar)
     lv_obj_align(s_slot_play, LV_ALIGN_RIGHT_MID, 0, 0);
     lv_obj_add_event_cb(s_slot_play, play_clicked, LV_EVENT_CLICKED, nullptr);
 
-    // Where the text is, while an intro or the credits run: one tap, as Home's card had it.
+    // Where the text is, while an intro or the credits run: one tap.
     s_slot_skip = theme::make_button(s_media_slot, "Skip intro", theme::panel_light, theme::type_body());
     theme::fill_accent(s_slot_skip);
     lv_obj_set_size(s_slot_skip, text_w, PLAY_D);
@@ -643,7 +641,7 @@ void build_lights_slot(lv_obj_t *bar)
     lv_obj_set_style_pad_column(s_lights_slot, TEXT_GAP, 0);
     lv_obj_add_event_cb(s_lights_slot, lights_touched, LV_EVENT_SHORT_CLICKED, nullptr);
     lv_obj_add_event_cb(s_lights_slot, lights_touched, LV_EVENT_LONG_PRESSED, nullptr);
-    // The whole bulb, the glass over its base, as Home's lights were drawn.
+    // The whole bulb, the glass over its base.
     s_lights_bulb = lv_obj_create(s_lights_slot);
     lv_obj_remove_style_all(s_lights_bulb);
     lv_obj_set_size(s_lights_bulb, icons::bulb_glass_icon.header.w * BULB_SCALE / LV_SCALE_NONE,
@@ -710,16 +708,6 @@ void build_bar_cards(lv_obj_t *screen, lv_obj_t *bar)
     subscribe(Topic::Media, kNoView, paint_media);
     subscribe(Topic::Home, kNoView, paint_heat);
     subscribe(Topic::Lights, kNoView, paint_lights_slot);
-}
-
-lv_obj_t *const *bar_slots(int &count)
-{
-    static lv_obj_t *slots[3];
-    slots[0] = s_media_slot;
-    slots[1] = s_heat_slot;
-    slots[2] = s_lights_slot;
-    count    = 3;
-    return slots;
 }
 
 }  // namespace ui::detail
