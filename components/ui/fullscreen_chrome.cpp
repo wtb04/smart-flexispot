@@ -170,7 +170,6 @@ void build_badge(Clock &clock, lv_obj_t *root, lv_event_cb_t on_click)
 }  // namespace
 
 namespace {
-constexpr std::int32_t STATUS_GAP       = 10;  // between what the top row holds
 constexpr std::int32_t SLOT_W           = 34;  // each of the status's marks, centred in one as wide
 constexpr std::int32_t SLOT_GAP         = 10;
 constexpr std::int32_t TAP_MARGIN       = 20;  // round the badge and the status, to be hit easily
@@ -189,7 +188,6 @@ Clock    *s_top         = nullptr;
 lv_obj_t *s_wifi_icon   = nullptr;
 lv_obj_t *s_phone_icon  = nullptr;
 lv_obj_t *s_slots[4]    = {};       // the battery, the phone, Wi-Fi and the time, from the page out
-lv_obj_t *s_spacer      = nullptr;  // between the page's end of the bar and the dock's
 lv_obj_t *s_update_box  = nullptr;  // while an update arrives, for whichever board
 lv_obj_t *s_update_icon = nullptr;
 lv_obj_t *s_update_bar  = nullptr;  // how far it is, under the icon
@@ -251,23 +249,11 @@ lv_obj_t *make_slot(lv_obj_t *parent, std::int32_t w)
 // and the lights from the page's far end.
 void arrange_top()
 {
-    const bool right = layout().rail_right;
-    const std::uint32_t count = lv_obj_get_child_count(s_top_bar);
-    lv_obj_t *row[8] = {};
-    for (std::uint32_t i = 0; i < count && i < std::size(row); ++i) {
-        row[i] = lv_obj_get_child(s_top_bar, static_cast<std::int32_t>(i));
-    }
-    static bool s_right_arranged = true;  // as they are built
-    if (std::exchange(s_right_arranged, right) != right) {
-        for (std::uint32_t i = 0; i < count && i < std::size(row); ++i) {
-            lv_obj_move_to_index(row[count - 1 - i], static_cast<std::int32_t>(i));
-        }
-    }
-    lv_obj_t *const status[] = {s_update_box, s_slots[0], s_slots[1], s_slots[2], s_slots[3]};
-    constexpr int   STATUS_PARTS = static_cast<int>(std::size(status));
-    for (int i = 0; i < STATUS_PARTS; ++i) {
-        lv_obj_move_to_index(status[right ? i : STATUS_PARTS - 1 - i], i);
-    }
+    // Built for the dock at the right; for the left, each row runs the other way.
+    const bool           right = layout().rail_right;
+    const lv_flex_flow_t flow  = right ? LV_FLEX_FLOW_ROW : LV_FLEX_FLOW_ROW_REVERSE;
+    lv_obj_set_flex_flow(s_top_bar, flow);
+    lv_obj_set_flex_flow(s_status, flow);
     // Against Wi-Fi beside it, what the width keeps for wider digits at the far end.
     lv_obj_set_style_text_align(s_top->label, right ? LV_TEXT_ALIGN_LEFT : LV_TEXT_ALIGN_RIGHT, 0);
     lv_obj_align(s_setup_dot, right ? LV_ALIGN_TOP_RIGHT : LV_ALIGN_TOP_LEFT, right ? STATUS_PAD / 2 : -STATUS_PAD / 2, 0);
@@ -284,16 +270,16 @@ void create_top_bar(lv_obj_t *parent)
     lv_obj_set_height(s_top_bar, CONTENT_Y);
     lv_obj_set_flex_flow(s_top_bar, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(s_top_bar, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(s_top_bar, STATUS_GAP, 0);
+    lv_obj_set_style_pad_column(s_top_bar, BAR_GAP, 0);
     lv_obj_set_scrollable(s_top_bar, false);
     lv_obj_set_clickable(s_top_bar, false);
 
     build_bar_slots(s_top_bar);
-    s_spacer = lv_obj_create(s_top_bar);
-    lv_obj_remove_style_all(s_spacer);
-    lv_obj_set_flex_grow(s_spacer, 1);
-    lv_obj_set_height(s_spacer, 1);
-    lv_obj_set_clickable(s_spacer, false);
+    lv_obj_t *spacer = lv_obj_create(s_top_bar);  // between the page's end of the bar and the dock's
+    lv_obj_remove_style_all(spacer);
+    lv_obj_set_flex_grow(spacer, 1);
+    lv_obj_set_height(spacer, 1);
+    lv_obj_set_clickable(spacer, false);
 
     s_clocks.emplace_back();
     s_top = &s_clocks.back();

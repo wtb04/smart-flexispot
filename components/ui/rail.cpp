@@ -24,8 +24,7 @@ constexpr std::int32_t DOCK_GAP      = 12;
 constexpr std::int32_t DOCK_DESK_ICON = 46;
 constexpr std::int32_t FOCUS_H     = 72;
 constexpr std::int32_t FOCUS_APART = 16;  // from the tabs over it
-// Home under Stand and Sit, apart from them: the height and the two, then a gap.
-constexpr std::int32_t HOME_Y = 3 * (DOCK_W - 2 * DOCK_PAD) + 2 * DOCK_GAP + 2 * DOCK_GAP;
+constexpr std::int32_t HOME_APART  = 24;  // from Sit over it
 
 constexpr std::int32_t SHEET_PAD     = 28;
 constexpr std::int32_t SHEET_GAP     = 24;  // from the dock
@@ -196,6 +195,7 @@ Shortcuts *add_shortcuts(lv_obj_t *root, bool column, std::int32_t side, std::in
 }
 
 lv_obj_t   *s_tabs          = nullptr;  // the dock's column of tabs
+lv_obj_t   *s_head          = nullptr;  // the desk's, at the dock's head, and Home under it
 lv_obj_t   *s_focus_button  = nullptr;  // the timer, between the desk and the pages
 lv_obj_t   *s_focus_mark    = nullptr;  // drawn while it is idle
 lv_obj_t   *s_focus_left    = nullptr;  // how long is left while it runs
@@ -208,6 +208,7 @@ lv_obj_t   *s_sheet         = nullptr;  // its card
 void build_dock_desk(lv_obj_t *dock)
 {
     lv_obj_t *head = lv_obj_create(dock);
+    s_head         = head;
     lv_obj_remove_style_all(head);
     lv_obj_set_size(head, DOCK_INNER_W, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(head, LV_FLEX_FLOW_COLUMN);
@@ -236,7 +237,7 @@ void paint_focus_button()
 {
     const Focus &focus = focus_state();
     const bool   idle  = focus_idle(focus);
-    lv_obj_set_hidden(s_focus_button, s_presence_gate && !status_state().present);
+    lv_obj_set_hidden(s_focus_button, owner_away());
     lv_obj_set_hidden(s_focus_mark, !idle);
     lv_obj_set_hidden(s_focus_left, idle);
     if (idle) {
@@ -328,7 +329,7 @@ void show_guest_presets()
     if (s_sheet == nullptr) {
         return;
     }
-    const bool shown = !s_presence_gate || !status_state().present;
+    const bool shown = owner_away() || !s_presence_gate;
     for (const int index : GUEST_PRESETS) {
         lv_obj_set_hidden(s_preset_buttons[index], !shown);
     }
@@ -364,11 +365,10 @@ lv_obj_t *dock_tabs()
 
 // Home under the desk, where a hand finds it first; the other pages stand up
 // from the foot, the timer lowest of all, being no page.
-void dock_tabs_done()
+void dock_tabs_done(lv_obj_t *home)
 {
-    lv_obj_t *home = lv_obj_get_child(s_tabs, 0);  // the first made, Home
-    lv_obj_set_parent(home, s_rail);
-    lv_obj_align(home, LV_ALIGN_TOP_MID, 0, HOME_Y);
+    lv_obj_set_parent(home, s_head);
+    lv_obj_set_style_margin_top(home, HOME_APART - DOCK_GAP, 0);
     build_focus_button(s_tabs);
     lv_obj_move_to_index(s_focus_button, 0);  // first in a column that stands up from the foot, so lowest
 }

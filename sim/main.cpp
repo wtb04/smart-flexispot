@@ -206,6 +206,18 @@ void run_for(std::uint32_t ms)
     }
 }
 
+// One round of everything the simulator plays, and the screen.
+void step_world()
+{
+    live::pump();
+    notices::pump();
+    hardware::tick();
+    media_stub::tick();
+    updates::tick();
+    const std::uint32_t idle = lv_timer_handler();
+    SDL_Delay(idle < 5 ? idle : 5);
+}
+
 void tap(SDL_Point at)
 {
     // Addressed to the window, as LVGL only takes a window's own events.
@@ -484,7 +496,9 @@ int main(int argc, char **argv)
     }
     for (const Options::Step &step : opts.taps) {
         if (step.wait_ms > 0) {
-            run_for(step.wait_ms);
+            for (const std::uint32_t until = SDL_GetTicks() + step.wait_ms; SDL_GetTicks() < until;) {
+                step_world();  // the desk and the rest go on meanwhile
+            }
         } else {
             tap(step.at);
         }
@@ -516,13 +530,7 @@ int main(int argc, char **argv)
             save_screenshot();
             break;
         }
-        live::pump();
-        notices::pump();
-        hardware::tick();
-        media_stub::tick();
-        updates::tick();
-        const std::uint32_t idle = lv_timer_handler();
-        SDL_Delay(idle < 5 ? idle : 5);
+        step_world();
     }
     return 0;
 }

@@ -1,5 +1,6 @@
 #include "ui_internal.h"
 
+#include "popout.h"
 #include "settings_model.h"
 #include "status_model.h"
 #include "topics.h"
@@ -36,10 +37,15 @@ std::atomic<bool> s_setup_visible{false};
 
 bool s_presence_gate = true;
 
+bool owner_away()
+{
+    return s_presence_gate && !status_state().present;
+}
+
 namespace {
 bool page_available(int index)
 {
-    return !NAV_ITEMS[index].needs_presence || !s_presence_gate || status_state().present;
+    return !NAV_ITEMS[index].needs_presence || !owner_away();
 }
 
 void paint_tab(int index, bool active)
@@ -96,18 +102,17 @@ void select_page(int index)
         lv_obj_set_hidden(s_pages[i], i != index);
         paint_tab(i, i == index);
     }
+    close_popout();
     publish(Topic::Page);
 }
 void toggle_setup()
 {
-    open_desk_sheet(false);
     select_page(s_page == SETUP_PAGE ? s_before_setup : SETUP_PAGE);
 }
 
 namespace {
 void nav_event_cb(lv_event_t *e)
 {
-    open_desk_sheet(false);
     select_page(static_cast<int>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e))));
 }
 }  // namespace
@@ -198,7 +203,7 @@ void create_content(lv_obj_t *parent)
         }
         s_pages[i] = make_page(area, l);
     }
-    dock_tabs_done();
+    dock_tabs_done(s_nav_tabs[HOME_PAGE]);
 }
 
 bool build_next_page()

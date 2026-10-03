@@ -21,6 +21,7 @@ struct Popout {
     lv_obj_t    *above    = nullptr;  // kept over the scrim while it is out, to be used meanwhile
     void (*lit)(bool open) = nullptr;  // told as it comes and goes, to paint its button
     lv_timer_t  *idle     = nullptr;
+    std::uint32_t idle_ms = 0;      // left untouched this long, it folds away
     std::int32_t x        = 0;  // the corner it unfolds from
     std::int32_t y        = 0;
     bool         leftward = false;  // across to the left of the corner, else to the right
@@ -47,6 +48,9 @@ void place_popout(Popout &p, std::int32_t x, std::int32_t y, bool leftward, bool
 void fit_popout(Popout &p);
 
 void open_popout(Popout &p, bool open);
+
+/** Whichever is out, as the page changes under it. */
+void close_popout();
 
 /** Whether it is still unfolding or folding away. */
 bool popout_moving(const Popout &p);

@@ -23,6 +23,9 @@ constexpr std::uint32_t STOPPED_MS      = 3000;  // a stop from here, which a st
 // on the desk, a start 0.75 s after a stop was taken as another stop, one 1.2 s
 // after started it.
 constexpr std::uint32_t STOP_REST_MS    = 1200;
+// Pressed, the desk starts in about half a second; still for longer than this
+// it has stopped of its own, and a tap starts it again rather than stopping it.
+constexpr std::uint32_t HALTED_MS       = 1500;
 
 DeskState   s_desk;
 LightsState s_lights;
@@ -84,11 +87,9 @@ void press_held(lv_timer_t *)
     }
     const int index = s_held;
     forget_held();
-    if (index >= 0 && index == s_desk.travelling) {
-        ESP_LOGI(TAG, "desk: still, preset %d pressed", index + 1);
-        s_moved_at = lv_tick_get();  // its travel starts now
-        press(index);
-    }
+    ESP_LOGI(TAG, "desk: still, preset %d pressed", index + 1);
+    s_moved_at = lv_tick_get();  // its travel starts now
+    press(index);
 }
 
 bool coasting()
@@ -143,19 +144,35 @@ void desk_take_available(bool available)
 // desk has stood still.
 void desk_go_to(int index)
 {
-    if (index < 0 || index >= kPresetCount || s_desk.preset_active[index]) {
-        return;  // there already
+    if (index < 0 || index >= kPresetCount) {
+        return;
     }
-    if (s_desk.travelling >= 0) {
-        const bool held = s_held >= 0;  // never pressed, so nothing under way to stop
-        ESP_LOGI(TAG, "desk: preset %d tapped on the way to %d: %s", index + 1, s_desk.travelling + 1,
-                 held ? "not yet pressed, dropped" : "stop");
-        arrived();
-        if (!held) {
-            press(index);
-            s_stopped_at = lv_tick_get();
+    if (s_stopped_at != 0 && lv_tick_elaps(s_stopped_at) >= STOPPED_MS) {
+        s_stopped_at = 0;
+    }
+    if (s_desk.travelling >= 0 && s_held >= 0) {
+        // Not pressed yet, so nothing under way: tapped again it is dropped, another one waits instead.
+        ESP_LOGI(TAG, "desk: preset %d tapped while %d waits", index + 1, s_held + 1);
+        if (index == s_held) {
+            arrived();
+        } else {
+            s_held = s_desk.travelling = index;
+            publish(Topic::Desk);
         }
         return;
+    }
+    if (s_desk.travelling >= 0 && lv_tick_elaps(s_moved_at) >= HALTED_MS) {
+        arrived();  // it stopped of its own, at the desk or short of the preset
+    }
+    if (s_desk.travelling >= 0) {
+        ESP_LOGI(TAG, "desk: preset %d tapped on the way to %d: stop", index + 1, s_desk.travelling + 1);
+        arrived();
+        press(index);
+        s_stopped_at = lv_tick_get();
+        return;
+    }
+    if (s_desk.preset_active[index]) {
+        return;  // there already
     }
     s_desk.travelling = index;
     s_moved_at        = lv_tick_get();
@@ -164,7 +181,7 @@ void desk_go_to(int index)
     }
     publish(Topic::Desk);
     const bool resting = s_stopped_at != 0 && lv_tick_elaps(s_stopped_at) < STOP_REST_MS;
-    if (resting || (s_stopped_at != 0 && lv_tick_elaps(s_stopped_at) < STOPPED_MS && coasting())) {
+    if (resting || (s_stopped_at != 0 && coasting())) {
         ESP_LOGI(TAG, "desk: preset %d tapped while it comes to a stop: once still", index + 1);
         s_held       = index;
         s_held_timer = lv_timer_create(press_held, SETTLE_CHECK_MS, nullptr);

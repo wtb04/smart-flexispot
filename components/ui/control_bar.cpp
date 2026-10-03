@@ -18,7 +18,7 @@ namespace ui::detail {
 namespace {
 constexpr std::int32_t BTN_H        = 56;  // a button inside a slot
 constexpr std::int32_t SLOT_PAD     = 10;
-constexpr std::int32_t SLOT_TAP     = 6;   // half the gap to the next slot, which takes the rest
+constexpr std::int32_t SLOT_TAP     = BAR_GAP / 2;  // half the gap to the next slot, which takes the rest
 // With the timer and the status, as wide as the bar is with the battery and an
 // update both showing, so nothing ever runs off its end.
 constexpr std::int32_t MEDIA_W      = 440;
@@ -176,7 +176,6 @@ lv_obj_t *s_slot_artist = nullptr;
 std::int32_t s_slot_text_x = 0;
 lv_obj_t *s_slot_play   = nullptr;
 lv_obj_t *s_slot_skip   = nullptr;  // Skip intro, or Next episode, over the text while it is offered
-bool      s_media_held  = false;    // a hold fires LONG_PRESSED and then CLICKED on release
 
 Popout    s_media_pop;
 Cover     s_card_cover;
@@ -302,7 +301,6 @@ void media_touched(lv_event_t *e)
 {
     const MediaState &media = media_state();
     if (lv_event_get_code(e) == LV_EVENT_LONG_PRESSED) {
-        s_media_held = true;
         if (!media.has_track) {
             open_favourites();
         } else if (media.hold_preset >= 0) {
@@ -312,9 +310,7 @@ void media_touched(lv_event_t *e)
         }
         return;
     }
-    if (!std::exchange(s_media_held, false)) {
-        open_under(s_media_pop, s_media_slot);
-    }
+    open_under(s_media_pop, s_media_slot);
 }
 
 void skip_check(lv_timer_t *)
@@ -388,7 +384,7 @@ lv_obj_t *round_button(lv_obj_t *parent, const char *symbol, std::int32_t side)
 void build_media_slot(lv_obj_t *bar)
 {
     s_media_slot = make_slot(bar, MEDIA_W);
-    lv_obj_add_event_cb(s_media_slot, media_touched, LV_EVENT_CLICKED, nullptr);
+    lv_obj_add_event_cb(s_media_slot, media_touched, LV_EVENT_SHORT_CLICKED, nullptr);
     lv_obj_add_event_cb(s_media_slot, media_touched, LV_EVENT_LONG_PRESSED, nullptr);
     build_cover(s_slot_cover, s_media_slot, THUMB, THUMB_RADIUS);
     const std::int32_t inset = THUMB_INSET - SLOT_PAD;
@@ -573,6 +569,9 @@ void build_heat_slot(lv_obj_t *bar)
     lv_obj_set_clickable(s_heat_dot, false);
     s_heat_now = theme::make_label(s_heat_slot, "--", theme::text, fonts::size_28());
     lv_obj_set_clickable(s_heat_now, false);
+    lv_point_t widest{};  // so the dot beside it stands still whatever the reading
+    lv_text_get_size(&widest, "88.8°", fonts::size_28(), 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    lv_obj_set_width(s_heat_now, widest.x);
 }
 
 void build_heat_card(lv_obj_t *screen)
@@ -589,7 +588,6 @@ void build_heat_card(lv_obj_t *screen)
 lv_obj_t *s_lights_slot = nullptr;
 lv_obj_t *s_lights_bulb = nullptr;
 lv_obj_t *s_lights_text = nullptr;
-bool      s_lights_held = false;  // a hold fires LONG_PRESSED and then CLICKED on release
 Popout    s_lights_pop;
 lv_obj_t *s_light_buttons[kLightCount] = {};
 
@@ -629,11 +627,7 @@ void paint_lights_slot()
 void lights_touched(lv_event_t *e)
 {
     if (lv_event_get_code(e) == LV_EVENT_LONG_PRESSED) {
-        s_lights_held = true;
         open_under(s_lights_pop, s_lights_slot);
-        return;
-    }
-    if (std::exchange(s_lights_held, false)) {
         return;
     }
     if (s_handlers.lights != nullptr) {
@@ -647,7 +641,7 @@ void build_lights_slot(lv_obj_t *bar)
     lv_obj_set_flex_flow(s_lights_slot, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(s_lights_slot, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(s_lights_slot, TEXT_GAP, 0);
-    lv_obj_add_event_cb(s_lights_slot, lights_touched, LV_EVENT_CLICKED, nullptr);
+    lv_obj_add_event_cb(s_lights_slot, lights_touched, LV_EVENT_SHORT_CLICKED, nullptr);
     lv_obj_add_event_cb(s_lights_slot, lights_touched, LV_EVENT_LONG_PRESSED, nullptr);
     // The whole bulb, the glass over its base, as Home's lights were drawn.
     s_lights_bulb = lv_obj_create(s_lights_slot);

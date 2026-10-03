@@ -183,11 +183,10 @@ bool build_next_part()
             if (SHOT_ENABLED) {
                 lv_timer_create(take_screenshots, SHOT_START_MS, nullptr);
             }
-            create_desk_sheet(scr);  // after the content, so it overlays it when open
+            create_desk_sheet(scr);
             build_cinema(scr);
             build_music(scr);
             build_focus_full(scr);
-            lv_obj_move_foreground(s_rail);  // and under the dock, which it slides out from
             create_notice_card();
             follow_pages();
             return true;

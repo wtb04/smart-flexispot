@@ -9,6 +9,7 @@ namespace {
 constexpr int           WHOLE    = 1000;  // all of it shown, in thousandths
 constexpr std::uint32_t OPEN_MS  = 240;
 constexpr std::uint32_t CLOSE_MS = 180;
+constexpr std::uint32_t IDLE_CHECK_MS = 1000;
 
 Popout *s_out = nullptr;  // the one out, or on its way
 
@@ -94,12 +95,16 @@ lv_obj_t *build_popout(Popout &p, lv_obj_t *parent, std::int32_t w, std::int32_t
     lv_obj_set_width(p.card, w);
     theme::style_panel(p.card, theme::panel, theme::radius::card);
     lv_obj_set_scrollable(p.card, false);
-    // A press on it keeps it out as long as it is being used.
-    lv_obj_add_event_cb(p.card, [](lv_event_t *e) { lv_timer_reset(static_cast<Popout *>(lv_event_get_user_data(e))->idle); },
-                        LV_EVENT_PRESSED, &p);
 
-    p.idle = lv_timer_create([](lv_timer_t *t) { open_popout(*static_cast<Popout *>(lv_timer_get_user_data(t)), false); },
-                             idle_ms, &p);
+    // Out while anything is touched, its buttons too, which a press on the card
+    // itself would not catch, as LVGL keeps a child's presses to the child.
+    p.idle_ms = idle_ms;
+    p.idle    = lv_timer_create([](lv_timer_t *t) {
+        Popout &out = *static_cast<Popout *>(lv_timer_get_user_data(t));
+        if (lv_display_get_inactive_time(nullptr) >= out.idle_ms) {
+            open_popout(out, false);
+        }
+    }, IDLE_CHECK_MS, &p);
     lv_timer_pause(p.idle);
     return p.card;
 }
@@ -177,6 +182,13 @@ void open_popout(Popout &p, bool open)
     lv_anim_set_duration(&anim, open ? OPEN_MS : CLOSE_MS);
     lv_anim_set_path_cb(&anim, open ? lv_anim_path_ease_out : lv_anim_path_ease_in);
     lv_anim_start(&anim);
+}
+
+void close_popout()
+{
+    if (s_out != nullptr) {
+        open_popout(*s_out, false);
+    }
 }
 
 bool popout_moving(const Popout &p)

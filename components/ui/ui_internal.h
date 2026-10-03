@@ -47,6 +47,7 @@ constexpr std::int32_t GAP        = 16;
 constexpr std::int32_t DOCK_W      = 112;
 constexpr std::int32_t TOP_H       = 72;   // the control bar's slots, centred over the pages
 constexpr std::int32_t CONTENT_Y   = 92;   // the page under it
+constexpr std::int32_t BAR_GAP     = 10;   // between the control bar's slots
 
 constexpr std::int32_t PANEL_PAD  = 16;
 constexpr std::int32_t BUTTON_GAP = 16;
@@ -154,6 +155,8 @@ extern lv_obj_t *s_dial;
 extern int s_page;
 extern std::atomic<bool> s_setup_visible;
 extern bool s_presence_gate;
+/** The phone away with the gate on: the owner's pages, and what shows of them elsewhere, are away. */
+bool owner_away();
 extern lv_obj_t *s_brightness_value;
 extern lv_obj_t *s_settings_view;
 extern lv_obj_t *s_appearance_view;
@@ -196,7 +199,8 @@ void place_notice();
 /** The dock: the tabs, Stand and Sit, the height that folds the desk out. */
 void create_dock(lv_obj_t *parent);
 lv_obj_t *dock_tabs();  // the column the tabs go in
-void dock_tabs_done();  // after the last tab, which the timer stands over
+/** After the last tab: Home goes under the desk, the timer under the tabs. */
+void dock_tabs_done(lv_obj_t *home);
 /** The desk folded out beside the dock: its height, every preset, up and down. */
 void create_desk_sheet(lv_obj_t *parent);
 void open_desk_sheet(bool open);

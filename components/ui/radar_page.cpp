@@ -2844,41 +2844,20 @@ bool full_open()
     return s_mapped;
 }
 
-// The map on the radar page, laid out at once rather than once the page's
-// change is told, as the bench times it.
+// Laid out by radar_page_opened as the page is chosen.
 void open_full()
 {
     detail::select_page(detail::RADAR_PAGE);
-    if (!s_mapped) {
-        lay_out_full();
-    }
 }
 
 void close_full()
 {
     detail::select_page(detail::HOME_PAGE);
-    if (s_mapped) {
-        lay_out_page();
-    }
 }
 
 void full_clicked(lv_event_t *)
 {
     open_full();
-}
-
-// The radar follows the page: the cards on Home, the map on the radar page,
-// and where it was while another page is up.
-void follow_page()
-{
-    if (detail::s_page == detail::RADAR_PAGE && !s_mapped) {
-        lay_out_full();
-    } else if (detail::s_page == detail::HOME_PAGE && s_mapped) {
-        lay_out_page();
-    }
-    if (s_radar_stale) {
-        refresh_radar();
-    }
 }
 }  // namespace
 
@@ -2923,7 +2902,6 @@ void build_radar_page(lv_obj_t *page, std::int32_t width, std::int32_t height)
     s_grow_timer = lv_timer_create(grow_tick, TRAIL_FRAME_MS, nullptr);
     lv_timer_pause(s_grow_timer);
     detail::subscribe(detail::Topic::Radar, detail::kNoView, refresh_radar);
-    detail::subscribe(detail::Topic::Page, detail::kNoView, follow_page);
     // What was looked up for an aircraft, each part once as it comes.
     detail::subscribe(detail::Topic::Lookup, detail::kNoView, [] {
         static std::uint32_t      s_details_shown = 0;
@@ -2942,14 +2920,26 @@ void build_radar_page(lv_obj_t *page, std::int32_t width, std::int32_t height)
 
 // Keeps what was on show: asking again only blanked the photograph while it
 // was fetched anew.
+// The radar follows the page: the cards on Home, the map on the radar page,
+// and where it was while another page is up.
 void radar_page_opened()
 {
     if (s_chosen[0] == '\0') {
         s_following = true;
     }
-    if (s_radar_stale) {
-        refresh_radar();
+    const bool moves = (detail::s_page == detail::RADAR_PAGE) != s_mapped &&
+                       (detail::s_page == detail::RADAR_PAGE || detail::s_page == detail::HOME_PAGE);
+    if (!moves) {
+        if (s_radar_stale) {
+            refresh_radar();
+        }
+        return;
     }
+    if (s_radar_stale && s_last != nullptr) {
+        radar::snapshot(*s_last);  // laid out, it draws this once
+        s_radar_stale = false;
+    }
+    s_mapped ? lay_out_page() : lay_out_full();
 }
 
 void show_radar(const radar::Snapshot &snapshot)
@@ -3135,7 +3125,6 @@ struct BenchLeft {
     bool gated      = true;
     int  page       = 0;
     int  range_step = 0;
-    bool full       = false;
 };
 BenchLeft s_bench_left;
 
@@ -3148,23 +3137,20 @@ void bench_put_back()
         s_range_step = s_bench_left.range_step;
         apply_range(0);
     }
-    if (s_bench_left.full != full_open()) {
-        s_bench_left.full ? open_full() : close_full();
-    }
     detail::s_presence_gate = s_bench_left.gated;
     detail::select_page(s_bench_left.page);
     s_bench_left.held = false;
 }
 
-// The radar page shown, even with the phone away, so its feed runs; ready once
-// the feed has answered and the map is drawn.
+// Home shown, its radar cards too with the phone away, so the feed runs; ready
+// once the feed has answered and the map is drawn.
 bool bench_ready()
 {
     if (!s_bench_left.held) {
-        s_bench_left = {true, detail::s_presence_gate, detail::s_page, s_range_step, full_open()};
+        s_bench_left = {true, detail::s_presence_gate, detail::s_page, s_range_step};
     }
     detail::s_presence_gate = false;
-    if (full_open() || detail::s_page != detail::HOME_PAGE) {
+    if (detail::s_page != detail::HOME_PAGE) {
         close_full();
     }
     return s_scope != nullptr && s_last != nullptr && s_last->ok && map_located();
@@ -3532,6 +3518,8 @@ void radar_home_area(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int3
     lv_obj_set_scrollable(s_page, false);
     s_page_w = w;
     s_page_h = h;
+    // Away with the radar page while the phone is, as the feed stops then.
+    detail::subscribe(detail::Topic::Page, detail::kNoView, [] { lv_obj_set_hidden(s_page, detail::owner_away()); });
 }
 
 }  // namespace ui
