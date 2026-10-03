@@ -587,7 +587,29 @@ constexpr Wide WIDE_BODIES[] = {
 constexpr int HEAVY       = 3;  // ADS-B's A5 of a type not in the list
 constexpr int CRUISING_FT = 20000;
 constexpr int MILITARY    = 9;  // over a giant cruising, 8
+// A military helicopter mostly hangs about the one place, in view for hours:
+// among the large wide-bodies, so it takes its turn without always being first.
+constexpr int MILITARY_HELICOPTER = 5;
+// Helicopters by their ICAO type, as MLAT gives no category; by how it starts.
+constexpr const char *HELICOPTERS[] = {
+    "EC2", "EC3", "EC4", "EC5", "EC7", "H160", "H60", "H47", "H64", "A109", "A119", "A139", "A149", "A169", "A189",
+    "AS32", "AS50", "AS55", "AS65", "B06", "B407", "B412", "B429", "EXPL", "S61", "S70", "S76", "S92", "NH90",
+    "CH47", "AH64", "LYNX", "WILD", "MI8", "MI17", "KA32", "R22", "R44", "R66", "AW", "UH1", "CH53",
+};
 constexpr int EMERGENCY   = kEmergencyNotability;
+
+bool helicopter(const Aircraft &aircraft)
+{
+    if (std::strcmp(aircraft.category, "A7") == 0) {
+        return true;
+    }
+    for (const char *start : HELICOPTERS) {
+        if (std::strncmp(aircraft.type, start, std::strlen(start)) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
 
 bool emergency(int squawk)
 {
@@ -614,7 +636,7 @@ int notability(const Aircraft &aircraft)
         return EMERGENCY;
     }
     if (aircraft.military) {
-        return MILITARY;
+        return helicopter(aircraft) ? MILITARY_HELICOPTER : MILITARY;
     }
     const auto *call    = reinterpret_cast<const unsigned char *>(aircraft.flight);
     const bool  airline = std::isupper(call[0]) && std::isupper(call[1]) && std::isupper(call[2]) &&
