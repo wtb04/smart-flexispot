@@ -29,7 +29,7 @@ renders the main views, offline and the same each time, to
 The parts that decide and parse — the request scheduler, the stream and job
 schedulers, the watchdog, the desk and companion protocols, the Home Assistant
 and Jellyfin protocols, the calendar, journey and radar parsers, the battery
-gauge, the focus timer — are plain C++ with no ESP-IDF in them, and are tested
+gauge, the focus timer, the Claude Code sessions' table — are plain C++ with no ESP-IDF in them, and are tested
 on the host under GoogleTest:
 
 ```sh
@@ -97,6 +97,7 @@ and returns; everything after that runs on tasks of its own.
 | `components/hass/`, `room/` | Home Assistant, and the home page's presenter |
 | `components/jellyfin/`, `media/`, `jpeg/` | Jellyfin, cover art, the JPEG engine and its software fallback |
 | `components/radar/`, `ical/`, `travel/` | Planes overhead, calendars, journeys |
+| `components/claude/` | The laptops' Claude Code sessions, as `tools/claude-hook` posts them to `/claude` |
 | `components/ble/`, `wifi/`, `ota/` | Presence and the companion's link, Wi-Fi, updates |
 | `components/power/`, `rtc/`, `sound/`, `logbuf/`, `focus/`, `imu/` | Battery, backup clock, chime, the log ring, the focus timer, the accelerometer |
 | `components/esp_hosted/` | The Wi-Fi co-processor's driver, with one change to its receive buffers |

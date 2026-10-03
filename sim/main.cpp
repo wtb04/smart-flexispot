@@ -1,5 +1,6 @@
 // The panel's screen in a window: components/ui as it is, the live feeds
 // fetched for real, the hardware played by hardware.cpp. See README.md.
+#include "claude_stub.h"
 #include "hardware.h"
 #include "home_assistant.h"
 #include "live/live.h"
@@ -138,6 +139,7 @@ const Key KEYS[] = {
     {SDLK_r, "R", "The air: good, some of it not, bad", home_assistant::next_air},
     {SDLK_m, "M", "What plays: nothing, music, a Jellyfin episode, one only followed", media_stub::next_scene},
     {SDLK_n, "N", "A notice from Home Assistant, another each time", notices::next_example},
+    {SDLK_c, "C", "Claude Code: working, one waiting on you, all done, none", claude_stub::next_scene},
     {SDLK_t, "T", "The focus part under way runs out now", hardware::end_focus_part},
     {SDLK_u, "U", "An update: arriving, ready, the companion's, both, none", updates::next},
     {SDLK_d, "D", "The desk link lost, and back", hardware::toggle_desk_link},

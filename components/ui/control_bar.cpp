@@ -674,6 +674,7 @@ void build_bar_slots(lv_obj_t *bar)
     build_media_slot(bar);
     build_heat_slot(bar);
     build_lights_slot(bar);
+    build_claude_slot(bar);
 }
 
 void build_bar_cards(lv_obj_t *screen, lv_obj_t *bar)
@@ -681,6 +682,7 @@ void build_bar_cards(lv_obj_t *screen, lv_obj_t *bar)
     build_media_card(screen);
     build_heat_card(screen);
     build_lights_card(screen);
+    build_claude_card(screen, bar);
     for (Popout *p : {&s_media_pop, &s_heat_pop, &s_lights_pop}) {
         p->above = bar;
     }

@@ -400,6 +400,7 @@ Slot<Focus>          p_focus;
 Slot<UpdateState>    p_update;
 Slot<BatteryArgs>    p_battery;
 Slot<bool>           p_radar;
+Slot<bool>           p_claude;
 Slot<DetailsArgs>    p_details;
 Slot<PhotoArgs>      p_photo;
 
@@ -746,6 +747,9 @@ void apply_page_updates()
     if (bool radar = false; take(p_radar, radar)) {
         publish(Topic::Radar);
     }
+    if (bool claude = false; take(p_claude, claude)) {
+        publish(Topic::Claude);
+    }
     static DetailsArgs details;
     if (take(p_details, details)) {
         radar_take_details(details.hex, details.details);
@@ -1066,6 +1070,12 @@ esp_err_t set_focus(const Focus &focus)
 esp_err_t set_update(const UpdateState &state)
 {
     put(p_update, state);
+    return ESP_OK;
+}
+
+esp_err_t set_claude()
+{
+    put(p_claude, true);
     return ESP_OK;
 }
 

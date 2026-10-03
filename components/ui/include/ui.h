@@ -372,6 +372,10 @@ esp_err_t set_screen(bool on);
 
 esp_err_t set_notification_volume(int percent);
 
+/** The laptops' Claude Code sessions changed: the pill reads them again from
+ *  the claude component. Thread-safe. */
+esp_err_t set_claude();
+
 /** The scope redraws from this; between readings it is left alone. */
 esp_err_t set_radar(const radar::Snapshot &snapshot);
 

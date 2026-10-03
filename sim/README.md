@@ -37,6 +37,7 @@ Everything else is played, and nothing but those read-only feeds leaves the Mac:
   episode with its intro, the episodes either side, subtitles and cinema mode;
 - notices from Home Assistant, in `notices.cpp`, read by the panel's own parser;
 - firmware updates, in `updates.cpp`, arriving and waiting to be installed;
+- Claude Code on the laptops, in `claude_stub.cpp`: sessions working, one waiting on you, all done, none, through the panel's own table;
 - the battery, the phone and Wi-Fi.
 
 **H** lists the keys that put it in each of those states. Any notice Home
@@ -44,6 +45,12 @@ Assistant could send goes to a running simulator with
 
 ```sh
 sim/send.sh notify '{"title":"Hello","message":"Kept until tapped","level":"warning","timeout_s":0}'
+```
+
+and any event a laptop's `tools/claude-hook` could, with
+
+```sh
+sim/send.sh claude '{"session":"s1","machine":"MbP","project":"tab5-hello","event":"PermissionRequest","tool":"Bash","target":"idf.py"}'
 ```
 
 ## Settings
