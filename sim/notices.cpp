@@ -1,5 +1,6 @@
 #include "notices.h"
 
+#include "claude_stub.h"
 #include "hass_protocol.h"
 #include "ui.h"
 
@@ -82,8 +83,11 @@ void pump()
         }
         const std::string line(buffer, static_cast<std::size_t>(got));
         constexpr char    NOTIFY[] = "notify ";
+        constexpr char    CLAUDE[] = "claude ";
         if (line.rfind(NOTIFY, 0) == 0) {
             from_home_assistant(line.substr(sizeof(NOTIFY) - 1));
+        } else if (line.rfind(CLAUDE, 0) == 0) {
+            claude_stub::from_hook(line.substr(sizeof(CLAUDE) - 1));
         } else {
             std::printf("W (sim) send.sh said something unknown: %s\n", line.c_str());
         }

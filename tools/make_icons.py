@@ -366,6 +366,43 @@ EXPAND = paint([(stroke(x0, y0, x1, y1, 2.6), True) for x0, y0, x1, y1 in (
     (4, 4, 11, 4), (4, 4, 4, 11), (24, 4, 17, 4), (24, 4, 24, 11),
     (4, 24, 11, 24), (4, 24, 4, 17), (24, 24, 17, 24), (24, 24, 24, 17))], STATUS_SIDE)
 
+# The laptops' Claude Code sessions. A shell's prompt, a chevron and the cursor
+# after it, for a command run.
+def prompt(x, y, k, width):
+    return [stroke(x, y, x + 4.5 * k, y + 4 * k, width), stroke(x + 4.5 * k, y + 4 * k, x, y + 8 * k, width),
+            stroke(x + 7 * k, y + 8 * k, x + 13 * k, y + 8 * k, width)]
+
+# Each session's state, as a solid disc with its sign cut out: waiting on you,
+# working, done, failed.
+SESSION_DISC = (disc(14, 14, 12.5), True)
+SESSION_ASKS = paint([SESSION_DISC, (stroke(14, 7.5, 14, 15, 3.2), False), (disc(14, 20, 2), False)], STATUS_SIDE)
+SESSION_WORKS = paint([SESSION_DISC] + [(disc(x, 14, 2.1), False) for x in (8.3, 14, 19.7)], STATUS_SIDE)
+SESSION_DONE = paint([SESSION_DISC, (stroke(8.3, 14.5, 12.3, 18.5, 2.8), False),
+                      (stroke(12.3, 18.5, 19.8, 10.2, 2.8), False)], STATUS_SIDE)
+SESSION_FAILED = paint([SESSION_DISC, (stroke(9.5, 9.5, 18.5, 18.5, 2.8), False),
+                        (stroke(9.5, 18.5, 18.5, 9.5, 2.8), False)], STATUS_SIDE)
+
+
+def ellipse(cx, cy, a, b):
+    return lambda x, y: ((x - cx) / a) ** 2 + ((y - cy) / b) ** 2 <= 1
+
+
+# What a session does, beside its lines; editing and reading are LVGL's own.
+RUN = paint([(part, True) for part in prompt(3.5, 6, 1.15, 2.6)])
+SEARCH = paint(ring(9, 9, 7, 4.6) + [(stroke(13.8, 13.8, 19.5, 19.5, 3.2), True)])
+# Two people, the nearer cut clear of the one behind.
+AGENTS = paint([(disc(14.5, 6.5, 3.4), True), (rounded(9, 11.5, 20.5, 22, 5.5), True),
+                (disc(8, 8.5, 4.6), False), (rounded(1.5, 13.5, 15, 23, 6.5), False),
+                (disc(8, 8.5, 3.4), True), (rounded(2.5, 14.5, 13.5, 24, 5.5), True)])
+WEB = paint(ring(11, 11, 9.5, 7.7) + [(ellipse(11, 11, 4.6, 9.5), True), (ellipse(11, 11, 2.9, 7.7), False),
+                                      (stroke(2, 11, 20, 11, 1.8), True)])
+
+# A step done, the one under way, one to come.
+STEP_SIDE = 16
+STEP_DONE = paint([(stroke(2.5, 8.5, 6.2, 12.2, 2.4), True), (stroke(6.2, 12.2, 13.5, 3.8, 2.4), True)], STEP_SIDE)
+STEP_NOW = paint([(disc(8, 8, 5), True)], STEP_SIDE)
+STEP_NEXT = paint(ring(8, 8, 5.2, 3.6), STEP_SIDE)
+
 
 def emit(name, data, side=SIDE, height=None):
     rows = []
@@ -404,7 +441,7 @@ out.write_text(f"""#pragma once
 
 namespace ui {{
 namespace icons {{
-{emit("train", TRAIN)}{emit("bus", BUS)}{emit("walk", WALK)}{emit("bike", BIKE)}{emit("no_photo", NO_PHOTO, NO_PHOTO_SIDE)}{emit("wifi", WIFI, STATUS_SIDE)}{emit("wifi_off", WIFI_OFF, STATUS_SIDE)}{emit("phone", PHONE, STATUS_SIDE)}{emit("phone_off", PHONE_OFF, STATUS_SIDE)}{emit("plane", PLANE, PLANE_SIDE)}{emit("plane_large", PLANE_LARGE, PLANE_LARGE_SIDE)}{emit("calendar", CALENDAR, 28)}{emit("desk", DESK, STATUS_SIDE)}{emit("timer", TIMER, 28)}{emit("update_panel", UPDATE_PANEL, STATUS_SIDE)}{emit("update_companion", UPDATE_COMPANION, STATUS_SIDE)}{emit("install_companion", INSTALL_COMPANION, STATUS_SIDE)}{emit("bulb_glass", BULB_GLASS, BULB_W, BULB_H)}{emit("bulb_base", BULB_BASE, BULB_W, BULB_H)}{emit("desk_up", DESK_UP, DESK_W, DESK_H)}{emit("desk_down", DESK_DOWN, DESK_W, DESK_H)}{emit("desk_lowest", DESK_LOWEST, DESK_W, DESK_H)}{emit("bulb", BULB, BULB_W, BULB_H)}{emit("expand", EXPAND, STATUS_SIDE)}{emit("collapse", COLLAPSE, STATUS_SIDE)}{emit("screen_timer", SCREEN_TIMER, CINEMA_SIDE)}{emit("subtitles", SUBTITLES, CINEMA_SIDE)}{emit("seek_back", SEEK_BACK, SEEK_SIDE)}{emit("seek_on", SEEK_ON, SEEK_SIDE)}{emit("plus", PLUS, MARK_SIDE)}{emit("minus", MINUS, MARK_SIDE)}{emit("times", TIMES, MARK_SIDE)}
+{emit("train", TRAIN)}{emit("bus", BUS)}{emit("walk", WALK)}{emit("bike", BIKE)}{emit("no_photo", NO_PHOTO, NO_PHOTO_SIDE)}{emit("wifi", WIFI, STATUS_SIDE)}{emit("wifi_off", WIFI_OFF, STATUS_SIDE)}{emit("phone", PHONE, STATUS_SIDE)}{emit("phone_off", PHONE_OFF, STATUS_SIDE)}{emit("plane", PLANE, PLANE_SIDE)}{emit("plane_large", PLANE_LARGE, PLANE_LARGE_SIDE)}{emit("calendar", CALENDAR, 28)}{emit("desk", DESK, STATUS_SIDE)}{emit("timer", TIMER, 28)}{emit("update_panel", UPDATE_PANEL, STATUS_SIDE)}{emit("update_companion", UPDATE_COMPANION, STATUS_SIDE)}{emit("install_companion", INSTALL_COMPANION, STATUS_SIDE)}{emit("bulb_glass", BULB_GLASS, BULB_W, BULB_H)}{emit("bulb_base", BULB_BASE, BULB_W, BULB_H)}{emit("desk_up", DESK_UP, DESK_W, DESK_H)}{emit("desk_down", DESK_DOWN, DESK_W, DESK_H)}{emit("desk_lowest", DESK_LOWEST, DESK_W, DESK_H)}{emit("bulb", BULB, BULB_W, BULB_H)}{emit("expand", EXPAND, STATUS_SIDE)}{emit("collapse", COLLAPSE, STATUS_SIDE)}{emit("screen_timer", SCREEN_TIMER, CINEMA_SIDE)}{emit("subtitles", SUBTITLES, CINEMA_SIDE)}{emit("seek_back", SEEK_BACK, SEEK_SIDE)}{emit("seek_on", SEEK_ON, SEEK_SIDE)}{emit("plus", PLUS, MARK_SIDE)}{emit("minus", MINUS, MARK_SIDE)}{emit("times", TIMES, MARK_SIDE)}{emit("session_asks", SESSION_ASKS, STATUS_SIDE)}{emit("session_works", SESSION_WORKS, STATUS_SIDE)}{emit("session_done", SESSION_DONE, STATUS_SIDE)}{emit("session_failed", SESSION_FAILED, STATUS_SIDE)}{emit("run", RUN)}{emit("search", SEARCH)}{emit("agents", AGENTS)}{emit("web", WEB)}{emit("step_done", STEP_DONE, STEP_SIDE)}{emit("step_now", STEP_NOW, STEP_SIDE)}{emit("step_next", STEP_NEXT, STEP_SIDE)}
 }}  // namespace icons
 }}  // namespace ui
 """)

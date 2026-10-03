@@ -38,6 +38,7 @@ I am not affiliated with Flexispot, LoctekMotion or M5Stack.
 - **Films and series.** Follows what plays on Jellyfin, with a cinema view that has the lights and the desk within reach.
 - **Planes overhead.** A live radar with who is flying, where to, their photo and their trail.
 - **The day.** The next lecture, a countdown, and when to leave to get there on time.
+- **Claude Code** on the laptops: a pill in the control bar while a session works, amber when one waits on you.
 - **Focus timer**, a **presence sensor** from your phone, and **diagnostics** for every part, on the panel itself.
 - **A simulator** that runs the real UI on a Mac, and host tests with coverage in CI.
 
@@ -114,6 +115,12 @@ The calendar page reads iCal feeds, mine come from [CalendarChanger](https://git
 | ![Focus](docs/screenshots/focus.png) | ![Focus fullscreen](docs/screenshots/focus-full.png) |
 
 A focus timer in rounds, 25 minutes on and 5 off by default with a long break after four. The timer has its button in the dock, with the countdown on it while a round runs; a tap opens its controls beside the dock, and from there it goes fullscreen, and if the panel restarts halfway through a round it picks it up where it should be.
+
+### Claude Code
+
+While a Claude Code session on one of my laptops is working, a pill sits in the control bar beside the lights: a ring of one piece per session, coloured by what each is doing, with how many there are inside it. It turns amber, with a chime and a notice, when a session waits for me to allow something, and stays so until I have. Tapped, it drops a card with each session's project and laptop, what it is doing, how far through its step list it is, and for how long; tapping a session shows its steps and what it did last. Ten minutes after the last thing any session did, the pill is gone again.
+
+Each laptop tells the panel through Claude Code's own hooks, with `tools/claude-hook`. Only names leave the laptop: a file's name, a command's first word, a search pattern, a host and the lines of the step list, never a prompt, a reply or what is in a file. Step 7 below sets it up.
 
 ### Away from the desk
 
@@ -222,6 +229,7 @@ Everything the panel talks to has a `*_secrets.example.h` template next to where
 | `components/travel/include/travel_secrets.h` | The journey planner and its key |
 | `components/ble/include/ble_secrets.h` | Your phone's Bluetooth identity key, for presence |
 | `components/ota/include/ota_secrets.h` | A key for updates over Wi-Fi |
+| `components/claude/include/claude_secrets.h` | A key for the laptops' Claude Code sessions, if you want them |
 
 ### 5. Flash it
 
@@ -256,6 +264,30 @@ tools/ota.sh panel --now      # install right away instead of when you tap Updat
 ```
 
 An update waits on the Setup page until you tap it, and is refused while the desk moves. A new firmware is on trial until it gets back on Wi-Fi. If it does not within three minutes, the panel goes back to the version before and tells you so.
+
+### 7. Claude Code on your laptops
+
+Optional. Each laptop needs `jq` and `curl`, which macOS has, and this repository's `tools/claude-hook`. In `~/.claude/settings.json`, give it the key from `claude_secrets.h` and run it on every event that changes what the panel shows; `async` keeps Claude Code from ever waiting on it:
+
+```json
+{
+  "env": { "CLAUDE_PANEL_KEY": "the key in claude_secrets.h" },
+  "hooks": {
+    "SessionStart":      [{ "hooks": [{ "type": "command", "command": "~/tab5-hello/tools/claude-hook", "async": true }] }],
+    "UserPromptSubmit":  [{ "hooks": [{ "type": "command", "command": "~/tab5-hello/tools/claude-hook", "async": true }] }],
+    "PreToolUse":        [{ "hooks": [{ "type": "command", "command": "~/tab5-hello/tools/claude-hook", "async": true }] }],
+    "PostToolUse":       [{ "hooks": [{ "type": "command", "command": "~/tab5-hello/tools/claude-hook", "async": true }] }],
+    "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "~/tab5-hello/tools/claude-hook", "async": true }] }],
+    "SubagentStart":     [{ "hooks": [{ "type": "command", "command": "~/tab5-hello/tools/claude-hook", "async": true }] }],
+    "SubagentStop":      [{ "hooks": [{ "type": "command", "command": "~/tab5-hello/tools/claude-hook", "async": true }] }],
+    "Stop":              [{ "hooks": [{ "type": "command", "command": "~/tab5-hello/tools/claude-hook", "async": true }] }],
+    "StopFailure":       [{ "hooks": [{ "type": "command", "command": "~/tab5-hello/tools/claude-hook", "async": true }] }],
+    "SessionEnd":        [{ "hooks": [{ "type": "command", "command": "~/tab5-hello/tools/claude-hook", "async": true }] }]
+  }
+}
+```
+
+It finds the panel at `smart-flexispot`, the name it gives the router; `CLAUDE_PANEL` in `env` points it elsewhere, and `CLAUDE_MACHINE` sets what the panel calls the laptop, its host name otherwise. Away from the panel's network it gives up after two seconds, unseen.
 
 ## Try it without the hardware
 

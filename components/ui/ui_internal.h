@@ -189,6 +189,9 @@ void place_top_bar();
  *  cards they drop, kept over the scrim by `bar` while one is out. */
 void build_bar_slots(lv_obj_t *bar);
 void build_bar_cards(lv_obj_t *screen, lv_obj_t *bar);
+/** The laptops' Claude Code sessions, beside the lights while any is about, and their card. */
+void build_claude_slot(lv_obj_t *bar);
+void build_claude_card(lv_obj_t *screen, lv_obj_t *bar);
 /** The thermostat, `w` by `h` at the top left of `parent`: the heating slot's card. */
 void build_thermostat_card(lv_obj_t *parent, std::int32_t w, std::int32_t h);
 void place_for_side();  // the dock, the page, the bar and its cards, after the dock changes side

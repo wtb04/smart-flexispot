@@ -1,0 +1,47 @@
+#!/bin/sh
+# Tells the panel what a Claude Code session on this laptop is doing. Claude
+# Code runs it from its hooks, in the background, with the hook's JSON on
+# stdin; README.md has the settings that do.
+#
+#   CLAUDE_PANEL_KEY  the panel's CLAUDE_KEY, from claude_secrets.h; unset, nothing is sent
+#   CLAUDE_PANEL      where the panel is, smart-flexispot unless set
+#   CLAUDE_MACHINE    what the panel calls this laptop, its host name unless set
+#
+# Only names leave the laptop: a file's name, a command's first word, a search
+# pattern, a host, the step list's lines. Never a prompt, a reply or what is in
+# a file. Away from the panel it gives up after two seconds, and Claude Code
+# never waits on it.
+[ -n "${CLAUDE_PANEL_KEY:-}" ] || exit 0
+command -v jq >/dev/null && command -v curl >/dev/null || exit 0
+
+body=$(jq -c --arg machine "${CLAUDE_MACHINE:-$(hostname -s)}" '
+  def base: split("/") | last;
+  # The command that does the work: past any cd, any variable set first, and
+  # into a $( ) one is set from.
+  def first_word:
+    [splits("&&|\\|\\||;|\\||\n") | gsub("\\$\\(|`|[()]"; " ") | [splits("[ \t]+")] | map(select(. != ""))
+     | until(length == 0 or (.[0] | (contains("=") or startswith("-")) | not); .[1:]) | .[0] // empty]
+    | (map(select(. != "cd" and . != "export")) + .) | (.[0] // "") | base;
+  (.tool_input // {}) as $in
+  | (.tool_name // "") as $tool
+  | {machine: $machine, session: .session_id, project: ((.cwd // "") | base), event: .hook_event_name}
+  + (if $tool == "" then {} else {tool: $tool} end)
+  + (if $tool == "" then {}
+     elif $tool == "Bash" then {target: (($in.command // "") | first_word)}
+     elif ($in.file_path // $in.notebook_path) then {target: (($in.file_path // $in.notebook_path) | base)}
+     elif $tool == "Grep" or $tool == "Glob" then {target: (($in.pattern // "")[0:39])}
+     elif $tool == "WebFetch" then {target: (($in.url // "") | capture("^[a-z]+://(?<host>[^/:]+)").host // "")}
+     elif ($tool | startswith("mcp__")) then {target: ($tool | split("__") | last)}
+     else {} end)
+  + (if $tool == "TodoWrite" then {steps: (($in.todos // []) as $todos | {
+       done: ($todos | map(select(.status == "completed")) | length),
+       total: ($todos | length),
+       items: ($todos | map({state: (if .status == "completed" then "done"
+                                     elif .status == "in_progress" then "now" else "next" end),
+                             text: (.content // "")[0:47]}))})}
+     else {} end)') || exit 0
+
+curl -s -m 2 -o /dev/null -X POST \
+    -H "Content-Type: application/json" -H "X-Claude-Key: $CLAUDE_PANEL_KEY" \
+    --data "$body" "http://${CLAUDE_PANEL:-smart-flexispot}/claude"
+exit 0
