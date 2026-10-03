@@ -87,6 +87,7 @@ bool route_fits(const Details &details, float lat, float lon);
  *  1 more, and cruising high 1 more. A military aircraft is above those,
  *  whatever its callsign, and an emergency squawk above all of them. */
 int notability(const Aircraft &aircraft);
+inline constexpr int kEmergencyNotability = 12;  // what an emergency squawk scores
 inline bool interesting(const Aircraft &aircraft) { return notability(aircraft) > 0; }
 
 /** Reads an adsb.fi v2 response, which is far too large to hand to a DOM

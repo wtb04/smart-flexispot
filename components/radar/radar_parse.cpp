@@ -587,7 +587,7 @@ constexpr Wide WIDE_BODIES[] = {
 constexpr int HEAVY       = 3;  // ADS-B's A5 of a type not in the list
 constexpr int CRUISING_FT = 20000;
 constexpr int MILITARY    = 9;  // over a giant cruising, 8
-constexpr int EMERGENCY   = 12;
+constexpr int EMERGENCY   = kEmergencyNotability;
 
 bool emergency(int squawk)
 {

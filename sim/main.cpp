@@ -220,7 +220,8 @@ void step_world()
     SDL_Delay(idle < 5 ? idle : 5);
 }
 
-void tap(SDL_Point at)
+// Held down for `hold_ms` before letting go: a long press past LVGL's 400 ms.
+void tap(SDL_Point at, std::uint32_t hold_ms = 120)
 {
     // Addressed to the window, as LVGL only takes a window's own events.
     const Uint32 window = SDL_GetWindowID(lv_sdl_window_get_window(lv_display_get_default()));
@@ -238,7 +239,7 @@ void tap(SDL_Point at)
         event.button.x        = at.x;
         event.button.y        = at.y;
         SDL_PushEvent(&event);
-        run_for(120);
+        run_for(type == SDL_MOUSEBUTTONDOWN ? hold_ms : 120);
     }
     run_for(300);
 }
@@ -349,6 +350,7 @@ struct Options {
     struct Step {
         SDL_Point     at{};
         std::uint32_t wait_ms = 0;  // a wait rather than a tap
+        std::uint32_t hold_ms = 0;  // a press held this long rather than a tap
     };
     std::vector<Step> taps;
     std::vector<std::pair<SDL_Point, SDL_Point>> swipes;
@@ -388,6 +390,13 @@ Options options(int argc, char **argv)
             SDL_Point at{};
             if (std::sscanf(value, "%d,%d", &at.x, &at.y) == 2) {
                 o.taps.push_back({at});
+            }
+            ++i;
+        } else if (name == "--hold") {
+            SDL_Point at{};
+            unsigned  ms = 0;
+            if (std::sscanf(value, "%d,%d,%u", &at.x, &at.y, &ms) == 3) {
+                o.taps.push_back({at, 0, ms});
             }
             ++i;
         } else if (name == "--swipe") {
@@ -508,7 +517,7 @@ int main(int argc, char **argv)
                 step_world();  // the desk and the rest go on meanwhile
             }
         } else {
-            tap(step.at);
+            tap(step.at, step.hold_ms > 0 ? step.hold_ms : 120);
         }
     }
     for (const auto &[from, to] : opts.swipes) {

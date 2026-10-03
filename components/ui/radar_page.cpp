@@ -92,9 +92,11 @@ constexpr int          OUTLINE_MAX_POINTS = 20;
 constexpr int          BLIP_MAX_CROSSINGS = 12;
 constexpr int          DOT_SIZE           = 5;
 
-// Stays with the aircraft it follows until another is clearly nearer, so the
-// card does not flick between two at much the same distance.
-constexpr float FOLLOW_MARGIN = 1.2f;
+// Turns between the few most notable in view, this often; one held drops out
+// only once it is outside a few more than that.
+constexpr std::uint32_t ROTATE_MS    = 5 * 60 * 1000;
+constexpr int           ROTATE_AMONG = 3;
+constexpr int           ROTATE_KEEP  = ROTATE_AMONG + 1;
 constexpr std::uint32_t REFOLLOW_MS = 60 * 1000;  // untouched this long, it follows again
 
 constexpr int SQUAWK_HIJACK    = 7500;
@@ -266,6 +268,8 @@ lv_obj_t    *s_map_chip = nullptr;  // on Home, to the radar page
 lv_obj_t    *s_track      = nullptr;  // following on its own, or how near it is to again
 lv_obj_t    *s_track_mark = nullptr;
 lv_obj_t    *s_track_ring = nullptr;
+lv_obj_t    *s_track_hold = nullptr;  // the pause sign, while held
+bool         s_held       = false;    // following paused by a long press, until a tap
 
 // The scope is one opaque picture, which the PPA copies to the screen whole:
 // the map, drawn for each range into s_ground, and each reading's planes over a
@@ -339,6 +343,7 @@ Row            s_rows[READINGS] = {};
 radar::Snapshot *s_last                        = nullptr;
 char             s_chosen[radar::kHexLen]      = {};
 bool             s_following                   = true;
+std::uint32_t    s_turn_began                  = 0;  // when the one followed was turned to
 radar::Details   s_details                     = {};
 char             s_details_hex[radar::kHexLen] = {};
 char             s_picture_hex[radar::kHexLen] = {};  // whose photo s_picture is about
@@ -1506,23 +1511,27 @@ constexpr int           TRACK_STEPS   = 100;
 
 void follow_again()
 {
+    s_held      = false;
     s_following = true;
+    s_chosen[0] = '\0';  // from the most notable, rather than keeping what was chosen by hand
     if (s_last != nullptr) {
         show_radar(*s_last);
     }
 }
 
 // Lit while it follows on its own; chosen by hand, faded, its ring filling over
-// the minute untouched after which it follows again.
+// the minute untouched after which it follows again; held, a pause sign.
 void paint_track()
 {
     if (s_track == nullptr) {
         return;
     }
-    lv_obj_set_hidden(s_track_ring, s_following);
+    lv_obj_set_hidden(s_track_ring, s_following || s_held);
+    lv_obj_set_hidden(s_track_mark, s_held);
+    lv_obj_set_hidden(s_track_hold, !s_held);
     lv_obj_set_style_image_recolor(s_track_mark, lv_color_hex(s_following ? theme::primary : theme::secondary), 0);
     lv_obj_set_style_image_opa(s_track_mark, s_following ? static_cast<lv_opa_t>(LV_OPA_COVER) : theme::mark_opa, 0);
-    if (!s_following) {
+    if (!s_following && !s_held) {
         const std::uint32_t idle = std::min(lv_display_get_inactive_time(nullptr), REFOLLOW_MS);
         const int           step = static_cast<int>(idle * TRACK_STEPS / REFOLLOW_MS);
         if (lv_arc_get_value(s_track_ring) != step) {
@@ -1533,7 +1542,7 @@ void paint_track()
 
 void track_tick(lv_timer_t *)
 {
-    if (!s_following && lv_display_get_inactive_time(nullptr) >= REFOLLOW_MS) {
+    if (!s_following && !s_held && lv_display_get_inactive_time(nullptr) >= REFOLLOW_MS) {
         follow_again();
     }
     paint_track();
@@ -1543,11 +1552,25 @@ lv_obj_t *build_track(lv_obj_t *bezel)
 {
     lv_obj_t *chip = theme::make_chip(bezel, "");
     lv_obj_set_ext_click_area(chip, (CORNER - ZOOM_D) / 2);
+    // A tap follows again; held, it keeps what is on show until tapped.
     lv_obj_add_event_cb(chip, [](lv_event_t *) {
         follow_again();
         paint_track();
-    }, LV_EVENT_PRESSED, nullptr);
+    }, LV_EVENT_SHORT_CLICKED, nullptr);
+    lv_obj_add_event_cb(chip, [](lv_event_t *) {
+        if (s_held) {
+            follow_again();
+        } else {
+            s_held      = true;
+            s_following = false;
+        }
+        paint_track();
+    }, LV_EVENT_LONG_PRESSED, nullptr);
     s_track_mark = theme::make_mark(chip, &icons::track_icon, LV_OPA_COVER);
+    s_track_hold = theme::make_label(chip, LV_SYMBOL_PAUSE, theme::secondary, fonts::size_16());
+    lv_obj_center(s_track_hold);
+    lv_obj_set_hidden(s_track_hold, true);
+    quiet(s_track_hold);
     s_track_ring = lv_arc_create(chip);
     lv_obj_set_size(s_track_ring, ZOOM_D, ZOOM_D);
     lv_obj_center(s_track_ring);
@@ -2325,38 +2348,60 @@ int plot_of(const char *hex)
     return -1;
 }
 
-// The most notable in view, a heavy cruising over a 737 climbing out of the
-// airport, the nearer of two alike; the nearest of all when none is notable.
-int most_notable()
+// The most notable in view, best first: a heavy cruising over a 737 climbing
+// out of the airport, the nearer of two alike, as the plots go nearest first.
+int most_notable(int *out, int max)
 {
-    int best = 0, best_score = -1;
+    int count = 0;
     for (int i = 0; i < s_shown; ++i) {
         const int score = radar::notability(*s_plots[i].aircraft);
-        if (score > best_score) {  // the plots go nearest first, so a tie keeps the nearer
-            best       = i;
-            best_score = score;
+        int       at    = count;
+        while (at > 0 && radar::notability(*s_plots[out[at - 1]].aircraft) < score) {
+            --at;
         }
+        if (at >= max) {
+            continue;
+        }
+        for (int j = std::min(count, max - 1); j > at; --j) {
+            out[j] = out[j - 1];
+        }
+        out[at] = i;
+        count   = std::min(count + 1, max);
     }
-    return best;
+    return count;
 }
 
+// Followed by turns: the most notable in view first, and every few minutes the
+// next of the few most notable, so Home shows other flights than the one. One
+// that leaves the view or falls out of the few is let go at once, and an
+// emergency is turned to at once.
 void follow_nearest()
 {
     if (s_shown == 0) {
         s_chosen[0] = '\0';
         return;
     }
-    const int  best = most_notable();
-    const int  held = plot_of(s_chosen);
-    // Kept until one clearly more notable comes into view, or one alike clearly nearer.
-    const int  held_score = held >= 0 ? radar::notability(*s_plots[held].aircraft) : -1;
-    const int  best_score = radar::notability(*s_plots[best].aircraft);
-    const bool keep = held >= 0 && (held_score > best_score ||
-                                    (held_score == best_score && s_plots[held].aircraft->distance_nm <
-                                                                     s_plots[best].aircraft->distance_nm * FOLLOW_MARGIN));
-    const int at = keep ? held : best;
-    if (!keep) {
-        remember_chosen(*s_plots[best].aircraft);
+    int       ranked[ROTATE_KEEP];
+    const int count = most_notable(ranked, ROTATE_KEEP);
+    const int held  = plot_of(s_chosen);
+    int       place = -1;  // of the held one among the ranked
+    for (int i = 0; i < count && held >= 0; ++i) {
+        place = ranked[i] == held ? i : place;
+    }
+    const std::uint32_t now     = lv_tick_get();
+    const bool          urgent  = radar::notability(*s_plots[ranked[0]].aircraft) >= radar::kEmergencyNotability &&
+                                  place != 0;
+    const bool          its_turn = place >= 0 && lv_tick_diff(now, s_turn_began) >= ROTATE_MS;
+    int                 at       = held;
+    if (place < 0 || urgent) {
+        at = ranked[0];
+    } else if (its_turn) {
+        const int among = std::min(count, ROTATE_AMONG);
+        at              = ranked[(std::min(place, among - 1) + 1) % among];
+    }
+    if (at != held) {
+        s_turn_began = now;
+        remember_chosen(*s_plots[at].aircraft);
     }
     if (std::strcmp(s_details_hex, s_chosen) != 0) {
         await_picture();
@@ -3256,36 +3301,6 @@ int bench_radar_map(char *out, std::size_t size, bool open)
     s_grown_hex[0] = '\0';  // its trail grows in, as when chosen
     show_radar(*s_last);
     return std::snprintf(out, size, "open\n");
-}
-
-// One frame of a zoom in, magnified by a quarter, held on the panel until
-// bench_radar_map(false) puts the screen back: to see what a zoom shows.
-int bench_radar_zoom_frame(char *out, std::size_t size)
-{
-#ifdef ESP_PLATFORM
-    if (!s_mapped || s_frame == nullptr) {
-        return std::snprintf(out, size, "not open\n");
-    }
-    lv_refr_now(nullptr);
-    lv_area_t keep[16];
-    int       kept = 0;
-    for (lv_obj_t *control : {s_zoom_out, s_zoom_in, s_map_chip, s_rings[0], s_rings[1], s_rings[2], s_rings[3],
-                              s_compass[0], s_compass[1], s_compass[2], s_compass[3]}) {
-        if (control != nullptr && !lv_obj_is_hidden(control) && kept < 16) {
-            lv_obj_get_coords(control, &keep[kept++]);
-        }
-    }
-    board::zoom_begin(keep, kept);
-    take_rings_out();
-    lv_display_enable_invalidation(lv_display_get_default(), false);
-    s_fast_zooming = true;
-    s_fast_from = s_fast_picture = RANGES[s_range_step];
-    s_fast_to   = static_cast<int>(static_cast<float>(s_fast_from) / 1.25f);
-    show_magnified(static_cast<std::int32_t>(std::lround(1.25f * 16.0f)));
-    return std::snprintf(out, size, "held\n");
-#else
-    return std::snprintf(out, size, "panel only\n");
-#endif
 }
 
 int bench_radar_open(char *out, std::size_t size)
