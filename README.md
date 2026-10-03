@@ -118,6 +118,10 @@ A focus timer in rounds, 25 minutes on and 5 off by default with a long break af
 
 ### Claude Code
 
+| Working | Waiting on you |
+|---|---|
+| ![The Claude Code card](docs/screenshots/claude.png) | ![A session waiting on you](docs/screenshots/claude-waiting.png) |
+
 While a Claude Code session on one of my laptops is working, a pill sits in the control bar beside the lights: a ring of one piece per session, coloured by what each is doing, with how many there are inside it. It turns amber, with a chime and a notice, when a session waits for me to allow something, and stays so until I have. Tapped, it drops a card with each session's project and laptop, what it is doing, how far through its step list it is, and for how long; tapping a session shows its steps and what it did last. Ten minutes after the last thing any session did, the pill is gone again.
 
 Each laptop tells the panel through Claude Code's own hooks, with `tools/claude-hook`. Only names leave the laptop: a file's name, a command's first word, a search pattern, a host and the lines of the step list, never a prompt, a reply or what is in a file. Step 7 below sets it up.
