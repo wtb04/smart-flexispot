@@ -469,7 +469,9 @@ int main(int argc, char **argv)
     SDL_AddEventWatch(on_event, nullptr);
 
     ui::set_cards(CARDS, static_cast<int>(std::size(CARDS)));
-    ESP_ERROR_CHECK(ui::init(handlers(), 80, 0, true, ui::Orientation::Normal));
+    const char *dock = std::getenv("SIM_DOCK");
+    ESP_ERROR_CHECK(ui::init(handlers(), 80, 0, dock == nullptr || std::strcmp(dock, "left") != 0,
+                             ui::Orientation::Normal));
     ESP_ERROR_CHECK(ui::build());
     // The settings as a panel fresh from the factory has them, from settings.cpp.
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_setting(ui::Setting::Charging, true));
