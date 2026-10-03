@@ -352,6 +352,11 @@ TEST(RadarParse, notability)
     Aircraft fighter = aircraft("VIPER1", "A6", "F35", 12000);
     fighter.military = true;
     EXPECT_GT(notability(fighter), wide_high) << "a military aircraft over a heavy, whatever its callsign";
+    Aircraft hovering = aircraft("G12", "", "EXPL", 800);
+    hovering.military = true;
+    EXPECT_LT(notability(hovering), notability(fighter)) << "a military helicopter, known by its type alone, below";
+    EXPECT_LT(notability(hovering), notability(aircraft("UAE147", "A5", "A388", 9000))) << "and below a giant";
+    EXPECT_EQ(notability(hovering), notability(aircraft("KLM691", "A5", "B77W", 9000))) << "as a 777";
 
     const std::string json = R"({"aircraft":[{"hex":"ae0470","flight":"RCH123  ","dbFlags":1,"lat":52.3,"lon":4.7},)"
                              R"({"hex":"484bd1","flight":"KLM90G  ","dbFlags":0,"lat":52.4,"lon":4.8}]})";

@@ -85,7 +85,8 @@ bool route_fits(const Details &details, float lat, float lon);
  *  large by its ADS-B category, scores 1; a wide-body 3 more, a 777, A350 or
  *  A340 4 more, a giant as an A380 or 747 6 more, a high-vortex one as a 757
  *  1 more, and cruising high 1 more. A military aircraft is above those,
- *  whatever its callsign, and an emergency squawk above all of them. */
+ *  whatever its callsign, but a military helicopter only as a 777; an
+ *  emergency squawk is above all of them. */
 int notability(const Aircraft &aircraft);
 inline constexpr int kEmergencyNotability = 12;  // what an emergency squawk scores
 inline bool interesting(const Aircraft &aircraft) { return notability(aircraft) > 0; }

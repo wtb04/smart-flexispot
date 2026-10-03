@@ -204,6 +204,18 @@ Heights are three 7-segment patterns with the decimal point on the middle
 digit. Blank displays, the `S-1` preset menu and error codes such as `E01` are
 all rejected rather than decoded into a bogus number.
 
+## In Home Assistant
+
+Everything in the control bar and on Home is one of Home Assistant's own entities, read and set over its websocket. The panel is a device of its own there too, over MQTT:
+
+| In Home Assistant | Entities |
+|---|---|
+| Controls | Up, Down, Stop, Preset 1 to 6, Screen |
+| Sensors | Height, Active preset, Motion, Presence |
+| Notifications | Screen message |
+| Configuration | Brightness |
+| Diagnostics | Battery, its voltage, current and power, Charging, External power, Desk link, Presence signal, Signal, Uptime, Last update |
+
 ## Odds and ends
 
 - The panel is natively 720x1280 portrait, turned a quarter by the P4's PPA as
