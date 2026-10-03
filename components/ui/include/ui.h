@@ -233,9 +233,13 @@ esp_err_t set_media_seeks(bool seeks);
 esp_err_t set_media_neighbours(bool previous, bool next);
 
 /** Whether the player takes pause, seek and skip from here. Some, such as
- *  Streamyfin, only report: the card and the cinema view then fade what the
- *  player would not act on. */
+ *  Streamyfin, only report: the bar, the card and the views then leave out
+ *  what the player would not act on. */
 esp_err_t set_media_remote(bool remote);
+
+/** Whether the player takes a track back, and on: the app playing on a speaker
+ *  may take neither, as a radio station does. Both until said otherwise. */
+esp_err_t set_media_tracks(bool back, bool on);
 
 /** Whether a video has subtitles to show, and whether they show. */
 esp_err_t set_media_subtitles(bool available, bool shown);

@@ -71,6 +71,15 @@ constexpr float PERCENT_PER_WHOLE = 100.0f;
 // attribute_number()'s answer when there is no number to read.
 constexpr float NO_NUMBER = -1.0f;
 
+// A media player's supported_features, as Home Assistant numbers them: a Cast
+// speaker's change with the app playing on it.
+constexpr std::uint32_t TAKES_PAUSE       = 1u << 0;
+constexpr std::uint32_t TAKES_VOLUME_SET  = 1u << 2;
+constexpr std::uint32_t TAKES_PREVIOUS    = 1u << 4;
+constexpr std::uint32_t TAKES_NEXT        = 1u << 5;
+constexpr std::uint32_t TAKES_VOLUME_STEP = 1u << 10;
+constexpr std::uint32_t TAKES_PLAY        = 1u << 14;
+
 constexpr std::size_t ISO_SECONDS_LENGTH = sizeof("YYYY-MM-DDTHH:MM:SS") - 1;
 constexpr int         MAX_POSITION_AGE_S = units::kSecondsPerDay;
 
@@ -271,6 +280,8 @@ struct PlayerView {
     std::string series;        // its series, whose episodes are its neighbours
     std::string still;         // a video's own picture, for the cinema view
     bool        remote = true;  // takes pause and seek from here; Jellyfin's players need not
+    bool        tracks_back = true;
+    bool        tracks_on   = true;
 };
 
 bool view_going(const PlayerView &view)
@@ -301,6 +312,17 @@ PlayerView speaker_view(const hass::ws::Entity *speaker)
     view.position_s      = reported + (speaker->state == "playing" ? seconds_since(view.position_key) : 0);
     view.volume          = attribute_number(*speaker, "volume_level");
     view.muted           = attribute(*speaker, "is_volume_muted") == "true";
+    // Without them reported, taken as taking everything, as before they were read.
+    const float features = attribute_number(*speaker, "supported_features");
+    if (features >= 0.0f) {
+        const auto takes  = static_cast<std::uint32_t>(features);
+        view.remote       = (takes & (TAKES_PAUSE | TAKES_PLAY)) != 0;
+        view.tracks_back  = (takes & TAKES_PREVIOUS) != 0;
+        view.tracks_on    = (takes & TAKES_NEXT) != 0;
+        if ((takes & (TAKES_VOLUME_SET | TAKES_VOLUME_STEP)) == 0) {
+            view.volume = NO_NUMBER;
+        }
+    }
     return view;
 }
 
@@ -468,6 +490,11 @@ void show_media()
     static bool       s_remote_shown = true;
     if (std::exchange(s_remote_shown, view.remote) != view.remote) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_remote(view.remote));
+    }
+    static int s_tracks_shown = 3;  // both, as the screen starts
+    const int  tracks         = (view.tracks_back ? 1 : 0) | (view.tracks_on ? 2 : 0);
+    if (std::exchange(s_tracks_shown, tracks) != tracks) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_tracks(view.tracks_back, view.tracks_on));
     }
     want_segments(view.jellyfin ? view.episode : "", view.series, view.jellyfin);
     media::set_still_url(view.jellyfin ? view.still.c_str() : "");
@@ -953,7 +980,7 @@ std::vector<std::string> attributes()
             "is_volume_muted",   "media_position_updated_at",
             "media_duration",    "media_position",      "volume_level",
             "entity_picture_local", "entity_picture",   "latitude",
-            "longitude"};
+            "longitude",         "supported_features"};
 }
 
 int entity_count()

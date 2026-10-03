@@ -23,6 +23,8 @@ struct MediaState {
     bool controllable = false;  // a player there is to steer; holding the card does nothing without one
     bool playing      = false;  // as shown: a pause shows once it has settled
     bool remote       = true;   // takes play, pause, skip and seek from here
+    bool tracks_back  = true;   // takes a track back, and on, as most players do
+    bool tracks_on    = true;
     bool video        = false;  // it seeks, as a film or an episode does
     int  position_s   = 0;      // as last reported, at position_at
     int  duration_s   = 0;      // 0 while unknown
@@ -65,6 +67,7 @@ void media_take_segments(const MediaSegment *segments, int count);
 void media_take_subtitles(bool available, bool shown);
 void media_take_still(const void *pixels);
 void media_take_neighbours(bool before, bool after);
+void media_take_tracks(bool back, bool on);
 void media_take_hold_preset(int preset);
 
 // ---- What follows from it. ----
@@ -72,9 +75,14 @@ void media_take_hold_preset(int preset);
 int  media_position_now();
 int  media_position_ms_now();
 bool media_is_video();
+/** A player only followed shows the volume and the subtitles only where it
+ *  takes them: what it never takes is left out rather than faded. */
+bool media_shows_volume();
+bool media_shows_subtitles();
 
 /** What the skip button offers now: into the intro, its end; into the credits,
- *  or near the end without any marked, the next episode, if there is one. */
+ *  or near the end without any marked, the next episode, if there is one.
+ *  Nothing for a player that is only followed. */
 struct MediaSkip {
     const char *text = nullptr;  // null when there is nothing to skip
     int         to_s = -1;       // where skipping the intro seeks to

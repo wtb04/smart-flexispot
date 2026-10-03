@@ -377,6 +377,7 @@ Slot<std::uint8_t>   p_subtitles;  // 1 for some to show, 2 for shown
 Slot<const void *>   p_still;
 Slot<const void *>   p_art_large;
 Slot<std::uint8_t>   p_neighbours;  // bit 0 an episode before, bit 1 one after
+Slot<std::uint8_t>   p_tracks;      // bit 0 a track back, bit 1 one on
 Slot<PillArgs>       p_pill[kPillCount];
 Slot<LightsArgs>     p_lights;
 Slot<LightArgs>      p_light[kLightCount];
@@ -643,6 +644,9 @@ void apply_media_updates()
     if (std::uint8_t around = 0; take(p_neighbours, around)) {
         media_take_neighbours((around & 1) != 0, (around & 2) != 0);
     }
+    if (std::uint8_t tracks = 0; take(p_tracks, tracks)) {
+        media_take_tracks((tracks & 1) != 0, (tracks & 2) != 0);
+    }
     for (int i = 0; i < media::kPickCount; ++i) {
         if (PickArgs pick{}; take(p_pick[i], pick)) {
             media_take_pick(i, pick.name.get());
@@ -866,6 +870,12 @@ esp_err_t set_media_segments(const MediaSegment *segments, int count)
 esp_err_t set_media_neighbours(bool previous, bool next)
 {
     put(p_neighbours, static_cast<std::uint8_t>((previous ? 1 : 0) | (next ? 2 : 0)));
+    return ESP_OK;
+}
+
+esp_err_t set_media_tracks(bool back, bool on)
+{
+    put(p_tracks, static_cast<std::uint8_t>((back ? 1 : 0) | (on ? 2 : 0)));
     return ESP_OK;
 }
 

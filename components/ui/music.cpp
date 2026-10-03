@@ -283,34 +283,35 @@ void show_media()
     theme::set_text(s_artist, media.artist);
     show_cover();
 
-    const bool known = media_state().duration_s > 0;
+    const bool known = media.duration_s > 0;
     for (lv_obj_t *part : {s_bar, s_elapsed, s_total}) {
         lv_obj_set_hidden(part, !known);
     }
     if (known) {
-        if (media_state().duration_s != s_duration_shown) {
-            s_duration_shown = media_state().duration_s;
-            lv_bar_set_range(s_bar, 0, media_state().duration_s * units::kMsPerSecond);
-            write_clock(s_total, media_state().duration_s);
+        if (media.duration_s != s_duration_shown) {
+            s_duration_shown = media.duration_s;
+            lv_bar_set_range(s_bar, 0, media.duration_s * units::kMsPerSecond);
+            write_clock(s_total, media.duration_s);
         }
         s_bar_end   = -1;  // where it is may have jumped
         s_elapsed_s = -1;
         glide(nullptr);
     }
 
-    theme::set_text(lv_obj_get_child(s_play, 0), media_state().playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
-    lv_obj_set_hidden(s_paused, media_state().playing);
-    const lv_opa_t dim = media_state().playing ? static_cast<lv_opa_t>(LV_OPA_TRANSP) : PAUSED_DIM;
+    theme::set_text(lv_obj_get_child(s_play, 0), media.playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
+    lv_obj_set_hidden(s_paused, media.playing);
+    const lv_opa_t dim = media.playing ? static_cast<lv_opa_t>(LV_OPA_TRANSP) : PAUSED_DIM;
     if (lv_obj_get_style_image_recolor_opa(s_cover, LV_PART_MAIN) != dim) {
         lv_obj_set_style_image_recolor(s_cover, lv_color_hex(theme::background), 0);
         lv_obj_set_style_image_recolor_opa(s_cover, dim, 0);
     }
-    for (lv_obj_t *control : s_steer) {
-        theme::set_usable(control, media_state().remote);
-    }
-    theme::set_usable(s_volume, media_state().volume >= 0);
-    if (media_state().volume >= 0 && !s_volume_held) {
-        show_volume(media_state().volume);
+    lv_obj_set_hidden(s_steer[0], !media.remote || !media.tracks_back);
+    lv_obj_set_hidden(s_steer[1], !media.remote);
+    lv_obj_set_hidden(s_steer[2], !media.remote || !media.tracks_on);
+    lv_obj_set_hidden(s_volume, !media_shows_volume());
+    theme::set_usable(s_volume, media.volume >= 0);
+    if (media.volume >= 0 && !s_volume_held) {
+        show_volume(media.volume);
     }
 }
 

@@ -201,18 +201,20 @@ void show_media()
     show_progress();
     theme::set_text(lv_obj_get_child(s_play, 0), playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
     lv_obj_set_hidden(s_paused, playing);
+    lv_obj_set_hidden(s_volume, !media_shows_volume());
     theme::set_usable(s_volume, media_state().volume >= 0);
     if (media_state().volume >= 0 && !s_volume_held) {
         show_volume(media_state().volume);
     }
     const MediaState &media = media_state();
-    for (lv_obj_t *control : {s_play, s_skip}) {
-        theme::set_usable(control, media.remote);
+    for (lv_obj_t *control : {s_play, s_steer[0], s_steer[1]}) {
+        lv_obj_set_hidden(control, !media.remote);
     }
     // Faded where there is no episode that side, so the grid stays as it is.
-    theme::set_usable(s_steer[0], media.remote && media.before);
-    theme::set_usable(s_steer[1], media.remote && media.after);
+    theme::set_usable(s_steer[0], media.before);
+    theme::set_usable(s_steer[1], media.after);
     theme::fill_accent_or(s_subtitles, media.subtitles_shown, theme::panel_light);
+    lv_obj_set_hidden(s_subtitles, !media_shows_subtitles());
     theme::set_usable(s_subtitles, media.subtitles_available);
     if (media.stills != s_stills_shown) {
         s_stills_shown = media.stills;

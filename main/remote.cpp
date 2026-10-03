@@ -572,7 +572,7 @@ esp_err_t desk_page(httpd_req_t *req)
     return httpd_resp_send(req, text, n);
 }
 
-// How long the radar takes to open fullscreen, draw, zoom and close. With
+// How long the radar takes to open its map, draw, zoom and close. With
 // ?open it is only shown, so its feed can start before the bench.
 esp_err_t bench_page(httpd_req_t *req)
 {

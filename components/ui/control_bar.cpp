@@ -173,6 +173,8 @@ lv_obj_t *s_card_full    = nullptr;
 lv_obj_t *s_card_bar     = nullptr;  // how far it has got
 lv_obj_t *s_card_at      = nullptr;
 lv_obj_t *s_card_length  = nullptr;
+lv_obj_t *s_card_transport = nullptr;  // before, play and after, for a player that takes them
+lv_obj_t *s_card_sound   = nullptr;  // the volume and the favourites or subtitles
 lv_obj_t *s_card_prev    = nullptr;
 lv_obj_t *s_card_play    = nullptr;
 lv_obj_t *s_card_next    = nullptr;
@@ -225,8 +227,8 @@ void paint_media()
     // Alone, the title stands in the middle; with who it is by, over it.
     lv_obj_align(s_slot_title, LV_ALIGN_LEFT_MID, s_slot_text_x, artist[0] != '\0' && media.has_track ? -TITLE_RISE : 0);
     show_play(s_slot_play, media.has_track && media.playing);
-    // With nothing playing, play offers the favourites.
-    theme::set_usable(s_slot_play, !media.has_track || media.remote);
+    // With nothing playing, play offers the favourites; a player only followed has none.
+    lv_obj_set_hidden(s_slot_play, media.has_track && !media.remote);
     paint_cover(s_slot_cover);
 
     if (s_card_title == nullptr) {
@@ -249,8 +251,20 @@ void paint_media()
     theme::set_text(lv_obj_get_child(s_card_next, 0), media.video ? "+10 s" : LV_SYMBOL_NEXT);
     show_play(s_card_play, media.has_track && media.playing);
     for (lv_obj_t *button : {s_card_prev, s_card_play, s_card_next}) {
-        theme::set_usable(button, media.has_track && media.remote);
+        theme::set_usable(button, media.has_track);
     }
+    // A video's are ten seconds either way, which any player that is steered takes.
+    lv_obj_set_hidden(s_card_prev, !media.video && !media.tracks_back);
+    lv_obj_set_hidden(s_card_next, !media.video && !media.tracks_on);
+    const bool shows_extra = !media.video || media_shows_subtitles();
+    const bool shows_sound = media_shows_volume() || shows_extra;
+    if (lv_obj_is_hidden(s_card_transport) != !media.remote || lv_obj_is_hidden(s_card_sound) != !shows_sound) {
+        lv_obj_set_hidden(s_card_transport, !media.remote);
+        lv_obj_set_hidden(s_card_sound, !shows_sound);
+        fit_popout(s_media_pop);
+    }
+    lv_obj_set_hidden(s_volume, !media_shows_volume());
+    lv_obj_set_hidden(s_card_extra, !shows_extra);
     const bool timed = media.has_track && media.duration_s > 0;
     for (lv_obj_t *part : {s_card_bar, s_card_at, s_card_length}) {
         lv_obj_set_style_opa(part, timed ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
@@ -460,6 +474,7 @@ void build_media_card(lv_obj_t *screen)
     s_card_length = theme::make_label(times, "", theme::secondary, fonts::size_16());
 
     lv_obj_t *transport = row_of(card, inner, CARD_BTN_H, LV_FLEX_ALIGN_CENTER);
+    s_card_transport    = transport;
     s_card_prev = card_button(transport, LV_SYMBOL_PREV, STEP_W);
     lv_obj_add_event_cb(s_card_prev, step_clicked, LV_EVENT_CLICKED, nullptr);
     s_card_play = card_button(transport, LV_SYMBOL_PLAY, inner - 2 * (STEP_W + CARD_GAP));
@@ -470,6 +485,7 @@ void build_media_card(lv_obj_t *screen)
 
     // The volume, as the music view has it, the favourites beside it.
     lv_obj_t *sound = row_of(card, inner, CARD_BTN_H, LV_FLEX_ALIGN_START);
+    s_card_sound    = sound;
     s_volume = lv_obj_create(sound);
     theme::style_panel(s_volume, theme::panel_light, theme::radius::control);
     lv_obj_set_height(s_volume, CARD_BTN_H);
