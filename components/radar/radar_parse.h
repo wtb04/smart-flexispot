@@ -35,6 +35,7 @@ struct Aircraft {
     int   altitude_ft;
     int   vertical_fpm;
     bool  on_ground;
+    bool  military;  // as the feed's database has it
 };
 
 struct Details {
@@ -76,10 +77,15 @@ bool parse_photo(const char *json, std::size_t length, char *out, std::size_t si
  *  known, as nothing then says it is wrong. */
 bool route_fits(const Details &details, float lat, float lon);
 
-/** Worth following of its own accord: in the air, and an airline's flight, by
- *  a callsign of three letters and then a number, or large or heavy by its
- *  ADS-B category. Not a light aircraft calling by its registration. */
-bool interesting(const Aircraft &aircraft);
+/** How much an aircraft is worth following of its own accord, 0 for not at
+ *  all: on the ground, or a light aircraft calling by its registration. An
+ *  airline's flight, by a callsign of three letters and then a number, or one
+ *  large by its ADS-B category, scores 1; a wide-body or heavy 3 more, a
+ *  high-vortex one as a 757 1 more, and cruising high 1 more. A military
+ *  aircraft is above those, whatever its callsign, and an emergency squawk
+ *  above all of them. */
+int notability(const Aircraft &aircraft);
+inline bool interesting(const Aircraft &aircraft) { return notability(aircraft) > 0; }
 
 /** Reads an adsb.fi v2 response, which is far too large to hand to a DOM
  *  parser on this part: the allocator keeps anything under sixteen kilobytes

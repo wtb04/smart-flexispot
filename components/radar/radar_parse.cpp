@@ -175,6 +175,8 @@ const Field *text_field(Scanner &in, const Field (&fields)[N], const char *key,
     return nullptr;
 }
 
+constexpr int DB_MILITARY = 1;  // dbFlags, the feeds' readsb database: bit 0 military
+
 bool read_number_field(Scanner &in, const char *key, std::size_t key_len, Aircraft &out,
                        bool &has_lat, bool &has_lon)
 {
@@ -197,6 +199,8 @@ bool read_number_field(Scanner &in, const char *key, std::size_t key_len, Aircra
         out.speed_kt = static_cast<float>(value);
     } else if (key_is(key, key_len, "baro_rate") && in.number(value)) {
         out.vertical_fpm = static_cast<int>(value);
+    } else if (key_is(key, key_len, "dbFlags") && in.number(value)) {
+        out.military = (static_cast<int>(value) & DB_MILITARY) != 0;
     } else {
         return false;
     }
@@ -566,17 +570,57 @@ double dot(const Unit &a, const Unit &b)
 }
 }  // namespace
 
-bool interesting(const Aircraft &aircraft)
+namespace {
+// ICAO type designators of the wide-bodies, by how they start.
+constexpr const char *WIDE_BODIES[] = {"B74", "B76", "B77", "B78", "A33", "A34", "A35", "A38", "A30", "MD11", "IL96"};
+constexpr int         CRUISING_FT   = 20000;
+constexpr int         MILITARY      = 6;  // over a heavy cruising, 5
+constexpr int         EMERGENCY     = 10;
+
+bool emergency(int squawk)
+{
+    return squawk == 7500 || squawk == 7600 || squawk == 7700;
+}
+
+bool wide_body(const char *type)
+{
+    for (const char *start : WIDE_BODIES) {
+        if (std::strncmp(type, start, std::strlen(start)) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+}  // namespace
+
+int notability(const Aircraft &aircraft)
 {
     if (aircraft.on_ground) {
-        return false;
+        return 0;
     }
-    const auto  *call    = reinterpret_cast<const unsigned char *>(aircraft.flight);
-    const bool   airline = std::isupper(call[0]) && std::isupper(call[1]) && std::isupper(call[2]) &&
-                           std::isdigit(call[3]);
-    const char  *kind    = aircraft.category;
-    const bool   big     = kind[0] == 'A' && (kind[1] == '3' || kind[1] == '4' || kind[1] == '5');
-    return airline || big;
+    if (emergency(aircraft.squawk)) {
+        return EMERGENCY;
+    }
+    if (aircraft.military) {
+        return MILITARY;
+    }
+    const auto *call    = reinterpret_cast<const unsigned char *>(aircraft.flight);
+    const bool  airline = std::isupper(call[0]) && std::isupper(call[1]) && std::isupper(call[2]) &&
+                          std::isdigit(call[3]);
+    const char  size    = aircraft.category[0] == 'A' ? aircraft.category[1] : '\0';
+    if (!airline && size != '3' && size != '4' && size != '5') {
+        return 0;
+    }
+    int score = 1;
+    if (size == '5' || wide_body(aircraft.type)) {
+        score += 3;
+    } else if (size == '4') {
+        score += 1;
+    }
+    if (aircraft.altitude_ft >= CRUISING_FT) {
+        score += 1;
+    }
+    return score;
 }
 
 bool route_fits(const Details &details, float lat, float lon)

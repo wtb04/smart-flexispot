@@ -308,13 +308,17 @@ TEST(RadarParse, route_fits)
     EXPECT_TRUE(radar::route_fits(unplaced, 51.46f, 7.03f)) << "nothing to say it is wrong";
 }
 
-TEST(RadarParse, interesting)
+TEST(RadarParse, notability)
 {
-    const auto aircraft = [](const char *flight, const char *category, bool on_ground = false) {
+    const auto aircraft = [](const char *flight, const char *category, const char *type = "", int feet = 3000,
+                             int squawk = -1, bool on_ground = false) {
         Aircraft a{};
         std::snprintf(a.flight, sizeof(a.flight), "%s", flight);
         std::snprintf(a.category, sizeof(a.category), "%s", category);
-        a.on_ground = on_ground;
+        std::snprintf(a.type, sizeof(a.type), "%s", type);
+        a.altitude_ft = feet;
+        a.squawk      = squawk;
+        a.on_ground   = on_ground;
         return a;
     };
     EXPECT_TRUE(interesting(aircraft("KLM90G", "A3"))) << "an airline's flight";
@@ -323,5 +327,25 @@ TEST(RadarParse, interesting)
     EXPECT_FALSE(interesting(aircraft("PHAHJ", "A1"))) << "a light aircraft by its registration";
     EXPECT_FALSE(interesting(aircraft("N217SR", "A1"))) << "nor an American one";
     EXPECT_FALSE(interesting(aircraft("", "A7"))) << "a helicopter";
-    EXPECT_FALSE(interesting(aircraft("KLM90G", "A3", true))) << "nothing on the ground";
+    EXPECT_FALSE(interesting(aircraft("KLM90G", "A3", "B738", 3000, -1, true))) << "nothing on the ground";
+
+    const int narrow_low  = notability(aircraft("KLM90G", "A3", "B738", 3000));
+    const int narrow_high = notability(aircraft("RYR15P", "A3", "B738", 36000));
+    const int wide_high   = notability(aircraft("KLM691", "A5", "B77W", 36000));
+    const int wide_by_type = notability(aircraft("SIA323", "", "A359", 9000));
+    EXPECT_GT(narrow_high, narrow_low) << "cruising over climbing out";
+    EXPECT_GT(wide_high, narrow_high) << "a heavy over a 737";
+    EXPECT_GT(wide_by_type, narrow_high) << "a wide-body known by its type, without a category";
+    EXPECT_GT(notability(aircraft("PHAHJ", "A1", "C172", 2000, 7700)), wide_high) << "an emergency above all";
+
+    Aircraft fighter = aircraft("VIPER1", "A6", "F35", 12000);
+    fighter.military = true;
+    EXPECT_GT(notability(fighter), wide_high) << "a military aircraft over a heavy, whatever its callsign";
+
+    const std::string json = R"({"aircraft":[{"hex":"ae0470","flight":"RCH123  ","dbFlags":1,"lat":52.3,"lon":4.7},)"
+                             R"({"hex":"484bd1","flight":"KLM90G  ","dbFlags":0,"lat":52.4,"lon":4.8}]})";
+    Aircraft read[2];
+    ASSERT_EQ(parse(json.c_str(), json.size(), read, 2), 2);
+    EXPECT_TRUE(read[0].military) << "dbFlags bit 0";
+    EXPECT_FALSE(read[1].military);
 }

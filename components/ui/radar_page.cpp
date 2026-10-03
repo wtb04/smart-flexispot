@@ -2255,16 +2255,19 @@ int plot_of(const char *hex)
     return -1;
 }
 
-// The nearest in view worth following, an airliner over a light aircraft;
-// the nearest of all when none is.
-int nearest_interesting()
+// The most notable in view, a heavy cruising over a 737 climbing out of the
+// airport, the nearer of two alike; the nearest of all when none is notable.
+int most_notable()
 {
+    int best = 0, best_score = -1;
     for (int i = 0; i < s_shown; ++i) {
-        if (radar::interesting(*s_plots[i].aircraft)) {
-            return i;
+        const int score = radar::notability(*s_plots[i].aircraft);
+        if (score > best_score) {  // the plots go nearest first, so a tie keeps the nearer
+            best       = i;
+            best_score = score;
         }
     }
-    return 0;
+    return best;
 }
 
 void follow_nearest()
@@ -2273,11 +2276,14 @@ void follow_nearest()
         s_chosen[0] = '\0';
         return;
     }
-    const int  best = nearest_interesting();
+    const int  best = most_notable();
     const int  held = plot_of(s_chosen);
-    const bool keep = held >= 0 &&
-                      (radar::interesting(*s_plots[held].aircraft) || !radar::interesting(*s_plots[best].aircraft)) &&
-                      s_plots[held].aircraft->distance_nm < s_plots[best].aircraft->distance_nm * FOLLOW_MARGIN;
+    // Kept until one clearly more notable comes into view, or one alike clearly nearer.
+    const int  held_score = held >= 0 ? radar::notability(*s_plots[held].aircraft) : -1;
+    const int  best_score = radar::notability(*s_plots[best].aircraft);
+    const bool keep = held >= 0 && (held_score > best_score ||
+                                    (held_score == best_score && s_plots[held].aircraft->distance_nm <
+                                                                     s_plots[best].aircraft->distance_nm * FOLLOW_MARGIN));
     const int at = keep ? held : best;
     if (!keep) {
         remember_chosen(*s_plots[best].aircraft);
