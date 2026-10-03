@@ -88,6 +88,11 @@ bool parse_photo(const char *json, std::size_t length, char *out, std::size_t si
  *  known, as nothing then says it is wrong. */
 bool route_fits(const Details &details, float lat, float lon);
 
+/** Whether an aircraft on the route's line flies toward its origin rather
+ *  than its destination: the database's route for the callsign is the same
+ *  pair the other way round. False when its track is not known. */
+bool route_backwards(const Details &details, float lat, float lon, float track_deg);
+
 /** How far along its route an aircraft at lat/lon is, as a share from 0 to 1,
  *  and the kilometres left along the great circle. False when the airports'
  *  places are not known. */

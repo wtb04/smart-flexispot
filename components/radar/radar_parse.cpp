@@ -729,6 +729,39 @@ int merge_reading(Aircraft *now, int count, int capacity, const Aircraft *before
     return count;
 }
 
+namespace {
+// The direction to fly from one place to another, in degrees from north.
+double bearing_to(double lat, double lon, double to_lat, double to_lon)
+{
+    constexpr double RAD = 3.14159265358979 / 180.0;
+    const double     p1  = lat * RAD;
+    const double     p2  = to_lat * RAD;
+    const double     dl  = (to_lon - lon) * RAD;
+    const double     deg = std::atan2(std::sin(dl) * std::cos(p2),
+                                      std::cos(p1) * std::sin(p2) - std::sin(p1) * std::cos(p2) * std::cos(dl)) /
+                       RAD;
+    return std::fmod(deg + 360.0, 360.0);
+}
+
+double degrees_apart(double a, double b)
+{
+    const double d = std::fabs(std::fmod(a - b + 540.0, 360.0) - 180.0);
+    return d;
+}
+}  // namespace
+
+bool route_backwards(const Details &details, float lat, float lon, float track_deg)
+{
+    constexpr double TOWARD_DEG = 60.0;   // flying at it, give or take an airway's bend
+    constexpr double AWAY_DEG   = 120.0;  // and plainly not at the other end
+    if (track_deg < 0.0f || !details.has_route || !details.has_origin_at || !details.has_dest_at) {
+        return false;
+    }
+    const double to_origin = bearing_to(lat, lon, details.origin_lat, details.origin_lon);
+    const double to_dest   = bearing_to(lat, lon, details.dest_lat, details.dest_lon);
+    return degrees_apart(track_deg, to_origin) <= TOWARD_DEG && degrees_apart(track_deg, to_dest) >= AWAY_DEG;
+}
+
 bool route_progress(const Details &details, float lat, float lon, float &share, float &left_km)
 {
     constexpr double EARTH_KM = 6371.0;
@@ -767,7 +800,7 @@ bool route_fits(const Details &details, float lat, float lon)
     Unit         normal = cross(from, to);
     const double length = std::sqrt(dot(normal, normal));
     if (length < 1e-9) {
-        return true;  // the same airport twice, or the far side of the world
+        return false;  // the same airport at both ends: the database is wrong about one of them
     }
     normal = {normal.x / length, normal.y / length, normal.z / length};
     const double route_km = std::atan2(length, dot(from, to)) * EARTH_KM;

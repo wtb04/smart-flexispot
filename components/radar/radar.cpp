@@ -352,7 +352,8 @@ void details_step(const DetailsJobPtr &job);
 
 // A route the database has for the callsign that does not fit where the
 // aircraft is: another of the callsign's days, shown as no route rather than
-// as the wrong one. Under the lock.
+// as the wrong one; and one it fits but flies the other way, turned round.
+// Under the lock.
 void drop_route_unless_fits(Details &details, const char *hex)
 {
     for (int i = 0; i < s_count; ++i) {
@@ -367,6 +368,12 @@ void drop_route_unless_fits(Details &details, const char *hex)
             details.has_dest_at   = false;
             details.origin_code[0] = details.origin_city[0] = '\0';
             details.dest_code[0]   = details.dest_city[0]   = '\0';
+        } else if (route_backwards(details, s_list[i].lat, s_list[i].lon, s_list[i].track_deg)) {
+            ESP_LOGI(TAG, "%s: %s to %s flown the other way round", hex, details.origin_code, details.dest_code);
+            std::swap(details.origin_code, details.dest_code);
+            std::swap(details.origin_city, details.dest_city);
+            std::swap(details.origin_lat, details.dest_lat);
+            std::swap(details.origin_lon, details.dest_lon);
         }
         return;
     }

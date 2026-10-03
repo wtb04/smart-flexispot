@@ -314,6 +314,15 @@ TEST(RadarParse, route_fits)
     radar::Details unplaced = route(0, 0, 0, 0);
     unplaced.has_origin_at  = false;
     EXPECT_TRUE(radar::route_fits(unplaced, 51.46f, 7.03f)) << "nothing to say it is wrong";
+    // EWG40F, Hamburg to Fuerteventura, which the database has as Fuerteventura both ends.
+    EXPECT_FALSE(radar::route_fits(route(28.45f, -13.86f, 28.45f, -13.86f), 52.3f, 5.0f)) << "the same airport twice";
+
+    // RYR1RX east of Stansted flying west, which the database has as Stansted to Szczecin.
+    const radar::Details stansted_szczecin = route(51.885f, 0.235f, 53.585f, 14.902f);
+    EXPECT_TRUE(radar::route_fits(stansted_szczecin, 51.90f, 1.81f));
+    EXPECT_TRUE(radar::route_backwards(stansted_szczecin, 51.90f, 1.81f, 295.0f)) << "flying at its origin";
+    EXPECT_FALSE(radar::route_backwards(stansted_szczecin, 51.90f, 1.81f, 80.0f)) << "on its way";
+    EXPECT_FALSE(radar::route_backwards(stansted_szczecin, 51.90f, 1.81f, -1.0f)) << "no track, no say";
 }
 
 TEST(RadarParse, notability)
