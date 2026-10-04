@@ -1,5 +1,7 @@
 #pragma once
 
+#include <ctime>
+
 // What the files of the screen share with each other. Nothing outside the
 // ui component includes this; ui.h is the interface.
 
@@ -284,5 +286,9 @@ bool build_next_page();
 void build_splash();
 /** Hides what has been put on the screen since, until the splash leaves. */
 void keep_under_splash();
+
+/** The time the screen shows: the real one, or running on from the clock
+ *  pinned by pin_clock(), so what it says agrees with the top bar. */
+std::time_t wall_now();
 
 }  // namespace ui::detail

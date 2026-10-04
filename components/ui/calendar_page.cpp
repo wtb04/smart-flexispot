@@ -491,7 +491,7 @@ void open_detail(const ical::Event &event)
     if (!s_detail.has_value()) {
         return;
     }
-    const auto now = static_cast<std::int64_t>(std::time(nullptr));
+    const auto now = static_cast<std::int64_t>(detail::wall_now());
     char       day[24];
     char       text[96];
     day_name(now, event.start, day, sizeof(day));
@@ -1602,7 +1602,7 @@ void show_calendar()
 
     static ical::Event ahead[EVENTS_AHEAD];
     const int          count = ical::upcoming(ahead, EVENTS_AHEAD);
-    const auto         now   = static_cast<std::int64_t>(std::time(nullptr));
+    const auto         now   = static_cast<std::int64_t>(detail::wall_now());
     const ical::Event *next  = count > 0 ? &ahead[0] : nullptr;
 
     // Shown once asked for, which main does well before it starts.
@@ -1673,7 +1673,7 @@ void show_tile()
     }
     static ical::Event ahead[TILE_AFTER + 1];
     const int          count = ical::upcoming(ahead, TILE_AFTER + 1);
-    const auto         now   = static_cast<std::int64_t>(std::time(nullptr));
+    const auto         now   = static_cast<std::int64_t>(detail::wall_now());
     char               text[96];
     const bool         any   = count > 0;
     const ical::Event &next  = ahead[0];

@@ -89,7 +89,7 @@ std::int32_t left_ms()
 void clock_text(std::int64_t in_ms, char *out, std::size_t size)
 {
     const std::int64_t in_s = in_ms >= 0 ? whole_seconds_up(in_ms) : in_ms / units::kMsPerSecond;
-    const std::time_t  at   = std::time(nullptr) + static_cast<std::time_t>(in_s);
+    const std::time_t  at   = detail::wall_now() + static_cast<std::time_t>(in_s);
     std::tm local{};
     localtime_r(&at, &local);
     std::snprintf(out, size, "%02d:%02d", local.tm_hour, local.tm_min);
