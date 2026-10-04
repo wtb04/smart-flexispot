@@ -244,10 +244,13 @@ void tap(SDL_Point at, std::uint32_t hold_ms = 120)
     run_for(300);
 }
 
-// A finger drawn from one point to the other, as quickly as a swipe is.
+// A finger drawn from one point to the other, as quickly as a swipe is: a
+// step every few milliseconds, as LVGL reads the pointer, and each long enough
+// that two of them pass its 50 px gesture limit. A read that finds the pointer
+// still starts the gesture over, and LVGL now and then reads twice at once.
 void swipe(SDL_Point from, SDL_Point to)
 {
-    constexpr int STEPS = 8;
+    constexpr int STEPS = 12;
     const Uint32  window = SDL_GetWindowID(lv_sdl_window_get_window(lv_display_get_default()));
     SDL_Event     event{};
     event.type            = SDL_MOUSEMOTION;
@@ -271,7 +274,7 @@ void swipe(SDL_Point from, SDL_Point to)
         event.motion.x        = from.x + (to.x - from.x) * i / STEPS;
         event.motion.y        = from.y + (to.y - from.y) * i / STEPS;
         SDL_PushEvent(&event);
-        run_for(15);
+        run_for(4);
     }
     event                 = {};
     event.type            = SDL_MOUSEBUTTONUP;
