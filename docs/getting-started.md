@@ -124,7 +124,7 @@ It boots into a splash that shows the desk, the network and Home Assistant comin
 Every [release](https://github.com/wtb04/smart-flexispot/releases) has a `smart_flexispot-<version>-full.bin` that can be written at 0x0 without building anything:
 
 ```sh
-esptool.py --chip esp32p4 -p /dev/cu.usbmodem* write_flash 0x0 smart_flexispot-v0.8.0-full.bin
+esptool.py --chip esp32p4 -p /dev/cu.usbmodem* write_flash 0x0 smart_flexispot-v0.9.0-full.bin
 ```
 
 Those are built from the empty templates, so they have no network: enough to try the screen and the desk, not the rest.
