@@ -32,7 +32,9 @@ secrets=components/ota/include/ota_secrets.h
 key=$(sed -n 's/^#define OTA_KEY "\(.*\)"/\1/p' "$secrets" 2>/dev/null || true)
 [ -n "$key" ] || { echo "no OTA_KEY in $secrets" >&2; exit 1; }
 
-. "${IDF_PATH:-$HOME/esp/esp-idf}/export.sh" >/dev/null 2>&1
+idf=${IDF_PATH:-$HOME/esp/esp-idf}
+[ -f "$idf/export.sh" ] || { echo "no ESP-IDF at $idf; set IDF_PATH" >&2; exit 1; }
+. "$idf/export.sh" >/dev/null
 
 send() {  # route, image
     echo "sending $2 to $host"

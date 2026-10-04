@@ -39,7 +39,8 @@ constexpr char KEY_HEADER[]        = "X-Update-Key";
 constexpr char INSTALL_KEY[]       = "install";
 constexpr char INSTALL_NOW[]       = "now";
 constexpr char COMPANION_PROJECT[] = "desk_companion";
-constexpr std::size_t KEY_MAX      = 64;
+constexpr std::size_t KEY_MAX      = 129;  // 128 characters and the end
+static_assert(sizeof(OTA_KEY) <= KEY_MAX, "the key is longer than a request may carry");
 constexpr std::size_t QUERY_MAX    = 32;
 constexpr std::size_t CHUNK        = 4 * units::kBytesPerKiB;
 constexpr std::size_t COMPANION_MAX = 960 * units::kBytesPerKiB;  // one of its app slots
@@ -241,13 +242,25 @@ esp_err_t answer(httpd_req_t *req, const char *status, const char *text)
     return httpd_resp_sendstr(req, text);
 }
 
+// Compared in full whatever differs, so the time taken says nothing of how
+// much of a guess was right. given is a zeroed KEY_MAX buffer the key fits in.
+bool same_key(const char *given, const char *key)
+{
+    const std::size_t length = std::strlen(key);
+    std::size_t       diff   = std::strlen(given) ^ length;
+    for (std::size_t i = 0; i < length; ++i) {
+        diff |= static_cast<unsigned char>(given[i]) ^ static_cast<unsigned char>(key[i]);
+    }
+    return diff == 0;
+}
+
 // Refuses anything without the key, and everything while there is no key.
 bool allowed(httpd_req_t *req)
 {
     char key[KEY_MAX] = {};
     return OTA_KEY[0] != '\0' &&
            httpd_req_get_hdr_value_str(req, KEY_HEADER, key, sizeof(key)) == ESP_OK &&
-           std::strcmp(key, OTA_KEY) == 0;
+           same_key(key, OTA_KEY);
 }
 
 bool asked_now(httpd_req_t *req)

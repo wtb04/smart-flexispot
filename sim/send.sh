@@ -3,7 +3,7 @@
 # would send the panel:
 #   sim/send.sh notify '{"title":"Hello","message":"From the desk","level":"warning","timeout_s":0}'
 #   sim/send.sh notify 'Plain text works too'
-#   sim/send.sh claude '{"session":"s1","machine":"MbP","project":"tab5-hello","event":"UserPromptSubmit"}'
+#   sim/send.sh claude '{"session":"s1","machine":"MbP","project":"smart-flexispot","event":"UserPromptSubmit"}'
 # On localhost only: nothing leaves this Mac.
 set -e
 if { [ "$1" != "notify" ] && [ "$1" != "claude" ]; } || [ -z "$2" ]; then

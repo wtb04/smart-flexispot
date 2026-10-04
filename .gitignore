@@ -18,5 +18,7 @@ sdkconfig.old
 # Natural Earth downloads for tools/make_map.py.
 .map-cache/
 
-# Your own Home Assistant entities; room_config.example.h is the template.
+# Your own Home Assistant entities and preset names; room_config.example.h and the
+# defaults in ui_internal.h are what everyone else gets.
 components/room/room_config.h
+components/ui/ui_presets.h

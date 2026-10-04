@@ -13,6 +13,9 @@
 #ifndef ICAL_WORK_URL
 #define ICAL_WORK_URL ""
 #endif
+#ifndef ICAL_WORK_KEEP
+#define ICAL_WORK_KEEP ""
+#endif
 
 #include <algorithm>
 #include <cctype>
@@ -36,7 +39,7 @@ constexpr Feed FEEDS[kFeedCount] = {
     {"Practicals", nullptr, nullptr},
     {"Exams", nullptr, nullptr},
     {"Other", nullptr, nullptr},
-    {"Work", ICAL_WORK_URL, "werk"},
+    {"Work", ICAL_WORK_URL, ICAL_WORK_KEEP},
 };
 
 std::mutex         s_lock;

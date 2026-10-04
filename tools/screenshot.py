@@ -3,8 +3,10 @@
 
 Usage: tools/screenshot.py [port] [out.png]
 
-Build with -DSHOT_ENABLED=1 first, and set SHOT_PAGE in ui.cpp to the page
-wanted; it is off otherwise because taking one holds the LVGL lock for several
+The port defaults to the first /dev/cu.usbmodem* there is.
+
+Build with -DSHOT_ENABLED=1 first (and -DSHOT_DESK_CARD=1 for the desk card
+open), with the pages wanted in take_screenshots() in components/ui/ui.cpp; it is off otherwise because taking one holds the LVGL lock for several
 seconds. This restarts the panel, which is what asks for the picture.
 
 The panel writes numbered base64 RGB565 between BEGIN and END on the console.
@@ -14,6 +16,7 @@ console writes without blocking and discards what will not fit -- and those
 rows come out black rather than shifting everything after them.
 """
 import base64
+import glob
 import re
 import struct
 import sys
@@ -22,7 +25,7 @@ import zlib
 
 import serial
 
-PORT = sys.argv[1] if len(sys.argv) > 1 else "/dev/cu.usbmodem202401"
+PORT = sys.argv[1] if len(sys.argv) > 1 else next(iter(sorted(glob.glob("/dev/cu.usbmodem*"))), "")
 OUT = sys.argv[2] if len(sys.argv) > 2 else "screen.png"
 WANT = int(sys.argv[3]) if len(sys.argv) > 3 else 1
 

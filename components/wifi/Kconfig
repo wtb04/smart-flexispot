@@ -1,0 +1,12 @@
+menu "Panel time"
+
+    config PANEL_TIMEZONE
+        string "Time zone, as a POSIX TZ string"
+        default "CET-1CEST,M3.5.0,M10.5.0/3"
+        help
+            The clock, the calendar and the radar's times are local to this.
+            The default is Central European Time with its summer time;
+            Europe/London is "GMT0BST,M3.5.0/1,M10.5.0", US Eastern
+            "EST5EDT,M3.2.0,M11.1.0".
+
+endmenu

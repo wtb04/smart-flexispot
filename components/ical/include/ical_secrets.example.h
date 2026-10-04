@@ -8,5 +8,9 @@
 #define ICAL_TIMETABLE_HOST ""
 
 // A calendar's published .ics link, as Outlook gives one, which carries its own
-// access token. Only its events whose title starts with "werk" are kept.
+// access token.
 #define ICAL_WORK_URL ""
+
+// Only that calendar's events whose title starts with this, in lower case, as
+// "work" for "Work" and "Workshop"; empty keeps them all.
+#define ICAL_WORK_KEEP ""

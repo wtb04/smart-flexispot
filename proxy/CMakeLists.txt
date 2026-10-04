@@ -6,7 +6,7 @@ cmake_minimum_required(VERSION 3.16)
 # Only the desk components and the units they count in, not the whole shelf:
 # the panel's board support is for a part this board is not, and pulling it in
 # makes the dependency solver go looking for a Tab5.
-set(EXTRA_COMPONENT_DIRS "../components/loctek" "../components/deskproto" "../components/units")
+set(EXTRA_COMPONENT_DIRS "../components/loctek" "../components/deskproto" "../components/units" "../components/settings")
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(desk_companion)

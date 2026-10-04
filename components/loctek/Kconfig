@@ -33,12 +33,14 @@ menu "Loctek desk control"
             pin looks exactly like a control box that will not wake.
 
     config LOCTEK_WAKE_PULSE_MS
-        int "Wake pulse, line held high (ms)"
+        int "Wait after raising the wake line (ms)"
         range 100 3000
         default 1000
         help
-            turnon() in the reference implementation: the line rests low, is
-            driven high for about a second to wake the panel, then returns low.
+            How long to give the box after waking it. The line is dropped low
+            briefly, then raised, and left high so the box keeps reporting;
+            turnon() in the reference sketch returns it low, which lets the box
+            go silent again.
 
     config LOCTEK_NUDGE_WAKE
         bool "Also nudge with a single step if the pulse is not enough"

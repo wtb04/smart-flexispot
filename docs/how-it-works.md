@@ -44,14 +44,15 @@ them.
 
 ### CI
 
-Every push runs [three jobs](../.github/workflows/ci.yml): the host tests with
+Every pull request and every push to main runs [three jobs](../.github/workflows/ci.yml): the host tests with
 coverage, whose table ends up in the run's summary; the firmware, both the
 normal build and the development one, in Espressif's image for ESP-IDF 5.5.5,
 from `sdkconfig.defaults` alone and the secrets' templates; and the simulator
 on Linux, whose screenshots are kept with the run. Each firmware build keeps
 its images: `smart_flexispot-full.bin` for the whole flash at 0x0, and
 `smart_flexispot.bin` for an update. A tag such as `v1.2.0` also puts the
-release build's two on a GitHub release.
+release build's two on a GitHub release, with LICENSE, NOTICE and
+THIRD_PARTY_NOTICES.md beside them.
 
 ### The development build
 

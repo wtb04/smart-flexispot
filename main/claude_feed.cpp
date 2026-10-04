@@ -24,15 +24,28 @@ namespace claude_feed {
 namespace {
 constexpr char        TAG[]        = "claude";
 constexpr char        KEY_HEADER[] = "X-Claude-Key";
-constexpr std::size_t KEY_MAX      = 64;
+constexpr std::size_t KEY_MAX      = 129;  // 128 characters and the end
+static_assert(sizeof(CLAUDE_KEY) <= KEY_MAX, "the key is longer than a request may carry");
 constexpr std::size_t BODY_MAX     = 8 * 1024;  // a long step list; an event alone is a few hundred bytes
 constexpr int         ASKED_MS     = 60 * 1000;  // the pill stays amber after, until it is answered
+
+// Compared in full whatever differs, so the time taken says nothing of how
+// much of a guess was right. given is a zeroed KEY_MAX buffer the key fits in.
+bool same_key(const char *given, const char *key)
+{
+    const std::size_t length = std::strlen(key);
+    std::size_t       diff   = std::strlen(given) ^ length;
+    for (std::size_t i = 0; i < length; ++i) {
+        diff |= static_cast<unsigned char>(given[i]) ^ static_cast<unsigned char>(key[i]);
+    }
+    return diff == 0;
+}
 
 bool allowed(httpd_req_t *req)
 {
     char key[KEY_MAX] = {};
     return CLAUDE_KEY[0] != '\0' && httpd_req_get_hdr_value_str(req, KEY_HEADER, key, sizeof(key)) == ESP_OK &&
-           std::strcmp(key, CLAUDE_KEY) == 0;
+           same_key(key, CLAUDE_KEY);
 }
 
 esp_err_t answer(httpd_req_t *req, const char *status)

@@ -39,19 +39,6 @@ constexpr int  JELLYFIN_COVER_H = 300;  // enough for the card's frame, square f
 constexpr int  JELLYFIN_PRESET  = 1;  // holding the card for Jellyfin: Preset 2
 std::atomic<bool> s_on_jellyfin{false};  // what the card shows, and so controls
 
-// The favourites, in the order the popup shows them. For another: open it in
-// the Spotify app, Share, Copy link; open.spotify.com/playlist/ID is
-// spotify:playlist:ID here. A Daily Mix keeps its link as its songs change.
-constexpr const char *PICK_URIS[] = {
-    "spotify:playlist:37i9dQZEVXbMDoHDwVN2tF",  // Top 50 - Global
-    "spotify:playlist:37i9dQZEVXbKCF6dqVpDkS",  // Top 50 - Netherlands
-    "spotify:playlist:37i9dQZEVXbMDoHDwVN2tF",  // Hip Hop Mix
-    "spotify:playlist:37i9dQZEVXbMDoHDwVN2tF",  // Daily Mix 2
-    "spotify:playlist:37i9dQZEVXbMDoHDwVN2tF",  // Daily Mix 3
-    "spotify:playlist:37i9dQZEVXbMDoHDwVN2tF",  // Daily Mix 5
-    "spotify:playlist:37i9dQZEVXbMDoHDwVN2tF",  // Daily Mix 6
-    "spotify:playlist:37i9dQZEVXbMDoHDwVN2tF",  // On Repeat
-};
 static_assert(std::size(PICK_URIS) <= media::kPickCount, "more favourites than the popup holds");
 
 // Titles and covers change now and then, a Daily Mix's among them.

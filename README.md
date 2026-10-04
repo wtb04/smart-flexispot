@@ -29,7 +29,9 @@ Smart Flexispot is firmware for an [M5Stack Tab5](https://docs.m5stack.com/en/co
 > [!NOTE]
 > **Built with AI.** Most of the code was written with AI rather than by hand, so this is not so much a showcase of my coding skills (if those still count for much nowadays) as of how I think using something like this should feel. It is also just a fun project for myself, and building it this way made it a matter of weeks instead of months.
 
-I am not affiliated with Flexispot, LoctekMotion or M5Stack.
+Issues are welcome; for pull requests, expect slow answers, as this is a project for my own desk.
+
+I am not affiliated with, or endorsed by, any of the products or services named here: Flexispot, LoctekMotion, M5Stack, Espressif, Home Assistant, Jellyfin, Anthropic, Planespotters or the flight data sites. Their names are trademarks of their owners.
 
 ## Highlights
 
@@ -78,7 +80,7 @@ When something plays on Jellyfin the control bar follows it, and holding it ther
 |---|---|
 | ![The radar on Home](docs/screenshots/radar.png) | ![The radar page](docs/screenshots/radar-full.png) |
 
-Purely because it's fun: everything flying within 20 to 160 km on a map of the coast, each plane coloured by its height, with its airline, route, photo and trail. Left alone it follows the most notable aircraft in view, an A380 over a 737, taking turns every few minutes. Positions come from [adsb.lol](https://adsb.lol) and [adsb.fi](https://adsb.fi), aircraft and routes from [adsbdb](https://www.adsbdb.com) and [hexdb.io](https://hexdb.io), photos from [Planespotters](https://www.planespotters.net).
+Purely because it's fun: everything flying within 20 to 160 km on a map of the coast, each plane coloured by its height, with its airline, route, photo and trail. Left alone it follows the most notable aircraft in view, an A380 over a 737, taking turns every few minutes. Positions come from [adsb.lol](https://adsb.lol) and [adsb.fi](https://adsb.fi), aircraft and routes from [adsbdb](https://www.adsbdb.com) and [hexdb.io](https://hexdb.io), photos from [Planespotters](https://www.planespotters.net). adsb.fi's data is for personal, non-commercial use only, and so is anything built on it here.
 
 ### The day
 
@@ -168,6 +170,6 @@ How the panel is put together inside, the desk protocol, and how to run the test
 
 ## Licence
 
-Copyright 2026 Wouter ten Brinke. The code, the documents and the board are under the Apache License 2.0, see [LICENSE](LICENSE) and [NOTICE](NOTICE). What comes from others keeps its own licence, listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Copyright 2026 Wouter ten Brinke. The code, the documents and the board are under the Apache License 2.0, see [LICENSE](LICENSE) and [NOTICE](NOTICE). What comes from others keeps its own licence, listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md); the aircraft photos in the screenshots are their photographers'.
 
 Made by [Wouter ten Brinke](https://woutertenbrinke.nl).

@@ -35,3 +35,11 @@ constexpr ToggleSpec TOGGLES[] = {
 // The thermostat, and the speaker the music card plays on.
 constexpr char CLIMATE_ENTITY[] = "climate.office";
 constexpr char MEDIA_SPEAKER[]  = "media_player.office_speaker";
+
+// The favourites, in the order the music card's popup shows them. For another:
+// open it in the Spotify app, Share, Copy link; open.spotify.com/playlist/ID is
+// spotify:playlist:ID here. A Daily Mix keeps its link as its songs change.
+constexpr const char *PICK_URIS[] = {
+    "spotify:playlist:37i9dQZEVXbMDoHDwVN2tF",  // Top 50 - Global
+    "spotify:playlist:37i9dQZEVXbKCF6dqVpDkS",  // Top 50 - Netherlands
+};

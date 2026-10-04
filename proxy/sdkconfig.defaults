@@ -1,23 +1,13 @@
 CONFIG_IDF_TARGET="esp32"
 
-# The desk hangs off UART2 on this board, wake on 23. TX and RX are the way
-# round the wiring actually is rather than the way round the table said: with
-# them the other way the box heard nothing and answered nothing, and with them
-# like this it decodes frames and reports its height.
+# The desk hangs off UART2, as the carrier board in pcb/ wires it: GPIO17 (TX2)
+# to RJ45 pin 5, where the box listens, GPIO16 (RX2) from the divider off pin 6,
+# where it sends, and wake on 23. Wired by hand with the pins the other way
+# round, swap TX and RX; the wrong way looks exactly like a dead control box.
 CONFIG_LOCTEK_UART_NUM=2
-CONFIG_LOCTEK_TX_GPIO=16
-CONFIG_LOCTEK_RX_GPIO=17
+CONFIG_LOCTEK_TX_GPIO=17
+CONFIG_LOCTEK_RX_GPIO=16
 CONFIG_LOCTEK_WAKE_GPIO=23
-
-# NOTE for the rev1 carrier board (pcb/): it routes GPIO17 (silkscreen
-# TX2) to RJ45 pin 5 and GPIO16 (RX2) to the divider off RJ45 pin 6 -- i.e. the
-# OPPOSITE way round from the flying-lead wiring above. When you move onto the
-# PCB, swap these two:
-#   CONFIG_LOCTEK_TX_GPIO=17
-#   CONFIG_LOCTEK_RX_GPIO=16
-# Leaving them as they are would put the ESP's transmitter on the divider output
-# and its receiver on the series resistor: not damaging, but nothing works, and
-# it looks exactly like a dead control box.
 
 # Indicator LEDs inside the RJ45 jack, driven through R5/R6 (220R).
 CONFIG_PROXY_LED_BT_GPIO=32
@@ -30,8 +20,7 @@ CONFIG_ESP_CONSOLE_UART_DEFAULT=y
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=4096
 CONFIG_FREERTOS_HZ=1000
 
-# BLE peripheral, for the link to the panel. Echo only for now: this build
-# measures the path, it does not drive anything over it.
+# BLE peripheral: the link the panel drives the desk over, and updates arrive by.
 CONFIG_BT_ENABLED=y
 CONFIG_BT_NIMBLE_ENABLED=y
 CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=y

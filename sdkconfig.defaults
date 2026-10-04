@@ -7,8 +7,9 @@ CONFIG_ESP32P4_REV_MIN_100=y
 
 # Flash / partitions (Tab5 has 16 MB)
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
-# 4 MB for the app and a SPIFFS partition, out of the board's 16 MB. The
-# default 1.5 MB leaves no room once MQTT and TLS are linked in.
+# Two 5 MB app slots for updates over the air, 2 MB of SPIFFS and a core dump,
+# out of the board's 16 MB; see partitions.csv. The default 1.5 MB app leaves
+# no room once MQTT and TLS are linked in.
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 
@@ -42,10 +43,6 @@ CONFIG_LV_DRAW_BUF_ALIGN=128
 # above 50 before startup allocation fails.
 CONFIG_BSP_LCD_DRAW_BUF_HEIGHT=50
 
-# On-screen FPS / memory overlay. LV_USE_SYSMON gates the two below it.
-CONFIG_LV_USE_SYSMON=y
-CONFIG_LV_USE_PERF_MONITOR=y
-CONFIG_LV_USE_MEM_MONITOR=y
 # Tints redrawn regions; the fastest way to spot wasted full-screen
 # invalidation when hunting dropped frames.
 # CONFIG_LV_USE_REFR_DEBUG=y
