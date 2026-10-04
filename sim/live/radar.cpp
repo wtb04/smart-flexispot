@@ -141,6 +141,19 @@ void fake_route(radar::Details &out)
     out.has_route     = true;
 }
 
+// The route as where the aircraft is says it is, as on the panel.
+void judge(const char *hex, radar::Details &out)
+{
+    std::lock_guard<std::mutex> hold(radar::s_lock);
+    const radar::Snapshot &s = radar::s_snapshot;
+    for (int i = 0; i < s.count; ++i) {
+        if (std::strcmp(s.list[i].hex, hex) == 0) {
+            radar::judge_route(out, s.list[i].lat, s.list[i].lon, s.list[i].track_deg);
+            return;
+        }
+    }
+}
+
 // As radar.cpp's fetch_details: one request for both halves, and each again on
 // its own when the other was unknown.
 bool fetch_details(const char *hex, const char *callsign, radar::Details &out)
@@ -155,6 +168,7 @@ bool fetch_details(const char *hex, const char *callsign, radar::Details &out)
         if (got.status == 200) {
             radar::parse_aircraft(got.body.data(), got.body.size(), out);
             radar::parse_route(got.body.data(), got.body.size(), out);
+            judge(hex, out);
             fake_route(out);
             return true;
         }
@@ -176,6 +190,7 @@ bool fetch_details(const char *hex, const char *callsign, radar::Details &out)
             radar::parse_route(got.body.data(), got.body.size(), out);
         }
     }
+    judge(hex, out);
     fake_route(out);
     return out.has_aircraft || out.has_route;
 }

@@ -117,6 +117,14 @@ bool route_backwards(const Details &details, float lat, float lon, float track_d
 enum class Leg { This, IntoOrigin, OutOfDest };
 Leg route_leg(const Details &details, float lat, float lon, float track_deg);
 
+/** What judge_route made of a route. */
+enum class RouteVerdict { Kept, Dropped, Reversed, IntoOrigin, OutOfDest };
+
+/** The route as where the aircraft is says it is: the leg either side of it
+ *  as the one airport of it that is known, one that does not fit left out (no
+ *  route rather than the wrong one), and one flown the other way turned round. */
+RouteVerdict judge_route(Details &details, float lat, float lon, float track_deg);
+
 /** How far along its route an aircraft at lat/lon is, as a share from 0 to 1,
  *  and the kilometres left along the great circle. False when the airports'
  *  places are not known. */

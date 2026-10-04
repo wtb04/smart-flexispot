@@ -98,7 +98,7 @@ void write_notice(const Notice &notice)
     theme::set_text(s_notice_body, titled ? notice.message : "");
     lv_obj_set_hidden(s_notice_body, !titled || notice.message[0] == '\0');
 
-    const time_t now = std::time(nullptr);
+    const time_t now = wall_now();
     s_notice_clock[0] = '\0';
     if (now >= CLOCK_SET) {
         std::tm local{};
