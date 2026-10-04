@@ -1,3 +1,5 @@
+# Changed from ESP-IDF v5.5.5: mipi_dsi_dma_trans_done_cb is no longer placed in
+# IRAM, as esp_lcd_panel_dpi.c no longer has it.
 [mapping:esp_lcd_dsi]
 archive: libesp_lcd.a
 entries:

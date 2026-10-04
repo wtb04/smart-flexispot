@@ -14,6 +14,9 @@
 #ifndef ICAL_WORK_URL
 #define ICAL_WORK_URL ""
 #endif
+#ifndef ICAL_WORK_KEEP
+#define ICAL_WORK_KEEP ""
+#endif
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -36,8 +39,8 @@ constexpr char TAG[] = "ical";
 
 constexpr char HOST[] = ICAL_TIMETABLE_HOST;
 
-// The timetable's four come from CalendarChanger by name. Work is a shared
-// Outlook calendar, of which only the shifts belong here.
+// The timetable's four come from one host by name. Work is an Outlook
+// calendar, of which only the events starting with ICAL_WORK_KEEP belong here.
 struct Feed {
     const char *name;
     const char *url;   // null: HOST/name
@@ -48,11 +51,11 @@ constexpr Feed FEEDS[kFeedCount] = {
     {"Practicals", nullptr, nullptr},
     {"Exams", nullptr, nullptr},
     {"Other", nullptr, nullptr},
-    {"Work", ICAL_WORK_URL, "werk"},
+    {"Work", ICAL_WORK_URL, ICAL_WORK_KEEP},
 };
 static_assert(kWorkFeed < kFeedCount, "the work feed is one of the feeds");
 
-// Case aside, so "Werk" and "Werken" both count.
+// Case aside, against a prefix in lower case: "werk" keeps "Werk" and "Werken".
 bool starts_with(const char *text, const char *prefix)
 {
     for (; *prefix != '\0'; ++text, ++prefix) {

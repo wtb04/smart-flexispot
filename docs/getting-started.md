@@ -4,7 +4,7 @@ Everything to build the panel for your own desk, from the hardware to the first 
 
 ## 1. Get the hardware
 
-- An M5Stack Tab5. Early units have an ESP32-P4 v1.x chip, which `sdkconfig.defaults` targets. Check yours with `esptool.py --port <port> chip_id`. Both display revisions (ILI9881C and ST7123) work.
+- An M5Stack Tab5. Early units have an ESP32-P4 v1.x chip, which `sdkconfig.defaults` targets, and so do the release images. Check yours with `esptool.py --port <port> chip_id`. On a v3.x chip, take the two `ESP32P4_REV` lines out of `sdkconfig.defaults` and run `idf.py fullclean`; I have not tried that. Both display revisions (ILI9881C and ST7123) work.
 - A Flexispot with a supported control box (see [Will it work with my desk?](../README.md#will-it-work-with-my-desk)) and an RJ45 cable you do not mind cutting.
 - Optionally, any ESP32 as the companion.
 
@@ -62,7 +62,7 @@ At start-up each LED blinks twice on its own and then both light together, which
 
 Everything to have it made is in [pcb/](../pcb/): the KiCad project, the [schematic as a PDF](../pcb/fab/tab5-desk-ctrl-schematic.pdf), and the gerbers, BOM and placement files for JLCPCB.
 
-Flash `proxy/` onto the DevKit with `cd proxy && idf.py build flash monitor`. Its defaults are for the breadboard it was first built on, which had TX and RX the other way round, so for the board set `CONFIG_LOCTEK_TX_GPIO=17` and `CONFIG_LOCTEK_RX_GPIO=16` under `idf.py menuconfig`, *Loctek desk control*.
+Flash `proxy/` onto the DevKit with `cd proxy && idf.py build flash monitor`. Its defaults are the board's. Wired by hand instead, check TX and RX under `idf.py menuconfig`, *Loctek desk control*.
 
 ## 3. Install ESP-IDF
 
@@ -74,11 +74,17 @@ cd esp-idf && ./install.sh esp32p4 esp32
 . ~/esp/esp-idf/export.sh     # in every new shell
 ```
 
-`esp32` is only needed for the companion.
+`esp32` is only needed for the companion. Then get this repository; the steps after this one run from it:
+
+```sh
+git clone https://github.com/wtb04/smart-flexispot ~/smart-flexispot && cd ~/smart-flexispot
+```
 
 ## 4. Fill in your secrets
 
 Everything the panel talks to has a `*_secrets.example.h` template next to where its real one goes. Copy each to `*_secrets.h` in the same folder and fill in what you have. Anything left empty is just not started, so the desk alone works with no secrets at all.
+
+Every one of them ends up as plain text in the firmware, in `build/` and on the panel's flash, where anyone holding the panel can read it over USB. So keep your build to yourself, and give Home Assistant and the MQTT broker users of their own with no more rights than the panel needs. For the update and Claude keys, something like `openssl rand -hex 16` makes a good one; they go over the network in plain HTTP, so they are only as private as your home network.
 
 | File | What goes in it |
 |---|---|
@@ -86,7 +92,7 @@ Everything the panel talks to has a `*_secrets.example.h` template next to where
 | `components/hass/include/hass_secrets.h` | Home Assistant's address and a token, and the MQTT broker |
 | `components/jellyfin/include/jellyfin_secrets.h` | The Jellyfin server and an API key |
 | `components/ical/include/ical_secrets.h` | Where your timetable's feeds are, and an Outlook calendar's link |
-| `components/travel/include/travel_secrets.h` | A travel service of your own and its key. The panel asks it the way to the next event; leave it empty and there is no route |
+| `components/travel/include/travel_secrets.h` | A travel service and its key. Mine is a separate project that is not published; the panel asks it the way to the next event, in the format `components/travel/test/test_travel_parse.cpp` shows. Leave it empty and there is no route |
 | `components/ble/include/ble_secrets.h` | Your phone's Bluetooth identity key, for presence |
 | `components/ota/include/ota_secrets.h` | A key for updates over Wi-Fi |
 | `components/claude/include/claude_secrets.h` | A key for the laptops' Claude Code sessions, if you want them |
@@ -96,8 +102,11 @@ Everything the panel talks to has a `*_secrets.example.h` template next to where
 A few things are mine in the code rather than secrets, and are worth a look before the first build:
 
 - **Your Home Assistant entities.** Copy `components/room/room_config.example.h` to `room_config.h` beside it, which git ignores, and put in your readings, lights, thermostat and speaker. Without it the panel is built with the example's.
+- **Your favourite playlists**, in the same file, for the music card's popup.
 - **Your desk's height range**, in `idf.py menuconfig`, *Loctek desk control*: 660 to 1310 mm is mine.
-- **The work calendar keeps only events whose title starts with "werk"**, in `components/ical/ical.cpp`, as mine is a shared calendar with only my shifts on it.
+- **Your time zone**, in `idf.py menuconfig`, *Panel time*. Central European Time is the default.
+- **What the presets are called** on the screen: copy the list in `components/ui/ui_internal.h` to `components/ui/ui_presets.h`, which git ignores, and rename them there.
+- **The radar's map** covers the Channel to Berlin, 48.5 to 56 N and 0.5 to 13 E. For your own part of the world, `tools/make_map.py --out components/radar/map_data.h --box <south> <west> <north> <east>` draws a new one from Natural Earth; keep the box modest, as every line on it costs memory to draw.
 
 ## 5. Flash it
 
@@ -118,7 +127,7 @@ Every [release](https://github.com/wtb04/smart-flexispot/releases) has a `smart_
 esptool.py --chip esp32p4 -p /dev/cu.usbmodem* write_flash 0x0 smart_flexispot-v0.8.0-full.bin
 ```
 
-Those are built from the templates though, so they have no network: enough to try the screen and the desk, not the rest.
+Those are built from the empty templates, so they have no network: enough to try the screen and the desk, not the rest.
 
 ## 6. Update over Wi-Fi
 
@@ -155,4 +164,4 @@ Optional. Each laptop needs `jq` and `curl`, which macOS has, and this repositor
 }
 ```
 
-It finds the panel at `smart-flexispot`, the name it gives the router; `CLAUDE_PANEL` in `env` points it elsewhere, and `CLAUDE_MACHINE` sets what the panel calls the laptop, its host name otherwise. Away from the panel's network it gives up after two seconds, unseen.
+It finds the panel at `smart-flexispot`, the name it gives the router; `CLAUDE_PANEL` in `env` points it elsewhere, and `CLAUDE_MACHINE` sets what the panel calls the laptop, its host name otherwise. Away from the panel's network it gives up after two seconds. It sends the key and the project's name in plain HTTP to whatever answers to that name, so on a network you do not trust, point `CLAUDE_PANEL` at the panel's fixed address or leave the hook out.

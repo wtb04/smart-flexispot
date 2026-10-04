@@ -9,7 +9,7 @@ Placement only -- routing is done by route.py, DRC by kicad-cli.
 
 Module assumptions (verify against your physical board):
   PINS_PER_ROW = 15          # measured: 30-pin board, 2x15
-  ROW_SPACING  = 22.86 mm  (0.9 in)
+  ROW_SPACING  = 25.4 mm  (1.0 in)
   pin 1 is at the antenna end, pin numbering runs toward the USB end.
 """
 import copy, math, os
@@ -19,7 +19,7 @@ from kiutils.items.common import Position, Net
 from kiutils.items.gritems import GrLine, GrArc, GrText
 from kiutils.items.zones import Zone, ZonePolygon, Hatch, KeepoutSettings, FillSettings
 
-LIB = "/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints"
+LIB = os.environ.get("KICAD9_FOOTPRINT_DIR", "/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints")
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "tab5-desk-ctrl.kicad_pcb")
 
@@ -37,7 +37,7 @@ PIN1_X = 21.5
 # Row inset is set by MOUNTING, not by the silk. The RJ45's courtyard reaches
 # +/- 10.70 about the module axis and an M3 needs 3.45 of courtyard plus a
 # margin, so the pocket above the jack only becomes usable once the axis sits at
-# y >= 18.4 -- which is what puts the rows here and makes H 37.0 rather than 31.8.
+# y >= 18.4 -- which is what puts the rows here and makes H 35.2.
 ROW_A_Y = 4.9
 ROW_B_Y = ROW_A_Y + ROW_SPACING          # 30.3, module centred on y = 17.6
 PINEND_X = PIN1_X + (PINS_PER_ROW - 1) * PITCH  # 57.06, USB end at the right edge
@@ -72,9 +72,9 @@ NETIDX = {n: i for i, n in enumerate(NETS)}
 #   row A (y=4.0)  D23 D22 TX0 RX0 D21 D19 D18  D5 TX2 RX2  D4  D2 D15 GND 3V3
 #   row B (y=29.4)  EN  VP  VN D34 D35 D32 D33 D25 D26 D27 D14 D12 D13 GND VIN
 #
-# RJ45 direction, confirmed by the user against their own control box. The
-# published tables (and ~/dev/tab5-hello/README.md) have pins 5 and 6 the other
-# way round -- they are written from the control panel's side. On this board:
+# RJ45 direction, measured on a real control box. The published LoctekMotion
+# tables have pins 5 and 6 the other way round, written from the keypad's side.
+# On this board:
 #   pin 6 = control box TX, 5 V  -> R1/R2 divider + BAT54S clamp -> our RX
 #   pin 5 = control box RX       <- R3 220R <- our TX
 #   pin 4 = wake ("PIN 20")      <- R4 220R <- our GPIO23
@@ -84,8 +84,7 @@ NETIDX = {n: i for i, n in enumerate(NETS)}
 #   RX_DIV  -> row A pin 10 = RX2 = GPIO16
 #   ESP_P20 -> row A pin  1 = D23 = GPIO23
 #
-# FIRMWARE: proxy/sdkconfig.defaults commits TX=16 / RX=17, which is the swap of
-# this. It needs TX=17, RX=16, WAKE=23 to match the board.
+# The companion's defaults in proxy/sdkconfig.defaults match: TX=17, RX=16, WAKE=23.
 U1A_NETS = {"1": "ESP_P20",
             "9": "ESP_TX", "10": "RX_DIV", "14": "GND", "15": "+3V3"}
 # LEDs on row B pins 6/7 (D32=GPIO32, D33=GPIO33). Row B is the bottom row, so
@@ -108,7 +107,7 @@ PARTS = [
     ("F1", "Resistor_SMD", "R_1206_3216Metric", 37.0, 24.9, 0, "PTC 500mA",
      {"1": "DESK_5V", "2": "D5V_F"}),
     ("D1", "Diode_SMD", "D_SMA", 44.0, 24.9, 180, "SS14", {"2": "D5V_F", "1": "+5V"}),
-    # decoupling next to the module's 5V pin (row A pin 19, now the left end)
+    # decoupling next to the module's 5V pin (row B pin 15, VIN, at the USB end)
     # 22uF, not the 100uF inherited from revA: at 5V across it a 10V-rated
     # X5R derates to a fraction of nominal anyway, the devkit carries its own
     # input bulk, and 100uF/1206 is a pricey non-stocked part for no benefit.

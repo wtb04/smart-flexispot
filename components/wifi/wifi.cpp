@@ -48,7 +48,7 @@ StaticEventGroup_t    s_events_ctrl;
 EventGroupHandle_t    s_events = nullptr;
 bool              s_sntp_started = false;
 
-constexpr char TIMEZONE[] = "CET-1CEST,M3.5.0,M10.5.0/3";
+constexpr char TIMEZONE[] = CONFIG_PANEL_TIMEZONE;
 
 void on_time_synced(timeval *)
 {

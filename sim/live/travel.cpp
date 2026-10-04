@@ -1,4 +1,4 @@
-// The way to the next appointment, asked of the Reis service as travel.cpp asks
+// The way to the next appointment, asked of the travel service as travel.cpp asks
 // it, for what network.cpp's ask_journey() would ask, and read by the same parser.
 #include "feeds.h"
 #include "http.h"

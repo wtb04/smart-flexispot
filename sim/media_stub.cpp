@@ -46,8 +46,8 @@ constexpr int CREDITS_BEFORE = 64;  // seconds from the end
 // Jellyfin and Home Assistant report the position now and then, not continuously.
 constexpr std::int64_t REPORT_EVERY_MS = 10000;
 
-constexpr const char *PICKS[] = {"Top 50 - Global", "Top 50 - Netherlands", "Hip Hop Mix", "Daily Mix 2",
-                                 "Daily Mix 3",     "Daily Mix 5",          "Daily Mix 6", "On Repeat"};
+constexpr const char *PICKS[] = {"Top 50 - Global", "Top 50 - Netherlands", "Mix 1", "Mix 2",
+                                 "Mix 3",           "Mix 4",                "Mix 5", "Mix 6"};
 
 Scene        s_scene   = Scene::Idle;
 int          s_item    = 0;  // the track, or the episode

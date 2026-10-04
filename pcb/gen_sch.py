@@ -25,7 +25,7 @@ from kiutils.items.common import (Position, Property, Effects, Font, Stroke,
                                   TitleBlock, Justify)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SYM = "/Applications/KiCad/KiCad.app/Contents/SharedSupport/symbols"
+SYM = os.environ.get("KICAD9_SYMBOL_DIR", "/Applications/KiCad/KiCad.app/Contents/SharedSupport/symbols")
 PRJSYM = os.path.join(HERE, "symbols")
 OUT = os.path.join(HERE, "tab5-desk-ctrl.kicad_sch")
 

@@ -50,7 +50,7 @@ sim/send.sh notify '{"title":"Hello","message":"Kept until tapped","level":"warn
 and any event a laptop's `tools/claude-hook` could, with
 
 ```sh
-sim/send.sh claude '{"session":"s1","machine":"MbP","project":"tab5-hello","event":"PermissionRequest","tool":"Bash","target":"idf.py"}'
+sim/send.sh claude '{"session":"s1","machine":"MbP","project":"smart-flexispot","event":"PermissionRequest","tool":"Bash","target":"idf.py"}'
 ```
 
 ## Settings

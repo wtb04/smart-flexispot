@@ -9,7 +9,9 @@
 #
 # Only names leave the laptop: a file's name, a command's first word, a search
 # pattern, a host, the step list's lines. Never a prompt, a reply or what is in
-# a file. Away from the panel it gives up after two seconds, and Claude Code
+# a file. They and the key go in plain HTTP to whatever answers to
+# CLAUDE_PANEL, so set it to the panel's fixed address on a network you do not
+# trust. Away from the panel it gives up after two seconds, and Claude Code
 # never waits on it.
 [ -n "${CLAUDE_PANEL_KEY:-}" ] || exit 0
 command -v jq >/dev/null && command -v curl >/dev/null || exit 0

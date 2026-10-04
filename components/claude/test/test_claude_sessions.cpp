@@ -14,7 +14,7 @@ Event event(const char *session, const char *name, const char *tool = "", const 
     Event e;
     e.machine = "MbP";
     e.session = session;
-    e.project = "tab5-hello";
+    e.project = "smart-flexispot";
     e.event   = name;
     e.tool    = tool;
     e.target  = target;
@@ -39,7 +39,7 @@ std::string said(const Action &action, Tense tense)
 TEST(ClaudeParse, an_event_as_the_hook_sends_it)
 {
     Event e;
-    ASSERT_TRUE(parse(R"({"machine":"MbP","session":"s1","project":"tab5-hello","event":"PreToolUse",
+    ASSERT_TRUE(parse(R"({"machine":"MbP","session":"s1","project":"smart-flexispot","event":"PreToolUse",
                           "tool":"Edit","target":"rail.cpp"})", e));
     EXPECT_EQ(e.machine, "MbP");
     EXPECT_EQ(e.session, "s1");

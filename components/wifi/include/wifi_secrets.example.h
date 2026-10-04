@@ -4,7 +4,9 @@
 // credentials are compiled into the firmware, so changing network means
 // editing this file and reflashing -- and anyone with the image can read them.
 //
+//   #define WIFI_SSID "your-network"
+//   #define WIFI_PASS "your-password"
+//
 // An empty SSID builds an image that never joins anything.
-
-#define WIFI_SSID "your-network"
-#define WIFI_PASS "your-password"
+#define WIFI_SSID ""
+#define WIFI_PASS ""

@@ -65,11 +65,11 @@ void next_scene()
 {
     switch (s_scene) {
         case 0:
-            send({event("a", "MbP", "tab5-hello", "UserPromptSubmit"),
-                  event("a", "MbP", "tab5-hello", "PreToolUse", "TodoWrite", nullptr, STEPS),
-                  event("a", "MbP", "tab5-hello", "PreToolUse", "Read", "topics.h"),
-                  event("a", "MbP", "tab5-hello", "PreToolUse", "Bash", "idf.py"),
-                  event("a", "MbP", "tab5-hello", "PreToolUse", "Edit", "claude_pill.cpp"),
+            send({event("a", "MbP", "smart-flexispot", "UserPromptSubmit"),
+                  event("a", "MbP", "smart-flexispot", "PreToolUse", "TodoWrite", nullptr, STEPS),
+                  event("a", "MbP", "smart-flexispot", "PreToolUse", "Read", "topics.h"),
+                  event("a", "MbP", "smart-flexispot", "PreToolUse", "Bash", "idf.py"),
+                  event("a", "MbP", "smart-flexispot", "PreToolUse", "Edit", "claude_pill.cpp"),
                   event("b", "MbP", "MediaCenter", "Stop")});
             break;
         case 1:
@@ -77,15 +77,15 @@ void next_scene()
                   event("c", "work", "billing-api", "SubagentStart"),
                   event("c", "work", "billing-api", "SubagentStart"),
                   event("c", "work", "billing-api", "PreToolUse", "Grep", "invoice_total"),
-                  event("a", "MbP", "tab5-hello", "PermissionRequest", "Bash", "idf.py")});
+                  event("a", "MbP", "smart-flexispot", "PermissionRequest", "Bash", "idf.py")});
             break;
         case 2:
-            send({event("a", "MbP", "tab5-hello", "PostToolUse", "Bash"),
-                  event("a", "MbP", "tab5-hello", "Stop"),
+            send({event("a", "MbP", "smart-flexispot", "PostToolUse", "Bash"),
+                  event("a", "MbP", "smart-flexispot", "Stop"),
                   event("c", "work", "billing-api", "Stop")});
             break;
         default:
-            send({event("a", "MbP", "tab5-hello", "SessionEnd"), event("b", "MbP", "MediaCenter", "SessionEnd"),
+            send({event("a", "MbP", "smart-flexispot", "SessionEnd"), event("b", "MbP", "MediaCenter", "SessionEnd"),
                   event("c", "work", "billing-api", "SessionEnd")});
             break;
     }

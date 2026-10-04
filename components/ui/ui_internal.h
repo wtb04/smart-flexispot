@@ -75,9 +75,14 @@ struct Notice {
 };
 
 // What the screen calls each preset. Everything off the screen says Preset 1 to 6.
+// ui_presets.h, which git ignores, can name them otherwise.
+#if __has_include("ui_presets.h")
+#include "ui_presets.h"
+#else
 constexpr const char *PRESET_NAMES[kPresetCount] = {
     "Preset 1", "Ultra low", "Stand", "Sit", "Sit 2", "Stand 2",
 };
+#endif
 
 
 
