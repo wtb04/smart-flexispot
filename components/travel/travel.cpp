@@ -8,10 +8,15 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "net.h"
-#include "travel_secrets.h"
 #include "units.h"
 #include "jobs.h"
 
+#if __has_include("travel_secrets.h")
+#include "travel_secrets.h"
+#endif
+#ifndef TRAVEL_HOST
+#define TRAVEL_HOST ""
+#endif
 #ifndef TRAVEL_API_KEY
 #define TRAVEL_API_KEY ""
 #endif

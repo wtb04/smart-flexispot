@@ -1,3 +1,14 @@
+# esp_lcd from ESP-IDF v5.5.5, patched
+
+A copy of ESP-IDF v5.5.5's `esp_lcd`, which this component stands in for, under
+ESP-IDF's Apache License 2.0 in [LICENSE](LICENSE). Changed:
+
+- `dsi/esp_lcd_panel_dpi.c`: the DMA goes round a ring of whole frames by itself
+  rather than being restarted from an interrupt after every frame; the comment at
+  its top says why.
+- `linker.lf`: the transfer-done callback that change removes is no longer placed
+  in IRAM.
+
 # esp_lcd Driver Design
 
 ## Class Diagram

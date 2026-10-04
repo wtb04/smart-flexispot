@@ -29,7 +29,7 @@ namespace radar {
 namespace {
 constexpr char TAG[] = "radar";
 
-constexpr char PHOTO_AGENT[] = "smart-flexispot (+https://woutertenbrinke.nl)";
+constexpr char PHOTO_AGENT[] = "smart-flexispot (+https://github.com/wtb04/smart-flexispot)";
 
 // Past the last ring, since the fullscreen view shows the sky to the screen's
 // edges, as far as 1.5 times the range from home at the widest.

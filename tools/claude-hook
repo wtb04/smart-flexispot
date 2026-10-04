@@ -1,7 +1,7 @@
 #!/bin/sh
 # Tells the panel what a Claude Code session on this laptop is doing. Claude
 # Code runs it from its hooks, in the background, with the hook's JSON on
-# stdin; README.md has the settings that do.
+# stdin; docs/getting-started.md has the settings that do.
 #
 #   CLAUDE_PANEL_KEY  the panel's CLAUDE_KEY, from claude_secrets.h; unset, nothing is sent
 #   CLAUDE_PANEL      where the panel is, smart-flexispot unless set

@@ -166,4 +166,8 @@ How the panel is put together inside, the desk protocol, and how to run the test
 - [adsb.lol](https://adsb.lol), [adsb.fi](https://adsb.fi), [adsbdb](https://www.adsbdb.com), [hexdb.io](https://hexdb.io) and [Planespotters](https://www.planespotters.net) for the planes, and the photographers for their photos.
 - [Natural Earth](https://www.naturalearthdata.com) for the map.
 
+## Licence
+
+Apache License 2.0, see [LICENSE](LICENSE), for the code, the documents and the board. What comes from others keeps its own licence, listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 Made by [Wouter ten Brinke](https://woutertenbrinke.nl).

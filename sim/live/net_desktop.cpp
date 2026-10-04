@@ -25,6 +25,9 @@
 #if __has_include("ical_secrets.h")
 #include "ical_secrets.h"
 #endif
+#ifndef ICAL_TIMETABLE_HOST
+#define ICAL_TIMETABLE_HOST ""
+#endif
 #ifndef ICAL_WORK_URL
 #define ICAL_WORK_URL ""
 #endif
@@ -45,7 +48,6 @@ const std::vector<std::string> &allowed()
 {
     static const std::vector<std::string> list = [] {
         std::vector<std::string> out = {
-            "https://calendar.example.org",       // the timetable's feeds
             "https://api.adsb.lol",                  // the sky
             "https://opendata.adsb.fi",
             "https://adsb.lol",                      // where a plane has been
@@ -53,7 +55,7 @@ const std::vector<std::string> &allowed()
             "https://api.planespotters.net",         // its photo's address
             ".plnspttrs.net",                        // and the photo
         };
-        for (const char *url : {ICAL_WORK_URL, TRAVEL_HOST}) {
+        for (const char *url : {ICAL_TIMETABLE_HOST, ICAL_WORK_URL, TRAVEL_HOST}) {
             if (url[0] != '\0') {
                 const std::string text  = url;
                 const std::size_t start = text.find("://");

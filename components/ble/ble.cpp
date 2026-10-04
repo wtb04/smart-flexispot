@@ -2,7 +2,6 @@
 
 #include "app_state.h"
 
-#include "ble_secrets.h"
 #include "esp_check.h"
 #include "proxy_link.h"
 #include "esp_log.h"
@@ -10,6 +9,13 @@
 #include "freertos/task.h"
 #include "host/ble_gap.h"
 #include "host/ble_hs.h"
+
+#if __has_include("ble_secrets.h")
+#include "ble_secrets.h"
+#endif
+#ifndef BLE_PHONE_IRK
+#define BLE_PHONE_IRK ""
+#endif
 #include "mbedtls/aes.h"
 #include "mbedtls/base64.h"
 #include "nimble/nimble_port.h"

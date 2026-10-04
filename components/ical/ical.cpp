@@ -5,8 +5,12 @@
 #include "clock_math.h"
 
 #include "esp_check.h"
+#if __has_include("ical_secrets.h")
 #include "ical_secrets.h"
-
+#endif
+#ifndef ICAL_TIMETABLE_HOST
+#define ICAL_TIMETABLE_HOST ""
+#endif
 #ifndef ICAL_WORK_URL
 #define ICAL_WORK_URL ""
 #endif
@@ -30,7 +34,7 @@ namespace ical {
 namespace {
 constexpr char TAG[] = "ical";
 
-constexpr char HOST[] = "https://calendar.example.org";
+constexpr char HOST[] = ICAL_TIMETABLE_HOST;
 
 // The timetable's four come from CalendarChanger by name. Work is a shared
 // Outlook calendar, of which only the shifts belong here.
@@ -106,7 +110,7 @@ int keep_only(Event *events, int count, const char *prefix)
 int fetch_feed(int index)
 {
     const Feed &feed = FEEDS[index];
-    if (feed.url != nullptr && feed.url[0] == '\0') {
+    if ((feed.url != nullptr && feed.url[0] == '\0') || (feed.url == nullptr && HOST[0] == '\0')) {
         return -1;  // not configured
     }
     char url[URL_SIZE];

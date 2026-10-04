@@ -5,7 +5,7 @@ The panel's screen in a window on the Mac, to work on the UI without flashing:
 the touchscreen.
 
 ```sh
-brew install cmake ninja sdl2
+brew install cmake ninja pkg-config sdl2
 sim/run.sh            # builds and opens it
 sim/run.sh --watch    # and again whenever components/ui or sim changes
 ```
