@@ -22,6 +22,8 @@ Pick        s_picks[media::kPickCount];
 lv_timer_t *s_pause_timer = nullptr;
 
 // What it said while the last track seemed to go, kept until that has lasted.
+// Its pictures too: the cover and the still going blank are held as its text
+// is, so the card and the cinema view keep the episode's through the gap.
 struct Gone {
     lv_timer_t *timer = nullptr;
     char        source[sizeof(MediaState::source)] = "";
@@ -29,6 +31,10 @@ struct Gone {
     bool        controllable = false;
     bool        video_told   = false;  // the player stopped seeking meanwhile, or started again
     bool        video        = false;
+    bool        cover_told   = false;  // the cover went blank meanwhile
+    bool        placeholder  = false;
+    int         art_width    = media::kArtSize;
+    bool        still_told   = false;  // and the still
 } s_gone;
 
 void copy(char *to, std::size_t size, const char *from)
@@ -85,6 +91,17 @@ void apply_gone(lv_timer_t *)
     if (s_gone.video_told) {
         s_media.video = s_gone.video;
     }
+    if (s_gone.cover_told) {
+        s_media.art         = nullptr;
+        s_media.large       = nullptr;
+        s_media.art_width   = s_gone.art_width;
+        s_media.placeholder = s_gone.placeholder;
+        ++s_media.covers;
+    }
+    if (s_gone.still_told) {
+        s_media.still = nullptr;
+        ++s_media.stills;
+    }
     media_apply_track(s_gone.source, nullptr, nullptr, s_gone.state, false, s_gone.controllable);
 }
 }  // namespace
@@ -99,6 +116,8 @@ void media_take_track(const char *source, const char *title, const char *artist,
         s_gone.controllable = controllable;
         if (s_gone.timer == nullptr) {
             s_gone.video_told = false;
+            s_gone.cover_told = false;
+            s_gone.still_told = false;
             s_gone.timer      = lv_timer_create(apply_gone, GONE_SETTLE_MS, nullptr);
             lv_timer_set_repeat_count(s_gone.timer, 1);
             lv_timer_set_auto_delete(s_gone.timer, false);
@@ -137,6 +156,12 @@ void media_apply_track(const char *source, const char *title, const char *artist
 
 void media_take_cover(const void *pixels, bool placeholder, int width)
 {
+    if (pixels == nullptr && s_gone.timer != nullptr) {
+        s_gone.cover_told  = true;  // the old one's buffer stays as it is until the next cover
+        s_gone.placeholder = placeholder;
+        s_gone.art_width   = width;
+        return;
+    }
     s_media.art         = pixels;
     s_media.art_width   = width;
     s_media.placeholder = placeholder;
@@ -147,6 +172,9 @@ void media_take_cover(const void *pixels, bool placeholder, int width)
 
 void media_take_large_cover(const void *pixels)
 {
+    if (pixels == nullptr && s_gone.timer != nullptr) {
+        return;  // goes with the cover, as apply_gone clears both
+    }
     s_media.large = pixels;
     ++s_media.covers;
     publish(Topic::Media);
@@ -200,6 +228,10 @@ void media_take_subtitles(bool available, bool shown)
 
 void media_take_still(const void *pixels)
 {
+    if (pixels == nullptr && s_gone.timer != nullptr) {
+        s_gone.still_told = true;
+        return;
+    }
     s_media.still = pixels;
     ++s_media.stills;
     publish(Topic::Media);
