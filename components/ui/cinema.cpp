@@ -14,8 +14,9 @@
 // Jellyfin fullscreen, for watching, in two columns as wide as the picture is:
 // the picture and what plays beside it, how far along the picture's foot, and
 // under them the volume under the picture and the controls under the words.
-// Ten seconds back or on is a swipe across the picture, as on the card; the
-// lights, the low desk and the screen's timer are quick actions over the view.
+// The episode before or after is a swipe across the picture, ten seconds back
+// or on a button beside play; the lights, the low desk and the screen's timer
+// are quick actions over the view.
 // The screen goes dark once left alone, and lights again when there is an intro
 // to skip or an episode to go on to.
 namespace ui::detail {
@@ -59,7 +60,7 @@ lv_obj_t     *s_play    = nullptr;
 lv_obj_t     *s_skip    = nullptr;
 lv_obj_t     *s_paused  = nullptr;  // the play mark over a paused picture
 bool          s_swiped  = false;    // the release that ends a swipe is not a tap
-lv_obj_t     *s_steer[2] = {};      // the episode before, and after
+lv_obj_t     *s_steer[2] = {};      // ten seconds back, and on
 lv_obj_t     *s_volume  = nullptr;  // the slider, filled as far as the level
 lv_obj_t     *s_volume_fill  = nullptr;
 lv_obj_t     *s_volume_level = nullptr;
@@ -210,9 +211,9 @@ void show_media()
     for (lv_obj_t *control : {s_play, s_steer[0], s_steer[1]}) {
         lv_obj_set_hidden(control, !media.remote);
     }
-    // Faded where there is no episode that side, so the grid stays as it is.
-    theme::set_usable(s_steer[0], media.before);
-    theme::set_usable(s_steer[1], media.after);
+    // Faded until the position is known, so the grid stays as it is.
+    theme::set_usable(s_steer[0], media.duration_s > 0);
+    theme::set_usable(s_steer[1], media.duration_s > 0);
     theme::fill_accent_or(s_subtitles, media.subtitles_shown, theme::panel_light);
     lv_obj_set_hidden(s_subtitles, !media_shows_subtitles());
     theme::set_usable(s_subtitles, media.subtitles_available);
@@ -267,14 +268,18 @@ lv_obj_t *line(lv_obj_t *parent, std::uint32_t colour, const lv_font_t *font, st
 }
 
 // A tap on the picture pauses or plays, as tapping a video does; a swipe across
-// it goes ten seconds on to the left or back to the right, as on the card.
+// it goes to the next episode to the left, or the one before to the right.
 void picture_touched(lv_event_t *e)
 {
     if (lv_event_get_code(e) == LV_EVENT_GESTURE) {
         const lv_dir_t direction = lv_indev_get_gesture_dir(lv_indev_active());
         if (direction == LV_DIR_LEFT || direction == LV_DIR_RIGHT) {
-            s_swiped = true;
-            media_seek_by(direction == LV_DIR_LEFT ? SEEK_STEP_S : -SEEK_STEP_S);
+            s_swiped                = true;
+            const bool        next  = direction == LV_DIR_LEFT;
+            const MediaState &media = media_state();
+            if (media.remote && (next ? media.after : media.before)) {
+                media_action(next ? MediaAction::Next : MediaAction::Previous);
+            }
         }
         return;
     }
@@ -411,18 +416,18 @@ std::int32_t side_width(std::int32_t w)
     return (w - PLAY_W - 2 * GRID_GAP) / 2;
 }
 
-// Before, play and after under the words, as wide as they are.
+// Back, play and on under the words, as wide as they are.
 void build_transport(std::int32_t x, std::int32_t y, std::int32_t w)
 {
     const std::int32_t side_w = side_width(w);
-    s_steer[0] = button(s_view, LV_SYMBOL_PREV, side_w, TRANSPORT_H,
-                        [](lv_event_t *) { media_action(MediaAction::Previous); });
+    s_steer[0] = button(s_view, "", side_w, TRANSPORT_H, [](lv_event_t *) { media_seek_by(-SEEK_STEP_S); });
+    mark(s_steer[0], &icons::seek_back_icon);
     lv_obj_set_pos(s_steer[0], x, y);
     s_play = button(s_view, LV_SYMBOL_PLAY, PLAY_W, TRANSPORT_H, [](lv_event_t *) { media_toggle_play(); });
     theme::fill_accent(s_play);
     lv_obj_set_pos(s_play, x + side_w + GRID_GAP, y);
-    s_steer[1] = button(s_view, LV_SYMBOL_NEXT, side_w, TRANSPORT_H,
-                        [](lv_event_t *) { media_action(MediaAction::Next); });
+    s_steer[1] = button(s_view, "", side_w, TRANSPORT_H, [](lv_event_t *) { media_seek_by(SEEK_STEP_S); });
+    mark(s_steer[1], &icons::seek_on_icon);
     lv_obj_set_pos(s_steer[1], x + w - side_w, y);
 }
 
