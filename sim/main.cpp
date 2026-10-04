@@ -250,7 +250,7 @@ void tap(SDL_Point at, std::uint32_t hold_ms = 120)
 // still starts the gesture over, and LVGL now and then reads twice at once.
 void swipe(SDL_Point from, SDL_Point to)
 {
-    constexpr int STEPS = 12;
+    constexpr int STEPS = 8;
     const Uint32  window = SDL_GetWindowID(lv_sdl_window_get_window(lv_display_get_default()));
     SDL_Event     event{};
     event.type            = SDL_MOUSEMOTION;
