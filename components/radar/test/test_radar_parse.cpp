@@ -285,6 +285,19 @@ TEST(RadarParse, capacity) { check_capacity(read_file("adsb_sample.json")); }
 TEST(RadarParse, route) { check_route(read_file("adsbdb_route.json")); }
 TEST(RadarParse, aircraft) { check_aircraft(read_file("adsbdb_aircraft.json")); }
 TEST(RadarParse, trace) { check_trace(read_file("trace_recent.json")); }
+TEST(RadarParse, photo_escapes)
+{
+    // Planespotters writes what is not ASCII as \u escapes, and a slash as \/.
+    const std::string json =
+        R"({"photos":[{"thumbnail_large":{"src":"https:\/\/t.plnspttrs.net\/1.jpg"},)"
+        R"("photographer":"C\u00e9sar Santiago \ud83d\udee9 \"Spotter\""}]})";
+    char url[128];
+    char by[64];
+    ASSERT_TRUE(radar::parse_photo(json.data(), json.size(), url, sizeof(url), by, sizeof(by)));
+    EXPECT_STREQ(url, "https://t.plnspttrs.net/1.jpg");
+    EXPECT_STREQ(by, "C\xc3\xa9sar Santiago \xf0\x9f\x9b\xa9 \"Spotter\"");
+}
+
 TEST(RadarParse, photo) { check_photo(read_file("planespotters_photo.json"), read_file("planespotters_none.json")); }
 
 namespace {

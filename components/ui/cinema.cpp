@@ -131,7 +131,7 @@ void show_progress()
         write_clock(s_total, media_state().duration_s);
     }
     // Ends at, by the clock, once the clock is known.
-    const time_t now = std::time(nullptr);
+    const time_t now = wall_now();
     lv_obj_set_hidden(s_ends, !known || now < CLOCK_SET);
     if (known && now >= CLOCK_SET) {
         const time_t ends = now + (media_state().duration_s - media_position_now());

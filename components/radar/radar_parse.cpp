@@ -1,6 +1,7 @@
 #include "radar_parse.h"
 
 #include <algorithm>
+#include <utility>
 #include <cctype>
 #include <cmath>
 
@@ -146,6 +147,81 @@ void copy_trimmed(char *out, std::size_t size, const char *start, std::size_t le
     out[length] = '\0';
 }
 
+int hex_digit(char c)
+{
+    if (c >= '0' && c <= '9') {
+        return c - '0';
+    }
+    if (c >= 'a' && c <= 'f') {
+        return c - 'a' + 10;
+    }
+    return c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+}
+
+// Four hex digits at text, or -1.
+long hex4(const char *text)
+{
+    long value = 0;
+    for (int i = 0; i < 4; ++i) {
+        const int digit = hex_digit(text[i]);
+        if (digit < 0) {
+            return -1;
+        }
+        value = value * 16 + digit;
+    }
+    return value;
+}
+
+// JSON's escapes undone in place, \u00e9 as UTF-8's two bytes; never longer
+// than what it reads. One cut off at the end, by the copy's length, is dropped.
+void unescape_in_place(char *text)
+{
+    char *write = text;
+    for (const char *read = text; *read != '\0'; ++read) {
+        if (*read != '\\') {
+            *write++ = *read;
+            continue;
+        }
+        const char kind = *++read;
+        if (kind == '\0') {
+            break;
+        }
+        if (kind != 'u') {
+            *write++ = kind == 'n' ? '\n' : kind == 't' ? '\t' : kind == 'r' ? '\r' : kind;
+            continue;
+        }
+        long code = hex4(read + 1);
+        if (code < 0) {
+            break;
+        }
+        read += 4;
+        // A character past the first 65536 comes as two, a surrogate pair.
+        if (code >= 0xD800 && code <= 0xDBFF && read[1] == '\\' && read[2] == 'u') {
+            const long low = hex4(read + 3);
+            if (low >= 0xDC00 && low <= 0xDFFF) {
+                code = 0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00);
+                read += 6;
+            }
+        }
+        if (code < 0x80) {
+            *write++ = static_cast<char>(code);
+        } else if (code < 0x800) {
+            *write++ = static_cast<char>(0xC0 | (code >> 6));
+            *write++ = static_cast<char>(0x80 | (code & 0x3F));
+        } else if (code < 0x10000) {
+            *write++ = static_cast<char>(0xE0 | (code >> 12));
+            *write++ = static_cast<char>(0x80 | ((code >> 6) & 0x3F));
+            *write++ = static_cast<char>(0x80 | (code & 0x3F));
+        } else {
+            *write++ = static_cast<char>(0xF0 | (code >> 18));
+            *write++ = static_cast<char>(0x80 | ((code >> 12) & 0x3F));
+            *write++ = static_cast<char>(0x80 | ((code >> 6) & 0x3F));
+            *write++ = static_cast<char>(0x80 | (code & 0x3F));
+        }
+    }
+    *write = '\0';
+}
+
 bool read_text(Scanner &in, char *out, std::size_t size)
 {
     const char *text   = nullptr;
@@ -154,6 +230,7 @@ bool read_text(Scanner &in, char *out, std::size_t size)
         return false;
     }
     copy_trimmed(out, size, text, length);
+    unescape_in_place(out);
     return true;
 }
 
@@ -397,18 +474,6 @@ bool enter_object(Scanner &in, const char *name)
     return seek_key(in, name) && in.take('{');
 }
 
-void unescape_in_place(char *text)
-{
-    char *write = text;
-    for (const char *read = text; *read != '\0'; ++read) {
-        if (*read == '\\' && read[1] != '\0') {
-            ++read;
-        }
-        *write++ = *read;
-    }
-    *write = '\0';
-}
-
 /** Stores the aircraft, or, once full, lets it replace the farthest if it is
  *  nearer: the scope shows the nearest `capacity`. */
 void keep_nearest(Aircraft *out, int capacity, int &stored, const Aircraft &aircraft)
@@ -518,7 +583,6 @@ bool parse_photo(const char *json, std::size_t length, char *out, std::size_t si
             return false;
         }
     }
-    unescape_in_place(out);
     return out[0] != '\0';
 }
 
@@ -931,6 +995,45 @@ Leg route_leg(const Details &details, float lat, float lon, float track_deg)
         return Leg::OutOfDest;
     }
     return Leg::This;
+}
+
+RouteVerdict judge_route(Details &details, float lat, float lon, float track_deg)
+{
+    const Leg leg = route_leg(details, lat, lon, track_deg);
+    if (leg == Leg::IntoOrigin) {
+        std::memcpy(details.dest_code, details.origin_code, sizeof(details.dest_code));
+        std::memcpy(details.dest_city, details.origin_city, sizeof(details.dest_city));
+        details.dest_lat       = details.origin_lat;
+        details.dest_lon       = details.origin_lon;
+        details.origin_code[0] = details.origin_city[0] = '\0';
+        details.has_origin_at  = false;
+        return RouteVerdict::IntoOrigin;
+    }
+    if (leg == Leg::OutOfDest) {
+        std::memcpy(details.origin_code, details.dest_code, sizeof(details.origin_code));
+        std::memcpy(details.origin_city, details.dest_city, sizeof(details.origin_city));
+        details.origin_lat   = details.dest_lat;
+        details.origin_lon   = details.dest_lon;
+        details.dest_code[0] = details.dest_city[0] = '\0';
+        details.has_dest_at  = false;
+        return RouteVerdict::OutOfDest;
+    }
+    if (!route_fits(details, lat, lon)) {
+        details.has_route      = false;
+        details.has_origin_at  = false;
+        details.has_dest_at    = false;
+        details.origin_code[0] = details.origin_city[0] = '\0';
+        details.dest_code[0]   = details.dest_city[0]   = '\0';
+        return RouteVerdict::Dropped;
+    }
+    if (route_backwards(details, lat, lon, track_deg)) {
+        std::swap(details.origin_code, details.dest_code);
+        std::swap(details.origin_city, details.dest_city);
+        std::swap(details.origin_lat, details.dest_lat);
+        std::swap(details.origin_lon, details.dest_lon);
+        return RouteVerdict::Reversed;
+    }
+    return RouteVerdict::Kept;
 }
 
 }  // namespace radar

@@ -319,6 +319,10 @@ esp_err_t init(const Handlers &handlers, int initial_brightness, std::uint32_t a
  *  between init() and build(). */
 void set_radar_range(int km);
 
+/** Shows this in the top bar in place of the time, as "9:41" for pictures; null
+ *  for the time again. Only the clock: everything else keeps the real time. */
+void pin_clock(const char *text);
+
 /** After init() has put up the splash and the screen is lit: everything else,
  *  built behind the splash a part at a time so that it keeps moving. Nothing
  *  set before this returns is drawn until it has. */

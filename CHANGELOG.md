@@ -2,6 +2,13 @@
 
 The versions are the points where the panel was a step further on my desk. None of them is a stable release, it is still a project in progress.
 
+## Unreleased
+
+- Screenshots at 9:41, retaken with `sim/shots.sh`
+- Board pictures on a background, from five angles, with `pcb/render.sh`
+- Photo credits show accents (César, not C\u00e9sar)
+- The simulator checks routes as the panel does
+
 ## v0.9.0, 4 October 2026
 
 First public release.
