@@ -72,7 +72,7 @@ One button goes between Stand and Sit, showing which way while the desk moves, a
 
 ![The cinema view](docs/screenshots/cinema.png)
 
-When something plays on Jellyfin the control bar follows it, and holding it there sends the desk to its viewing height. The cinema view has the episode's still, when it ends, skip intro, next episode, subtitles and volume, with the lights and the desk within reach. Only what the player playing would act on is shown.
+When something plays on Jellyfin the control bar follows it, and holding it there sends the desk to its viewing height. The cinema view has the episode's still, when it ends, skip intro, next episode, ten seconds back and on, subtitles and volume, with the lights and the desk within reach. A swipe across the picture goes to the episode before or after. Only what the player playing would act on is shown.
 
 ### Planes overhead
 

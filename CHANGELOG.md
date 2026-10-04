@@ -8,6 +8,7 @@ The versions are the points where the panel was a step further on my desk. None 
 - Board pictures on a background, from five angles, with `pcb/render.sh`
 - Photo credits show accents (César, not C\u00e9sar)
 - The simulator checks routes as the panel does
+- Cinema: ten seconds back and on as buttons, a swipe across the picture for the episode before or after
 
 ## v0.9.0, 4 October 2026
 
