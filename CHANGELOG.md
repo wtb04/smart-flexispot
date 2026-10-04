@@ -9,6 +9,7 @@ The versions are the points where the panel was a step further on my desk. None 
 - Photo credits show accents (César, not C\u00e9sar)
 - The simulator checks routes as the panel does
 - Cinema: ten seconds back and on as buttons, a swipe across the picture for the episode before or after
+- Between episodes, the cover and the still stay until the next one comes
 
 ## v0.9.0, 4 October 2026
 

@@ -214,6 +214,10 @@ void go_on_to(int item)
     s_between_until = now_ms() + BETWEEN_MS;
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media("OFFICE SPEAKER", "", "", "OFF", false, false));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_seeks(false));
+    // And its pictures go blank, as the panel's media lets them go with nothing to fetch.
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_album_art(nullptr, false));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_album_art_large(nullptr));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_cinema_still(nullptr));
 }
 }  // namespace
 
