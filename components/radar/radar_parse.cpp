@@ -843,12 +843,22 @@ bool route_backwards(const Details &details, float lat, float lon, float track_d
     return degrees_apart(track_deg, to_origin) <= TOWARD_DEG && degrees_apart(track_deg, to_dest) >= AWAY_DEG;
 }
 
-bool route_progress(const Details &details, float lat, float lon, float &share, float &left_km)
+namespace {
+constexpr double EARTH_KM = 6371.0;
+constexpr double SLACK_KM = 150.0;  // a flight starts and ends off the line, and airways are not great circles
+
+// Where an aircraft is against the great circle of its route: how far along
+// it from the origin, negative before it, and how far off to one side.
+struct Placed {
+    double route_km;
+    double along_km;
+    double off_km;
+    double origin_km;  // straight to each airport
+    double dest_km;
+};
+
+bool place_on_route(const Details &details, float lat, float lon, Placed &out)
 {
-    constexpr double EARTH_KM = 6371.0;
-    if (!details.has_route || !details.has_origin_at || !details.has_dest_at) {
-        return false;
-    }
     const Unit from   = unit_at(details.origin_lat, details.origin_lon);
     const Unit to     = unit_at(details.dest_lat, details.dest_lon);
     const Unit here   = unit_at(lat, lon);
@@ -858,40 +868,69 @@ bool route_progress(const Details &details, float lat, float lon, float &share, 
         return false;
     }
     normal = {normal.x / length, normal.y / length, normal.z / length};
-    const double route_km = std::atan2(length, dot(from, to)) * EARTH_KM;
-    const double off      = dot(here, normal);
+    const double off = dot(here, normal);
     const Unit   on{here.x - off * normal.x, here.y - off * normal.y, here.z - off * normal.z};
-    const double along_km = std::atan2(dot(cross(from, on), normal), dot(from, on)) * EARTH_KM;
-    share   = static_cast<float>(std::clamp(along_km / route_km, 0.0, 1.0));
-    left_km = static_cast<float>(std::max(route_km - along_km, 0.0));
+    out.route_km  = std::atan2(length, dot(from, to)) * EARTH_KM;
+    out.along_km  = std::atan2(dot(cross(from, on), normal), dot(from, on)) * EARTH_KM;
+    out.off_km    = std::asin(std::clamp(off, -1.0, 1.0)) * EARTH_KM;
+    out.origin_km = std::acos(std::clamp(dot(here, from), -1.0, 1.0)) * EARTH_KM;
+    out.dest_km   = std::acos(std::clamp(dot(here, to), -1.0, 1.0)) * EARTH_KM;
+    return true;
+}
+}  // namespace
+
+bool route_progress(const Details &details, float lat, float lon, float &share, float &left_km)
+{
+    Placed at{};
+    if (!details.has_route || !details.has_origin_at || !details.has_dest_at || !place_on_route(details, lat, lon, at)) {
+        return false;
+    }
+    share   = static_cast<float>(std::clamp(at.along_km / at.route_km, 0.0, 1.0));
+    left_km = static_cast<float>(std::max(at.route_km - at.along_km, 0.0));
     return true;
 }
 
 bool route_fits(const Details &details, float lat, float lon)
 {
-    constexpr double EARTH_KM     = 6371.0;
-    constexpr double SLACK_KM     = 150.0;  // airways are not great circles, and a flight starts and ends off the line
-    constexpr double SLACK_SHARE  = 0.15;   // of a long route's length
+    constexpr double SLACK_SHARE = 0.15;  // of a long route's length, at its middle
+    constexpr double FAN         = 0.5;   // off the line by this much of the way from the nearer end
     if (!details.has_route || !details.has_origin_at || !details.has_dest_at) {
         return true;
     }
-    const Unit   from   = unit_at(details.origin_lat, details.origin_lon);
-    const Unit   to     = unit_at(details.dest_lat, details.dest_lon);
-    const Unit   here   = unit_at(lat, lon);
-    Unit         normal = cross(from, to);
-    const double length = std::sqrt(dot(normal, normal));
-    if (length < 1e-9) {
+    Placed at{};
+    if (!place_on_route(details, lat, lon, at)) {
         return false;  // the same airport at both ends: the database is wrong about one of them
     }
-    normal = {normal.x / length, normal.y / length, normal.z / length};
-    const double route_km = std::atan2(length, dot(from, to)) * EARTH_KM;
-    const double slack_km = std::max(SLACK_KM, SLACK_SHARE * route_km);
-    const double off      = dot(here, normal);
-    const double off_km   = std::asin(std::clamp(off, -1.0, 1.0)) * EARTH_KM;
-    // Along the route from its origin, of where the aircraft is put on the line.
-    const Unit on{here.x - off * normal.x, here.y - off * normal.y, here.z - off * normal.z};
-    const double along_km = std::atan2(dot(cross(from, on), normal), dot(from, on)) * EARTH_KM;
-    return std::fabs(off_km) <= slack_km && along_km >= -slack_km && along_km <= route_km + slack_km;
+    // Off the line, little near either airport and more toward the middle: an
+    // aircraft beside its origin is not on a route that sets off the other way.
+    const double from_end = std::max(std::min(at.along_km, at.route_km - at.along_km), 0.0);
+    const double slack_km = std::min(std::max(SLACK_KM, SLACK_SHARE * at.route_km), SLACK_KM + FAN * from_end);
+    return std::fabs(at.off_km) <= slack_km && at.along_km >= -SLACK_KM && at.along_km <= at.route_km + SLACK_KM;
+}
+
+Leg route_leg(const Details &details, float lat, float lon, float track_deg)
+{
+    constexpr double NEAR_KM    = 50.0;  // closer, it may be turning after take-off
+    constexpr double TOWARD_DEG = 30.0;
+    Placed at{};
+    if (track_deg < 0.0f || !details.has_route || !details.has_origin_at || !details.has_dest_at ||
+        !place_on_route(details, lat, lon, at)) {
+        return Leg::This;
+    }
+    // Behind one end, within a quarter turn of the line carried on past it.
+    const double behind_origin = -at.along_km;
+    const double past_dest     = at.along_km - at.route_km;
+    const double to_origin     = bearing_to(lat, lon, details.origin_lat, details.origin_lon);
+    const double to_dest       = bearing_to(lat, lon, details.dest_lat, details.dest_lon);
+    if (behind_origin > 0.0 && at.origin_km > NEAR_KM && std::fabs(at.off_km) <= std::max(SLACK_KM, behind_origin) &&
+        degrees_apart(track_deg, to_origin) <= TOWARD_DEG) {
+        return Leg::IntoOrigin;
+    }
+    if (past_dest > 0.0 && at.dest_km > NEAR_KM && std::fabs(at.off_km) <= std::max(SLACK_KM, past_dest) &&
+        degrees_apart(track_deg, to_dest) >= 180.0 - TOWARD_DEG) {
+        return Leg::OutOfDest;
+    }
+    return Leg::This;
 }
 
 }  // namespace radar

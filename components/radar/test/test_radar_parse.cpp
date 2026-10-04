@@ -325,6 +325,27 @@ TEST(RadarParse, route_fits)
     EXPECT_FALSE(radar::route_backwards(stansted_szczecin, 51.90f, 1.81f, -1.0f)) << "no track, no say";
 }
 
+TEST(RadarParse, route_leg)
+{
+    // DHK597 over the Netherlands, flying East Midlands to Leipzig, which the
+    // databases have as Leipzig to Hong Kong, the callsign's next leg.
+    const radar::Details leipzig_hong_kong = route(51.42f, 12.24f, 22.31f, 113.92f);
+    EXPECT_FALSE(radar::route_fits(leipzig_hong_kong, 52.40f, 5.00f)) << "behind its origin";
+    EXPECT_EQ(radar::route_leg(leipzig_hong_kong, 52.40f, 5.00f, 100.0f), radar::Leg::IntoOrigin);
+    EXPECT_EQ(radar::route_leg(leipzig_hong_kong, 52.40f, 5.00f, 280.0f), radar::Leg::This) << "flying away from it";
+    EXPECT_EQ(radar::route_leg(leipzig_hong_kong, 52.40f, 5.00f, -1.0f), radar::Leg::This) << "no track, no say";
+    EXPECT_EQ(radar::route_leg(leipzig_hong_kong, 51.50f, 12.00f, 90.0f), radar::Leg::This) << "just taken off";
+    EXPECT_EQ(radar::route_leg(leipzig_hong_kong, 47.00f, 30.00f, 90.0f), radar::Leg::This) << "on its way";
+    // Rome to Leipzig, beside the origin: not on a route that sets off east.
+    EXPECT_FALSE(radar::route_fits(leipzig_hong_kong, 47.00f, 12.30f)) << "beside its origin";
+    EXPECT_EQ(radar::route_leg(leipzig_hong_kong, 47.00f, 12.30f, 0.0f), radar::Leg::This) << "not behind it";
+
+    // Amsterdam to London, and the aircraft flying on west past London.
+    const radar::Details amsterdam_london = route(52.31f, 4.76f, 51.47f, -0.45f);
+    EXPECT_EQ(radar::route_leg(amsterdam_london, 51.20f, -3.50f, 260.0f), radar::Leg::OutOfDest);
+    EXPECT_EQ(radar::route_leg(amsterdam_london, 51.20f, -3.50f, 80.0f), radar::Leg::This) << "flying back at it";
+}
+
 TEST(RadarParse, notability)
 {
     const auto aircraft = [](const char *flight, const char *category, const char *type = "", int feet = 3000,

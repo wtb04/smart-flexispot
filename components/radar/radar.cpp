@@ -361,7 +361,8 @@ void details_step(const DetailsJobPtr &job);
 
 // A route the database has for the callsign that does not fit where the
 // aircraft is: another of the callsign's days, shown as no route rather than
-// as the wrong one; and one it fits but flies the other way, turned round.
+// as the wrong one; one it fits but flies the other way, turned round; and
+// the leg either side of it, as the one airport of it that is known.
 // Under the lock.
 void drop_route_unless_fits(Details &details, const char *hex)
 {
@@ -369,7 +370,27 @@ void drop_route_unless_fits(Details &details, const char *hex)
         if (std::strcmp(s_list[i].hex, hex) != 0) {
             continue;
         }
-        if (!route_fits(details, s_list[i].lat, s_list[i].lon)) {
+        const Leg leg = route_leg(details, s_list[i].lat, s_list[i].lon, s_list[i].track_deg);
+        if (leg != Leg::This) {
+            ESP_LOGI(TAG, "%s: %s to %s, on the leg %s %s", hex, details.origin_code, details.dest_code,
+                     leg == Leg::IntoOrigin ? "into" : "out of",
+                     leg == Leg::IntoOrigin ? details.origin_code : details.dest_code);
+            if (leg == Leg::IntoOrigin) {
+                std::memcpy(details.dest_code, details.origin_code, sizeof(details.dest_code));
+                std::memcpy(details.dest_city, details.origin_city, sizeof(details.dest_city));
+                details.dest_lat = details.origin_lat;
+                details.dest_lon = details.origin_lon;
+                details.origin_code[0] = details.origin_city[0] = '\0';
+                details.has_origin_at  = false;
+            } else {
+                std::memcpy(details.origin_code, details.dest_code, sizeof(details.origin_code));
+                std::memcpy(details.origin_city, details.dest_city, sizeof(details.origin_city));
+                details.origin_lat = details.dest_lat;
+                details.origin_lon = details.dest_lon;
+                details.dest_code[0] = details.dest_city[0] = '\0';
+                details.has_dest_at  = false;
+            }
+        } else if (!route_fits(details, s_list[i].lat, s_list[i].lon)) {
             ESP_LOGI(TAG, "%s: %s to %s does not fit where it is, left out", hex, details.origin_code,
                      details.dest_code);
             details.has_route     = false;
