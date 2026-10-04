@@ -4,18 +4,13 @@ The versions are the points where the panel was a step further on my desk. None 
 
 ## v0.9.0, 4 October 2026
 
-The first public version: a calendar that shows when and where first, a radar column like a boarding pass with better routes, and everything personal moved out of the code.
+First public release.
 
-- The calendar page as next up and an agenda: the next event's course in large type and its session under it rather than both cut off, when and where with how long until it, and under it the rest of its day, a clash said as at the same time; within a few hours, the way there instead, when to leave and each step as what to do with its icon, the other times to leave as chips. The rest of the week as an agenda at the right, a long event with its end and an address as street and town. The day strip is gone; the week view shows each event's course.
-- Home's next event with its start and where it is in large type, the end beside the start, the course over up to three lines rather than cut off, and the events after it by course, as many as fit whole. On the calendar page, too, the start and the place are large, how long until it beside its kind on the line above, on its day.
-- The radar's plane column as a boarding pass: the flight number as sold with the airline beside it, the route's two ends with how far along the flight is and the kilometres to go, "On approach" when the autopilot's approach is on, a Military chip and the country of an aircraft without a route, then altitude with where it is climbing or descending to, speed, which way it heads and where it is from you, with the aircraft and its registration last. The photographer is named on the photo, as Planespotters asks.
-- Routes of a callsign that flies more than one leg: the route databases keep one, as Leipzig to Hong Kong for DHL's DHK597, which also flies East Midlands to Leipzig. An aircraft behind the route's origin and flying at it shows that airport as where it goes, and one past its destination and flying away as where it comes from, the other end left as unknown. A route no longer fits an aircraft well before its origin or beside it just because the route is long.
-- Routes for low-cost airlines: where adsbdb's route for a callsign does not fit where the aircraft is, as it often does not for Ryanair's and easyJet's, hexdb.io's is asked for and taken when it fits. One with the same airport at both ends is left out, and one flown the other way round is turned round.
-- Everything that was mine in the code is in files of one's own, which git ignores, with an example beside each: the Home Assistant entities and favourite playlists in `room_config.h`, the presets' names in `ui_presets.h`, and the timetable's host and the work calendar's filter with the other secrets. Without them the panel builds with no network and generic names, from a fresh clone with nothing filled in.
-- The time zone is a setting in menuconfig, *Panel time*, Central European Time by default.
-- The companion's pins are the carrier board's by default, and it builds again; CI now builds it too.
-- The update and Claude keys can be up to 128 characters, and are compared in constant time.
-- Apache 2.0, with a NOTICE and the third-party notices beside every image.
+- Calendar: the next event first, with its start time and room in large type
+- Radar: plane details as a boarding pass, and better routes for low-cost and multi-leg flights
+- Personal settings moved out of the code into your own config files
+- Time zone setting, longer update keys, and the companion builds again
+- Apache 2.0 licence
 
 ## v0.8.0, 3 October 2026
 
