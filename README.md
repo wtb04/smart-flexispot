@@ -168,6 +168,6 @@ How the panel is put together inside, the desk protocol, and how to run the test
 
 ## Licence
 
-Apache License 2.0, see [LICENSE](LICENSE), for the code, the documents and the board. What comes from others keeps its own licence, listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Copyright 2026 Wouter ten Brinke. The code, the documents and the board are under the Apache License 2.0, see [LICENSE](LICENSE) and [NOTICE](NOTICE). What comes from others keeps its own licence, listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 Made by [Wouter ten Brinke](https://woutertenbrinke.nl).

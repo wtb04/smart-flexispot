@@ -1,6 +1,6 @@
 # Third-party notices
 
-This project's own code, documents and board are under the Apache License 2.0 in [LICENSE](LICENSE). The firmware images also carry the work of others, under their own licences, below.
+This project's own code, documents and board are copyright 2026 Wouter ten Brinke, under the Apache License 2.0 in [LICENSE](LICENSE). The firmware images also carry the work of others, under their own licences, below.
 
 | What | Where | Licence |
 |---|---|---|
