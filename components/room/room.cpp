@@ -33,11 +33,8 @@ namespace room {
 namespace {
 constexpr char TAG[] = "room";
 
-constexpr char CLIMATE_ENTITY[] = "climate.office_thermostaat";
-
 // Two players, one card: the speaker, then Jellyfin. Anything playing outranks
 // anything paused, so a paused speaker gives way to Jellyfin starting.
-constexpr char MEDIA_SPEAKER[]  = "media_player.office_speaker";
 constexpr int  JELLYFIN_COVER_H = 300;  // enough for the card's frame, square from the middle
 constexpr int  JELLYFIN_PRESET  = 1;  // holding the card for Jellyfin: Preset 2
 std::atomic<bool> s_on_jellyfin{false};  // what the card shows, and so controls

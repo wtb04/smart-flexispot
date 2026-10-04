@@ -13,6 +13,9 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   host-tests:
     name: Host tests and coverage
@@ -209,4 +212,5 @@ jobs:
           cp smart_flexispot-full.bin "smart_flexispot-${GITHUB_REF_NAME}-full.bin"
           cp smart_flexispot.bin "smart_flexispot-${GITHUB_REF_NAME}-ota.bin"
           gh release create "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --title "$title" --notes-file ../notes.md \
-            "smart_flexispot-${GITHUB_REF_NAME}-full.bin" "smart_flexispot-${GITHUB_REF_NAME}-ota.bin"
+            "smart_flexispot-${GITHUB_REF_NAME}-full.bin" "smart_flexispot-${GITHUB_REF_NAME}-ota.bin" \
+            ../LICENSE ../THIRD_PARTY_NOTICES.md

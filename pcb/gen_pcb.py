@@ -7,8 +7,8 @@ UART over RJ45, driven over BLE by the Tab5 panel.
 
 Placement only -- routing is done by route.py, DRC by kicad-cli.
 
-Module assumptions (see HANDOFF.md, verify against your physical board):
-  PINS_PER_ROW = 15          # measured: 30-pin board, 2x15   (38-pin NodeMCU-32S / ESP32-DevKitC class)
+Module assumptions (verify against your physical board):
+  PINS_PER_ROW = 15          # measured: 30-pin board, 2x15
   ROW_SPACING  = 22.86 mm  (0.9 in)
   pin 1 is at the antenna end, pin numbering runs toward the USB end.
 """
@@ -30,9 +30,9 @@ ROW_SPACING = 25.4        # 1.0 in -- confirmed: on a breadboard the module
                           # leaves one column free on one side only, which is
                           # only true at 1.0 in (0.9 leaves one each side, 1.1 none)
 # Module runs along the board with pin 1 (the antenna end) at the LEFT, pointing
-# inboard, so that pin 19 -- the USB end -- reaches the RIGHT board edge and stays
+# inboard, so that pin 15 -- the USB end -- reaches the RIGHT board edge and stays
 # accessible. Headers are at rot 90, so pin n sits at PIN1_X + (n-1)*PITCH.
-# RF cost of this is real and accepted: see HANDOFF.md.
+# The RF cost of this is real and accepted.
 PIN1_X = 21.5
 # Row inset is set by MOUNTING, not by the silk. The RJ45's courtyard reaches
 # +/- 10.70 about the module axis and an M3 needs 3.45 of courtyard plus a
@@ -65,10 +65,6 @@ NETS = ["", "GND", "+5V", "DESK_5V", "D5V_F", "DESK_TX", "LED_BT", "LED_BT_A",
         "RX_DIV", "DESK_RX", "ESP_TX", "PIN20", "ESP_P20", "+3V3"]
 NETIDX = {n: i for i, n in enumerate(NETS)}
 
-# NodeMCU-32S pin -> net.  Row A pin 1 = 3V3, 14 = GND, 19 = 5V(VIN).
-# Row B GPIOs chosen non-strapping and in left-to-right order matching the
-# passives below, so the whole thing routes without crossings:
-#   pin 8 = GPIO19, pin 11 = GPIO17, pin 13 = GPIO4
 # DOIT ESP32 DevKit V1, 30-pin. Read off the module itself (photo), not assumed.
 # The module's silkscreen has USB on the LEFT; our board has USB on the RIGHT, so
 # the module is rotated 180 deg in-plane -- that reverses each row AND swaps which
@@ -188,7 +184,7 @@ LCSC = {
 NO_BOM = {"H1", "H2", "H3", "H4"}
 
 # Fitted by hand, not by the assembler. JLCPCB stocks none of these: the PTC is
-# not in their catalogue, a 1x19 socket is an odd length, and the only RJ45 they
+# not in their catalogue, a 1x15 socket is an odd length, and the only RJ45 they
 # matched was a modular PLUG (male, cable-end) with no stock -- the wrong part.
 # Tagged on the board so the BOM/CPL split stays in step with the design.
 HAND_SOLDER = {"RJ45_1", "U1A", "U1B"}   # F1 moved to assembly, see LCSC below

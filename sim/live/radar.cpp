@@ -30,7 +30,7 @@ constexpr const char  *FEEDS[]        = {"https://api.adsb.lol/v2/point/%.4f/%.4
                                          "https://opendata.adsb.fi/api/v2/lat/%.4f/lon/%.4f/dist/%d"};
 constexpr char         LOOKUP_HOST[]  = "https://api.adsbdb.com";
 constexpr char         PHOTO_HOST[]   = "https://api.planespotters.net";
-constexpr char         PHOTO_AGENT[]  = "smart-flexispot-sim (+https://woutertenbrinke.nl)";  // they ask for a contact
+constexpr char         PHOTO_AGENT[]  = "smart-flexispot-sim (+https://github.com/wtb04/smart-flexispot)";  // they ask for a contact
 constexpr char         TRACE_HOST[]   = "https://adsb.lol";
 constexpr int          RANGE_KM       = 250;  // as components/radar asks
 constexpr float        NM_PER_KM      = 0.539957f;

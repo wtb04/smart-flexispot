@@ -1,7 +1,7 @@
 # How it works
 
 The inside of the panel, and how to work on it. The [README](../README.md) has
-what it does and how to set one up.
+what it does, and [getting started](getting-started.md) how to set one up.
 
 ## Working on it
 

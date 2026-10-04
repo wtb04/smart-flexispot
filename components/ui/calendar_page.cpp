@@ -608,7 +608,7 @@ bool is_upper(char c)
 }
 
 // An address as street and town: "Voorbeeldstraat 12 1234AB Plaats Nederland" is
-// Voorbeeldstraat 12, Plaats. A room is left as it is.
+// "Voorbeeldstraat 12, Plaats".
 void short_place(const char *place, char *out, std::size_t size)
 {
     std::snprintf(out, size, "%s", place);

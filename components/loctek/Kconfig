@@ -9,7 +9,7 @@ menu "Loctek desk control"
             sdkconfig.defaults does. Otherwise pick another controller.
 
     config LOCTEK_TX_GPIO
-        int "TX GPIO (to control box RJ45 pin 6)"
+        int "TX GPIO (to control box RJ45 pin 5, where the box receives)"
         default 37
         help
             The defaults are the panel's: M5-Bus TXD0, connector pin 14, with
@@ -17,7 +17,7 @@ menu "Loctek desk control"
             on UART0. The companion sets its own in proxy/sdkconfig.defaults.
 
     config LOCTEK_RX_GPIO
-        int "RX GPIO (from control box RJ45 pin 5)"
+        int "RX GPIO (from control box RJ45 pin 6, where the box sends)"
         default 38
         help
             The defaults are the panel's: M5-Bus RXD0, connector pin 13, with

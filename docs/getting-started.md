@@ -27,6 +27,8 @@ There are two ways to reach the control box. Either the Tab5 is wired to it dire
   <img alt="Option 1 wiring: the Tab5's M5-Bus pins to RJ45 pins 4 to 7" src="diagrams/wiring-1-light.svg">
 </picture>
 
+The panel starts out talking to a companion over Bluetooth. With the cable, set Setup, Behaviour, Desk link to **WIRE** once it is running.
+
 ### Option 2: over Bluetooth, with a companion
 
 The companion is an ESP32 DevKit V1 (30-pin) on a small carrier board of my own with an RJ45 jack. The board takes its power from the desk, shifts the box's 5 V signal down to 3.3 V for the ESP32, and lights the two LEDs in the jack for Bluetooth (`BT`) and the desk link (`LINK`).
@@ -83,11 +85,19 @@ Everything the panel talks to has a `*_secrets.example.h` template next to where
 | `components/wifi/include/wifi_secrets.h` | Your Wi-Fi |
 | `components/hass/include/hass_secrets.h` | Home Assistant's address and a token, and the MQTT broker |
 | `components/jellyfin/include/jellyfin_secrets.h` | The Jellyfin server and an API key |
-| `components/ical/include/ical_secrets.h` | Your calendar feeds |
-| `components/travel/include/travel_secrets.h` | The journey planner and its key |
+| `components/ical/include/ical_secrets.h` | Where your timetable's feeds are, and an Outlook calendar's link |
+| `components/travel/include/travel_secrets.h` | A travel service of your own and its key. The panel asks it the way to the next event; leave it empty and there is no route |
 | `components/ble/include/ble_secrets.h` | Your phone's Bluetooth identity key, for presence |
 | `components/ota/include/ota_secrets.h` | A key for updates over Wi-Fi |
 | `components/claude/include/claude_secrets.h` | A key for the laptops' Claude Code sessions, if you want them |
+
+### Make it yours
+
+A few things are mine in the code rather than secrets, and are worth a look before the first build:
+
+- **Your Home Assistant entities.** Copy `components/room/room_config.example.h` to `room_config.h` beside it, which git ignores, and put in your readings, lights, thermostat and speaker. Without it the panel is built with the example's.
+- **Your desk's height range**, in `idf.py menuconfig`, *Loctek desk control*: 660 to 1310 mm is mine.
+- **The work calendar keeps only events whose title starts with "werk"**, in `components/ical/ical.cpp`, as mine is a shared calendar with only my shifts on it.
 
 ## 5. Flash it
 
@@ -102,10 +112,10 @@ Ctrl-] leaves the monitor. If the port does not show up, hold BOOT while pluggin
 
 It boots into a splash that shows the desk, the network and Home Assistant coming up, and is on the home page in about ten seconds.
 
-Every CI run also keeps a `smart_flexispot-full.bin` that can be written at 0x0 without building anything:
+Every [release](https://github.com/wtb04/smart-flexispot/releases) has a `smart_flexispot-<version>-full.bin` that can be written at 0x0 without building anything:
 
 ```sh
-esptool.py --chip esp32p4 -p /dev/cu.usbmodem* write_flash 0x0 smart_flexispot-full.bin
+esptool.py --chip esp32p4 -p /dev/cu.usbmodem* write_flash 0x0 smart_flexispot-v0.8.0-full.bin
 ```
 
 Those are built from the templates though, so they have no network: enough to try the screen and the desk, not the rest.
@@ -131,16 +141,16 @@ Optional. Each laptop needs `jq` and `curl`, which macOS has, and this repositor
 {
   "env": { "CLAUDE_PANEL_KEY": "the key in claude_secrets.h" },
   "hooks": {
-    "SessionStart":      [{ "hooks": [{ "type": "command", "command": "~/tab5-hello/tools/claude-hook", "async": true }] }],
-    "UserPromptSubmit":  [{ "hooks": [{ "type": "command", "command": "~/tab5-hello/tools/claude-hook", "async": true }] }],
-    "PreToolUse":        [{ "hooks": [{ "type": "command", "command": "~/tab5-hello/tools/claude-hook", "async": true }] }],
-    "PostToolUse":       [{ "hooks": [{ "type": "command", "command": "~/tab5-hello/tools/claude-hook", "async": true }] }],
-    "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "~/tab5-hello/tools/claude-hook", "async": true }] }],
-    "SubagentStart":     [{ "hooks": [{ "type": "command", "command": "~/tab5-hello/tools/claude-hook", "async": true }] }],
-    "SubagentStop":      [{ "hooks": [{ "type": "command", "command": "~/tab5-hello/tools/claude-hook", "async": true }] }],
-    "Stop":              [{ "hooks": [{ "type": "command", "command": "~/tab5-hello/tools/claude-hook", "async": true }] }],
-    "StopFailure":       [{ "hooks": [{ "type": "command", "command": "~/tab5-hello/tools/claude-hook", "async": true }] }],
-    "SessionEnd":        [{ "hooks": [{ "type": "command", "command": "~/tab5-hello/tools/claude-hook", "async": true }] }]
+    "SessionStart":      [{ "hooks": [{ "type": "command", "command": "~/smart-flexispot/tools/claude-hook", "async": true }] }],
+    "UserPromptSubmit":  [{ "hooks": [{ "type": "command", "command": "~/smart-flexispot/tools/claude-hook", "async": true }] }],
+    "PreToolUse":        [{ "hooks": [{ "type": "command", "command": "~/smart-flexispot/tools/claude-hook", "async": true }] }],
+    "PostToolUse":       [{ "hooks": [{ "type": "command", "command": "~/smart-flexispot/tools/claude-hook", "async": true }] }],
+    "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "~/smart-flexispot/tools/claude-hook", "async": true }] }],
+    "SubagentStart":     [{ "hooks": [{ "type": "command", "command": "~/smart-flexispot/tools/claude-hook", "async": true }] }],
+    "SubagentStop":      [{ "hooks": [{ "type": "command", "command": "~/smart-flexispot/tools/claude-hook", "async": true }] }],
+    "Stop":              [{ "hooks": [{ "type": "command", "command": "~/smart-flexispot/tools/claude-hook", "async": true }] }],
+    "StopFailure":       [{ "hooks": [{ "type": "command", "command": "~/smart-flexispot/tools/claude-hook", "async": true }] }],
+    "SessionEnd":        [{ "hooks": [{ "type": "command", "command": "~/smart-flexispot/tools/claude-hook", "async": true }] }]
   }
 }
 ```

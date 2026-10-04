@@ -46,8 +46,8 @@
   import draw: *
   let rows = (
     ("pin 23, GPIO47  wake", "4  wake", "right"),
-    ("pin 13, GPIO38  RX", "5", "left"),
-    ("pin 14, GPIO37  TX", "6", "right"),
+    ("pin 13, GPIO38  RX", "6  box TX", "left"),
+    ("pin 14, GPIO37  TX", "5  box RX", "right"),
     ("pin 1, 3 or 5  GND", "7  GND", none),
   )
   let top = 3.0

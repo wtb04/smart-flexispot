@@ -13,29 +13,10 @@ struct PillSpec {
     float       warn_lo, warn_hi;
 };
 
-constexpr PillSpec PILLS[] = {
-    {"sensor.office_awair_carbon_dioxide", "CO2", 0.0f, 800.0f, 0.0f, 1200.0f},
-    {"sensor.office_awair_volatile_organic_compounds_parts", "VOC", 0.0f, 333.0f, 0.0f,
-     1000.0f},
-    {"sensor.office_awair_humidity", "HUMIDITY", 40.0f, 60.0f, 30.0f, 70.0f},
-    {"sensor.office_awair_pm2_5", "PM2.5", 0.0f, 12.0f, 0.0f, 35.0f},
-};
-
 struct LightSpec {
     const char *entity;
     const char *name;
 };
-
-constexpr LightSpec LIGHTS[] = {
-    {"light.office_bureaulamp", "Desk lamp"},
-    {"light.office_lamp_muur", "Wall lamp"},
-    {"light.office_bed", "Bed"},
-    {"light.office_grote_lamp", "Main lamp"},
-};
-
-constexpr char ALL_LIGHTS_ENTITY[] = "input_boolean.office_verlichting_actief";
-constexpr char ALL_LIGHTS_ON[]     = "script.office_verlichting_aan";
-constexpr char ALL_LIGHTS_OFF[]    = "script.office_verlichting_uit";
 
 struct ToggleSpec {
     const char *entity;
@@ -43,9 +24,12 @@ struct ToggleSpec {
     const char *off_label;
 };
 
-constexpr ToggleSpec TOGGLES[] = {
-    {"input_boolean.office_alleen_kast", "1", "2"},
-};
+// Which entities: room_config.h, which git ignores, or the example beside it.
+#if __has_include("room_config.h")
+#include "room_config.h"
+#else
+#include "room_config.example.h"
+#endif
 
 inline const char *toggle_label(const ToggleSpec &spec, bool on)
 {

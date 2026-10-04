@@ -17,3 +17,6 @@ sdkconfig.old
 
 # Natural Earth downloads for tools/make_map.py.
 .map-cache/
+
+# Your own Home Assistant entities; room_config.example.h is the template.
+components/room/room_config.h

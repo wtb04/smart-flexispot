@@ -7,6 +7,9 @@
 #if __has_include("ical_secrets.h")
 #include "ical_secrets.h"
 #endif
+#ifndef ICAL_TIMETABLE_HOST
+#define ICAL_TIMETABLE_HOST ""
+#endif
 #ifndef ICAL_WORK_URL
 #define ICAL_WORK_URL ""
 #endif
@@ -21,7 +24,7 @@
 
 namespace ical {
 namespace {
-constexpr char HOST[] = "https://calendar.example.org";
+constexpr char HOST[] = ICAL_TIMETABLE_HOST;
 
 struct Feed {
     const char *name;
@@ -54,7 +57,7 @@ int fetch_feed(int index, std::vector<Event> &into)
     const Feed &feed = FEEDS[index];
     // SIM_NO_WORK: the timetable alone, for screenshots.
     const bool skipped = feed.url != nullptr && std::getenv("SIM_NO_WORK") != nullptr;
-    if (skipped || (feed.url != nullptr && feed.url[0] == '\0')) {
+    if (skipped || (feed.url != nullptr && feed.url[0] == '\0') || (feed.url == nullptr && HOST[0] == '\0')) {
         return -1;
     }
     const std::string url = feed.url != nullptr ? std::string(feed.url) : std::string(HOST) + "/" + feed.name;
