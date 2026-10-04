@@ -82,7 +82,8 @@ bool parse_photo(const char *json, std::size_t length, char *out, std::size_t si
                  char *photographer = nullptr, std::size_t photographer_size = 0);
 
 /** Whether the route fits where the aircraft is: near the great circle from
- *  one airport to the other, and not past either end. A callsign's route can
+ *  one airport to the other, nearer still by either airport, and not past
+ *  either end. A callsign's route can
  *  be another day's leg, as airlines give their callsigns to other flights; one
  *  that does not fit is not to be shown. True when the airports' places are not
  *  known, as nothing then says it is wrong. */
@@ -107,6 +108,14 @@ bool parse_airport(const char *json, std::size_t length, Airport &out);
  *  than its destination: the database's route for the callsign is the same
  *  pair the other way round. False when its track is not known. */
 bool route_backwards(const Details &details, float lat, float lon, float track_deg);
+
+/** Which of a callsign's legs an aircraft flies, against the one leg the
+ *  databases keep for it: that one, the leg into its origin (behind the origin
+ *  and flying at it, as DHK597 flies East Midlands to Leipzig, which they have
+ *  as Leipzig to Hong Kong), or the leg out of its destination (past it and
+ *  flying away). This when its track is not known. */
+enum class Leg { This, IntoOrigin, OutOfDest };
+Leg route_leg(const Details &details, float lat, float lon, float track_deg);
 
 /** How far along its route an aircraft at lat/lon is, as a share from 0 to 1,
  *  and the kilometres left along the great circle. False when the airports'
