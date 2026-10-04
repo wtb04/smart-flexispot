@@ -66,6 +66,7 @@ for an aircraft whose own is not on file.
 SIM_HOME=lat,lon   # the radar's centre, in place of zone.home
 SIM_ZOOM=0.75      # the window's scale, for a smaller screen
 SIM_DOCK=left      # the dock at the left, as Setup can put it
+SIM_CLOCK=9:41     # the top bar shows that rather than the time
 ```
 
 `--page N` opens a page (0 Home to 3 Setup), `--press KEYS` presses keys as
@@ -84,11 +85,7 @@ anyone at the keyboard:
 sim/run.sh --press amm --page 0 --shot 3   # the home page with a Jellyfin episode on
 ```
 
-The README's radar and calendar pictures, over Schiphol:
-
-```sh
-cd sim
-SIM_HOME=52.3105,4.7683 SIM_DOCK=left SIM_ROUTE="AMS,Amsterdam,JFK,New York" ./build/sim --press a --page 0 --pick-above 9000 \
-    --shot 20 --out ../docs/screenshots/radar.png --tap2 618,229 --out2 ../docs/screenshots/radar-full.png
-SIM_NO_WORK=1 SIM_DOCK=left ./build/sim --page 2 --shot 16 --out ../docs/screenshots/calendar.png
-```
+`sim/shots.sh` takes every picture in the README again, into
+`docs/screenshots`: the radar over Schiphol, the calendar without the work
+feed, and 9:41 on the clock. It runs live, so the sky needs to have something
+in it.

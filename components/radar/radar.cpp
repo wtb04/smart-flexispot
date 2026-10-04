@@ -370,40 +370,25 @@ void drop_route_unless_fits(Details &details, const char *hex)
         if (std::strcmp(s_list[i].hex, hex) != 0) {
             continue;
         }
-        const Leg leg = route_leg(details, s_list[i].lat, s_list[i].lon, s_list[i].track_deg);
-        if (leg != Leg::This) {
-            ESP_LOGI(TAG, "%s: %s to %s, on the leg %s %s", hex, details.origin_code, details.dest_code,
-                     leg == Leg::IntoOrigin ? "into" : "out of",
-                     leg == Leg::IntoOrigin ? details.origin_code : details.dest_code);
-            if (leg == Leg::IntoOrigin) {
-                std::memcpy(details.dest_code, details.origin_code, sizeof(details.dest_code));
-                std::memcpy(details.dest_city, details.origin_city, sizeof(details.dest_city));
-                details.dest_lat = details.origin_lat;
-                details.dest_lon = details.origin_lon;
-                details.origin_code[0] = details.origin_city[0] = '\0';
-                details.has_origin_at  = false;
-            } else {
-                std::memcpy(details.origin_code, details.dest_code, sizeof(details.origin_code));
-                std::memcpy(details.origin_city, details.dest_city, sizeof(details.origin_city));
-                details.origin_lat = details.dest_lat;
-                details.origin_lon = details.dest_lon;
-                details.dest_code[0] = details.dest_city[0] = '\0';
-                details.has_dest_at  = false;
-            }
-        } else if (!route_fits(details, s_list[i].lat, s_list[i].lon)) {
-            ESP_LOGI(TAG, "%s: %s to %s does not fit where it is, left out", hex, details.origin_code,
-                     details.dest_code);
-            details.has_route     = false;
-            details.has_origin_at = false;
-            details.has_dest_at   = false;
-            details.origin_code[0] = details.origin_city[0] = '\0';
-            details.dest_code[0]   = details.dest_city[0]   = '\0';
-        } else if (route_backwards(details, s_list[i].lat, s_list[i].lon, s_list[i].track_deg)) {
-            ESP_LOGI(TAG, "%s: %s to %s flown the other way round", hex, details.origin_code, details.dest_code);
-            std::swap(details.origin_code, details.dest_code);
-            std::swap(details.origin_city, details.dest_city);
-            std::swap(details.origin_lat, details.dest_lat);
-            std::swap(details.origin_lon, details.dest_lon);
+        char from[kAirportCodeLen];
+        char to[kAirportCodeLen];
+        std::memcpy(from, details.origin_code, sizeof(from));
+        std::memcpy(to, details.dest_code, sizeof(to));
+        switch (judge_route(details, s_list[i].lat, s_list[i].lon, s_list[i].track_deg)) {
+        case RouteVerdict::IntoOrigin:
+            ESP_LOGI(TAG, "%s: %s to %s, on the leg into %s", hex, from, to, from);
+            break;
+        case RouteVerdict::OutOfDest:
+            ESP_LOGI(TAG, "%s: %s to %s, on the leg out of %s", hex, from, to, to);
+            break;
+        case RouteVerdict::Dropped:
+            ESP_LOGI(TAG, "%s: %s to %s does not fit where it is, left out", hex, from, to);
+            break;
+        case RouteVerdict::Reversed:
+            ESP_LOGI(TAG, "%s: %s to %s flown the other way round", hex, from, to);
+            break;
+        case RouteVerdict::Kept:
+            break;
         }
         return;
     }

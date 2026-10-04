@@ -106,7 +106,7 @@ foreach(scene IN LISTS SCENES)
     list(GET parts 0 name)
     list(GET parts 1 args)
     separate_arguments(args UNIX_COMMAND "${args}")
-    list(APPEND SHOT_COMMANDS COMMAND ${CMAKE_COMMAND} -E env SIM_OFFLINE=1 SIM_DOCK=left
+    list(APPEND SHOT_COMMANDS COMMAND ${CMAKE_COMMAND} -E env SIM_OFFLINE=1 SIM_DOCK=left SIM_CLOCK=9:41
          $<TARGET_FILE:sim> ${args} --out ${SHOTS}/${name}.png)
 endforeach()
 add_custom_target(screenshots ${SHOT_COMMANDS}

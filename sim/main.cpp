@@ -474,6 +474,8 @@ int main(int argc, char **argv)
     ESP_ERROR_CHECK(ui::init(handlers(), 80, 0, dock == nullptr || std::strcmp(dock, "left") != 0,
                              ui::Orientation::Normal));
     ESP_ERROR_CHECK(ui::build());
+    // SIM_CLOCK=9:41: the top bar shows that rather than the time, for pictures.
+    ui::pin_clock(std::getenv("SIM_CLOCK"));
     // The settings as a panel fresh from the factory has them, from settings.cpp.
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_setting(ui::Setting::Charging, true));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_setting(ui::Setting::PresenceGate, true));
