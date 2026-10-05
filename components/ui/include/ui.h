@@ -247,6 +247,10 @@ esp_err_t set_media_tracks(bool back, bool on);
  *  Both until said otherwise. */
 esp_err_t set_media_takes(bool volume, bool subtitles);
 
+/** Whether a pause waits a moment before it shows: a speaker says it paused
+ *  between two songs, Jellyfin and a laptop only when they did. */
+esp_err_t set_media_pause_settles(bool settles);
+
 /** Whether a video has subtitles to show, and whether they show. */
 esp_err_t set_media_subtitles(bool available, bool shown);
 
