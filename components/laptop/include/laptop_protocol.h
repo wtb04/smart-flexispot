@@ -1,0 +1,43 @@
+#pragma once
+
+#include <cstddef>
+#include <string>
+
+// What Desk Link, on a laptop, says is playing there, and what the panel asks
+// of it back. Pure, so the host tests can run it.
+//
+// The laptop posts a report to the panel's /laptop whenever what plays changes
+// and every few seconds while anything does:
+//   {"machine": "wtb-mbp", "port": 47801, "app": "Safari", "playing": true,
+//    "title": "...", "artist": "...", "position": 167.4, "duration": 540,
+//    "art": "3f2a", "takes": ["pause", "seek", "next", "previous"]}
+// An empty title is nothing playing. "art", when there is any, changes with
+// the picture, which is at /art.jpg on the laptop's port. Commands go to
+// /command there: {"command": "pause"}, or "seek" with a "position".
+namespace laptop {
+struct NowPlaying {
+    bool        active  = false;  // something to show, playing or paused
+    bool        playing = false;
+    std::string machine;
+    int         port = 0;
+    std::string app;
+    std::string title;
+    std::string artist;
+    std::string art;
+    int         position_s = 0;
+    int         duration_s = 0;
+    bool        takes_pause    = false;
+    bool        takes_seek     = false;
+    bool        takes_next     = false;
+    bool        takes_previous = false;
+};
+
+/** False when `body` is not a report: unreadable, or without a port to answer on. */
+bool read(const char *body, std::size_t length, NowPlaying &out);
+
+enum class Command { Play, Pause, Next, Previous, Seek };
+std::string command_body(Command command, int position_s = 0);
+
+/** Where the laptop serves the picture, versioned so a new one is fetched. */
+std::string art_path(const std::string &art);
+}  // namespace laptop

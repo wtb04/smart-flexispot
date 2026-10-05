@@ -23,6 +23,8 @@ struct MediaState {
     bool controllable = false;  // a player there is to steer; holding the card does nothing without one
     bool playing      = false;  // as shown: a pause shows once it has settled
     bool remote       = true;   // takes play, pause, skip and seek from here
+    bool takes_volume    = true;
+    bool takes_subtitles = true;
     bool tracks_back  = true;   // takes a track back, and on, as most players do
     bool tracks_on    = true;
     bool video        = false;  // it seeks, as a film or an episode does
@@ -62,6 +64,7 @@ void media_take_large_cover(const void *pixels);
 void media_take_progress(int position_s, int duration_s, bool playing);
 void media_take_volume(int percent);
 void media_take_remote(bool remote);
+void media_take_takes(bool volume, bool subtitles);
 void media_take_video(bool seeks);
 void media_take_segments(const MediaSegment *segments, int count);
 void media_take_subtitles(bool available, bool shown);
