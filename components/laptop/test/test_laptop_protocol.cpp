@@ -57,6 +57,7 @@ TEST(LaptopProtocol, paused_and_without_a_length)
     EXPECT_EQ(now.duration_s, 0) << "a live stream has none";
     EXPECT_EQ(now.volume, -1) << "a Mac that cannot set its output says none";
     EXPECT_FALSE(now.takes_volume);
+    EXPECT_FALSE(now.takes_volume_step);
     EXPECT_FALSE(now.video) << "music unless it says";
 }
 
@@ -81,6 +82,17 @@ TEST(LaptopProtocol, commands)
     EXPECT_EQ(laptop::command_body(Command::Volume, 35, 5),
               R"({"type":"command","at":5,"command":"volume","level":35})");
     EXPECT_EQ(laptop::command_body(Command::Mute, 1, 5), R"({"type":"command","at":5,"command":"mute","muted":true})");
+}
+
+TEST(LaptopProtocol, a_volume_that_only_steps)
+{
+    const NowPlaying now = read(R"({"port":47801,"title":"x","takes":["pause","volume_step"]})");
+    EXPECT_TRUE(now.takes_volume_step);
+    EXPECT_FALSE(now.takes_volume) << "no level to set or show";
+    EXPECT_EQ(now.volume, -1);
+    EXPECT_EQ(laptop::command_body(Command::VolumeUp, 0, 5), R"({"type":"command","at":5,"command":"volume_up"})");
+    EXPECT_EQ(laptop::command_body(Command::VolumeDown, 0, 5),
+              R"({"type":"command","at":5,"command":"volume_down"})");
 }
 
 TEST(LaptopProtocol, head)

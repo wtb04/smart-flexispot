@@ -26,6 +26,7 @@ void next();
 void previous();
 void set_volume(int percent);
 void set_muted(bool muted);
+void step_volume(bool up);
 
 /** Where the cover is for media to ask fetch_cover() for, or empty. */
 std::string art_url(const NowPlaying &now);

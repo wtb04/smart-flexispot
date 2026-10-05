@@ -43,6 +43,13 @@ private struct Menu: View {
         VStack(spacing: 12) {
             header
             if link.sharing { playing }
+            if link.sharing && link.asksForKeys {
+                HStack {
+                    Text("The panel can step this display's volume").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Allow") { VolumeKeys.askToAllow() }.buttonStyle(.glass).controlSize(.small)
+                }
+            }
             settings
             HStack {
                 Spacer()

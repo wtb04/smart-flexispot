@@ -17,7 +17,9 @@
 //    "takes": ["pause", "seek", "next", "previous", "volume"]}
 // An empty title is nothing playing. "art", when there is any, changes with
 // the picture, which the panel asks the laptop's /cover for. "volume" is the
-// laptop's own output, in percent, where it can be set. "claude" carries an
+// laptop's own output, in percent, where it can be set; "volume_step" in
+// "takes" is an output that only steps, as a display's does through
+// MonitorControl, moved by "volume_up" and "volume_down". "claude" carries an
 // event from tools/claude-hook as "event". The panel sends the laptop's /link
 // "ping", and "command": "pause", "seek" with a "position", "volume" with a
 // "level", "mute" with "muted". What answers is sealed as well: "pong", "ok",
@@ -42,6 +44,7 @@ struct NowPlaying {
     bool        takes_next     = false;
     bool        takes_previous = false;
     bool        takes_volume   = false;
+    bool        takes_volume_step = false;  // up and down, with no level to show
 };
 
 /** A message's type and when it was sent; false when it has neither. */
@@ -57,7 +60,7 @@ bool read(const char *body, std::size_t length, NowPlaying &out);
 /** The hook's event a "claude" message carries, as JSON; empty for none. */
 std::string claude_event(const char *body, std::size_t length);
 
-enum class Command { Play, Pause, Next, Previous, Seek, Volume, Mute };
+enum class Command { Play, Pause, Next, Previous, Seek, Volume, Mute, VolumeUp, VolumeDown };
 /** `value` is the position for Seek, the percent for Volume, 1 to mute for Mute. */
 std::string command_body(Command command, int value, std::int64_t at_ms);
 

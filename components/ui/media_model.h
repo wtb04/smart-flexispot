@@ -26,6 +26,7 @@ struct MediaState {
     bool pause_settles   = true;
     bool takes_volume    = true;
     bool takes_subtitles = true;
+    bool steps_volume    = false;  // up and down only, with no level
     bool tracks_back  = true;   // takes a track back, and on, as most players do
     bool tracks_on    = true;
     bool video        = false;  // it seeks, as a film or an episode does
@@ -65,7 +66,7 @@ void media_take_large_cover(const void *pixels);
 void media_take_progress(int position_s, int duration_s, bool playing);
 void media_take_volume(int percent);
 void media_take_remote(bool remote);
-void media_take_takes(bool volume, bool subtitles);
+void media_take_takes(bool volume, bool subtitles, bool steps);
 void media_take_pause_settles(bool settles);
 void media_take_video(bool seeks);
 void media_take_segments(const MediaSegment *segments, int count);
