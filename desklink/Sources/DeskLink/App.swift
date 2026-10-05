@@ -251,7 +251,9 @@ private struct SettingsView: View {
                     Label { Text("Address") } icon: { Tile(symbol: "network", colour: .blue) }
                 }
                 LabeledContent {
-                    SecureField("Key", text: $link.key, prompt: Text("64 hex digits")).labelsHidden()
+                    SecureField("Key", text: $link.key, prompt: Text("64 hex digits"))
+                        .labelsHidden()
+                        .frame(maxWidth: 200)  // the dots of a long key run on past the edge otherwise
                 } label: {
                     Label { Text("Key") } icon: { Tile(symbol: "key.fill", colour: .gray) }
                 }
@@ -286,16 +288,19 @@ private struct SettingsView: View {
                 }
             }
 
-            HStack {
-                Spacer()
-                Button("Quit Desk Link") { NSApplication.shared.terminate(nil) }
-            }
-            .listRowBackground(Color.clear)
         }
         .formStyle(.grouped)
         .scrollDisabled(true)
         .frame(width: 460)
         .fixedSize(horizontal: false, vertical: true)
+        .safeAreaInset(edge: .bottom) {
+            HStack {
+                Spacer()
+                Button("Quit Desk Link") { NSApplication.shared.terminate(nil) }
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 18)
+        }
         .toolbar(removing: .title)
         .containerBackground(.thickMaterial, for: .window)
         // Opened, nothing is being typed in yet: the address is not selected.
