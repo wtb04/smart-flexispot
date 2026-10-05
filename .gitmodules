@@ -1,0 +1,3 @@
+[submodule "desklink/Vendor/mediaremote-adapter"]
+	path = desklink/Vendor/mediaremote-adapter
+	url = https://github.com/ungive/mediaremote-adapter.git
