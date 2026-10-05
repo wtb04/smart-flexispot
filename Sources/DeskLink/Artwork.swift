@@ -9,6 +9,7 @@ import UniformTypeIdentifiers
 struct Artwork {
     let jpeg: Data
     let version: String
+    let wide: Bool  // a video's frame rather than a record's sleeve
 
     private static let largest = 480
 
@@ -30,6 +31,7 @@ struct Artwork {
         CGImageDestinationAddImage(destination, scaled, [kCGImageDestinationLossyCompressionQuality: 0.85] as CFDictionary)
         guard CGImageDestinationFinalize(destination) else { return nil }
         jpeg = out as Data
+        wide = Double(image.width) > Double(image.height) * 1.2
         version = SHA256.hash(data: original).prefix(6).map { String(format: "%02x", $0) }.joined()
     }
 }

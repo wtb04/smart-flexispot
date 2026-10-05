@@ -8,6 +8,8 @@ final class Link: ObservableObject {
     enum Reach { case unknown, answering, refused, unreachable }
 
     @Published private(set) var track: Track?
+    @Published private(set) var cover: NSImage?
+    @Published private(set) var heard: Date?
     @Published private(set) var reach = Reach.unknown
     @Published var sharing: Bool {
         didSet {
@@ -32,8 +34,14 @@ final class Link: ObservableObject {
     }
 
     private static let port: UInt16 = 47801
-    // The panel forgets a laptop it has not heard from in 30 seconds.
+    private static let browsers: Set<String> = [
+        "com.apple.Safari", "com.google.Chrome", "org.mozilla.firefox", "company.thebrowser.Browser",
+        "com.microsoft.edgemac", "com.brave.Browser", "com.operasoftware.Opera", "com.vivaldi.Vivaldi",
+    ]
+    // The panel forgets a laptop it has not heard from in 30 seconds; with
+    // nothing playing, a report now and then only keeps the menu's status true.
     private static let heartbeat: TimeInterval = 10
+    private static let idleEvery = 3
 
     private let defaults = UserDefaults.standard
     private let source: NowPlayingSource
@@ -78,11 +86,14 @@ final class Link: ObservableObject {
                                                       reason: "Telling the desk panel what plays")
         source.start()
         server.start()
+        var beats = 0
         beat = Timer.scheduledTimer(withTimeInterval: Self.heartbeat, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                if self?.track != nil { self?.report() }
+                beats += 1
+                if self?.track != nil || beats % Self.idleEvery == 0 { self?.report() }
             }
         }
+        report()
     }
 
     private func end() {
@@ -94,6 +105,7 @@ final class Link: ObservableObject {
         server.stop()
         track = nil
         artwork = nil
+        cover = nil
         report()  // nothing playing, so the panel lets go at once
         reach = .unknown
     }
@@ -102,6 +114,7 @@ final class Link: ObservableObject {
         guard sharing else { return }
         if new?.artwork != track?.artwork {
             artwork = new?.artwork.flatMap(Artwork.init)
+            cover = new?.artwork.flatMap { NSImage(data: $0) }
         }
         track = new
         reportSoon()
@@ -135,6 +148,9 @@ final class Link: ObservableObject {
             body["position"] = track.position()
             body["duration"] = track.duration
             body["art"] = artwork?.version ?? ""
+            // Now Playing does not say; a clip's cover is a wide frame, and
+            // before one comes a browser is most likely playing a video.
+            body["video"] = artwork.map(\.wide) ?? Self.browsers.contains(track.bundle)
             body["takes"] = takes
         }
         var request = URLRequest(url: url, timeoutInterval: 3)
@@ -147,6 +163,7 @@ final class Link: ObservableObject {
             Task { @MainActor in
                 guard let self, self.sharing else { return }
                 self.reach = status == nil ? .unreachable : status == 403 ? .refused : .answering
+                if self.reach == .answering { self.heard = Date() }
             }
         }.resume()
     }

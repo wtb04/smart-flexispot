@@ -3,6 +3,7 @@ import Foundation
 
 struct Track: Equatable {
     var app: String
+    var bundle: String
     var title: String
     var artist: String
     var playing: Bool
@@ -152,6 +153,7 @@ final class NowPlayingSource: @unchecked Sendable {  // its state is kept on its
             ?? state["bundleIdentifier"] as? String ?? ""
         return Track(
             app: appName(bundle),
+            bundle: bundle,
             title: title,
             artist: state["artist"] as? String ?? "",
             playing: state["playing"] as? Bool ?? false,
