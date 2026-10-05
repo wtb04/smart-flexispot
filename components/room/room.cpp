@@ -276,6 +276,7 @@ struct PlayerView {
     bool        tracks_on   = true;
     bool        takes_volume    = true;
     bool        takes_subtitles = true;
+    bool        video           = false;  // shown in the cinema; Jellyfin's always are
 };
 
 bool view_going(const PlayerView &view)
@@ -370,6 +371,8 @@ PlayerView laptop_view(const laptop::NowPlaying &now)
     view.title        = now.title;
     view.artist       = now.artist;
     view.picture      = laptop::art_url(now);
+    view.video        = now.video;
+    view.still        = now.video ? view.picture : "";
     view.position_s   = now.position_s;
     view.duration_s   = now.duration_s;
     view.position_key = now.title + ':' + std::to_string(now.position_s) + (now.playing ? "" : "p");
@@ -542,8 +545,19 @@ void show_media()
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_takes(view.takes_volume, view.takes_subtitles));
     }
     const bool jellyfin = view.from == From::Jellyfin;
-    want_segments(jellyfin ? view.episode : "", view.series, jellyfin);
-    media::set_still_url(jellyfin ? view.still.c_str() : "");
+    const bool video    = jellyfin || view.video;
+    want_segments(jellyfin ? view.episode : "", view.series, video);
+    // An episode's are looked up; anything else's are whether it skips.
+    static int s_neighbours_shown = -1;
+    if (jellyfin && !view.episode.empty()) {
+        s_neighbours_shown = -1;
+    } else {
+        const int neighbours = !jellyfin && video ? (view.tracks_back ? 1 : 0) | (view.tracks_on ? 2 : 0) : 0;
+        if (std::exchange(s_neighbours_shown, neighbours) != neighbours) {
+            ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_neighbours((neighbours & 1) != 0, (neighbours & 2) != 0));
+        }
+    }
+    media::set_still_url(video ? view.still.c_str() : "");
     if (gone_only_briefly(view)) {
         return;
     }
@@ -645,8 +659,10 @@ jobs::Result look_up_segments()
         std::lock_guard<std::mutex> hold(s_segments_lock);
         s_neighbours = around;
     }
-    ESP_ERROR_CHECK_WITHOUT_ABORT(
-        ui::set_media_neighbours(!around.previous.empty(), !around.next.empty()));
+    if (!item.empty()) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(
+            ui::set_media_neighbours(!around.previous.empty(), !around.next.empty()));
+    }
     if (item.empty() || !jellyfin::fetch(segments::path_for(item), answer)) {
         show_segments({});
         return jobs::sleep();
