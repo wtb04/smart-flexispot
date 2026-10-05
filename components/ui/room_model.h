@@ -27,6 +27,8 @@ struct LightsState {
     char       label[40] = "";             // the lights button's, and what it says of them
     char       state[32] = "";
     LightState lights[kLightCount];
+    bool       room_known = false;  // Home Assistant has told the two below
+    bool       room_lit   = false;  // the big light or the light scene: someone is in
 };
 
 const DeskState   &desk_state();
@@ -41,5 +43,6 @@ void desk_go_to(int index);
 
 void lights_take(const char *label, const char *state, bool on);
 void lights_take_light(int index, const char *name, const char *state, bool on);
+void lights_take_room(bool lit);
 
 }  // namespace ui::detail

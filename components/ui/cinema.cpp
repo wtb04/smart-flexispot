@@ -3,6 +3,7 @@
 #include "status_model.h"
 
 #include "room_model.h"
+#include "screen_rules.h"
 #include "topics.h"
 
 #include <algorithm>
@@ -44,7 +45,7 @@ constexpr std::int32_t VOLUME_INSET  = 28;   // its speaker and level from its e
 constexpr std::uint8_t VOLUME_FILL_MIX = 64;  // of the text's colour into the bar's
 constexpr time_t       CLOCK_SET     = 1'700'000'000;  // any earlier and the clock is not set yet
 constexpr std::uint32_t TICK_MS      = 500;
-constexpr std::uint32_t DARK_AFTER_MS = 15 * units::kMsPerSecond;
+constexpr std::int64_t  DARK_AFTER_MS = 15 * units::kMsPerSecond;
 
 lv_obj_t     *s_view    = nullptr;
 lv_obj_t     *s_still   = nullptr;
@@ -73,7 +74,6 @@ lv_obj_t     *s_low_chip    = nullptr;  // quick actions in the row over the vie
 lv_obj_t     *s_lights_chip = nullptr;
 lv_obj_t     *s_screen_chip = nullptr;
 lv_timer_t   *s_tick    = nullptr;
-std::uint32_t s_woke_at = 0;  // lit for an intro to skip: kept lit a while from then
 bool          s_skip_was_offered = false;
 
 ViewId s_cinema = kNoView;
@@ -144,19 +144,15 @@ void show_progress()
     }
 }
 
+// Lit for an intro or credits to skip; when it goes dark is the screen
+// schedule's, told by cinema_dark_after().
 void keep_screen()
 {
     const bool offered = media_skip_offer().text != nullptr;
     if (offered && !s_skip_was_offered) {
-        s_woke_at = lv_tick_get();
         set_screen_state(true);
     }
     s_skip_was_offered = offered;
-    const bool untouched = lv_display_get_inactive_time(nullptr) >= DARK_AFTER_MS &&
-                           lv_tick_elaps(s_woke_at) >= DARK_AFTER_MS;
-    if (s_auto_off && status_state().screen_on && untouched && !offered) {
-        set_screen_state(false);
-    }
 }
 
 void show_volume(int percent)
@@ -472,7 +468,6 @@ void build_cinema(lv_obj_t *screen)
     lv_timer_pause(s_tick);
     s_cinema = add_view({"cinema", ViewKind::Fullscreen, s_view,
                          [] {
-                             s_woke_at          = lv_tick_get();
                              s_skip_was_offered = false;
                              lv_timer_resume(s_tick);
                              tick(s_tick);
@@ -501,5 +496,13 @@ void build_cinema(lv_obj_t *screen)
 void open_cinema()
 {
     open_view(s_cinema);
+}
+
+std::int64_t cinema_dark_after()
+{
+    if (!view_open(s_cinema)) {
+        return 0;
+    }
+    return s_auto_off && !s_skip_was_offered ? DARK_AFTER_MS : screen_rules::kNever;
 }
 }  // namespace ui::detail

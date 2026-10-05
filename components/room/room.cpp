@@ -867,6 +867,10 @@ void render(const hass::ws::EntityStore &store)
     s_all_lights_on.store(all != nullptr && is_on(all->state), std::memory_order_relaxed);
     ESP_ERROR_CHECK_WITHOUT_ABORT(
         ui::set_lights("LIGHTS", on_off(all), all != nullptr && is_on(all->state)));
+    if (const hass::ws::Entity *main = store.find(MAIN_LIGHT_ENTITY); all != nullptr || main != nullptr) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_room_lit((all != nullptr && is_on(all->state)) ||
+                                                       (main != nullptr && is_on(main->state))));
+    }
 
     for (int i = 0; i < LIGHT_COUNT; ++i) {
         const hass::ws::Entity *entity = store.find(LIGHTS[i].entity);
