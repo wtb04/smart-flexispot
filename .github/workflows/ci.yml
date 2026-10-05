@@ -52,6 +52,19 @@ jobs:
           name: test-results
           path: build_tests/coverage/junit.xml
 
+  pictures:
+    name: Pictures without metadata
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install exiftool
+        run: sudo apt-get update && sudo apt-get install -y libimage-exiftool-perl
+
+      - name: None carries when, where or with what it was made
+        run: tools/strip_metadata.sh --check
+
   firmware:
     name: Firmware (${{ matrix.variant }})
     runs-on: ubuntu-24.04

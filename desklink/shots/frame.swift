@@ -1,7 +1,7 @@
 // Desk Link's windows for the README, as the panel's screenshots are shown:
 // side by side on the panel's own background, with room around them.
 //
-//     swift desklink/shots/frame.swift out.png menu.png settings.png
+//     swift desklink/shots/frame.swift out.png menu.png settings.png && tools/strip_metadata.sh
 //
 // Take the windows on a Retina screen, Cmd+Shift+4 then Space, Option held
 // while clicking so they come without macOS's shadow; this adds its own.

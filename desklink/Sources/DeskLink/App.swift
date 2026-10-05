@@ -291,8 +291,6 @@ private struct SettingsView: View {
         }
         .formStyle(.grouped)
         .scrollDisabled(true)
-        .frame(width: 460)
-        .fixedSize(horizontal: false, vertical: true)
         .safeAreaInset(edge: .bottom) {
             HStack {
                 Spacer()
@@ -301,6 +299,9 @@ private struct SettingsView: View {
             .padding(.horizontal, 20)
             .padding(.bottom, 18)
         }
+        // After the inset, or its spacer widens the window to the screen's.
+        .frame(width: 460)
+        .fixedSize(horizontal: false, vertical: true)
         .toolbar(removing: .title)
         // With no title, the toolbar's own background was left, a small
         // rectangle at the top while the window is not in front.
