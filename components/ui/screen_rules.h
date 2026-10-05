@@ -2,17 +2,18 @@
 
 #include <cstdint>
 
-// When the screen goes dark by itself and when it lights again. The big light
-// or the light scene on says someone is in the room, so the screen stays; with
-// them off it stays only for the phone by day. Unplugged away from the desk it
-// is somewhere else, and goes dark soon. Only something happening lights
-// it again, never the night ending: whoever sleeps through it is not woken.
+// When the screen goes dark by itself and when it lights again, with nothing of
+// LVGL in it. The big light or the light scene on says someone is in the room,
+// so the screen stays; with them off it stays only for the phone by day.
+// Unplugged away from the desk it is somewhere else and goes dark soon. Only
+// something happening lights it again, never the night ending: whoever sleeps
+// through it is not woken.
 namespace ui::screen_rules {
 
-constexpr std::int64_t kPhoneGoneMs   = 5 * 60 * 1000;  // unheard this long: away, not a fluke
-constexpr std::int64_t kAwayDarkMs    = 30 * 1000;
-constexpr std::int64_t kNightDarkMs   = 60 * 1000;
 constexpr std::int64_t kNever         = -1;
+constexpr std::int64_t kAwayMs        = 30 * 1000;
+constexpr std::int64_t kNightMs       = 60 * 1000;
+constexpr std::int64_t kPhoneGoneMs   = 5 * 60 * 1000;  // unheard this long: away, not a fluke
 constexpr int          kNightFromMin  = 22 * 60 + 30;
 constexpr int          kNightUntilMin = 7 * 60;
 
@@ -21,94 +22,156 @@ inline bool is_night(int minute_of_day)
     return minute_of_day >= kNightFromMin || minute_of_day < kNightUntilMin;
 }
 
+/** Things as they are at one look. */
 struct Inputs {
     bool         screen_on  = true;
-    bool         on_battery = false;
-    bool         desk_linked = false;  // unplugged and not linked: away, its room's lights say nothing
-    bool         lit_known  = false;  // Home Assistant has told the lights
-    bool         lit        = false;  // the big light or the light scene
+    bool         unplugged  = false;
+    bool         at_desk    = false;  // the desk answers over Bluetooth
+    bool         room_known = false;  // Home Assistant has told the lights
+    bool         room_lit   = false;  // the big light or the light scene
     bool         phone      = false;  // heard near just now
     bool         night      = false;  // false while the clock is not set
-    bool         notice     = false;  // one on show keeps the screen for its time
-    std::int64_t video_ms   = 0;      // the full-screen video's own: 0 none, kNever kept lit
+    bool         attention  = false;  // a notice or a skip button: lights the screen and holds it
+    std::int64_t film_ms    = 0;      // the open film's own wait: 0 none open, kNever held lit
     std::int64_t untouched  = 0;      // since the last touch
 };
 
 enum class Action : std::uint8_t { Keep, Wake, Dark };
 
+enum class Why : std::uint8_t {
+    None,
+    LightOn,    // woke: the big light or the scene came on
+    PhoneBack,  // woke: the phone came back after counting as gone
+    Attention,  // woke for a notice or a skip button, and dark once it went
+    Film,       // the film's own wait
+    Away,       // unplugged and away from the desk
+    Empty,      // the lights off and the phone gone
+    Night,      // the lights off at night
+};
+
+struct Decision {
+    Action action = Action::Keep;
+    Why    why    = Why::None;
+    bool operator==(const Decision &) const = default;
+};
+
+inline const char *describe(Why why)
+{
+    switch (why) {
+        case Why::LightOn:   return "the light came on";
+        case Why::PhoneBack: return "the phone came back";
+        case Why::Attention: return "a notice or a skip button";
+        case Why::Film:      return "the film's own wait";
+        case Why::Away:      return "unplugged, away from the desk";
+        case Why::Empty:     return "the lights off, the phone gone";
+        case Why::Night:     return "the lights off, at night";
+        default:             return "nothing";
+    }
+}
+
+/** Looked at whenever something changes and at least once a second, `now` in
+ *  milliseconds from the first look. */
 class Schedule {
 public:
-    /** How long left alone before dark, as things are; kNever to stay lit. */
-    std::int64_t dark_after(const Inputs &in) const
+    Decision step(const Inputs &in, std::int64_t now)
     {
-        if (in.video_ms != 0) {
-            return in.video_ms;
-        }
-        if (in.on_battery && !in.desk_linked) {
-            return kAwayDarkMs;
-        }
-        if (!in.lit_known || in.lit) {
-            return kNever;
-        }
-        if (!phone_here_) {
-            return kAwayDarkMs;
-        }
-        return in.night ? kNightDarkMs : kNever;
-    }
+        const bool phone_back = follow_phone(in.phone, now);
+        const bool light_on   = follow_room(in);
+        const bool asked      = in.attention && !attention_;
+        const bool let_go     = !in.attention && attention_;
+        attention_            = in.attention;
 
-    /** Once a second or so, `now` in milliseconds from any start. */
-    Action step(const Inputs &in, std::int64_t now)
-    {
-        if (!started_) {
-            started_  = true;
-            heard_at_ = now;  // a phone not heard yet since the start is given its time
-            count_from_ = now;
+        // Lit by anything, or a new rule: the wait starts again from here.
+        const Rule rule = rule_for(in);
+        if ((in.screen_on && !screen_on_) || rule.after != rule_.after) {
+            since_ = now;
         }
-        if (in.phone) {
-            heard_at_ = now;
-        }
-        const bool was_here = phone_here_;
-        phone_here_         = now - heard_at_ < kPhoneGoneMs;
-        const bool arrived  = phone_here_ && !was_here;
-
-        const bool lit_now = in.lit_known && in.lit;
-        const bool lit_up  = lit_now && was_dark_known_;
-        was_dark_known_    = in.lit_known && !in.lit;
-
-        const bool woke = in.screen_on && !was_on_;
-        was_on_         = in.screen_on;
-
-        const std::int64_t after = dark_after(in);
-        if (arrived || lit_up || woke || (after != kNever && after != last_after_)) {
-            count_from_ = now;
-        }
-        last_after_ = after;
+        screen_on_ = in.screen_on;
+        rule_      = rule;
 
         if (!in.screen_on) {
-            if (arrived || lit_up) {
-                was_on_ = true;
-                return Action::Wake;
-            }
-            return Action::Keep;
+            return wake_for(phone_back, light_on, asked, now);
         }
-        const std::int64_t quiet = in.untouched < now - count_from_ ? in.untouched : now - count_from_;
-        if (after == kNever || in.notice || quiet < after) {
-            return Action::Keep;
+        if (in.attention) {
+            return {};
         }
-        was_on_ = false;
-        return Action::Dark;
+        if (let_go && lit_for_attention_ && in.untouched >= now - woke_at_) {
+            return dark(Why::Attention);
+        }
+        const std::int64_t quiet = in.untouched < now - since_ ? in.untouched : now - since_;
+        if (rule.after == kNever || quiet < rule.after) {
+            return {};
+        }
+        return dark(rule.why);
     }
 
-    bool phone_here() const { return phone_here_; }
-
 private:
-    bool         started_        = false;
-    bool         phone_here_     = true;
-    bool         was_dark_known_ = false;
-    bool         was_on_         = true;
-    std::int64_t heard_at_       = 0;
-    std::int64_t count_from_     = 0;
-    std::int64_t last_after_     = kNever;
+    struct Rule {
+        std::int64_t after = kNever;  // left alone this long, dark
+        Why          why   = Why::None;
+    };
+
+    Rule rule_for(const Inputs &in) const
+    {
+        if (in.film_ms != 0) {
+            return {in.film_ms, Why::Film};
+        }
+        if (in.unplugged && !in.at_desk) {
+            return {kAwayMs, Why::Away};
+        }
+        if (!in.room_known || in.room_lit) {
+            return {};
+        }
+        if (!phone_near_) {
+            return {kAwayMs, Why::Empty};
+        }
+        return in.night ? Rule{kNightMs, Why::Night} : Rule{};
+    }
+
+    /** True as the phone comes back after counting as gone. */
+    bool follow_phone(bool heard, std::int64_t now)
+    {
+        if (heard) {
+            heard_at_ = now;
+        }
+        const bool was_near = phone_near_;
+        phone_near_         = now - heard_at_ < kPhoneGoneMs;
+        return phone_near_ && !was_near;
+    }
+
+    /** True as the room's light comes on after being told off. */
+    bool follow_room(const Inputs &in)
+    {
+        const bool came_on = in.room_known && in.room_lit && room_was_dark_;
+        room_was_dark_     = in.room_known && !in.room_lit;
+        return came_on;
+    }
+
+    Decision wake_for(bool phone_back, bool light_on, bool asked, std::int64_t now)
+    {
+        if (!phone_back && !light_on && !asked) {
+            return {};
+        }
+        lit_for_attention_ = !phone_back && !light_on;
+        woke_at_           = now;
+        return {Action::Wake, light_on ? Why::LightOn : phone_back ? Why::PhoneBack : Why::Attention};
+    }
+
+    Decision dark(Why why)
+    {
+        lit_for_attention_ = false;
+        return {Action::Dark, why};
+    }
+
+    std::int64_t heard_at_          = 0;  // a phone not heard since the first look gets its time from there
+    bool         phone_near_        = true;
+    bool         room_was_dark_     = false;
+    bool         attention_         = false;
+    bool         lit_for_attention_ = false;  // lit for it alone, so dark again after unless touched
+    std::int64_t woke_at_           = 0;
+    bool         screen_on_         = true;
+    Rule         rule_;
+    std::int64_t since_ = 0;  // when the current rule's wait began
 };
 
 }  // namespace ui::screen_rules

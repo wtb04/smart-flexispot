@@ -130,7 +130,6 @@ constexpr std::int32_t ROW_CARD_GAP   = 18;
 extern bool s_dock_right;
 extern Orientation s_orientation;
 extern Handlers s_handlers;
-extern bool s_notice_lit_screen;
 extern int s_initial_brightness;
 extern lv_obj_t *s_dock;
 extern lv_obj_t *s_content;
@@ -176,6 +175,7 @@ void paint_desk_shortcuts();
 /** A ring in the accent round a preset's button, breathing while the desk is on its way there. */
 void show_desk_travel(lv_obj_t *obj, bool travelling);  // after the preset the desk is at changes
 void show_next_notice();
+bool notice_on_show();
 void paint_notice_corner();  // when the notice on show came, and how many wait
 void create_notice_card();
 /** The screen going dark by itself, and lighting again: see screen_rules.h. */
@@ -226,6 +226,8 @@ void open_cinema();
 /** How long the open film leaves the screen lit untouched: 0 with none open,
  *  screen_rules::kNever while it keeps it lit. */
 std::int64_t cinema_dark_after();
+/** An intro or credits to skip on show: the screen lights for it. */
+bool cinema_offers_skip();
 void build_music(lv_obj_t *screen);
 void open_music();
 // The time beside a fullscreen view's chip back, faded with its other buttons,

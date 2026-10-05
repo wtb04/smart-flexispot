@@ -57,8 +57,6 @@ int           s_desk_control_count              = 0;
 }  // namespace
 
 
-bool s_notice_lit_screen = false;
-
 void set_screen_state(bool on)
 {
     if (on == status_state().screen_on || s_handlers.screen == nullptr) {
@@ -71,7 +69,6 @@ void set_screen_state(bool on)
 namespace {
 void wake_on_touch(lv_event_t *)
 {
-    s_notice_lit_screen = false;
     if (status_state().screen_on) {
         return;
     }
@@ -91,7 +88,6 @@ void wake_on_touch(lv_event_t *)
 
 void screen_off_cb(lv_event_t *)
 {
-    s_notice_lit_screen = false;
     set_screen_state(false);
 }
 
@@ -568,7 +564,6 @@ void apply_wifi(bool wifi)
 void apply_screen(bool on)
 {
     status_state().screen_on = on;
-    s_notice_lit_screen      = false;
     publish(Topic::Status);
 }
 
