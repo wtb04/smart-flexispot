@@ -44,6 +44,7 @@ struct PlayerView {
     bool                          subtitles_shown     = false;
     bool                          before = false;  // the cinema's previous and next
     bool                          after  = false;
+    bool                          episodes = false;  // before and after are episodes, not videos
     std::vector<ui::MediaSegment> segments;        // its intro and credits, to skip
 
     bool pause_settles = false;  // a pause is only shown once it has lasted, as a speaker says paused between songs

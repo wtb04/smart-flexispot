@@ -93,6 +93,7 @@ public:
     {
         PlayerView view;
         view.kind            = Kind::Video;
+        view.episodes        = true;
         view.hold_preset     = JELLYFIN_PRESET;
         view.takes_volume    = now.takes_volume;
         view.takes_subtitles = now.takes_subtitles;

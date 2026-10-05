@@ -152,14 +152,15 @@ void show_volume(const PlayerView &view, bool moved)
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_volume(percent));
 }
 
-/** Asks for the track's cover once it changed; true when a different one is
- *  now on its way, which the title waits for. */
+/** Asks for the track's cover once it changed, or once a new one came for
+ *  it, as a laptop's does when the browser gives one late or a sharper one is
+ *  found; true when a different one is now on its way, which the title waits for. */
 bool ask_for_art(const std::string &picture, const std::string &title)
 {
     static std::string s_art_title;
     static std::string s_art_path;
     static bool        s_art_asked = false;
-    if (title != s_art_title) {
+    if (title != s_art_title || (s_art_asked && !picture.empty() && picture != s_art_path)) {
         s_art_title = title;
         s_art_asked = false;
     }
@@ -202,9 +203,9 @@ void show_takes(const PlayerView &view)
 void show_extras(const PlayerView &view)
 {
     static int s_around = -1;
-    const int  around   = (view.before ? 1 : 0) | (view.after ? 2 : 0);
+    const int  around   = (view.before ? 1 : 0) | (view.after ? 2 : 0) | (view.episodes ? 4 : 0);
     if (std::exchange(s_around, around) != around) {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_neighbours(view.before, view.after));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_neighbours(view.before, view.after, view.episodes));
     }
     static std::vector<ui::MediaSegment> s_segments;
     static bool                          s_segments_told = false;

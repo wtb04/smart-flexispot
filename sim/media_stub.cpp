@@ -203,7 +203,7 @@ void show_item()
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_seeks(video));
     if (laptop()) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_segments(nullptr, 0));
-        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_neighbours(false, true));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_neighbours(false, false, false));  // a browser's takes no next
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_subtitles(false, false));
         paint(s_still, media::kStillW, media::kStillH, CLIP.hue + 0.3f);
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_cinema_still(s_still.data()));
