@@ -1,6 +1,9 @@
 import AppKit
 import Foundation
+import OSLog
 import ServiceManagement
+
+private let log = Logger(subsystem: "nl.w-tb.desklink", category: "panel")
 
 /// What this Mac shares with the desk panel, and the panel's commands back.
 @MainActor
@@ -116,8 +119,14 @@ final class Link: ObservableObject {
             artwork = new?.artwork.flatMap(Artwork.init)
             cover = new?.artwork.flatMap { NSImage(data: $0) }
         }
+        let paused = new?.playing != track?.playing && new?.title == track?.title
         track = new
-        reportSoon()
+        if paused {
+            pendingReport?.cancel()
+            report()  // a pause is felt at once; it never comes in a burst
+        } else {
+            reportSoon()
+        }
     }
 
     // The player's changes come in bursts, as a volume key held down does:
@@ -158,6 +167,7 @@ final class Link: ObservableObject {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(key, forHTTPHeaderField: "X-Laptop-Key")
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        log.info("report \(self.track?.title ?? "nothing", privacy: .public), art \(self.artwork?.version ?? "none", privacy: .public)")
         URLSession.shared.dataTask(with: request) { [weak self] _, response, _ in
             let status = (response as? HTTPURLResponse)?.statusCode
             Task { @MainActor in
@@ -170,6 +180,7 @@ final class Link: ObservableObject {
 
     private func handle(_ request: Request) -> Response {
         if request.method == "GET", request.path.hasPrefix("/art.jpg"), let artwork {
+            log.info("cover fetched, \(artwork.jpeg.count) bytes")
             return Response(status: 200, type: "image/jpeg", body: artwork.jpeg)
         }
         guard request.method == "POST", request.path == "/command" else { return .notFound }

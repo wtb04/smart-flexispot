@@ -102,7 +102,7 @@ final class NowPlayingSource: @unchecked Sendable {  // its state is kept on its
 
     private func launch() {
         guard wanted, process == nil else { return }
-        let process = adapter(["stream", "--micros", "--debounce=200"])
+        let process = adapter(["stream", "--micros", "--debounce=100"])
         let output = Pipe()
         process.standardOutput = output
         output.fileHandleForReading.readabilityHandler = { [weak self] handle in
