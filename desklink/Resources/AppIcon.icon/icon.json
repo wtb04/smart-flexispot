@@ -1,0 +1,46 @@
+{
+  "fill": {
+    "automatic-gradient": "extended-srgb:1.00000,0.52941,0.21961,1.00000"
+  },
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "waves.svg",
+          "name": "waves",
+          "fill": "automatic",
+          "position": {
+            "scale": 0.86,
+            "translation-in-points": [
+              -14,
+              10
+            ]
+          }
+        },
+        {
+          "image-name": "display.svg",
+          "name": "display",
+          "fill": "automatic",
+          "position": {
+            "scale": 0.86,
+            "translation-in-points": [
+              -14,
+              10
+            ]
+          }
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.4
+      }
+    }
+  ],
+  "supported-platforms": {
+    "squares": "shared"
+  }
+}

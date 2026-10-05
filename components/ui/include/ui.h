@@ -231,7 +231,7 @@ esp_err_t set_media_seeks(bool seeks);
 
 /** Whether a video has an episode before it, and after, for the cinema view to
  *  offer; its Previous and Next actions start them. */
-esp_err_t set_media_neighbours(bool previous, bool next);
+esp_err_t set_media_neighbours(bool previous, bool next, bool episodes = true);
 
 /** Whether the player takes pause, seek and skip from here. Some, such as
  *  Streamyfin, only report: the bar, the card and the views then leave out
@@ -241,6 +241,16 @@ esp_err_t set_media_remote(bool remote);
 /** Whether the player takes a track back, and on: the app playing on a speaker
  *  may take neither, as a radio station does. Both until said otherwise. */
 esp_err_t set_media_tracks(bool back, bool on);
+
+/** Whether the player could ever take a volume, and subtitles, from here,
+ *  which are left out rather than faded when it cannot; and whether its volume
+ *  only steps, with no level to show, as a display's does through
+ *  MonitorControl. A volume and subtitles until said otherwise. */
+esp_err_t set_media_takes(bool volume, bool subtitles, bool steps = false);
+
+/** Whether a pause waits a moment before it shows: a speaker says it paused
+ *  between two songs, Jellyfin and a laptop only when they did. */
+esp_err_t set_media_pause_settles(bool settles);
 
 /** Whether a video has subtitles to show, and whether they show. */
 esp_err_t set_media_subtitles(bool available, bool shown);

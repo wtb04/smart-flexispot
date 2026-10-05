@@ -1,3 +1,4 @@
+#include "volume_steps.h"
 #include "ui_internal.h"
 
 #include "room_model.h"
@@ -61,11 +62,14 @@ lv_obj_t     *s_paused  = nullptr;  // the play mark over a paused picture
 bool          s_swiped  = false;    // the release that ends a swipe is not a tap
 lv_obj_t     *s_steer[2] = {};      // ten seconds back, and on
 lv_obj_t     *s_volume  = nullptr;  // the slider, filled as far as the level
+VolumeSteps s_volume_steps;
 lv_obj_t     *s_volume_fill  = nullptr;
 lv_obj_t     *s_volume_level = nullptr;
 bool          s_volume_held  = false;  // a finger on it: what it shows is what it sets
 lv_obj_t     *s_ends    = nullptr;  // when it will end, by the clock
 lv_obj_t     *s_subtitles = nullptr;
+std::int32_t  s_sound_w     = 0;  // the volume's width alone, and beside the subtitles
+std::int32_t  s_beside_subs = 0;
 std::uint32_t s_stills_shown = UINT32_MAX;  // the model's count of stills when last drawn
 bool          s_auto_off = true;    // the screen goes dark when left alone
 lv_obj_t     *s_low_chip    = nullptr;  // quick actions in the row over the view
@@ -185,7 +189,10 @@ void show_media()
     theme::set_text(lv_obj_get_child(s_play, 0), playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
     lv_obj_set_hidden(s_paused, playing);
     lv_obj_set_hidden(s_volume, !media_shows_volume());
-    theme::set_usable(s_volume, media_state().volume >= 0);
+    // Across the whole width where there are no subtitles to sit beside.
+    lv_obj_set_width(s_volume, media_shows_subtitles() ? s_beside_subs : s_sound_w);
+    show_volume_steps(s_volume_steps, media_state().steps_volume);
+    theme::set_usable(s_volume, media_state().volume >= 0 || media_state().steps_volume);
     if (media_state().volume >= 0 && !s_volume_held) {
         show_volume(media_state().volume);
     }
@@ -315,6 +322,9 @@ void build_text(std::int32_t x, std::int32_t w)
 // One bar, filled as loud as it plays, dragged or tapped anywhere along to set it.
 void volume_touched(lv_event_t *e)
 {
+    if (step_volume(s_volume, e)) {
+        return;
+    }
     const lv_event_code_t code = lv_event_get_code(e);
     if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) {
         s_volume_held = false;
@@ -362,6 +372,7 @@ void build_volume(std::int32_t x, std::int32_t y, std::int32_t w)
     s_volume_level = theme::make_label(s_volume, "", theme::text, fonts::size_28());
     lv_obj_align(s_volume_level, LV_ALIGN_RIGHT_MID, -VOLUME_INSET, 0);
     lv_obj_set_clickable(s_volume_level, false);
+    s_volume_steps = make_volume_steps(s_volume, speaker, s_volume_level, s_volume_fill, fonts::size_28());
 }
 
 void preset(int index)
@@ -417,7 +428,9 @@ void build_transport(std::int32_t x, std::int32_t y, std::int32_t w)
 void build_sound(std::int32_t x, std::int32_t y, std::int32_t w)
 {
     const std::int32_t side_w = side_width(w);
-    build_volume(x, y, w - side_w - GRID_GAP);
+    s_sound_w                 = w;
+    s_beside_subs             = w - side_w - GRID_GAP;
+    build_volume(x, y, s_beside_subs);
     s_subtitles = button(s_view, "", side_w, TRANSPORT_H, [](lv_event_t *) {
         media_toggle_subtitles();
     });

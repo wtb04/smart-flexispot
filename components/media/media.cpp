@@ -109,8 +109,37 @@ net::HostConfig cover_host()
     return config;
 }
 
+const char *s_fetcher_scheme = "";
+Fetcher     s_fetcher        = nullptr;
+
+bool fetched_elsewhere(const char *url)
+{
+    return s_fetcher != nullptr && s_fetcher_scheme[0] != '\0' &&
+           std::strncmp(url, s_fetcher_scheme, std::strlen(s_fetcher_scheme)) == 0;
+}
+
+// What s_body holds, so a picture asked for twice, as a laptop's video is for
+// the card and the cinema, is decoded twice but fetched once.
+char        s_body_url[PATH_SIZE] = "";
+std::size_t s_body_length         = 0;
+
+std::size_t fetch_body(const char *url);
+
 std::size_t download(const char *url)
 {
+    if (s_body_length > 0 && std::strcmp(url, s_body_url) == 0) {
+        return s_body_length;
+    }
+    s_body_length = fetch_body(url);
+    std::snprintf(s_body_url, sizeof(s_body_url), "%s", s_body_length > 0 ? url : "");
+    return s_body_length;
+}
+
+std::size_t fetch_body(const char *url)
+{
+    if (fetched_elsewhere(url)) {
+        return s_fetcher(url, s_body, jpeg::kMaxInput - 1);
+    }
     net::Request request;
     request.host     = net::host_for(url, cover_host());
     request.path     = url;
@@ -119,7 +148,10 @@ std::size_t download(const char *url)
     request.dedupe   = net::Dedupe::Join;
     request.max_body = jpeg::kMaxInput - 1;  // and the end of text fetch() puts after it
     request.what     = "cover";
-    const net::Fetched got = net::fetch(std::move(request), reinterpret_cast<char *>(s_body), jpeg::kMaxInput);
+    const std::int64_t asked = esp_timer_get_time();
+    const net::Fetched got   = net::fetch(std::move(request), reinterpret_cast<char *>(s_body), jpeg::kMaxInput);
+    ESP_LOGI(TAG, "cover of %u KB in %d ms, %d of them on the wire", static_cast<unsigned>(got.length / 1024),
+             static_cast<int>((esp_timer_get_time() - asked) / units::kUsPerMs), got.ms);
     if (!got.ok() || got.truncated || got.length >= jpeg::kMaxInput - 1) {
         ESP_LOGW(TAG, "cover %s, http %d%s", got.ok() ? "answered" : "not had", got.status,
                  got.truncated ? ", too large" : "");
@@ -224,14 +256,18 @@ bool decode(std::size_t bytes, Target to)
 bool fetch(const char *url, Target to)
 {
     const std::size_t bytes = download(url);
-    return bytes > 0 && decode(bytes, to);
+    if (bytes > 0 && decode(bytes, to)) {
+        return true;
+    }
+    s_body_length = 0;  // fetched afresh when it is tried again
+    return false;
 }
 
 bool fetch_playing(const char *path)
 {
     // A path on Home Assistant, or a whole address, as a Jellyfin cover has.
     char       url[URL_SIZE];
-    const bool whole = std::strncmp(path, "http", std::strlen("http")) == 0;
+    const bool whole = std::strncmp(path, "http", std::strlen("http")) == 0 || fetched_elsewhere(path);
     std::snprintf(url, sizeof(url), "%s%s", whole ? "" : s_origin, path);
     std::uint16_t *art   = s_art[s_next];
     std::uint16_t *large = s_large[s_next];
@@ -453,6 +489,12 @@ void set_pick_art(int index, const char *url)
     if (changed && s_task != nullptr) {
         xTaskNotifyGive(s_task);
     }
+}
+
+void set_fetcher(const char *scheme, Fetcher fetch)
+{
+    s_fetcher_scheme = scheme;
+    s_fetcher        = fetch;
 }
 
 void set_still_url(const char *url)
