@@ -1,7 +1,7 @@
 // A crop of the screen's corner for the README: its corners rounded and a
 // soft shadow under it, on nothing, so it sits on GitHub's light and dark.
 //
-//     swift desklink/shots/round.swift menu-raw.png menu.png
+//     swift desklink/shots/round.swift menu-raw.png menu.png && tools/strip_metadata.sh
 import AppKit
 
 let arguments = Array(CommandLine.arguments.dropFirst())
