@@ -172,4 +172,4 @@ How the panel is put together inside, the desk protocol, and how to run the test
 
 Copyright 2026 Wouter ten Brinke. The code, the documents and the board are under the Apache License 2.0, see [LICENSE](LICENSE) and [NOTICE](NOTICE). What comes from others keeps its own licence, listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md); the aircraft photos in the screenshots are their photographers'.
 
-Made by [Wouter ten Brinke](https://woutertenbrinke.nl).
+Made by [Wouter ten Brinke](https://woutertenbrinke.nl), with a [write-up of the project](https://woutertenbrinke.nl/projects/smart-flexispot) on my site.
