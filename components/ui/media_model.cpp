@@ -250,10 +250,11 @@ void media_take_still(const void *pixels)
     publish(Topic::Media);
 }
 
-void media_take_neighbours(bool before, bool after)
+void media_take_neighbours(bool before, bool after, bool episodes)
 {
-    s_media.before = before;
-    s_media.after  = after;
+    s_media.before   = before;
+    s_media.after    = after;
+    s_media.episodes = episodes;
     publish(Topic::Media);
 }
 
@@ -327,7 +328,7 @@ MediaSkip media_skip_offer()
     // Seeking to the end only stops the player there; the episode after is
     // started instead, and without one there is nothing to go on to.
     if (next && s_media.after) {
-        offer.text = "Next episode";
+        offer.text = s_media.episodes ? "Next episode" : "Next video";
         offer.next = true;
     }
     return offer;

@@ -231,7 +231,7 @@ esp_err_t set_media_seeks(bool seeks);
 
 /** Whether a video has an episode before it, and after, for the cinema view to
  *  offer; its Previous and Next actions start them. */
-esp_err_t set_media_neighbours(bool previous, bool next);
+esp_err_t set_media_neighbours(bool previous, bool next, bool episodes = true);
 
 /** Whether the player takes pause, seek and skip from here. Some, such as
  *  Streamyfin, only report: the bar, the card and the views then leave out

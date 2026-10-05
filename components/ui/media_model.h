@@ -49,6 +49,7 @@ struct MediaState {
     bool subtitles_available = false;
     bool subtitles_shown     = false;
     bool before = false, after = false;
+    bool episodes = true;  // what before and after are: Jellyfin's episodes, or a laptop's videos
     MediaSegment segments[kMaxSegments]{};
     int          segment_count = 0;
 
@@ -72,7 +73,7 @@ void media_take_video(bool seeks);
 void media_take_segments(const MediaSegment *segments, int count);
 void media_take_subtitles(bool available, bool shown);
 void media_take_still(const void *pixels);
-void media_take_neighbours(bool before, bool after);
+void media_take_neighbours(bool before, bool after, bool episodes);
 void media_take_tracks(bool back, bool on);
 void media_take_hold_preset(int preset);
 

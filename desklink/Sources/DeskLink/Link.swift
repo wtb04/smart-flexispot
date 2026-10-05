@@ -67,6 +67,9 @@ final class Link: ObservableObject {
     private var awake: NSObjectProtocol?
     private var pendingReport: DispatchWorkItem?
     private var seal: Seal?
+    private var coverFrom: Data?   // what artwork and cover are made from
+    private var lookedUp = ""      // the browser's video a YouTube thumbnail was asked for
+    private var thumbnail: Data?   // and the one found
     private let machine = Host.current().localizedName ?? ProcessInfo.processInfo.hostName
 
     init() {
@@ -125,8 +128,9 @@ final class Link: ObservableObject {
         source.stop()
         server.stop()
         track = nil
-        artwork = nil
-        cover = nil
+        showCover(nil)
+        lookedUp = ""
+        thumbnail = nil
         report()  // nothing playing, so the panel lets go at once
         reach = .unknown
         reachesBack = nil
@@ -134,10 +138,10 @@ final class Link: ObservableObject {
 
     private func take(_ new: Track?) {
         guard sharing else { return }
-        if new?.artwork != track?.artwork {
-            artwork = new?.artwork.flatMap(Artwork.init)
-            cover = new?.artwork.flatMap { NSImage(data: $0) }
+        if let new, Self.browsers.contains(new.bundle), new.title + "\n" + new.artist != lookedUp {
+            look(for: new)
         }
+        showCover(thumbnail ?? new?.artwork)
         let paused = new?.playing != track?.playing && new?.title == track?.title
         track = new
         if paused {
@@ -145,6 +149,27 @@ final class Link: ObservableObject {
             report()  // a pause is felt at once; it never comes in a burst
         } else {
             reportSoon()
+        }
+    }
+
+    private func showCover(_ from: Data?) {
+        guard from != coverFrom else { return }
+        coverFrom = from
+        artwork = from.flatMap(Artwork.init)
+        cover = from.flatMap { NSImage(data: $0) }
+    }
+
+    /// The video's own thumbnail, sharper than Safari's cover, or one where it gave none.
+    private func look(for track: Track) {
+        let wanted = track.title + "\n" + track.artist
+        lookedUp = wanted
+        thumbnail = nil
+        Task { [weak self] in
+            let found = await YouTubeCover.find(title: track.title, channel: track.artist, small: track.artwork)
+            guard let self, self.lookedUp == wanted, let found else { return }
+            self.thumbnail = found
+            self.showCover(found)
+            self.reportSoon()
         }
     }
 
@@ -162,7 +187,9 @@ final class Link: ObservableObject {
         if let track {
             var takes = ["pause"]
             if track.duration > 0 { takes.append("seek") }
-            if track.skips { takes += ["next", "previous"] }
+            // Now Playing does not say what a player takes, and a browser's
+            // video, YouTube's, takes no next or previous of its own.
+            if track.skips && !Self.browsers.contains(track.bundle) { takes += ["next", "previous"] }
             if let percent = output.percent {
                 takes.append("volume")
                 state["volume"] = percent
