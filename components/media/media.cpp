@@ -148,7 +148,10 @@ std::size_t fetch_body(const char *url)
     request.dedupe   = net::Dedupe::Join;
     request.max_body = jpeg::kMaxInput - 1;  // and the end of text fetch() puts after it
     request.what     = "cover";
-    const net::Fetched got = net::fetch(std::move(request), reinterpret_cast<char *>(s_body), jpeg::kMaxInput);
+    const std::int64_t asked = esp_timer_get_time();
+    const net::Fetched got   = net::fetch(std::move(request), reinterpret_cast<char *>(s_body), jpeg::kMaxInput);
+    ESP_LOGI(TAG, "cover of %u KB in %d ms, %d of them on the wire", static_cast<unsigned>(got.length / 1024),
+             static_cast<int>((esp_timer_get_time() - asked) / units::kUsPerMs), got.ms);
     if (!got.ok() || got.truncated || got.length >= jpeg::kMaxInput - 1) {
         ESP_LOGW(TAG, "cover %s, http %d%s", got.ok() ? "answered" : "not had", got.status,
                  got.truncated ? ", too large" : "");
