@@ -21,7 +21,7 @@ TEST(LaptopProtocol, reads_a_video_playing)
     const NowPlaying now = read(
         R"j({"machine":"wtb-mbp","port":47801,"app":"Safari","playing":true,"title":"Aart (86)",)j"
         R"j("artist":"RTV Oost","position":167.4,"duration":540.06,"art":"3f2a",)j"
-        R"j("takes":["pause","seek","next"]})j");
+        R"j("volume":40,"muted":true,"takes":["pause","seek","next","volume"]})j");
     EXPECT_TRUE(now.active);
     EXPECT_TRUE(now.playing);
     EXPECT_EQ(now.machine, "wtb-mbp");
@@ -36,6 +36,9 @@ TEST(LaptopProtocol, reads_a_video_playing)
     EXPECT_TRUE(now.takes_seek);
     EXPECT_TRUE(now.takes_next);
     EXPECT_FALSE(now.takes_previous) << "only what it lists";
+    EXPECT_TRUE(now.takes_volume);
+    EXPECT_EQ(now.volume, 40);
+    EXPECT_TRUE(now.muted);
 }
 
 TEST(LaptopProtocol, an_empty_title_is_nothing_playing)
@@ -51,6 +54,8 @@ TEST(LaptopProtocol, paused_and_without_a_length)
     EXPECT_TRUE(now.active);
     EXPECT_FALSE(now.playing);
     EXPECT_EQ(now.duration_s, 0) << "a live stream has none";
+    EXPECT_EQ(now.volume, -1) << "a Mac that cannot set its output says none";
+    EXPECT_FALSE(now.takes_volume);
 }
 
 TEST(LaptopProtocol, refuses_what_is_not_a_report)
@@ -71,6 +76,9 @@ TEST(LaptopProtocol, commands)
     EXPECT_EQ(laptop::command_body(Command::Next), R"({"command":"next"})");
     EXPECT_EQ(laptop::command_body(Command::Previous), R"({"command":"previous"})");
     EXPECT_EQ(laptop::command_body(Command::Seek, 90), R"({"command":"seek","position":90})");
+    EXPECT_EQ(laptop::command_body(Command::Volume, 35), R"({"command":"volume","level":35})");
+    EXPECT_EQ(laptop::command_body(Command::Mute, 1), R"({"command":"mute","muted":true})");
+    EXPECT_EQ(laptop::command_body(Command::Mute, 0), R"({"command":"mute","muted":false})");
 }
 
 TEST(LaptopProtocol, art_path)

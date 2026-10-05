@@ -147,7 +147,7 @@ void check_quiet(void *)
     tell(NowPlaying{});
 }
 
-void send(Command command, int position_s = 0)
+void send(Command command, int value = 0)
 {
     std::string origin;
     {
@@ -169,17 +169,21 @@ void send(Command command, int position_s = 0)
     request.host        = net::host_for(origin, like);
     request.path        = "/command";
     request.method      = net::Method::Post;
-    request.body        = command_body(command, position_s);
+    request.body        = command_body(command, value);
     request.priority    = net::Priority::Tap;
     request.deadline_ms = COMMAND_DEADLINE_MS;
     request.what        = "laptop command";
-    if (command == Command::Seek) {
-        request.key    = "seek";
+    // A slider dragged along sends where it stopped, not every level it passed.
+    if (command == Command::Seek || command == Command::Volume) {
+        request.key    = command == Command::Seek ? "seek" : "volume";
         request.dedupe = net::Dedupe::Replace;
     }
-    request.done = [](const net::Response &answer) {
-        if (!answer.ok() && answer.outcome != net::Outcome::Replaced) {
-            ESP_LOGW(TAG, "command not taken: %s, http %d", net::outcome_name(answer.outcome), answer.status);
+    request.done = [body = request.body](const net::Response &answer) {
+        if (answer.ok()) {
+            ESP_LOGI(TAG, "sent %s", body.c_str());
+        } else if (answer.outcome != net::Outcome::Replaced) {
+            ESP_LOGW(TAG, "%s not taken: %s, http %d", body.c_str(), net::outcome_name(answer.outcome),
+                     answer.status);
         }
     };
     net::submit(std::move(request));
@@ -215,6 +219,7 @@ void play_pause()
     {
         std::lock_guard<std::mutex> hold(s_lock);
         if (!s_now.active || !s_now.takes_pause) {
+            ESP_LOGI(TAG, "play or pause, but %s", s_now.active ? "it does not take one" : "nothing plays");
             return;
         }
         s_now.playing = !s_now.playing;
@@ -237,6 +242,16 @@ void next()
 void previous()
 {
     send(Command::Previous);
+}
+
+void set_volume(int percent)
+{
+    send(Command::Volume, percent);
+}
+
+void set_muted(bool muted)
+{
+    send(Command::Mute, muted ? 1 : 0);
 }
 
 std::string art_url(const NowPlaying &now)
