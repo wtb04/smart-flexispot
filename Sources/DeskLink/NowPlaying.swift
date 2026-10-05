@@ -27,7 +27,7 @@ enum Command: Int {
 /// What macOS has as Now Playing, from the adapter: Apple shut the
 /// MediaRemote framework to other apps in macOS 15.4, and the adapter reaches
 /// it through /usr/bin/perl, which Apple's entitlements still let in.
-final class NowPlayingSource {
+final class NowPlayingSource: @unchecked Sendable {  // its state is kept on its own queue
     var onChange: ((Track?) -> Void)?
 
     private let script: URL
@@ -48,6 +48,24 @@ final class NowPlayingSource {
             self.wanted = true
             self.launch()
         }
+    }
+
+    /// At once, for quitting: the adapter outlives the app otherwise.
+    func stopNow() {
+        queue.sync {
+            self.wanted = false
+            self.process?.terminate()
+            self.process = nil
+        }
+    }
+
+    /// One left running by a Desk Link that crashed.
+    func clearLeftovers() {
+        let clear = Process()
+        clear.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        clear.arguments = ["-f", script.path]
+        try? clear.run()
+        clear.waitUntilExit()
     }
 
     func stop() {

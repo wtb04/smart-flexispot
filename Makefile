@@ -2,9 +2,10 @@
 # make install    into /Applications, and start it
 # make clean
 #
-# SIGN is the identity to sign with; ad hoc ("-") unless set, which is enough
-# on the Mac it was built on.
-SIGN    ?= -
+# SIGN is the identity to sign with: the first Apple Development one there is,
+# else ad hoc. Ad hoc gives each build a new identity, and the keychain then
+# asks again whether Desk Link may read the panel's key.
+SIGN    ?= $(or $(shell security find-identity -v -p codesigning | sed -n 's/.*"\(Apple Development[^"]*\)".*/\1/p' | head -1),-)
 APP     := build/Desk Link.app
 ADAPTER := Vendor/mediaremote-adapter
 ADAPTER_BUILD := build/adapter
@@ -29,6 +30,7 @@ app: $(ADAPTER_BUILD)/MediaRemoteAdapter.framework
 
 install: app
 	-osascript -e 'quit app "Desk Link"' 2>/dev/null
+	while pgrep -x DeskLink >/dev/null; do sleep 0.2; done
 	rm -rf "/Applications/Desk Link.app"
 	cp -R "$(APP)" /Applications/
 	open "/Applications/Desk Link.app"

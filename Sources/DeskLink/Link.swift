@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import ServiceManagement
 
@@ -36,10 +37,11 @@ final class Link: ObservableObject {
 
     private let defaults = UserDefaults.standard
     private let source: NowPlayingSource
+    private let output = SystemVolume()
     private var server: CommandServer!
     private var artwork: Artwork?
     private var beat: Timer?
-    private var reportSoon: DispatchWorkItem?
+    private var pendingReport: DispatchWorkItem?
     private let machine = Host.current().localizedName ?? ProcessInfo.processInfo.hostName
 
     init() {
@@ -59,6 +61,12 @@ final class Link: ObservableObject {
             DispatchQueue.main.sync { MainActor.assumeIsolated { self?.handle(request) ?? .notFound } }
         }
         source.onChange = { [weak self] track in self?.take(track) }
+        output.onChange = { [weak self] in
+            if self?.track != nil { self?.reportSoon() }
+        }
+        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil,
+                                               queue: .main) { [source] _ in source.stopNow() }
+        source.clearLeftovers()
         if sharing { begin() }
     }
 
@@ -89,10 +97,15 @@ final class Link: ObservableObject {
             artwork = new?.artwork.flatMap(Artwork.init)
         }
         track = new
-        // The player's changes come in bursts: one report for the lot.
-        reportSoon?.cancel()
+        reportSoon()
+    }
+
+    // The player's changes come in bursts, as a volume key held down does:
+    // one report for the lot.
+    private func reportSoon() {
+        pendingReport?.cancel()
         let soon = DispatchWorkItem { [weak self] in self?.report() }
-        reportSoon = soon
+        pendingReport = soon
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: soon)
     }
 
@@ -103,6 +116,11 @@ final class Link: ObservableObject {
             var takes = ["pause"]
             if track.duration > 0 { takes.append("seek") }
             if track.skips { takes += ["next", "previous"] }
+            if let percent = output.percent {
+                takes.append("volume")
+                body["volume"] = percent
+                body["muted"] = output.muted
+            }
             body["app"] = track.app
             body["title"] = track.title
             body["artist"] = track.artist
@@ -142,6 +160,12 @@ final class Link: ObservableObject {
         case "seek":
             guard let position = (command["position"] as? NSNumber)?.doubleValue else { return Response(status: 400) }
             source.seek(to: position)
+        case "volume":
+            guard let level = (command["level"] as? NSNumber)?.intValue else { return Response(status: 400) }
+            output.set(percent: level)
+        case "mute":
+            guard let muted = command["muted"] as? Bool else { return Response(status: 400) }
+            output.set(muted: muted)
         default:
             return Response(status: 400)
         }
