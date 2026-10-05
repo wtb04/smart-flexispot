@@ -20,7 +20,7 @@ TEST(LaptopProtocol, reads_a_video_playing)
 {
     const NowPlaying now = read(
         R"j({"machine":"wtb-mbp","port":47801,"app":"Safari","playing":true,"title":"Aart (86)",)j"
-        R"j("artist":"RTV Oost","position":167.4,"duration":540.06,"art":"3f2a",)j"
+        R"j("artist":"RTV Oost","position":167.4,"duration":540.06,"art":"3f2a","video":true,)j"
         R"j("volume":40,"muted":true,"takes":["pause","seek","next","volume"]})j");
     EXPECT_TRUE(now.active);
     EXPECT_TRUE(now.playing);
@@ -32,6 +32,7 @@ TEST(LaptopProtocol, reads_a_video_playing)
     EXPECT_EQ(now.position_s, 167);
     EXPECT_EQ(now.duration_s, 540);
     EXPECT_EQ(now.art, "3f2a");
+    EXPECT_TRUE(now.video);
     EXPECT_TRUE(now.takes_pause);
     EXPECT_TRUE(now.takes_seek);
     EXPECT_TRUE(now.takes_next);
@@ -56,6 +57,7 @@ TEST(LaptopProtocol, paused_and_without_a_length)
     EXPECT_EQ(now.duration_s, 0) << "a live stream has none";
     EXPECT_EQ(now.volume, -1) << "a Mac that cannot set its output says none";
     EXPECT_FALSE(now.takes_volume);
+    EXPECT_FALSE(now.video) << "music unless it says";
 }
 
 TEST(LaptopProtocol, refuses_what_is_not_a_report)

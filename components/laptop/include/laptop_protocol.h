@@ -10,7 +10,7 @@
 // and every few seconds while anything does:
 //   {"machine": "wtb-mbp", "port": 47801, "app": "Safari", "playing": true,
 //    "title": "...", "artist": "...", "position": 167.4, "duration": 540,
-//    "art": "3f2a", "volume": 40, "muted": false,
+//    "art": "3f2a", "video": true, "volume": 40, "muted": false,
 //    "takes": ["pause", "seek", "next", "previous", "volume"]}
 // An empty title is nothing playing. "art", when there is any, changes with
 // the picture, which is at /art.jpg on the laptop's port. "volume" is the
@@ -27,6 +27,7 @@ struct NowPlaying {
     std::string title;
     std::string artist;
     std::string art;
+    bool        video = false;  // a film or a clip rather than a song: the cinema shows it
     int         position_s = 0;
     int         duration_s = 0;
     int         volume     = -1;  // percent, -1 when it has none

@@ -61,6 +61,7 @@ bool read(const char *body, std::size_t length, NowPlaying &out)
     out.title      = text_of(root, "title");
     out.artist     = text_of(root, "artist");
     out.art        = text_of(root, "art");
+    out.video      = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "video"));
     out.active     = !out.title.empty();
     out.playing    = out.active && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "playing"));
     out.position_s = seconds_of(root, "position");
