@@ -26,6 +26,7 @@
 #include <cctype>
 #include <cstring>
 #include <mutex>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -356,9 +357,10 @@ PlayerView laptop_view(const laptop::NowPlaying &now)
 {
     PlayerView view;
     view.from            = From::Laptop;
-    view.takes_volume    = false;
+    view.takes_volume    = now.takes_volume;
     view.takes_subtitles = false;
-    view.volume          = NO_NUMBER;
+    view.volume = now.takes_volume && now.volume >= 0 ? static_cast<float>(now.volume) / PERCENT_PER_WHOLE : NO_NUMBER;
+    view.muted  = now.muted;
     if (!now.active) {
         return view;
     }
@@ -389,10 +391,18 @@ PlayerView s_laptop_view;
 const PlayerView &choose_view()
 {
     const PlayerView *order[] = {&s_jellyfin_view, &s_speaker_view, &s_laptop_view};
+    // Among the paused, the one on the card stays: a pause from here must not
+    // hand the card, and the next tap, to another paused player.
+    const From        shown   = s_on.load(std::memory_order_relaxed);
+    const PlayerView *paused[] = {shown == From::Jellyfin ? &s_jellyfin_view
+                                  : shown == From::Laptop ? &s_laptop_view
+                                                          : &s_speaker_view,
+                                  &s_jellyfin_view, &s_speaker_view, &s_laptop_view};
     const PlayerView *chosen  = &s_speaker_view;
     bool              found   = false;
     for (const bool want_playing : {true, false}) {
-        for (const PlayerView *view : order) {
+        for (const PlayerView *view : want_playing ? std::span<const PlayerView *const>(order)
+                                                   : std::span<const PlayerView *const>(paused)) {
             if (!found && view_going(*view) && (view->state == "paused") != want_playing) {
                 chosen = view;
                 found  = true;
@@ -548,7 +558,7 @@ void show_media()
     const std::string title   = on ? view.title : "";
     // An idle speaker has nothing on: to look at, it is off.
     const std::string state   = view.state == "idle" ? "OFF" : upper(view.state);
-    if (view.from == From::Speaker) {
+    if (view.from != From::Jellyfin) {
         s_muted.store(view.muted, std::memory_order_relaxed);
     }
     const bool art_coming = ask_for_art(view.picture, title);
@@ -733,6 +743,7 @@ void send_volume(void *)
         return;
     }
     if (on(From::Laptop)) {
+        laptop::set_volume(percent);
         return;
     }
     char value[SERVICE_VALUE_SIZE];
@@ -870,10 +881,14 @@ void on_media(ui::MediaAction action)
             nudge_volume(VOLUME_STEP);
             break;
         case ui::MediaAction::Mute: {
+            const bool muted = s_muted.load(std::memory_order_relaxed);
+            if (on(From::Laptop)) {
+                laptop::set_muted(!muted);
+                break;
+            }
             if (!on(From::Speaker)) {
                 break;
             }
-            const bool muted = s_muted.load(std::memory_order_relaxed);
             ESP_ERROR_CHECK_WITHOUT_ABORT(
                 hass::ws::call_service_with("media_player", "volume_mute", MEDIA_SPEAKER,
                                             "is_volume_muted", muted ? "false" : "true"));

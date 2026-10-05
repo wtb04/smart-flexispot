@@ -18,6 +18,8 @@ void play_pause();
 void seek(int position_s);
 void next();
 void previous();
+void set_volume(int percent);
+void set_muted(bool muted);
 
 /** The picture's whole address, or empty when there is none. */
 std::string art_url(const NowPlaying &now);

@@ -33,6 +33,10 @@ const char *command_name(Command command)
             return "previous";
         case Command::Seek:
             return "seek";
+        case Command::Volume:
+            return "volume";
+        case Command::Mute:
+            return "mute";
     }
     return "";
 }
@@ -61,6 +65,9 @@ bool read(const char *body, std::size_t length, NowPlaying &out)
     out.playing    = out.active && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "playing"));
     out.position_s = seconds_of(root, "position");
     out.duration_s = seconds_of(root, "duration");
+    const cJSON *volume = cJSON_GetObjectItemCaseSensitive(root, "volume");
+    out.volume     = cJSON_IsNumber(volume) && volume->valuedouble >= 0 ? static_cast<int>(volume->valuedouble + 0.5) : -1;
+    out.muted      = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "muted"));
     const cJSON *take = nullptr;
     cJSON_ArrayForEach(take, cJSON_GetObjectItemCaseSensitive(root, "takes"))
     {
@@ -72,17 +79,22 @@ bool read(const char *body, std::size_t length, NowPlaying &out)
         out.takes_seek     = out.takes_seek || std::strcmp(name, "seek") == 0;
         out.takes_next     = out.takes_next || std::strcmp(name, "next") == 0;
         out.takes_previous = out.takes_previous || std::strcmp(name, "previous") == 0;
+        out.takes_volume   = out.takes_volume || std::strcmp(name, "volume") == 0;
     }
     cJSON_Delete(root);
     return true;
 }
 
-std::string command_body(Command command, int position_s)
+std::string command_body(Command command, int value)
 {
     cJSON *root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "command", command_name(command));
     if (command == Command::Seek) {
-        cJSON_AddNumberToObject(root, "position", position_s);
+        cJSON_AddNumberToObject(root, "position", value);
+    } else if (command == Command::Volume) {
+        cJSON_AddNumberToObject(root, "level", value);
+    } else if (command == Command::Mute) {
+        cJSON_AddBoolToObject(root, "muted", value != 0);
     }
     char       *text = cJSON_PrintUnformatted(root);
     std::string out  = text != nullptr ? text : "";
