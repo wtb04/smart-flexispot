@@ -1214,6 +1214,21 @@ void snapshot(Snapshot &out)
     out.age_s    = age_s();
 }
 
+bool known_without_photo(const char *hex)
+{
+    if (s_lock == nullptr || s_photo_entries == nullptr || hex == nullptr || hex[0] == '\0') {
+        return false;
+    }
+    Lock hold;
+    for (int i = 0; i < PHOTO_ENTRIES; ++i) {
+        const PhotoEntry &entry = s_photo_entries[i];
+        if (entry.state == Photo::None && std::strcmp(entry.hex, hex) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void status(Status &out)
 {
     if (s_lock == nullptr) {

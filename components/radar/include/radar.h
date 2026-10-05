@@ -68,6 +68,9 @@ int trail(const char *hex, TrailPoint *out, int max);
 /** Thread-safe copy of the last good reading. */
 void snapshot(Snapshot &out);
 
+/** Whether planespotters said it has no photo of `hex`; false until it says. */
+bool known_without_photo(const char *hex);
+
 /** Thread-safe. */
 void status(Status &out);
 

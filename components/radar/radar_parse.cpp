@@ -756,6 +756,15 @@ int notability(const Aircraft &aircraft)
     return score;
 }
 
+int ranking(const Aircraft &aircraft, bool no_photo)
+{
+    const int score = notability(aircraft);
+    if (!no_photo || score == 0 || score >= EMERGENCY) {
+        return score;
+    }
+    return std::max(1, score - kNoPhotoPenalty);
+}
+
 int merge_reading(Aircraft *now, int count, int capacity, const Aircraft *before, int before_count,
                   std::int64_t now_us, std::int64_t keep_us)
 {
