@@ -27,6 +27,10 @@ constexpr char ALL_LIGHTS_ENTITY[] = "input_boolean.office_lights_on";
 constexpr char ALL_LIGHTS_ON[]     = "script.office_lights_on";
 constexpr char ALL_LIGHTS_OFF[]    = "script.office_lights_off";
 
+// One of the lights above: with it or the lights all on, someone is in the
+// room and the screen stays lit.
+constexpr char MAIN_LIGHT_ENTITY[] = "light.office_ceiling";
+
 // Switches in the corners of the heating dial, with what each side is called.
 constexpr ToggleSpec TOGGLES[] = {
     {"input_boolean.office_heating_zone", "1", "2"},
