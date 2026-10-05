@@ -87,6 +87,21 @@ std::string sender(httpd_req_t *req)
     return text;
 }
 
+// net keeps one setting per origin, taken from whoever asks for it first; the
+// cover is fetched from the same origin, so the key has to be in it before a
+// report can name a cover.
+net::Host host_with_key(const std::string &origin)
+{
+    static const std::string headers = std::string(KEY_HEADER) + ": " + LAPTOP_KEY;
+    net::HostConfig          like;
+    like.name        = "laptop";
+    like.headers     = headers.c_str();
+    like.timeout_ms  = COMMAND_TIMEOUT_MS;
+    like.connections = 1;
+    like.retry       = net::Retry{1, 300, 200, false};
+    return net::host_for(origin, like);
+}
+
 void tell(const NowPlaying &now)
 {
     if (s_on_change != nullptr) {
@@ -124,10 +139,12 @@ esp_err_t report(httpd_req_t *req)
         ESP_LOGW(TAG, "not a report: %.*s", static_cast<int>(got < 120 ? got : 120), body);
         return answer(req, "400 Bad Request");
     }
+    const std::string origin = "http://" + from + ':' + std::to_string(now.port);
+    host_with_key(origin);
     {
         std::lock_guard<std::mutex> hold(s_lock);
         s_now      = now;
-        s_origin   = "http://" + from + ':' + std::to_string(now.port);
+        s_origin   = origin;
         s_heard_us = esp_timer_get_time();
     }
     tell(now);
@@ -157,16 +174,8 @@ void send(Command command, int value = 0)
         }
         origin = s_origin;
     }
-    static const std::string headers = std::string(KEY_HEADER) + ": " + LAPTOP_KEY;
-    net::HostConfig          like;
-    like.name        = "laptop";
-    like.headers     = headers.c_str();
-    like.timeout_ms  = COMMAND_TIMEOUT_MS;
-    like.connections = 1;
-    like.retry       = net::Retry{1, 300, 200, false};
-
     net::Request request;
-    request.host        = net::host_for(origin, like);
+    request.host        = host_with_key(origin);
     request.path        = "/command";
     request.method      = net::Method::Post;
     request.body        = command_body(command, value);
