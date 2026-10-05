@@ -10,6 +10,10 @@ The versions are the points where the panel was a step further on my desk. None 
 - The simulator checks routes as the panel does
 - Cinema: ten seconds back and on as buttons, a swipe across the picture for the episode before or after
 - Between episodes, the cover and the still stay until the next one comes
+- The screen goes dark by itself when nobody is there: never with the main light on, after a minute at night, after half a minute with the phone gone or away from the desk on the battery
+- The screen lights again for the main light or the phone coming back, never for the morning
+- A notice keeps the screen lit for its whole time, also over a film
+- `room_config.h` takes `MAIN_LIGHT_ENTITY`, the light that says someone is in: add it to yours
 
 ## v0.9.0, 4 October 2026
 
