@@ -36,7 +36,16 @@ constexpr Episode     EPISODES[] = {
     {"The Fight", 13, 1504, 0.55f},
     {"Time Capsule", 14, 1290, 0.33f},
 };
-constexpr int JELLYFIN_PRESET = 1;  // holding the card for Jellyfin, as room.cpp has it
+constexpr int JELLYFIN_PRESET = 1;  // holding the card for Jellyfin, as jellyfin_player.cpp has it
+
+// A clip in Safari on the laptop, as Desk Link reports one.
+struct Clip {
+    const char *title;
+    const char *channel;
+    int         length_s;
+    float       hue;
+};
+constexpr Clip CLIP = {"Morning light over the IJ", "City Walks", 1845, 0.58f};
 
 // Intro and credits, as Jellyfin's media segments give them.
 constexpr int INTRO_FROM_S   = 20;
@@ -58,7 +67,17 @@ bool         s_subtitles = false;
 
 bool video()
 {
-    return s_scene == Scene::Episode || s_scene == Scene::Followed;
+    return s_scene == Scene::Episode || s_scene == Scene::Followed || s_scene == Scene::Laptop;
+}
+
+bool laptop()
+{
+    return s_scene == Scene::Laptop;
+}
+
+float hue()
+{
+    return laptop() ? CLIP.hue : video() ? EPISODES[s_item].hue : TRACKS[s_item].hue;
 }
 double       s_position_s = 0;   // at s_position_at
 std::int64_t s_position_at = 0;  // ms
@@ -117,7 +136,10 @@ void paint(std::vector<std::uint16_t> &into, int w, int h, float hue)
 
 int length_s()
 {
-    return s_scene == Scene::Music ? TRACKS[s_item].length_s : video() ? EPISODES[s_item].length_s : 0;
+    return s_scene == Scene::Music ? TRACKS[s_item].length_s
+           : laptop()              ? CLIP.length_s
+           : video()               ? EPISODES[s_item].length_s
+                                   : 0;
 }
 
 int position_s()
@@ -144,6 +166,8 @@ void show_text()
     if (s_scene == Scene::Music) {
         const Track &t = TRACKS[s_item];
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media("SPOTIFY", t.title, t.artist, state, s_playing, true));
+    } else if (laptop()) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media("SAFARI, LAPTOP", CLIP.title, CLIP.channel, state, s_playing, true));
     } else if (video()) {
         const Episode &e = EPISODES[s_item];
         char           line[96];
@@ -160,20 +184,30 @@ void show_item()
     const bool followed = s_scene == Scene::Followed;
     show_text();
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_remote(!followed));
+    // As the players say: Jellyfin takes subtitles, the speaker none, and the
+    // laptop's display only steps its volume.
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_takes(true, video && !laptop(), laptop()));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_pause_settles(s_scene == Scene::Music));
     if (s_scene == Scene::Idle) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_album_art(nullptr, false));
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_album_art_large(nullptr));
     } else {
         // An episode's cover is its series' poster, two wide to three high, as Jellyfin's.
-        const int art_w = video ? media::kArtSize * 2 / 3 : media::kArtSize;
-        paint(s_art, art_w, media::kArtSize, video ? EPISODES[s_item].hue : TRACKS[s_item].hue);
+        const int art_w = video && !laptop() ? media::kArtSize * 2 / 3 : media::kArtSize;
+        paint(s_art, art_w, media::kArtSize, hue());
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_album_art(s_art.data(), false, art_w));
-        paint(s_large, media::kLargeArtSize, media::kLargeArtSize, video ? EPISODES[s_item].hue : TRACKS[s_item].hue);
+        paint(s_large, media::kLargeArtSize, media::kLargeArtSize, hue());
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_album_art_large(s_large.data()));
     }
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_hold_preset(video ? JELLYFIN_PRESET : -1));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_hold_preset(video && !laptop() ? JELLYFIN_PRESET : -1));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_seeks(video));
-    if (video) {
+    if (laptop()) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_segments(nullptr, 0));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_neighbours(false, false, false));  // a browser's takes no next
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_subtitles(false, false));
+        paint(s_still, media::kStillW, media::kStillH, CLIP.hue + 0.3f);
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_cinema_still(s_still.data()));
+    } else if (video) {
         const int              end = EPISODES[s_item].length_s;
         const ui::MediaSegment segments[] = {
             {ui::MediaSegment::Kind::Intro, INTRO_FROM_S, INTRO_TO_S},
@@ -191,7 +225,7 @@ void show_item()
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_subtitles(false, false));
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_cinema_still(nullptr));
     }
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_volume(followed ? -1 : s_muted ? 0 : s_volume));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_volume(followed || laptop() ? -1 : s_muted ? 0 : s_volume));
     report_progress();
 }
 
@@ -206,6 +240,10 @@ void go_to(int item, int from_s)
 // goes straight on.
 void go_on_to(int item)
 {
+    if (laptop()) {
+        go_to(0, 0);  // the next clip, as the browser's next goes
+        return;
+    }
     if (!video()) {
         go_to(item, 0);
         return;
@@ -242,7 +280,9 @@ void tick()
         return;
     }
     if (position_s() >= length_s()) {
-        const int last = s_scene == Scene::Music ? static_cast<int>(std::size(TRACKS)) : static_cast<int>(std::size(EPISODES));
+        const int last = s_scene == Scene::Music ? static_cast<int>(std::size(TRACKS))
+                         : laptop()               ? 1
+                                                  : static_cast<int>(std::size(EPISODES));
         if (s_item + 1 < last) {
             go_on_to(s_item + 1);  // as a queue or Jellyfin's next up goes on
         } else {
@@ -262,15 +302,16 @@ void show(Scene scene)
     s_playing = scene != Scene::Idle;
     // An episode starts just before its intro, so Skip intro can be tried.
     const bool episode = scene == Scene::Episode || scene == Scene::Followed;
-    go_to(episode ? 1 : 0, episode ? INTRO_FROM_S - 5 : 60);
+    go_to(episode ? 1 : 0, episode ? INTRO_FROM_S - 5 : scene == Scene::Laptop ? 412 : 60);
 }
 
 void next_scene()
 {
     show(s_scene == Scene::Idle      ? Scene::Music
          : s_scene == Scene::Music   ? Scene::Episode
-         : s_scene == Scene::Episode ? Scene::Followed
-                                     : Scene::Idle);
+         : s_scene == Scene::Episode  ? Scene::Followed
+         : s_scene == Scene::Followed ? Scene::Laptop
+                                      : Scene::Idle);
 }
 
 void on_media(ui::MediaAction action)
@@ -282,7 +323,9 @@ void on_media(ui::MediaAction action)
         std::printf("W (sim) media action %d sent to a player that takes none\n", static_cast<int>(action));
         return;
     }
-    const int count = s_scene == Scene::Music ? static_cast<int>(std::size(TRACKS)) : static_cast<int>(std::size(EPISODES));
+    const int count = s_scene == Scene::Music ? static_cast<int>(std::size(TRACKS))
+                      : laptop()               ? 1
+                                               : static_cast<int>(std::size(EPISODES));
     switch (action) {
         case ui::MediaAction::PlayPause:
             set_position(position_s());
@@ -292,8 +335,15 @@ void on_media(ui::MediaAction action)
             break;
         case ui::MediaAction::Next:     go_on_to((s_item + 1) % count); break;
         case ui::MediaAction::Previous: go_on_to((s_item + count - 1) % count); break;
-        case ui::MediaAction::VolumeUp:   on_volume(std::min(100, s_volume + 5)); break;
-        case ui::MediaAction::VolumeDown: on_volume(std::max(0, s_volume - 5)); break;
+        case ui::MediaAction::VolumeUp:
+        case ui::MediaAction::VolumeDown:
+            if (laptop()) {
+                std::printf("I (sim) the display's volume a step %s\n",
+                            action == ui::MediaAction::VolumeUp ? "up" : "down");
+            } else {
+                on_volume(std::clamp(s_volume + (action == ui::MediaAction::VolumeUp ? 5 : -5), 0, 100));
+            }
+            break;
         case ui::MediaAction::Mute:
             s_muted = !s_muted;
             ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_volume(s_muted ? 0 : s_volume));

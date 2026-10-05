@@ -1,3 +1,4 @@
+#include "volume_steps.h"
 #include "ui_internal.h"
 
 #include "home_model.h"
@@ -182,6 +183,7 @@ lv_obj_t *s_card_extra   = nullptr;  // the favourites, or for a video its subti
 lv_obj_t *s_extra_list   = nullptr;
 lv_obj_t *s_extra_subs   = nullptr;
 lv_obj_t *s_volume       = nullptr;
+VolumeSteps s_volume_steps;
 lv_obj_t *s_volume_fill  = nullptr;
 lv_obj_t *s_volume_text  = nullptr;
 bool      s_volume_held  = false;
@@ -264,6 +266,7 @@ void paint_media()
         fit_popout(s_media_pop);
     }
     lv_obj_set_hidden(s_volume, !media_shows_volume());
+    show_volume_steps(s_volume_steps, media.steps_volume);
     lv_obj_set_hidden(s_card_extra, !shows_extra);
     const bool timed = media.has_track && media.duration_s > 0;
     for (lv_obj_t *part : {s_card_bar, s_card_at, s_card_length}) {
@@ -279,7 +282,7 @@ void paint_media()
     lv_obj_set_hidden(s_extra_subs, !media.video);
     theme::fill_accent_or(s_card_extra, media.video && media.subtitles_shown, theme::panel_light);
     theme::set_usable(s_card_extra, !media.video || media.subtitles_available);
-    theme::set_usable(s_volume, media.volume >= 0);
+    theme::set_usable(s_volume, media.volume >= 0 || media.steps_volume);
     if (media.volume >= 0 && !s_volume_held) {
         show_volume(media.volume);
     }
@@ -346,6 +349,9 @@ void step_clicked(lv_event_t *e)
 
 void volume_touched(lv_event_t *e)
 {
+    if (step_volume(s_volume, e)) {
+        return;
+    }
     const lv_event_code_t code = lv_event_get_code(e);
     if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) {
         s_volume_held = false;
@@ -507,6 +513,7 @@ void build_media_card(lv_obj_t *screen)
     s_volume_text = theme::make_label(s_volume, "", theme::text, fonts::size_22());
     lv_obj_align(s_volume_text, LV_ALIGN_RIGHT_MID, -VOLUME_INSET, 0);
     lv_obj_set_clickable(s_volume_text, false);
+    s_volume_steps = make_volume_steps(s_volume, speaker, s_volume_text, s_volume_fill, fonts::size_22());
     // The favourites for music; nobody picks another while watching, so for a
     // video the subtitles, as the cinema view has them.
     s_card_extra = card_button(sound, LV_SYMBOL_LIST, STEP_W);

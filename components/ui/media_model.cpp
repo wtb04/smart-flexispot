@@ -144,7 +144,7 @@ void media_apply_track(const char *source, const char *title, const char *artist
     copy(s_media.state, sizeof(s_media.state), state != nullptr ? state : "--");
     s_media.has_track    = has_track;
     s_media.controllable = controllable;
-    if (playing || !has_track) {
+    if (playing || !has_track || !s_media.pause_settles) {
         cancel_pause_settle();
         s_media.playing = playing;
     } else if (s_media.playing && s_pause_timer == nullptr) {
@@ -201,6 +201,19 @@ void media_take_remote(bool remote)
     publish(Topic::Media);
 }
 
+void media_take_pause_settles(bool settles)
+{
+    s_media.pause_settles = settles;
+}
+
+void media_take_takes(bool volume, bool subtitles, bool steps)
+{
+    s_media.takes_volume    = volume;
+    s_media.takes_subtitles = subtitles;
+    s_media.steps_volume    = steps;
+    publish(Topic::Media);
+}
+
 void media_take_video(bool seeks)
 {
     if (s_gone.timer != nullptr) {
@@ -237,10 +250,11 @@ void media_take_still(const void *pixels)
     publish(Topic::Media);
 }
 
-void media_take_neighbours(bool before, bool after)
+void media_take_neighbours(bool before, bool after, bool episodes)
 {
-    s_media.before = before;
-    s_media.after  = after;
+    s_media.before   = before;
+    s_media.after    = after;
+    s_media.episodes = episodes;
     publish(Topic::Media);
 }
 
@@ -280,12 +294,12 @@ bool media_is_video()
 
 bool media_shows_volume()
 {
-    return s_media.remote || s_media.volume >= 0;
+    return s_media.takes_volume && (s_media.remote || s_media.volume >= 0 || s_media.steps_volume);
 }
 
 bool media_shows_subtitles()
 {
-    return s_media.remote || s_media.subtitles_available;
+    return s_media.takes_subtitles && (s_media.remote || s_media.subtitles_available);
 }
 
 MediaSkip media_skip_offer()
@@ -314,7 +328,7 @@ MediaSkip media_skip_offer()
     // Seeking to the end only stops the player there; the episode after is
     // started instead, and without one there is nothing to go on to.
     if (next && s_media.after) {
-        offer.text = "Next episode";
+        offer.text = s_media.episodes ? "Next episode" : "Next video";
         offer.next = true;
     }
     return offer;

@@ -2,6 +2,7 @@
 
 #include "esp_err.h"
 
+#include <cstddef>
 #include <cstdint>
 
 namespace media {
@@ -69,6 +70,12 @@ void set_art_path(const char *path);
 /** Thread-safe. A favourite's cover by its whole address, HTTPS included, fetched
  *  once the playing cover is in hand. Empty clears it. */
 void set_pick_art(int index, const char *url);
+
+/** For covers at addresses of another kind, as Desk Link's sealed ones are:
+ *  `fetch` fills `into` with the picture and says how long it is, 0 for none.
+ *  Called on the fetch task. */
+using Fetcher = std::size_t (*)(const char *url, std::uint8_t *into, std::size_t size);
+void set_fetcher(const char *scheme, Fetcher fetch);
 
 /** Thread-safe. The still by its whole address, cropped to its shape from the
  *  middle; empty clears it. */

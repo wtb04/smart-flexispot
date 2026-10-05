@@ -23,6 +23,10 @@ struct MediaState {
     bool controllable = false;  // a player there is to steer; holding the card does nothing without one
     bool playing      = false;  // as shown: a pause shows once it has settled
     bool remote       = true;   // takes play, pause, skip and seek from here
+    bool pause_settles   = true;
+    bool takes_volume    = true;
+    bool takes_subtitles = true;
+    bool steps_volume    = false;  // up and down only, with no level
     bool tracks_back  = true;   // takes a track back, and on, as most players do
     bool tracks_on    = true;
     bool video        = false;  // it seeks, as a film or an episode does
@@ -45,6 +49,7 @@ struct MediaState {
     bool subtitles_available = false;
     bool subtitles_shown     = false;
     bool before = false, after = false;
+    bool episodes = true;  // what before and after are: Jellyfin's episodes, or a laptop's videos
     MediaSegment segments[kMaxSegments]{};
     int          segment_count = 0;
 
@@ -62,11 +67,13 @@ void media_take_large_cover(const void *pixels);
 void media_take_progress(int position_s, int duration_s, bool playing);
 void media_take_volume(int percent);
 void media_take_remote(bool remote);
+void media_take_takes(bool volume, bool subtitles, bool steps);
+void media_take_pause_settles(bool settles);
 void media_take_video(bool seeks);
 void media_take_segments(const MediaSegment *segments, int count);
 void media_take_subtitles(bool available, bool shown);
 void media_take_still(const void *pixels);
-void media_take_neighbours(bool before, bool after);
+void media_take_neighbours(bool before, bool after, bool episodes);
 void media_take_tracks(bool back, bool on);
 void media_take_hold_preset(int preset);
 
