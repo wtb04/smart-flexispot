@@ -4,7 +4,8 @@
 
 // When the screen goes dark by itself and when it lights again. The big light
 // or the light scene on says someone is in the room, so the screen stays; with
-// them off it stays only for the phone by day. Only something happening lights
+// them off it stays only for the phone by day. Unplugged away from the desk it
+// is somewhere else, and goes dark soon. Only something happening lights
 // it again, never the night ending: whoever sleeps through it is not woken.
 namespace ui::screen_rules {
 
@@ -22,7 +23,8 @@ inline bool is_night(int minute_of_day)
 
 struct Inputs {
     bool         screen_on  = true;
-    bool         on_battery = false;  // away from the desk: its room's lights say nothing
+    bool         on_battery = false;
+    bool         desk_linked = false;  // unplugged and not linked: away, its room's lights say nothing
     bool         lit_known  = false;  // Home Assistant has told the lights
     bool         lit        = false;  // the big light or the light scene
     bool         phone      = false;  // heard near just now
@@ -42,7 +44,7 @@ public:
         if (in.video_ms != 0) {
             return in.video_ms;
         }
-        if (in.on_battery) {
+        if (in.on_battery && !in.desk_linked) {
             return kAwayDarkMs;
         }
         if (!in.lit_known || in.lit) {

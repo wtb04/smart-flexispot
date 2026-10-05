@@ -180,7 +180,7 @@ TEST(ScreenRules, unknown_lights_stay_lit)
     EXPECT_EQ(run(schedule, in, 0, 30 * MIN), Action::Keep) << "before Home Assistant has told the lights";
 }
 
-TEST(ScreenRules, on_battery_half_a_minute)
+TEST(ScreenRules, on_battery_away_from_the_desk_half_a_minute)
 {
     Schedule schedule;
     Inputs   in   = dark_room();
@@ -188,6 +188,19 @@ TEST(ScreenRules, on_battery_half_a_minute)
     in.on_battery = true;
     EXPECT_EQ(run(schedule, in, 0, 29 * S), Action::Keep);
     EXPECT_EQ(run(schedule, in, 30 * S, 30 * S), Action::Dark) << "away from the desk, whatever its lights";
+}
+
+TEST(ScreenRules, on_battery_at_the_desk_as_plugged_in)
+{
+    Schedule schedule;
+    Inputs   in    = dark_room();
+    in.lit         = true;
+    in.on_battery  = true;
+    in.desk_linked = true;
+    EXPECT_EQ(run(schedule, in, 0, 30 * MIN), Action::Keep) << "linked to the desk, the light on: lit";
+    in.lit   = false;
+    in.night = true;
+    EXPECT_EQ(run(schedule, in, 30 * MIN + S, 31 * MIN + S), Action::Dark) << "and the night's minute as anywhere";
 }
 
 TEST(ScreenRules, a_notice_keeps_it_lit)

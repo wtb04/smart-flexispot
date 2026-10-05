@@ -35,6 +35,7 @@ void look()
     screen_rules::Inputs in;
     in.screen_on  = status.screen_on;
     in.on_battery = status.on_battery;
+    in.desk_linked = desk_state().available;
     in.lit_known  = lights.room_known;
     in.lit        = lights.room_lit;
     in.phone      = status.present;
@@ -53,7 +54,7 @@ void look()
         case screen_rules::Action::Dark:
             ESP_LOGI(TAG, "screen dark after %d s: %s", static_cast<int>(s_schedule.dark_after(in) / 1000),
                      in.video_ms != 0         ? "the film's own"
-                     : in.on_battery          ? "on the battery"
+                     : in.on_battery && !in.desk_linked ? "on the battery, away from the desk"
                      : !s_schedule.phone_here() ? "the light off, the phone away"
                                                 : "the light off, at night");
             set_screen_state(false);
