@@ -5,6 +5,7 @@
 #include "esp_timer.h"
 #include "ha_ws.h"
 #include "jellyfin.h"
+#include "laptop.h"
 #include "media.h"
 #include "esp_heap_caps.h"
 #include "net.h"
@@ -37,7 +38,13 @@ constexpr char TAG[] = "room";
 // anything paused, so a paused speaker gives way to Jellyfin starting.
 constexpr int  JELLYFIN_COVER_H = 300;  // enough for the card's frame, square from the middle
 constexpr int  JELLYFIN_PRESET  = 1;  // holding the card for Jellyfin: Preset 2
-std::atomic<bool> s_on_jellyfin{false};  // what the card shows, and so controls
+enum class From : std::uint8_t { Speaker, Jellyfin, Laptop };
+std::atomic<From> s_on{From::Speaker};  // what the card shows, and so controls
+
+bool on(From from)
+{
+    return s_on.load(std::memory_order_relaxed) == from;
+}
 
 static_assert(std::size(PICK_URIS) <= media::kPickCount, "more favourites than the popup holds");
 
@@ -249,7 +256,7 @@ std::string media_artist(const hass::ws::Entity &player)
 // Assistant reports it, Jellyfin as its own socket does.
 struct PlayerView {
     bool        known    = false;
-    bool        jellyfin = false;
+    From        from     = From::Speaker;
     std::string state;         // playing, paused, idle, off
     std::string source;
     std::string title;
@@ -266,6 +273,8 @@ struct PlayerView {
     bool        remote = true;  // takes pause and seek from here; Jellyfin's players need not
     bool        tracks_back = true;
     bool        tracks_on   = true;
+    bool        takes_volume    = true;
+    bool        takes_subtitles = true;
 };
 
 bool view_going(const PlayerView &view)
@@ -282,6 +291,7 @@ PlayerView speaker_view(const hass::ws::Entity *speaker)
     }
     const std::string app = attribute(*speaker, "app_name");
     view.known            = true;
+    view.takes_subtitles  = false;
     view.state            = speaker->state;
     view.source           = upper(app.empty() ? speaker->name : app);
     view.title            = attribute(*speaker, "media_title");
@@ -304,7 +314,8 @@ PlayerView speaker_view(const hass::ws::Entity *speaker)
         view.tracks_back  = (takes & TAKES_PREVIOUS) != 0;
         view.tracks_on    = (takes & TAKES_NEXT) != 0;
         if ((takes & (TAKES_VOLUME_SET | TAKES_VOLUME_STEP)) == 0) {
-            view.volume = NO_NUMBER;
+            view.volume       = NO_NUMBER;
+            view.takes_volume = false;
         }
     }
     return view;
@@ -313,7 +324,9 @@ PlayerView speaker_view(const hass::ws::Entity *speaker)
 PlayerView jellyfin_view(const jellyfin::NowPlaying &now)
 {
     PlayerView view;
-    view.jellyfin = true;
+    view.from            = From::Jellyfin;
+    view.takes_volume    = now.takes_volume;
+    view.takes_subtitles = now.takes_subtitles;
     if (!now.active) {
         return view;
     }
@@ -339,16 +352,43 @@ PlayerView jellyfin_view(const jellyfin::NowPlaying &now)
     return view;
 }
 
-// Both sources draw the card from tasks of their own, one at a time.
+PlayerView laptop_view(const laptop::NowPlaying &now)
+{
+    PlayerView view;
+    view.from            = From::Laptop;
+    view.takes_volume    = false;
+    view.takes_subtitles = false;
+    view.volume          = NO_NUMBER;
+    if (!now.active) {
+        return view;
+    }
+    view.known        = true;
+    view.state        = now.playing ? "playing" : "paused";
+    view.source       = now.app.empty() ? "LAPTOP" : upper(now.app) + ", LAPTOP";
+    view.title        = now.title;
+    view.artist       = now.artist;
+    view.picture      = laptop::art_url(now);
+    view.position_s   = now.position_s;
+    view.duration_s   = now.duration_s;
+    view.position_key = now.title + ':' + std::to_string(now.position_s) + (now.playing ? "" : "p");
+    view.remote       = now.takes_pause;
+    view.tracks_back  = now.takes_previous;
+    view.tracks_on    = now.takes_next;
+    return view;
+}
+
+// The sources draw the card from tasks of their own, one at a time.
 std::mutex s_media_lock;
 PlayerView s_speaker_view;
 PlayerView s_jellyfin_view;
+PlayerView s_laptop_view;
 
 /** The player the card shows and controls: anything playing before anything
- *  paused, the speaker before Jellyfin; the speaker while neither has anything. */
+ *  paused, Jellyfin before the speaker before the laptop; the speaker while
+ *  none has anything. */
 const PlayerView &choose_view()
 {
-    const PlayerView *order[] = {&s_speaker_view, &s_jellyfin_view};
+    const PlayerView *order[] = {&s_jellyfin_view, &s_speaker_view, &s_laptop_view};
     const PlayerView *chosen  = &s_speaker_view;
     bool              found   = false;
     for (const bool want_playing : {true, false}) {
@@ -359,9 +399,9 @@ const PlayerView &choose_view()
             }
         }
     }
-    if (s_on_jellyfin.exchange(chosen->jellyfin) != chosen->jellyfin) {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(
-            ui::set_media_hold_preset(chosen->jellyfin ? JELLYFIN_PRESET : -1));
+    const bool jellyfin = chosen->from == From::Jellyfin;
+    if ((s_on.exchange(chosen->from) == From::Jellyfin) != jellyfin) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_hold_preset(jellyfin ? JELLYFIN_PRESET : -1));
     }
     return *chosen;
 }
@@ -427,7 +467,13 @@ void show_media_position(const PlayerView &view, bool playing)
 
 void show_media_volume(const PlayerView &view)
 {
+    static From s_volume_from = From::Speaker;
+    const bool  moved         = std::exchange(s_volume_from, view.from) != view.from;
     if (view.volume < 0.0f) {
+        if (moved) {
+            s_volume_pct.store(-1, std::memory_order_relaxed);
+            ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_volume(-1));
+        }
         return;
     }
     const int          percent = percent_of(view.volume);
@@ -480,8 +526,14 @@ void show_media()
     if (std::exchange(s_tracks_shown, tracks) != tracks) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_tracks(view.tracks_back, view.tracks_on));
     }
-    want_segments(view.jellyfin ? view.episode : "", view.series, view.jellyfin);
-    media::set_still_url(view.jellyfin ? view.still.c_str() : "");
+    static int s_takes_shown = 3;  // both, as the screen starts
+    const int  takes         = (view.takes_volume ? 1 : 0) | (view.takes_subtitles ? 2 : 0);
+    if (std::exchange(s_takes_shown, takes) != takes) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_takes(view.takes_volume, view.takes_subtitles));
+    }
+    const bool jellyfin = view.from == From::Jellyfin;
+    want_segments(jellyfin ? view.episode : "", view.series, jellyfin);
+    media::set_still_url(jellyfin ? view.still.c_str() : "");
     if (gone_only_briefly(view)) {
         return;
     }
@@ -496,7 +548,7 @@ void show_media()
     const std::string title   = on ? view.title : "";
     // An idle speaker has nothing on: to look at, it is off.
     const std::string state   = view.state == "idle" ? "OFF" : upper(view.state);
-    if (!view.jellyfin) {
+    if (view.from == From::Speaker) {
         s_muted.store(view.muted, std::memory_order_relaxed);
     }
     const bool art_coming = ask_for_art(view.picture, title);
@@ -676,8 +728,11 @@ void send_volume(void *)
         return;
     }
     s_volume_sent_us.store(esp_timer_get_time(), std::memory_order_relaxed);
-    if (s_on_jellyfin.load(std::memory_order_relaxed)) {
+    if (on(From::Jellyfin)) {
         jellyfin::set_volume(percent);
+        return;
+    }
+    if (on(From::Laptop)) {
         return;
     }
     char value[SERVICE_VALUE_SIZE];
@@ -746,10 +801,21 @@ void on_jellyfin(const jellyfin::NowPlaying &now)
     show_media();
 }
 
+void on_laptop(const laptop::NowPlaying &now)
+{
+    std::lock_guard<std::mutex> hold(s_media_lock);
+    s_laptop_view = laptop_view(now);
+    show_media();
+}
+
 void on_seek(int position_s)
 {
-    if (s_on_jellyfin.load(std::memory_order_relaxed)) {
+    if (on(From::Jellyfin)) {
         jellyfin::seek(position_s);
+        return;
+    }
+    if (on(From::Laptop)) {
+        laptop::seek(position_s);
         return;
     }
     ESP_ERROR_CHECK_WITHOUT_ABORT(hass::ws::call_service_with(
@@ -776,16 +842,20 @@ void on_media(ui::MediaAction action)
 {
     switch (action) {
         case ui::MediaAction::PlayPause:
-            if (s_on_jellyfin.load(std::memory_order_relaxed)) {
+            if (on(From::Jellyfin)) {
                 jellyfin::play_pause();
+            } else if (on(From::Laptop)) {
+                laptop::play_pause();
             } else {
                 hass::ws::call_service("media_player", "media_play_pause", MEDIA_SPEAKER);
             }
             break;
         case ui::MediaAction::Previous:
         case ui::MediaAction::Next:
-            if (s_on_jellyfin.load(std::memory_order_relaxed)) {
+            if (on(From::Jellyfin)) {
                 play_neighbour(action == ui::MediaAction::Next);
+            } else if (on(From::Laptop)) {
+                action == ui::MediaAction::Next ? laptop::next() : laptop::previous();
             } else {
                 hass::ws::call_service("media_player",
                                        action == ui::MediaAction::Next ? "media_next_track"
@@ -800,6 +870,9 @@ void on_media(ui::MediaAction action)
             nudge_volume(VOLUME_STEP);
             break;
         case ui::MediaAction::Mute: {
+            if (!on(From::Speaker)) {
+                break;
+            }
             const bool muted = s_muted.load(std::memory_order_relaxed);
             ESP_ERROR_CHECK_WITHOUT_ABORT(
                 hass::ws::call_service_with("media_player", "volume_mute", MEDIA_SPEAKER,
@@ -807,7 +880,7 @@ void on_media(ui::MediaAction action)
             break;
         }
         case ui::MediaAction::Subtitles:
-            if (s_on_jellyfin.load(std::memory_order_relaxed)) {
+            if (on(From::Jellyfin)) {
                 jellyfin::toggle_subtitles();
             }
             break;

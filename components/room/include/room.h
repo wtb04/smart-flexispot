@@ -3,6 +3,7 @@
 #include "esp_err.h"
 #include "ha_ws_protocol.h"
 #include "jellyfin_protocol.h"
+#include "laptop_protocol.h"
 
 #include <string>
 #include <vector>
@@ -29,6 +30,9 @@ void on_media(ui::MediaAction action);
 
 /** What Jellyfin's followed session plays, from its socket's task. */
 void on_jellyfin(const jellyfin::NowPlaying &now);
+
+/** What Desk Link says plays on a laptop, from the server's task. */
+void on_laptop(const laptop::NowPlaying &now);
 
 /** Jumps the playing video to `position_s`. */
 void on_seek(int position_s);

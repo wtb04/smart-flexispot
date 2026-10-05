@@ -201,6 +201,13 @@ void media_take_remote(bool remote)
     publish(Topic::Media);
 }
 
+void media_take_takes(bool volume, bool subtitles)
+{
+    s_media.takes_volume    = volume;
+    s_media.takes_subtitles = subtitles;
+    publish(Topic::Media);
+}
+
 void media_take_video(bool seeks)
 {
     if (s_gone.timer != nullptr) {
@@ -280,12 +287,12 @@ bool media_is_video()
 
 bool media_shows_volume()
 {
-    return s_media.remote || s_media.volume >= 0;
+    return s_media.takes_volume && (s_media.remote || s_media.volume >= 0);
 }
 
 bool media_shows_subtitles()
 {
-    return s_media.remote || s_media.subtitles_available;
+    return s_media.takes_subtitles && (s_media.remote || s_media.subtitles_available);
 }
 
 MediaSkip media_skip_offer()

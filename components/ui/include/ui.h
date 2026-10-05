@@ -242,6 +242,11 @@ esp_err_t set_media_remote(bool remote);
  *  may take neither, as a radio station does. Both until said otherwise. */
 esp_err_t set_media_tracks(bool back, bool on);
 
+/** Whether the player could ever take a volume, and subtitles, from here: a
+ *  laptop's player takes neither, so they are left out rather than faded.
+ *  Both until said otherwise. */
+esp_err_t set_media_takes(bool volume, bool subtitles);
+
 /** Whether a video has subtitles to show, and whether they show. */
 esp_err_t set_media_subtitles(bool available, bool shown);
 
