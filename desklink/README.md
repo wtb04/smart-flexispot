@@ -5,6 +5,10 @@ artist, the cover and where it is, from anything macOS shows under Now Playing,
 YouTube in Safari as much as Spotify. The panel's media card then plays, pauses,
 seeks and skips it.
 
+| The menu | Its settings |
+|---|---|
+| <picture><source media="(prefers-color-scheme: dark)" srcset="shots/menu-dark.png"><img src="shots/menu-light.png" alt="Desk Link's menu, under its icon in the menu bar"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="shots/settings-dark.png"><img src="shots/settings-light.png" alt="Desk Link's settings" width="380"></picture> |
+
 Its menu turns sharing on and off, says what it shares and whether the panel
 answers, and sets the panel's address and key and whether it opens at login.
 
