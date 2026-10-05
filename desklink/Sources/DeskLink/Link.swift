@@ -66,6 +66,7 @@ final class Link: ObservableObject {
     private var beat: Timer?
     private var awake: NSObjectProtocol?
     private var pendingReport: DispatchWorkItem?
+    private var vanishing: DispatchWorkItem?  // nothing playing, passed on once it has lasted
     private var seal: Seal?
     private var coverFrom: Data?   // what artwork and cover are made from
     private var lookedUp = ""      // the browser's video a YouTube thumbnail was asked for
@@ -121,6 +122,8 @@ final class Link: ObservableObject {
     }
 
     private func end() {
+        vanishing?.cancel()
+        vanishing = nil
         beat?.invalidate()
         beat = nil
         if let awake { ProcessInfo.processInfo.endActivity(awake) }
@@ -136,8 +139,25 @@ final class Link: ObservableObject {
         reachesBack = nil
     }
 
+    // Safari lets go of Now Playing for a moment around a pause or a play;
+    // passed on, the panel would hand its buttons to the speaker meanwhile.
+    private static let goneAfter: TimeInterval = 3
+
     private func take(_ new: Track?) {
         guard sharing else { return }
+        vanishing?.cancel()
+        vanishing = nil
+        if new == nil, track != nil {
+            let later = DispatchWorkItem { [weak self] in self?.apply(nil) }
+            vanishing = later
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.goneAfter, execute: later)
+            return
+        }
+        apply(new)
+    }
+
+    private func apply(_ new: Track?) {
+        vanishing = nil
         if let new, Self.browsers.contains(new.bundle), new.title + "\n" + new.artist != lookedUp {
             look(for: new)
         }
