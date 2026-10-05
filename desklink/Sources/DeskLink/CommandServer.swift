@@ -6,6 +6,7 @@ struct Request {
     let path: String
     let headers: [String: String]  // names in lower case
     let body: Data
+    var local = false  // from this Mac itself
 }
 
 struct Response {
@@ -57,7 +58,8 @@ final class CommandServer {
             guard let self else { return }
             var buffer = soFar
             if let data { buffer.append(data) }
-            if let request = Self.parse(buffer) {
+            if var request = Self.parse(buffer) {
+                request.local = Self.local(connection.endpoint)
                 self.answer(connection, self.handle(request))
             } else if done || error != nil || buffer.count > Self.largest {
                 connection.cancel()
@@ -93,6 +95,15 @@ final class CommandServer {
         guard body.count >= length else { return nil }
         return Request(method: String(start[0]), path: String(start[1]), headers: headers,
                        body: Data(body.prefix(length)))
+    }
+
+    private static func local(_ endpoint: NWEndpoint) -> Bool {
+        guard case .hostPort(let host, _) = endpoint else { return false }
+        switch host {
+        case .ipv4(let address): return address == .loopback
+        case .ipv6(let address): return address == .loopback || address == IPv6Address("::ffff:127.0.0.1")
+        default: return false
+        }
     }
 
     private static func reason(_ status: Int) -> String {

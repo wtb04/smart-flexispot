@@ -19,7 +19,11 @@ extension Link {
 
     var health: Health {
         guard sharing else { return .off }
-        return reach == .answering ? .good : reach == .unknown && !key.isEmpty ? .good : .trouble
+        switch reach {
+        case .answering: return reachesBack == false ? .trouble : .good
+        case .unknown: return key.isEmpty ? .trouble : .good
+        case .refused, .unreachable: return .trouble
+        }
     }
 
     var symbol: String {
@@ -113,12 +117,13 @@ private struct Menu: View {
         DisclosureGroup("Panel", isExpanded: $showsSettings) {
             Form {
                 TextField("Address", text: $link.panel, prompt: Text("smart-flexispot"))
-                SecureField("Key", text: $link.key, prompt: Text("LAPTOP_KEY"))
+                SecureField("Key", text: $link.key, prompt: Text("DESK_LINK_KEY"))
+                Toggle("Claude Code sessions", isOn: $link.sharesClaude)
                 Toggle("Open at login", isOn: $link.opensAtLogin)
             }
             .formStyle(.grouped)
             .scrollDisabled(true)
-            .frame(height: 150)
+            .frame(height: 190)
         }
         .font(.subheadline)
     }
@@ -126,7 +131,7 @@ private struct Menu: View {
     private var dot: Color {
         switch link.health {
         case .off: return .secondary
-        case .good: return link.reach == .answering ? .green : .yellow
+        case .good: return link.reach == .answering && link.reachesBack == true ? .green : .yellow
         case .trouble: return .orange
         }
     }
@@ -136,8 +141,13 @@ private struct Menu: View {
         if link.key.isEmpty { return "Needs the panel's key" }
         switch link.reach {
         case .unknown: return "Looking for \(link.panel)"
-        case .answering: return "Connected to \(link.panel)"
-        case .refused: return "\(link.panel) refused the key"
+        case .answering:
+            switch link.reachesBack {
+            case true: return "Connected to \(link.panel)"
+            case false: return "\(link.panel) cannot reach this Mac"
+            default: return "\(link.panel) answers, checking back"
+            }
+        case .refused: return "Wrong key, or not the panel"
         case .unreachable: return "\(link.panel) not reachable"
         }
     }
