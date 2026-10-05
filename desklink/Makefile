@@ -26,6 +26,9 @@ app: $(ADAPTER_BUILD)/MediaRemoteAdapter.framework
 	cp "$$(swift build -c release --arch arm64 --show-bin-path)/DeskLink" "$(APP)/Contents/MacOS/DeskLink"
 	cp -R $(ADAPTER_BUILD)/MediaRemoteAdapter.framework "$(APP)/Contents/Resources/"
 	cp $(ADAPTER)/bin/mediaremote-adapter.pl "$(APP)/Contents/Resources/"
+	xcrun actool "$(CURDIR)/Resources/AppIcon.icon" --compile "$(CURDIR)/$(APP)/Contents/Resources" \
+		--platform macosx --minimum-deployment-target 26.0 --app-icon AppIcon \
+		--output-partial-info-plist "$(CURDIR)/build/icon.plist" >/dev/null  # actool takes no relative path
 	codesign --force --deep --sign "$(SIGN)" "$(APP)"
 
 install: app

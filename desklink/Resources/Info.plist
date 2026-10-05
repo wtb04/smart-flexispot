@@ -8,6 +8,10 @@
     <string>Desk Link</string>
     <key>CFBundleDisplayName</key>
     <string>Desk Link</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundleIconName</key>
+    <string>AppIcon</string>
     <key>CFBundleExecutable</key>
     <string>DeskLink</string>
     <key>CFBundlePackageType</key>
