@@ -280,6 +280,10 @@ esp_err_t set_lights(const char *label, const char *state, bool on);
 /** An empty name hides that button, so fewer lights than slots is fine. */
 esp_err_t set_light(int index, const char *name, const char *state, bool on);
 
+/** The big light or the light scene on: someone is in the room, so the screen
+ *  stays lit. Not the bed light, which is on for sleeping too. */
+esp_err_t set_room_lit(bool lit);
+
 /** An empty label hides the toggle. */
 esp_err_t set_dial_toggle(int index, const char *label, bool on);
 
