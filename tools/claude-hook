@@ -3,17 +3,13 @@
 # Code runs it from its hooks, in the background, with the hook's JSON on
 # stdin; docs/getting-started.md has the settings that do.
 #
-#   CLAUDE_PANEL_KEY  the panel's CLAUDE_KEY, from claude_secrets.h; unset, nothing is sent
-#   CLAUDE_PANEL      where the panel is, smart-flexispot unless set
 #   CLAUDE_MACHINE    what the panel calls this laptop, its host name unless set
 #
-# Only names leave the laptop: a file's name, a command's first word, a search
-# pattern, a host, the step list's lines. Never a prompt, a reply or what is in
-# a file. They and the key go in plain HTTP to whatever answers to
-# CLAUDE_PANEL, so set it to the panel's fixed address on a network you do not
-# trust. Away from the panel it gives up after two seconds, and Claude Code
-# never waits on it.
-[ -n "${CLAUDE_PANEL_KEY:-}" ] || exit 0
+# It hands the event to Desk Link on this laptop, which seals it and passes it
+# on to the panel; without Desk Link running, nothing leaves the laptop. Only
+# names go: a file's name, a command's first word, a search pattern, a host,
+# the step list's lines. Never a prompt, a reply or what is in a file. Claude
+# Code never waits on it.
 command -v jq >/dev/null && command -v curl >/dev/null || exit 0
 
 body=$(jq -c --arg machine "${CLAUDE_MACHINE:-$(hostname -s)}" '
@@ -43,7 +39,6 @@ body=$(jq -c --arg machine "${CLAUDE_MACHINE:-$(hostname -s)}" '
                              text: (.content // "")[0:47]}))})}
      else {} end)') || exit 0
 
-curl -s -m 2 -o /dev/null -X POST \
-    -H "Content-Type: application/json" -H "X-Claude-Key: $CLAUDE_PANEL_KEY" \
-    --data "$body" "http://${CLAUDE_PANEL:-smart-flexispot}/claude"
+curl -s -m 2 -o /dev/null -X POST -H "Content-Type: application/json" \
+    --data "$body" "http://127.0.0.1:47801/claude"
 exit 0

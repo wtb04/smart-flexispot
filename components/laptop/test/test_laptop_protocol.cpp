@@ -73,18 +73,42 @@ TEST(LaptopProtocol, refuses_what_is_not_a_report)
 
 TEST(LaptopProtocol, commands)
 {
-    EXPECT_EQ(laptop::command_body(Command::Pause), R"({"command":"pause"})");
-    EXPECT_EQ(laptop::command_body(Command::Play), R"({"command":"play"})");
-    EXPECT_EQ(laptop::command_body(Command::Next), R"({"command":"next"})");
-    EXPECT_EQ(laptop::command_body(Command::Previous), R"({"command":"previous"})");
-    EXPECT_EQ(laptop::command_body(Command::Seek, 90), R"({"command":"seek","position":90})");
-    EXPECT_EQ(laptop::command_body(Command::Volume, 35), R"({"command":"volume","level":35})");
-    EXPECT_EQ(laptop::command_body(Command::Mute, 1), R"({"command":"mute","muted":true})");
-    EXPECT_EQ(laptop::command_body(Command::Mute, 0), R"({"command":"mute","muted":false})");
+    EXPECT_EQ(laptop::command_body(Command::Pause, 0, 5), R"({"type":"command","at":5,"command":"pause"})");
+    EXPECT_EQ(laptop::command_body(Command::Play, 0, 5), R"({"type":"command","at":5,"command":"play"})");
+    EXPECT_EQ(laptop::command_body(Command::Next, 0, 5), R"({"type":"command","at":5,"command":"next"})");
+    EXPECT_EQ(laptop::command_body(Command::Seek, 90, 5),
+              R"({"type":"command","at":5,"command":"seek","position":90})");
+    EXPECT_EQ(laptop::command_body(Command::Volume, 35, 5),
+              R"({"type":"command","at":5,"command":"volume","level":35})");
+    EXPECT_EQ(laptop::command_body(Command::Mute, 1, 5), R"({"type":"command","at":5,"command":"mute","muted":true})");
 }
 
-TEST(LaptopProtocol, art_path)
+TEST(LaptopProtocol, head)
 {
-    EXPECT_EQ(laptop::art_path("3f2a"), "/art.jpg?v=3f2a");
-    EXPECT_EQ(laptop::art_path(""), "") << "no picture, nothing to fetch";
+    laptop::Head      head;
+    const std::string state = R"({"type":"state","at":1791223792000,"port":47801})";
+    ASSERT_TRUE(laptop::read_head(state.data(), state.size(), head));
+    EXPECT_EQ(head.type, "state");
+    EXPECT_EQ(head.at_ms, 1791223792000) << "milliseconds, past what an int holds";
+    const std::string untimed = R"({"type":"state"})";
+    EXPECT_FALSE(laptop::read_head(untimed.data(), untimed.size(), head)) << "without when, it cannot be fresh";
+}
+
+TEST(LaptopProtocol, answers)
+{
+    EXPECT_EQ(laptop::pong_body("smart-flexispot", "v0.9.0", 1, 7),
+              R"({"type":"pong","at":7,"panel":"smart-flexispot","firmware":"v0.9.0","reaches":true})");
+    EXPECT_EQ(laptop::pong_body("p", "f", -1, 7), R"({"type":"pong","at":7,"panel":"p","firmware":"f"})")
+        << "not said before the panel has tried";
+    EXPECT_EQ(laptop::ping_body(7), R"({"type":"ping","at":7})");
+    EXPECT_EQ(laptop::ok_body(7), R"({"type":"ok","at":7})");
+    EXPECT_EQ(laptop::cover_body("3f2a", 7), R"({"type":"cover","at":7,"art":"3f2a"})");
+}
+
+TEST(LaptopProtocol, claude_event)
+{
+    const std::string message = R"({"type":"claude","at":7,"event":{"machine":"wtb-mbp","event":"Stop"}})";
+    EXPECT_EQ(laptop::claude_event(message.data(), message.size()), R"({"machine":"wtb-mbp","event":"Stop"})");
+    const std::string empty = R"({"type":"claude","at":7})";
+    EXPECT_EQ(laptop::claude_event(empty.data(), empty.size()), "");
 }
