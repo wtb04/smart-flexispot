@@ -12,6 +12,8 @@ export SIM_NO_WORK=1  # the timetable alone, never the work calendar
 ./build/sim --press amm --page 0 --tap 72,656 --tap 372,631 --shot 9 --out $S/focus.png >/dev/null 2>&1
 ./build/sim --press amm --page 0 --tap 72,656 --tap 372,631 --tap 538,423 --shot 8 --out $S/focus-full.png >/dev/null 2>&1
 ./build/sim --press amm --page 0 --tap 870,46 --tap 1210,152 --shot 6 --out $S/cinema.png >/dev/null 2>&1
+./build/sim --press ammmm --page 0 --tap 870,46 --shot 6 --out $S/laptop-card.png >/dev/null 2>&1
+./build/sim --press ammmm --page 0 --tap 870,46 --tap 1210,152 --shot 6 --out $S/laptop.png >/dev/null 2>&1
 ./build/sim --press ammcc --page 0 --wait 1500 --tap 704,400 --wait 800 --tap 497,46 --shot 8 --out $S/claude-waiting.png >/dev/null 2>&1
 ./build/sim --press amm --page 3 --shot 4 --out $S/setup.png >/dev/null 2>&1
 ./build/sim --press amm --page 3 --tap 704,400 --shot 5 --out $S/diagnostics.png >/dev/null 2>&1
