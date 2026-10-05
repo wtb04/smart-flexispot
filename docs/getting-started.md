@@ -101,7 +101,7 @@ Every one of them ends up as plain text in the firmware, in `build/` and on the 
 
 A few things are mine in the code rather than secrets, and are worth a look before the first build:
 
-- **Your Home Assistant entities.** Copy `components/room/room_config.example.h` to `room_config.h` beside it, which git ignores, and put in your readings, lights, thermostat and speaker. Without it the panel is built with the example's.
+- **Your Home Assistant entities.** Copy `components/room/room_config.example.h` to `room_config.h` beside it, which git ignores, and put in your readings, lights, the main light that says someone is in, thermostat and speaker. Without it the panel is built with the example's.
 - **Your favourite playlists**, in the same file, for the music card's popup.
 - **Your desk's height range**, in `idf.py menuconfig`, *Loctek desk control*: 660 to 1310 mm is mine.
 - **Your time zone**, in `idf.py menuconfig`, *Panel time*. Central European Time is the default.

@@ -220,6 +220,13 @@ void lights_take(const char *label, const char *state, bool on)
     publish(Topic::Lights);
 }
 
+void lights_take_room(bool lit)
+{
+    s_lights.room_known = true;
+    s_lights.room_lit   = lit;
+    publish(Topic::Lights);
+}
+
 void lights_take_light(int index, const char *name, const char *state, bool on)
 {
     LightState &light = s_lights.lights[index];

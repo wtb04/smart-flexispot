@@ -169,20 +169,17 @@ void restart_notice_timer(int timeout_ms)
 }
 }  // namespace
 
+bool notice_on_show()
+{
+    return s_notice_card != nullptr && !lv_obj_is_hidden(s_notice_card);
+}
+
 void show_next_notice()
 {
     Notice notice{};
     if (!notices_take_next(notice)) {
         hide_notice();
-        if (s_notice_lit_screen) {
-            s_notice_lit_screen = false;
-            set_screen_state(false);
-        }
         return;
-    }
-    if (!status_state().screen_on) {
-        s_notice_lit_screen = true;
-        set_screen_state(true);
     }
     write_notice(notice);
     raise_notice();
