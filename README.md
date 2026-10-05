@@ -40,7 +40,7 @@ I am not affiliated with, or endorsed by, any of the products or services named 
 - **Films and series.** Follows what plays on Jellyfin, with a cinema view that has the lights and the desk within reach.
 - **Planes overhead.** A live radar with who is flying, where to, their photo and their trail.
 - **The day.** The next lecture, a countdown, and when to leave to get there on time.
-- **Desk Link**, a menu bar app for the Mac: what plays there, YouTube in a browser as much as Spotify, shows on the panel and is steered from it.
+- **Desk Link**, a menu bar app that connects my Mac to the panel: what plays there shows on the panel and is steered from it, and Claude Code's sessions come through it.
 - **Claude Code** on the laptops: a pill in the control bar while a session works, amber when one waits on you.
 - **Focus timer**, a **presence sensor** from your phone, and **diagnostics** for every part, on the panel itself.
 - **A simulator** that runs the real UI on a Mac, and host tests with coverage in CI.
@@ -77,11 +77,11 @@ When something plays on Jellyfin the control bar follows it, and holding it ther
 
 ### The laptop
 
-| On the panel | On the Mac |
-|---|---|
-| ![A video from the laptop in the cinema view](docs/screenshots/laptop.png) | <picture><source media="(prefers-color-scheme: dark)" srcset="desklink/shots/menu-dark.png"><img src="desklink/shots/menu-light.png" alt="Desk Link's menu, under its icon in the menu bar"></picture> |
+![A video from the laptop in the cinema view](docs/screenshots/laptop.png)
 
-[Desk Link](desklink/) is a menu bar app on my Mac. Whatever macOS lists under Now Playing, a YouTube video in Safari as much as a song in Spotify, it tells the panel, with its cover and where it is; a video then shows in the cinema view, music on the media card, and the panel's play, pause, seek, skip and volume go back to the Mac. Jellyfin comes first, then the speaker, then the laptop. Every message each way is sealed with a key the two share, and each pings the other, so the menu says whether the link holds both ways.
+[Desk Link](desklink/), a small menu bar app on my Mac, connects the laptop to the panel. Whatever plays on the Mac shows on the panel with its cover, a video in the cinema view and music on the media card, and the panel's buttons pause, seek, skip and change the volume there. Claude Code's sessions come through it too. Jellyfin comes first, then the speaker, then the laptop. Everything the two send each other is encrypted with a key they share, and each regularly checks that the other is still there.
+
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="desklink/shots/menu-dark.png"><img src="desklink/shots/menu-light.png" alt="Desk Link's menu, under its icon in the menu bar" width="407"></picture></p>
 
 ### Planes overhead
 
