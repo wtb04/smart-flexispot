@@ -11,17 +11,22 @@ struct DeskLinkApp: App {
             Image(systemName: link.symbol)
         }
         .menuBarExtraStyle(.window)
+
+        Settings {
+            SettingsView(link: link)
+        }
     }
 }
 
 extension Link {
-    enum Health { case off, good, trouble }
+    enum Health { case off, good, checking, trouble }
 
     var health: Health {
         guard sharing else { return .off }
+        if key.isEmpty { return .trouble }
         switch reach {
-        case .answering: return reachesBack == false ? .trouble : .good
-        case .unknown: return key.isEmpty ? .trouble : .good
+        case .answering: return reachesBack == false ? .trouble : reachesBack == true ? .good : .checking
+        case .unknown: return .checking
         case .refused, .unreachable: return .trouble
         }
     }
@@ -29,161 +34,183 @@ extension Link {
     var symbol: String {
         switch health {
         case .off: return "antenna.radiowaves.left.and.right.slash"
-        case .good: return track != nil ? "dot.radiowaves.left.and.right" : "antenna.radiowaves.left.and.right"
+        case .good, .checking: return track != nil ? "dot.radiowaves.left.and.right" : "antenna.radiowaves.left.and.right"
         case .trouble: return "exclamationmark.triangle"
+        }
+    }
+
+    var dot: Color {
+        switch health {
+        case .off: return .secondary
+        case .good: return .green
+        case .checking: return .yellow
+        case .trouble: return .orange
+        }
+    }
+
+    var status: String {
+        guard sharing else { return "Not sharing" }
+        if key.isEmpty { return "Needs the panel's key" }
+        switch reach {
+        case .unknown: return "Looking for \(panel)"
+        case .answering:
+            switch reachesBack {
+            case true: return "Connected to \(panel)"
+            case false: return "\(panel) cannot reach this Mac"
+            default: return "Connected, checking back"
+            }
+        case .refused: return "Wrong key, or not the panel"
+        case .unreachable: return "\(panel) not reachable"
         }
     }
 }
 
 private struct Menu: View {
     @ObservedObject var link: Link
-    @State private var showsSettings = false
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
-        VStack(spacing: 12) {
-            header
-            if link.sharing { playing }
-            if link.sharing && link.asksForKeys {
-                HStack {
-                    Text("The panel can step this display's volume").font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Allow") { VolumeKeys.askToAllow() }.buttonStyle(.glass).controlSize(.small)
-                }
-            }
-            settings
-            HStack {
+        VStack(spacing: 10) {
+            HStack(spacing: 8) {
+                Circle().fill(link.dot).frame(width: 8, height: 8)
+                Text(link.status).font(.callout).lineLimit(1)
                 Spacer()
-                Button("Quit Desk Link") { NSApplication.shared.terminate(nil) }
-                    .buttonStyle(.glass)
+                Toggle("Share with the desk panel", isOn: $link.sharing)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
                     .controlSize(.small)
             }
-        }
-        .padding(14)
-        .frame(width: 320)
-    }
-
-    private var header: some View {
-        HStack(alignment: .center, spacing: 10) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Desk Link").font(.headline)
-                HStack(spacing: 6) {
-                    Circle().fill(dot).frame(width: 8, height: 8)
-                    Text(status).font(.subheadline).foregroundStyle(.secondary)
-                }
+            if link.sharing {
+                Playing(link: link)
             }
-            Spacer()
-            Toggle("Share with the desk panel", isOn: $link.sharing)
-                .labelsHidden()
-                .toggleStyle(.switch)
+            if link.sharing && link.asksForKeys {
+                Button {
+                    VolumeKeys.askToAllow()
+                } label: {
+                    Label("Let the panel step this display's volume", systemImage: "speaker.wave.2")
+                        .font(.caption)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+            }
+            HStack {
+                Button("Settings…") {
+                    NSApp.activate()
+                    openSettings()
+                }
+                Spacer()
+                Button("Quit") { NSApplication.shared.terminate(nil) }
+            }
+            .buttonStyle(.glass)
+            .controlSize(.small)
         }
+        .padding(12)
+        .frame(width: 300)
     }
+}
 
-    @ViewBuilder private var playing: some View {
-        if let track = link.track {
-            HStack(spacing: 12) {
-                cover
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(track.title).font(.callout.weight(.semibold)).lineLimit(2)
+private struct Playing: View {
+    @ObservedObject var link: Link
+
+    var body: some View {
+        HStack(spacing: 10) {
+            cover
+            VStack(alignment: .leading, spacing: 3) {
+                if let track = link.track {
+                    Text(track.title).font(.callout.weight(.medium)).lineLimit(1)
                     Text([track.artist, track.app].filter { !$0.isEmpty }.joined(separator: ", "))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
-                    if track.duration > 0 { Progress(track: track) }
+                    if track.duration > 0 { Bar(track: track) }
+                } else {
+                    Text("Nothing playing").font(.callout).foregroundStyle(.secondary)
                 }
-                Spacer(minLength: 0)
             }
-            .padding(10)
-            .glassEffect(.regular, in: .rect(cornerRadius: 14))
-        } else {
-            HStack {
-                Image(systemName: "music.note").foregroundStyle(.tertiary)
-                Text("Nothing playing").foregroundStyle(.secondary)
-                Spacer()
+            Spacer(minLength: 0)
+            if let track = link.track {
+                Button {
+                    link.playPause()
+                } label: {
+                    Image(systemName: track.playing ? "pause.fill" : "play.fill").frame(width: 14, height: 14)
+                }
+                .buttonStyle(.glass)
+                .buttonBorderShape(.circle)
             }
-            .padding(10)
-            .glassEffect(.regular, in: .rect(cornerRadius: 14))
         }
+        .padding(8)
+        .glassEffect(.regular, in: .rect(cornerRadius: 12))
     }
 
     @ViewBuilder private var cover: some View {
-        let shape = RoundedRectangle(cornerRadius: 8, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
         if let image = link.cover {
             Image(nsImage: image)
                 .resizable()
                 .aspectRatio(contentMode: .fill)
-                .frame(width: 72, height: 52)
+                .frame(width: 44, height: 44)
                 .clipShape(shape)
         } else {
             shape.fill(.quaternary)
-                .frame(width: 72, height: 52)
-                .overlay(Image(systemName: "play.rectangle").foregroundStyle(.secondary))
-        }
-    }
-
-    private var settings: some View {
-        DisclosureGroup("Panel", isExpanded: $showsSettings) {
-            Form {
-                TextField("Address", text: $link.panel, prompt: Text("smart-flexispot"))
-                SecureField("Key", text: $link.key, prompt: Text("DESK_LINK_KEY"))
-                Toggle("Claude Code sessions", isOn: $link.sharesClaude)
-                Toggle("Open at login", isOn: $link.opensAtLogin)
-            }
-            .formStyle(.grouped)
-            .scrollDisabled(true)
-            .frame(height: 190)
-        }
-        .font(.subheadline)
-    }
-
-    private var dot: Color {
-        switch link.health {
-        case .off: return .secondary
-        case .good: return link.reach == .answering && link.reachesBack == true ? .green : .yellow
-        case .trouble: return .orange
-        }
-    }
-
-    private var status: String {
-        guard link.sharing else { return "Not sharing" }
-        if link.key.isEmpty { return "Needs the panel's key" }
-        switch link.reach {
-        case .unknown: return "Looking for \(link.panel)"
-        case .answering:
-            switch link.reachesBack {
-            case true: return "Connected to \(link.panel)"
-            case false: return "\(link.panel) cannot reach this Mac"
-            default: return "\(link.panel) answers, checking back"
-            }
-        case .refused: return "Wrong key, or not the panel"
-        case .unreachable: return "\(link.panel) not reachable"
+                .frame(width: 44, height: 44)
+                .overlay(Image(systemName: link.track == nil ? "music.note" : "play.rectangle").foregroundStyle(.secondary))
         }
     }
 }
 
-private struct Progress: View {
+private struct Bar: View {
     let track: Track
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
-            let at = track.position(now: context.date)
-            VStack(alignment: .leading, spacing: 2) {
-                ProgressView(value: min(at, track.duration), total: track.duration)
-                    .progressViewStyle(.linear)
-                    .controlSize(.small)
-                HStack {
-                    Text(clock(at))
-                    Spacer()
-                    Text(clock(track.duration))
-                }
-                .font(.caption2.monospacedDigit())
-                .foregroundStyle(.secondary)
-            }
+            ProgressView(value: min(track.position(now: context.date), track.duration), total: track.duration)
+                .progressViewStyle(.linear)
+                .controlSize(.mini)
+                .tint(.secondary)
         }
     }
+}
 
-    private func clock(_ seconds: Double) -> String {
-        let whole = Int(seconds)
-        let (h, m, s) = (whole / 3600, whole / 60 % 60, whole % 60)
-        return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
+private struct SettingsView: View {
+    @ObservedObject var link: Link
+
+    var body: some View {
+        Form {
+            Section("Panel") {
+                TextField("Address", text: $link.panel, prompt: Text("smart-flexispot"))
+                SecureField("Key", text: $link.key, prompt: Text("DESK_LINK_KEY, 64 hex digits"))
+                LabeledContent("Link") {
+                    HStack(spacing: 6) {
+                        Circle().fill(link.dot).frame(width: 8, height: 8)
+                        Text(link.status)
+                    }
+                }
+                if !link.firmware.isEmpty {
+                    LabeledContent("Firmware", value: link.firmware)
+                }
+            }
+            Section("Share") {
+                Toggle("What plays on this Mac", isOn: $link.sharing)
+                Toggle("Claude Code sessions", isOn: $link.sharesClaude)
+            }
+            Section {
+                LabeledContent("Volume keys") {
+                    if VolumeKeys.allowed {
+                        Text("Allowed").foregroundStyle(.secondary)
+                    } else {
+                        Button("Allow…") { VolumeKeys.askToAllow() }
+                    }
+                }
+            } footer: {
+                Text("For a display whose volume macOS cannot set: with MonitorControl running, the panel's − and + press the volume keys.")
+            }
+            Section {
+                Toggle("Open at login", isOn: $link.opensAtLogin)
+            }
+        }
+        .formStyle(.grouped)
+        .frame(width: 440)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
