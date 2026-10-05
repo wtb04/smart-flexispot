@@ -178,6 +178,8 @@ void show_desk_travel(lv_obj_t *obj, bool travelling);  // after the preset the 
 void show_next_notice();
 void paint_notice_corner();  // when the notice on show came, and how many wait
 void create_notice_card();
+/** The screen going dark by itself, and lighting again: see screen_rules.h. */
+void start_screen_schedule();
 /** The notice over the pages or a fullscreen view, the dock left clear. */
 void place_notice();
 /** The dock: the tabs, Stand and Sit, the height that folds the desk out. */
@@ -221,6 +223,9 @@ void build_favourites(lv_obj_t *screen);  // over the pages and the music view, 
 // Jellyfin fullscreen: the film, its controls, the desk and the lights.
 void build_cinema(lv_obj_t *screen);
 void open_cinema();
+/** How long the open film leaves the screen lit untouched: 0 with none open,
+ *  screen_rules::kNever while it keeps it lit. */
+std::int64_t cinema_dark_after();
 void build_music(lv_obj_t *screen);
 void open_music();
 // The time beside a fullscreen view's chip back, faded with its other buttons,
