@@ -16,6 +16,7 @@ This project's own code, documents and board are copyright 2026 Wouter ten Brink
 | Montserrat, drawn into the fonts in [components/ui/fonts](components/ui/fonts) and LVGL's own | | SIL Open Font License 1.1 |
 | Font Awesome Free 5's icons, in LVGL's built-in fonts | managed component | SIL Open Font License 1.1 |
 | Natural Earth, drawn into the map | [tools/make_map.py](tools/make_map.py) | public domain |
+| mediaremote-adapter, built into Desk Link | [desklink/Vendor/mediaremote-adapter](https://github.com/ungive/mediaremote-adapter), a submodule | BSD-3-Clause, its [LICENSE](https://github.com/ungive/mediaremote-adapter/blob/master/LICENSE) |
 
 Not this project's, and not under its licence either:
 

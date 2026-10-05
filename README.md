@@ -40,6 +40,7 @@ I am not affiliated with, or endorsed by, any of the products or services named 
 - **Films and series.** Follows what plays on Jellyfin, with a cinema view that has the lights and the desk within reach.
 - **Planes overhead.** A live radar with who is flying, where to, their photo and their trail.
 - **The day.** The next lecture, a countdown, and when to leave to get there on time.
+- **Desk Link**, a menu bar app for the Mac: what plays there, YouTube in a browser as much as Spotify, shows on the panel and is steered from it.
 - **Claude Code** on the laptops: a pill in the control bar while a session works, amber when one waits on you.
 - **Focus timer**, a **presence sensor** from your phone, and **diagnostics** for every part, on the panel itself.
 - **A simulator** that runs the real UI on a Mac, and host tests with coverage in CI.
@@ -74,6 +75,10 @@ One button goes between Stand and Sit, showing which way while the desk moves, a
 
 When something plays on Jellyfin the control bar follows it, and holding it there sends the desk to its viewing height. The cinema view has the episode's still, when it ends, skip intro, next episode, ten seconds back and on, subtitles and volume, with the lights and the desk within reach. A swipe across the picture goes to the episode before or after. Only what the player playing would act on is shown.
 
+### The laptop
+
+[Desk Link](desklink/) is a menu bar app on my Mac. Whatever macOS lists under Now Playing, a YouTube video in Safari as much as a song in Spotify, it tells the panel, with its cover and where it is; a video then shows in the cinema view, music on the media card, and the panel's play, pause, seek, skip and volume go back to the Mac. Jellyfin comes first, then the speaker, then the laptop. Every message each way is sealed with a key the two share, and each pings the other, so the menu says whether the link holds both ways.
+
 ### Planes overhead
 
 | On Home | The radar page |
@@ -102,7 +107,7 @@ A focus timer in rounds, 25 minutes on and 5 off by default, from its button at 
 |---|---|
 | ![The Claude Code card](docs/screenshots/claude.png) | ![A session waiting on you](docs/screenshots/claude-waiting.png) |
 
-While a Claude Code session on one of my laptops works, a pill in the control bar shows it, turning amber with a chime when one waits for me to allow something; tapped, it shows each session's project, steps and what it did last. The laptops tell the panel through Claude Code's hooks, and only names leave them, never a prompt, a reply or a file's contents.
+While a Claude Code session on one of my laptops works, a pill in the control bar shows it, turning amber with a chime when one waits for me to allow something; tapped, it shows each session's project, steps and what it did last. The laptops tell the panel through Claude Code's hooks and Desk Link, sealed, and only names leave them, never a prompt, a reply or a file's contents.
 
 ### Away from the desk
 
@@ -167,6 +172,7 @@ How the panel is put together inside, the desk protocol, and how to run the test
 - [iMicknl/LoctekMotion_IoT](https://github.com/iMicknl/LoctekMotion_IoT) for working out the control box protocol and pinouts. This project would not exist without it.
 - [adsb.lol](https://adsb.lol), [adsb.fi](https://adsb.fi), [adsbdb](https://www.adsbdb.com), [hexdb.io](https://hexdb.io) and [Planespotters](https://www.planespotters.net) for the planes, and the photographers for their photos.
 - [Natural Earth](https://www.naturalearthdata.com) for the map.
+- [ungive/mediaremote-adapter](https://github.com/ungive/mediaremote-adapter), through which Desk Link reads macOS's Now Playing.
 
 ## Licence
 

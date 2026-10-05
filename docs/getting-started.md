@@ -142,9 +142,18 @@ tools/ota.sh panel --now      # install right away instead of when you tap Updat
 
 An update waits on the Setup page until you tap it, and is refused while the desk moves. A new firmware is on trial until it gets back on Wi-Fi. If it does not within three minutes, the panel goes back to the version before and tells you so.
 
-## 7. Claude Code on your laptops
+## 7. Desk Link on your Mac
 
-Optional. Each laptop needs Desk Link, a menu bar app of mine that is not published: it tells the panel what plays on the Mac and passes these events on, every message sealed with the key in `desk_link_secrets.h`. It also needs `jq` and `curl`, which macOS has, and this repository's `tools/claude-hook`. In `~/.claude/settings.json`, run it on every event that changes what the panel shows; `async` keeps Claude Code from ever waiting on it:
+Optional. [Desk Link](../desklink/) is a menu bar app that tells the panel what plays on the Mac and takes its play, pause, seek and volume back, and passes Claude Code's events on, every message sealed with the key in `desk_link_secrets.h`. It needs macOS 26, Xcode's command line tools and CMake:
+
+```sh
+git submodule update --init
+cd desklink && make install
+```
+
+Then give it the key from its menu, under Panel, or before its first start with `defaults write nl.w-tb.desklink key <DESK_LINK_KEY>`, which it moves into the keychain. The menu says whether the panel answers, and whether the panel reaches the Mac back; a firewall that lets Desk Link out but keeps port 47801 shut stops the commands.
+
+For Claude Code, each laptop also needs `jq` and `curl`, which macOS has, and this repository's `tools/claude-hook`. In `~/.claude/settings.json`, run it on every event that changes what the panel shows; `async` keeps Claude Code from ever waiting on it:
 
 ```json
 {
