@@ -375,6 +375,7 @@ Slot<SegmentsArgs>   p_segments;
 Slot<bool>           p_media_seeks;
 Slot<bool>           p_media_remote;
 Slot<std::uint8_t>   p_media_takes;  // bit 0 a volume, bit 1 subtitles
+Slot<bool>           p_pause_settles;
 Slot<std::uint8_t>   p_subtitles;  // 1 for some to show, 2 for shown
 Slot<const void *>   p_still;
 Slot<const void *>   p_art_large;
@@ -631,6 +632,9 @@ void apply_media_updates()
     }
     if (bool remote = false; take(p_media_remote, remote)) {
         media_take_remote(remote);
+    }
+    if (bool settles = true; take(p_pause_settles, settles)) {
+        media_take_pause_settles(settles);
     }
     if (std::uint8_t takes = 0; take(p_media_takes, takes)) {
         media_take_takes((takes & 1) != 0, (takes & 2) != 0);
@@ -903,6 +907,12 @@ esp_err_t set_cinema_still(const void *pixels)
 esp_err_t set_media_remote(bool remote)
 {
     put(p_media_remote, remote);
+    return ESP_OK;
+}
+
+esp_err_t set_media_pause_settles(bool settles)
+{
+    put(p_pause_settles, settles);
     return ESP_OK;
 }
 

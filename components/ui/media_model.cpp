@@ -144,7 +144,7 @@ void media_apply_track(const char *source, const char *title, const char *artist
     copy(s_media.state, sizeof(s_media.state), state != nullptr ? state : "--");
     s_media.has_track    = has_track;
     s_media.controllable = controllable;
-    if (playing || !has_track) {
+    if (playing || !has_track || !s_media.pause_settles) {
         cancel_pause_settle();
         s_media.playing = playing;
     } else if (s_media.playing && s_pause_timer == nullptr) {
@@ -199,6 +199,11 @@ void media_take_remote(bool remote)
 {
     s_media.remote = remote;
     publish(Topic::Media);
+}
+
+void media_take_pause_settles(bool settles)
+{
+    s_media.pause_settles = settles;
 }
 
 void media_take_takes(bool volume, bool subtitles)

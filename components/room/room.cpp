@@ -544,6 +544,11 @@ void show_media()
     if (std::exchange(s_takes_shown, takes) != takes) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_takes(view.takes_volume, view.takes_subtitles));
     }
+    static bool s_settles_shown = true;
+    const bool  settles         = view.from == From::Speaker;
+    if (std::exchange(s_settles_shown, settles) != settles) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_pause_settles(settles));
+    }
     const bool jellyfin = view.from == From::Jellyfin;
     const bool video    = jellyfin || view.video;
     want_segments(jellyfin ? view.episode : "", view.series, video);
