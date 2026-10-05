@@ -98,6 +98,12 @@ final class Link: ObservableObject {
         if sharing { begin() }
     }
 
+    /// The menu's own button, as the panel's is.
+    func playPause() {
+        guard let track else { return }
+        source.send(track.playing ? .pause : .play)
+    }
+
     private func begin() {
         // App Nap holds a menu bar app's timers back by minutes, past the
         // panel's patience, which then takes the Mac for gone.

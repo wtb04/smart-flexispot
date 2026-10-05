@@ -387,7 +387,7 @@ void build_volume(std::int32_t x, std::int32_t y, std::int32_t w)
     s_volume_level = theme::make_label(s_volume, "", theme::text, fonts::size_28());
     lv_obj_align(s_volume_level, LV_ALIGN_RIGHT_MID, -VOLUME_INSET, 0);
     lv_obj_set_clickable(s_volume_level, false);
-    s_volume_steps = make_volume_steps(s_volume, speaker, s_volume_level, s_volume_fill, fonts::size_28(), VOLUME_INSET);
+    s_volume_steps = make_volume_steps(s_volume, speaker, s_volume_level, s_volume_fill, fonts::size_28());
 }
 
 void preset(int index)

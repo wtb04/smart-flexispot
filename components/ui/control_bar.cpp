@@ -513,7 +513,7 @@ void build_media_card(lv_obj_t *screen)
     s_volume_text = theme::make_label(s_volume, "", theme::text, fonts::size_22());
     lv_obj_align(s_volume_text, LV_ALIGN_RIGHT_MID, -VOLUME_INSET, 0);
     lv_obj_set_clickable(s_volume_text, false);
-    s_volume_steps = make_volume_steps(s_volume, speaker, s_volume_text, s_volume_fill, fonts::size_22(), VOLUME_INSET);
+    s_volume_steps = make_volume_steps(s_volume, speaker, s_volume_text, s_volume_fill, fonts::size_22());
     // The favourites for music; nobody picks another while watching, so for a
     // video the subtitles, as the cinema view has them.
     s_card_extra = card_button(sound, LV_SYMBOL_LIST, STEP_W);
