@@ -302,6 +302,9 @@ private struct SettingsView: View {
             .padding(.bottom, 18)
         }
         .toolbar(removing: .title)
+        // With no title, the toolbar's own background was left, a small
+        // rectangle at the top while the window is not in front.
+        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         .containerBackground(.thickMaterial, for: .window)
         // Opened, nothing is being typed in yet: the address is not selected.
         .onAppear { DispatchQueue.main.async { NSApp.keyWindow?.makeFirstResponder(nil) } }
