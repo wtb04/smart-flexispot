@@ -41,6 +41,7 @@ final class Link: ObservableObject {
     private var server: CommandServer!
     private var artwork: Artwork?
     private var beat: Timer?
+    private var awake: NSObjectProtocol?
     private var pendingReport: DispatchWorkItem?
     private let machine = Host.current().localizedName ?? ProcessInfo.processInfo.hostName
 
@@ -71,6 +72,10 @@ final class Link: ObservableObject {
     }
 
     private func begin() {
+        // App Nap holds a menu bar app's timers back by minutes, past the
+        // panel's patience, which then takes the Mac for gone.
+        awake = ProcessInfo.processInfo.beginActivity(options: .userInitiatedAllowingIdleSystemSleep,
+                                                      reason: "Telling the desk panel what plays")
         source.start()
         server.start()
         beat = Timer.scheduledTimer(withTimeInterval: Self.heartbeat, repeats: true) { [weak self] _ in
@@ -83,6 +88,8 @@ final class Link: ObservableObject {
     private func end() {
         beat?.invalidate()
         beat = nil
+        if let awake { ProcessInfo.processInfo.endActivity(awake) }
+        awake = nil
         source.stop()
         server.stop()
         track = nil
