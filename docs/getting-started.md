@@ -95,7 +95,7 @@ Every one of them ends up as plain text in the firmware, in `build/` and on the 
 | `components/travel/include/travel_secrets.h` | A travel service and its key. Mine is a separate project that is not published; the panel asks it the way to the next event, in the format `components/travel/test/test_travel_parse.cpp` shows. Leave it empty and there is no route |
 | `components/ble/include/ble_secrets.h` | Your phone's Bluetooth identity key, for presence |
 | `components/ota/include/ota_secrets.h` | A key for updates over Wi-Fi |
-| `components/claude/include/claude_secrets.h` | A key for the laptops' Claude Code sessions, if you want them |
+| `components/laptop/include/desk_link_secrets.h` | The key a laptop's Desk Link seals what it tells the panel with, if you want a laptop's Now Playing and Claude Code sessions on it |
 
 ### Make it yours
 
@@ -144,11 +144,10 @@ An update waits on the Setup page until you tap it, and is refused while the des
 
 ## 7. Claude Code on your laptops
 
-Optional. Each laptop needs `jq` and `curl`, which macOS has, and this repository's `tools/claude-hook`. In `~/.claude/settings.json`, give it the key from `claude_secrets.h` and run it on every event that changes what the panel shows; `async` keeps Claude Code from ever waiting on it:
+Optional. Each laptop needs Desk Link, a menu bar app of mine that is not published: it tells the panel what plays on the Mac and passes these events on, every message sealed with the key in `desk_link_secrets.h`. It also needs `jq` and `curl`, which macOS has, and this repository's `tools/claude-hook`. In `~/.claude/settings.json`, run it on every event that changes what the panel shows; `async` keeps Claude Code from ever waiting on it:
 
 ```json
 {
-  "env": { "CLAUDE_PANEL_KEY": "the key in claude_secrets.h" },
   "hooks": {
     "SessionStart":      [{ "hooks": [{ "type": "command", "command": "~/smart-flexispot/tools/claude-hook", "async": true }] }],
     "UserPromptSubmit":  [{ "hooks": [{ "type": "command", "command": "~/smart-flexispot/tools/claude-hook", "async": true }] }],
@@ -164,4 +163,4 @@ Optional. Each laptop needs `jq` and `curl`, which macOS has, and this repositor
 }
 ```
 
-It finds the panel at `smart-flexispot`, the name it gives the router; `CLAUDE_PANEL` in `env` points it elsewhere, and `CLAUDE_MACHINE` sets what the panel calls the laptop, its host name otherwise. Away from the panel's network it gives up after two seconds. It sends the key and the project's name in plain HTTP to whatever answers to that name, so on a network you do not trust, point `CLAUDE_PANEL` at the panel's fixed address or leave the hook out.
+The hook hands each event to Desk Link on the laptop itself, and Desk Link seals it and passes it on, so nothing a network can read leaves the laptop. `CLAUDE_MACHINE` in `env` sets what the panel calls the laptop, its host name otherwise. Without Desk Link running, the events go nowhere.

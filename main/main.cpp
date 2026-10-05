@@ -4,6 +4,7 @@
 #include "board.h"
 #include "claude_feed.h"
 #include "laptop.h"
+#include "media.h"
 #include "desk.h"
 #include "diagnostics.h"
 #include "focus.h"
@@ -478,8 +479,8 @@ extern "C" void app_main(void)
         .relay   = ble::desk::send_update,
     }));
     tell_rolled_back();
-    ESP_ERROR_CHECK_WITHOUT_ABORT(claude_feed::start());
-    ESP_ERROR_CHECK_WITHOUT_ABORT(laptop::start(room::on_laptop));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(laptop::start({.playing = room::on_laptop, .claude = claude_feed::take}));
+    media::set_fetcher(laptop::kCoverScheme, laptop::fetch_cover);
     ESP_ERROR_CHECK_WITHOUT_ABORT(remote::start());
     ESP_ERROR_CHECK(wallclock::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("network"));

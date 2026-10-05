@@ -1,22 +1,27 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 
-// What Desk Link, on a laptop, says is playing there, and what the panel asks
-// of it back. Pure, so the host tests can run it.
+// What Desk Link, on a laptop, says to the panel and the panel to it, each
+// message sealed as link_envelope.h has it. Pure, so the host tests can run it.
 //
-// The laptop posts a report to the panel's /laptop whenever what plays changes
-// and every few seconds while anything does:
-//   {"machine": "wtb-mbp", "port": 47801, "app": "Safari", "playing": true,
+// The laptop says how it is, "state", to the panel's /link whenever what
+// plays changes and every ten seconds whatever it is, and the panel answers
+// "pong": that it is the panel, and whether it reaches the laptop back.
+//   {"type": "state", "at": 1791223792000, "machine": "wtb-mbp", "port": 47801,
+//    "app": "Safari", "playing": true,
 //    "title": "...", "artist": "...", "position": 167.4, "duration": 540,
 //    "art": "3f2a", "video": true, "volume": 40, "muted": false,
 //    "takes": ["pause", "seek", "next", "previous", "volume"]}
 // An empty title is nothing playing. "art", when there is any, changes with
-// the picture, which is at /art.jpg on the laptop's port. "volume" is the
-// laptop's own output, in percent, where it can be set. Commands go to
-// /command there: {"command": "pause"}, "seek" with a "position", "volume"
-// with a "level", "mute" with "muted".
+// the picture, which the panel asks the laptop's /cover for. "volume" is the
+// laptop's own output, in percent, where it can be set. "claude" carries an
+// event from tools/claude-hook as "event". The panel sends the laptop's /link
+// "ping", and "command": "pause", "seek" with a "position", "volume" with a
+// "level", "mute" with "muted". What answers is sealed as well: "pong", "ok",
+// and for a cover the picture itself.
 namespace laptop {
 struct NowPlaying {
     bool        active  = false;  // something to show, playing or paused
@@ -39,13 +44,26 @@ struct NowPlaying {
     bool        takes_volume   = false;
 };
 
-/** False when `body` is not a report: unreadable, or without a port to answer on. */
+/** A message's type and when it was sent; false when it has neither. */
+struct Head {
+    std::string  type;
+    std::int64_t at_ms = 0;
+};
+bool read_head(const char *body, std::size_t length, Head &out);
+
+/** A state's now playing; false without a port to answer on. */
 bool read(const char *body, std::size_t length, NowPlaying &out);
+
+/** The hook's event a "claude" message carries, as JSON; empty for none. */
+std::string claude_event(const char *body, std::size_t length);
 
 enum class Command { Play, Pause, Next, Previous, Seek, Volume, Mute };
 /** `value` is the position for Seek, the percent for Volume, 1 to mute for Mute. */
-std::string command_body(Command command, int value = 0);
+std::string command_body(Command command, int value, std::int64_t at_ms);
 
-/** Where the laptop serves the picture, versioned so a new one is fetched. */
-std::string art_path(const std::string &art);
+/** `reaches`: -1 before the panel has tried the laptop's port, else whether it answered. */
+std::string pong_body(const char *panel, const char *firmware, int reaches, std::int64_t at_ms);
+std::string ping_body(std::int64_t at_ms);
+std::string ok_body(std::int64_t at_ms);
+std::string cover_body(const std::string &art, std::int64_t at_ms);
 }  // namespace laptop

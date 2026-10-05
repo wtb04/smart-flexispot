@@ -109,8 +109,20 @@ net::HostConfig cover_host()
     return config;
 }
 
+const char *s_fetcher_scheme = "";
+Fetcher     s_fetcher        = nullptr;
+
+bool fetched_elsewhere(const char *url)
+{
+    return s_fetcher != nullptr && s_fetcher_scheme[0] != '\0' &&
+           std::strncmp(url, s_fetcher_scheme, std::strlen(s_fetcher_scheme)) == 0;
+}
+
 std::size_t download(const char *url)
 {
+    if (fetched_elsewhere(url)) {
+        return s_fetcher(url, s_body, jpeg::kMaxInput - 1);
+    }
     net::Request request;
     request.host     = net::host_for(url, cover_host());
     request.path     = url;
@@ -231,7 +243,7 @@ bool fetch_playing(const char *path)
 {
     // A path on Home Assistant, or a whole address, as a Jellyfin cover has.
     char       url[URL_SIZE];
-    const bool whole = std::strncmp(path, "http", std::strlen("http")) == 0;
+    const bool whole = std::strncmp(path, "http", std::strlen("http")) == 0 || fetched_elsewhere(path);
     std::snprintf(url, sizeof(url), "%s%s", whole ? "" : s_origin, path);
     std::uint16_t *art   = s_art[s_next];
     std::uint16_t *large = s_large[s_next];
@@ -453,6 +465,12 @@ void set_pick_art(int index, const char *url)
     if (changed && s_task != nullptr) {
         xTaskNotifyGive(s_task);
     }
+}
+
+void set_fetcher(const char *scheme, Fetcher fetch)
+{
+    s_fetcher_scheme = scheme;
+    s_fetcher        = fetch;
 }
 
 void set_still_url(const char *url)
