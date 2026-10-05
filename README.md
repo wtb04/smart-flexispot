@@ -77,6 +77,10 @@ When something plays on Jellyfin the control bar follows it, and holding it ther
 
 ### The laptop
 
+| On the panel | On the Mac |
+|---|---|
+| ![A video from the laptop in the cinema view](docs/screenshots/laptop.png) | <picture><source media="(prefers-color-scheme: dark)" srcset="desklink/shots/menu-dark.png"><img src="desklink/shots/menu-light.png" alt="Desk Link's menu, under its icon in the menu bar"></picture> |
+
 [Desk Link](desklink/) is a menu bar app on my Mac. Whatever macOS lists under Now Playing, a YouTube video in Safari as much as a song in Spotify, it tells the panel, with its cover and where it is; a video then shows in the cinema view, music on the media card, and the panel's play, pause, seek, skip and volume go back to the Mac. Jellyfin comes first, then the speaker, then the laptop. Every message each way is sealed with a key the two share, and each pings the other, so the menu says whether the link holds both ways.
 
 ### Planes overhead
