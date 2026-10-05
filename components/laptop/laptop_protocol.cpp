@@ -54,6 +54,10 @@ const char *command_name(Command command)
             return "volume";
         case Command::Mute:
             return "mute";
+        case Command::VolumeUp:
+            return "volume_up";
+        case Command::VolumeDown:
+            return "volume_down";
     }
     return "";
 }
@@ -119,6 +123,7 @@ bool read(const char *body, std::size_t length, NowPlaying &out)
         out.takes_next     = out.takes_next || std::strcmp(name, "next") == 0;
         out.takes_previous = out.takes_previous || std::strcmp(name, "previous") == 0;
         out.takes_volume   = out.takes_volume || std::strcmp(name, "volume") == 0;
+        out.takes_volume_step = out.takes_volume_step || std::strcmp(name, "volume_step") == 0;
     }
     cJSON_Delete(root);
     return true;

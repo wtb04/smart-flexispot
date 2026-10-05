@@ -206,10 +206,11 @@ void media_take_pause_settles(bool settles)
     s_media.pause_settles = settles;
 }
 
-void media_take_takes(bool volume, bool subtitles)
+void media_take_takes(bool volume, bool subtitles, bool steps)
 {
     s_media.takes_volume    = volume;
     s_media.takes_subtitles = subtitles;
+    s_media.steps_volume    = steps;
     publish(Topic::Media);
 }
 
@@ -292,7 +293,7 @@ bool media_is_video()
 
 bool media_shows_volume()
 {
-    return s_media.takes_volume && (s_media.remote || s_media.volume >= 0);
+    return s_media.takes_volume && (s_media.remote || s_media.volume >= 0 || s_media.steps_volume);
 }
 
 bool media_shows_subtitles()

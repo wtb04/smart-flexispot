@@ -17,6 +17,10 @@ final class Link: ObservableObject {
     @Published private(set) var reach = Reach.unknown
     @Published private(set) var reachesBack: Bool?  // the panel's commands get here, as it last said
     @Published private(set) var firmware = ""
+
+    /// The output takes no level, an app would take the volume keys, and
+    /// Desk Link may not press them yet: the menu offers to ask.
+    var asksForKeys: Bool { output.percent == nil && VolumeKeys.taken && !VolumeKeys.allowed }
     @Published var sharesClaude: Bool {
         didSet { defaults.set(sharesClaude, forKey: "claude") }
     }
@@ -157,6 +161,8 @@ final class Link: ObservableObject {
                 takes.append("volume")
                 state["volume"] = percent
                 state["muted"] = output.muted
+            } else if VolumeKeys.taken && VolumeKeys.allowed {
+                takes.append("volume_step")
             }
             state["app"] = track.app
             state["title"] = track.title
@@ -258,6 +264,8 @@ final class Link: ObservableObject {
         case "mute":
             guard let muted = command["muted"] as? Bool else { return false }
             output.set(muted: muted)
+        case "volume_up": VolumeKeys.press(up: true)
+        case "volume_down": VolumeKeys.press(up: false)
         default:
             return false
         }

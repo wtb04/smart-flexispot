@@ -118,7 +118,24 @@ bool fetched_elsewhere(const char *url)
            std::strncmp(url, s_fetcher_scheme, std::strlen(s_fetcher_scheme)) == 0;
 }
 
+// What s_body holds, so a picture asked for twice, as a laptop's video is for
+// the card and the cinema, is decoded twice but fetched once.
+char        s_body_url[PATH_SIZE] = "";
+std::size_t s_body_length         = 0;
+
+std::size_t fetch_body(const char *url);
+
 std::size_t download(const char *url)
+{
+    if (s_body_length > 0 && std::strcmp(url, s_body_url) == 0) {
+        return s_body_length;
+    }
+    s_body_length = fetch_body(url);
+    std::snprintf(s_body_url, sizeof(s_body_url), "%s", s_body_length > 0 ? url : "");
+    return s_body_length;
+}
+
+std::size_t fetch_body(const char *url)
 {
     if (fetched_elsewhere(url)) {
         return s_fetcher(url, s_body, jpeg::kMaxInput - 1);
@@ -236,7 +253,11 @@ bool decode(std::size_t bytes, Target to)
 bool fetch(const char *url, Target to)
 {
     const std::size_t bytes = download(url);
-    return bytes > 0 && decode(bytes, to);
+    if (bytes > 0 && decode(bytes, to)) {
+        return true;
+    }
+    s_body_length = 0;  // fetched afresh when it is tried again
+    return false;
 }
 
 bool fetch_playing(const char *path)

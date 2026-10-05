@@ -110,6 +110,7 @@ std::string        s_origin;  // http://address:port, where it answers
 std::int64_t       s_heard_us  = 0;
 std::int64_t       s_pinged_us = 0;
 int                s_reaches   = -1;  // whether the panel reaches the laptop's port back
+int                s_missed    = 0;   // pings in a row it did not
 esp_timer_handle_t s_quiet     = nullptr;
 
 std::int64_t now_ms()
@@ -178,7 +179,26 @@ net::Host host_of(const std::string &origin)
     like.timeout_ms  = COVER_TIMEOUT_MS;
     like.connections = 1;
     like.retry       = net::Retry{1, 300, 200, false};
+    // On the same network, a laptop that missed a few is back in seconds, as
+    // one restarting Desk Link is; not left resting as a server would be.
+    like.rest        = net::Rest{5, 2 * 1000, 2 * 1000};
     return net::host_for(origin, like);
+}
+
+// Anything sealed that came back from the laptop says the panel reaches it;
+// it is said not to after two pings in a row that truly went unanswered.
+void reached(const std::string &origin, bool yes)
+{
+    std::lock_guard<std::mutex> hold(s_lock);
+    if (origin != s_origin) {
+        return;
+    }
+    s_missed      = yes ? 0 : s_missed + 1;
+    const int now = yes ? 1 : s_missed >= 2 ? 0 : s_reaches;
+    if (now != s_reaches && now >= 0) {
+        ESP_LOGI(TAG, "%s %s", s_now.machine.c_str(), now == 1 ? "answers back" : "does not answer back");
+    }
+    s_reaches = now;
 }
 
 void tell(const NowPlaying &now)
@@ -203,15 +223,9 @@ void ping_back(const std::string &origin)
     request.deadline_ms = COMMAND_DEADLINE_MS;
     request.what        = "laptop ping";
     request.done        = [origin](const net::Response &answer) {
-        const bool reached = answer.ok() && !opened(LINK, answer.body, answer.length, "pong").empty();
-        std::lock_guard<std::mutex> hold(s_lock);
-        if (origin != s_origin) {
-            return;
+        if (answer.outcome == net::Outcome::Answered || answer.outcome == net::Outcome::Failed) {
+            reached(origin, answer.ok() && !opened(LINK, answer.body, answer.length, "pong").empty());
         }
-        if (reached != (s_reaches == 1)) {
-            ESP_LOGI(TAG, "%s %s", s_now.machine.c_str(), reached ? "answers back" : "does not answer back");
-        }
-        s_reaches = reached ? 1 : 0;
     };
     net::submit(std::move(request));
 }
@@ -232,6 +246,7 @@ esp_err_t take_state(httpd_req_t *req, const std::string &plain)
         if (origin != s_origin) {
             ESP_LOGI(TAG, "%s at %s", now.machine.c_str(), origin.c_str());
             s_reaches = -1;
+            s_missed  = 0;
         }
         ping        = origin != s_origin || heard - s_pinged_us >= PING_EVERY_US;
         s_pinged_us = ping ? heard : s_pinged_us;
@@ -332,9 +347,10 @@ void send(Command command, int value = 0)
         request.key    = command == Command::Seek ? "seek" : "volume";
         request.dedupe = net::Dedupe::Replace;
     }
-    request.done = [body](const net::Response &answer) {
+    request.done = [body, origin](const net::Response &answer) {
         if (answer.ok() && !opened(LINK, answer.body, answer.length, "ok").empty()) {
             ESP_LOGI(TAG, "sent %s", body.c_str());
+            reached(origin, true);
         } else if (answer.outcome != net::Outcome::Replaced) {
             ESP_LOGW(TAG, "%s not taken: %s, http %d", body.c_str(), net::outcome_name(answer.outcome),
                      answer.status);
@@ -408,6 +424,11 @@ void set_muted(bool muted)
     send(Command::Mute, muted ? 1 : 0);
 }
 
+void step_volume(bool up)
+{
+    send(up ? Command::VolumeUp : Command::VolumeDown);
+}
+
 std::string art_url(const NowPlaying &now)
 {
     return now.art.empty() ? "" : std::string(kCoverScheme) + now.art;
@@ -451,6 +472,7 @@ std::size_t fetch_cover(const char *url, std::uint8_t *into, std::size_t size)
         return 0;
     }
     std::memcpy(into, picture.data(), picture.size());
+    reached(origin, true);
     return picture.size();
 }
 }  // namespace laptop

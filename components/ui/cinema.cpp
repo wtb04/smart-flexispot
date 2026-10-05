@@ -1,3 +1,4 @@
+#include "volume_steps.h"
 #include "ui_internal.h"
 
 #include "status_model.h"
@@ -62,6 +63,7 @@ lv_obj_t     *s_paused  = nullptr;  // the play mark over a paused picture
 bool          s_swiped  = false;    // the release that ends a swipe is not a tap
 lv_obj_t     *s_steer[2] = {};      // ten seconds back, and on
 lv_obj_t     *s_volume  = nullptr;  // the slider, filled as far as the level
+VolumeSteps s_volume_steps;
 lv_obj_t     *s_volume_fill  = nullptr;
 lv_obj_t     *s_volume_level = nullptr;
 bool          s_volume_held  = false;  // a finger on it: what it shows is what it sets
@@ -203,7 +205,8 @@ void show_media()
     theme::set_text(lv_obj_get_child(s_play, 0), playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
     lv_obj_set_hidden(s_paused, playing);
     lv_obj_set_hidden(s_volume, !media_shows_volume());
-    theme::set_usable(s_volume, media_state().volume >= 0);
+    show_volume_steps(s_volume_steps, media_state().steps_volume);
+    theme::set_usable(s_volume, media_state().volume >= 0 || media_state().steps_volume);
     if (media_state().volume >= 0 && !s_volume_held) {
         show_volume(media_state().volume);
     }
@@ -334,6 +337,9 @@ void build_text(std::int32_t x, std::int32_t w)
 // One bar, filled as loud as it plays, dragged or tapped anywhere along to set it.
 void volume_touched(lv_event_t *e)
 {
+    if (step_volume(s_volume, e)) {
+        return;
+    }
     const lv_event_code_t code = lv_event_get_code(e);
     if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) {
         s_volume_held = false;
@@ -381,6 +387,7 @@ void build_volume(std::int32_t x, std::int32_t y, std::int32_t w)
     s_volume_level = theme::make_label(s_volume, "", theme::text, fonts::size_28());
     lv_obj_align(s_volume_level, LV_ALIGN_RIGHT_MID, -VOLUME_INSET, 0);
     lv_obj_set_clickable(s_volume_level, false);
+    s_volume_steps = make_volume_steps(s_volume, speaker, s_volume_level, s_volume_fill, fonts::size_28(), VOLUME_INSET);
 }
 
 void preset(int index)
