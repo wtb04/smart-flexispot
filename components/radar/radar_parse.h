@@ -142,6 +142,12 @@ int notability(const Aircraft &aircraft);
 inline constexpr int kEmergencyNotability = 12;  // what an emergency squawk scores
 inline bool interesting(const Aircraft &aircraft) { return notability(aircraft) > 0; }
 
+/** Notability as the scope ranks by: one without a photo is less to look at,
+ *  so a military aircraft without one drops to a cruising 777. Never below 1
+ *  for an interesting one, and an emergency keeps its place. */
+inline constexpr int kNoPhotoPenalty = 3;
+int ranking(const Aircraft &aircraft, bool no_photo);
+
 /** Reads an adsb.fi v2 response, which is far too large to hand to a DOM
  *  parser on this part: the allocator keeps anything under sixteen kilobytes
  *  in internal RAM, and a JSON tree of forty kilobytes is thousands of small

@@ -2567,21 +2567,26 @@ int plot_of(const char *hex)
 // out of the airport, the nearer of two alike, as the plots go nearest first.
 int most_notable(int *out, int max)
 {
+    int scores[ROTATE_KEEP];
+    max       = std::min(max, ROTATE_KEEP);
     int count = 0;
     for (int i = 0; i < s_shown; ++i) {
-        const int score = radar::notability(*s_plots[i].aircraft);
+        const radar::Aircraft &aircraft = *s_plots[i].aircraft;
+        const int score = radar::ranking(aircraft, radar::known_without_photo(aircraft.hex));
         int       at    = count;
-        while (at > 0 && radar::notability(*s_plots[out[at - 1]].aircraft) < score) {
+        while (at > 0 && scores[at - 1] < score) {
             --at;
         }
         if (at >= max) {
             continue;
         }
         for (int j = std::min(count, max - 1); j > at; --j) {
-            out[j] = out[j - 1];
+            out[j]    = out[j - 1];
+            scores[j] = scores[j - 1];
         }
-        out[at] = i;
-        count   = std::min(count + 1, max);
+        out[at]    = i;
+        scores[at] = score;
+        count      = std::min(count + 1, max);
     }
     return count;
 }

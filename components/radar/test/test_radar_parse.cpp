@@ -417,6 +417,38 @@ TEST(RadarParse, notability)
     EXPECT_FALSE(read[1].military);
 }
 
+TEST(RadarParse, ranking)
+{
+    const auto aircraft = [](const char *flight, const char *category, const char *type, int feet,
+                             bool military = false, int squawk = -1) {
+        Aircraft a{};
+        std::snprintf(a.flight, sizeof(a.flight), "%s", flight);
+        std::snprintf(a.category, sizeof(a.category), "%s", category);
+        std::snprintf(a.type, sizeof(a.type), "%s", type);
+        a.altitude_ft = feet;
+        a.military    = military;
+        a.squawk      = squawk;
+        return a;
+    };
+    const Aircraft fighter     = aircraft("VIPER1", "A6", "F35", 12000, true);
+    const Aircraft b777_high   = aircraft("KLM691", "A5", "B77W", 36000);
+    const Aircraft a330_high   = aircraft("KLM689", "A5", "A333", 36000);
+    const Aircraft narrow_low  = aircraft("KLM90G", "A3", "B738", 3000);
+    const Aircraft narrow_high = aircraft("RYR15P", "A3", "B738", 36000);
+
+    EXPECT_EQ(ranking(fighter, false), notability(fighter)) << "with a photo, or not yet known, as notable";
+    EXPECT_GT(ranking(fighter, false), ranking(b777_high, false));
+    EXPECT_EQ(ranking(fighter, true), ranking(b777_high, false)) << "without one, a cruising 777";
+    EXPECT_GT(ranking(fighter, true), ranking(a330_high, false)) << "still over the wide-bodies below it";
+
+    EXPECT_EQ(ranking(narrow_low, true), 1) << "an airliner without one stays interesting";
+    EXPECT_EQ(ranking(narrow_high, true), 1);
+    EXPECT_EQ(ranking(aircraft("PHAHJ", "A1", "C172", 2000), true), 0) << "nor does one become so";
+
+    const Aircraft emergency = aircraft("PHAHJ", "A1", "C172", 2000, false, 7700);
+    EXPECT_EQ(ranking(emergency, true), kEmergencyNotability) << "an emergency keeps its place";
+}
+
 TEST(RadarParse, merge_reading)
 {
     const auto aircraft = [](const char *hex, const char *type, bool military) {
