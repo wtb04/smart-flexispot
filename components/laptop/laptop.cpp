@@ -177,7 +177,10 @@ net::Host host_of(const std::string &origin)
     net::HostConfig like;
     like.name        = "laptop";
     like.timeout_ms  = COVER_TIMEOUT_MS;
-    like.connections = 1;
+    // Desk Link closes each connection once it has answered; one kept open
+    // here would be written to after that, and wait out the timeout.
+    like.keep_open   = false;
+    like.connections = 2;  // so a command never waits behind a cover
     like.retry       = net::Retry{1, 300, 200, false};
     // On the same network, a laptop that missed a few is back in seconds, as
     // one restarting Desk Link is; not left resting as a server would be.
@@ -461,11 +464,14 @@ std::size_t fetch_cover(const char *url, std::uint8_t *into, std::size_t size)
     request.priority = net::Priority::Now;
     request.max_body = COVER_MAX - 1;
     request.what     = "laptop cover";
-    const net::Fetched got = net::fetch(std::move(request), answer, COVER_MAX);
+    const std::int64_t asked = esp_timer_get_time();
+    const net::Fetched got   = net::fetch(std::move(request), answer, COVER_MAX);
     if (!got.ok() || got.truncated) {
         ESP_LOGW(TAG, "cover not had: http %d", got.status);
         return 0;
     }
+    ESP_LOGI(TAG, "cover of %u KB in %d ms, %d of them on the wire", static_cast<unsigned>(got.length / 1024),
+             static_cast<int>((esp_timer_get_time() - asked) / units::kUsPerMs), got.ms);
     const std::string picture = opened(COVER, answer, got.length, nullptr);
     if (picture.empty() || picture.size() > size) {
         ESP_LOGW(TAG, "cover %s", picture.empty() ? "would not open" : "too large");
