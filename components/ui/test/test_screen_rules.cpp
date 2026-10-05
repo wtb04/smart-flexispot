@@ -3,228 +3,274 @@
 #include <gtest/gtest.h>
 
 namespace {
-using ui::screen_rules::Action;
-using ui::screen_rules::Inputs;
-using ui::screen_rules::Schedule;
+using namespace ui::screen_rules;
 
 constexpr std::int64_t S   = 1000;
 constexpr std::int64_t MIN = 60 * S;
 
-Inputs dark_room()
-{
-    Inputs in;
-    in.lit_known = true;
-    in.phone     = true;
-    return in;
-}
+// The panel as it follows the schedule: looked at as things change and once a
+// second, the screen doing what it is told, and a finger on it only when
+// touch() says so.
+struct Panel {
+    Schedule     schedule;
+    Inputs       in;
+    std::int64_t now        = 0;
+    std::int64_t touched_at = 0;
 
-// Steps once a second from `from` to `to`, nobody touching, and says what the
-// screen was told last; it follows what it is told.
-Action run(Schedule &schedule, Inputs &in, std::int64_t from, std::int64_t to)
-{
-    Action last = Action::Keep;
-    for (std::int64_t t = from; t <= to; t += S) {
-        in.untouched = t;
-        const Action action = schedule.step(in, t);
-        if (action != Action::Keep) {
-            last         = action;
-            in.screen_on = action == Action::Wake;
-        }
+    Panel()
+    {
+        in.room_known = true;
+        in.phone      = true;
     }
-    return last;
-}
+
+    Decision look()
+    {
+        in.untouched = now - touched_at;
+        const Decision decision = schedule.step(in, now);
+        if (decision.action != Action::Keep) {
+            in.screen_on = decision.action == Action::Wake;
+        }
+        return decision;
+    }
+
+    /** Looks at once, as the panel does when something changes, then once a
+     *  second for `ms`; gives the last thing it was told. */
+    Decision wait(std::int64_t ms)
+    {
+        Decision last = look();
+        for (const std::int64_t until = now + ms; now < until;) {
+            now += S;
+            if (const Decision decision = look(); decision.action != Action::Keep) {
+                last = decision;
+            }
+        }
+        return last;
+    }
+
+    void touch()
+    {
+        touched_at   = now;
+        in.screen_on = true;
+    }
+};
+
+Decision dark(Why why) { return {Action::Dark, why}; }
+Decision wake(Why why) { return {Action::Wake, why}; }
+constexpr Decision kept{};
+
 }  // namespace
+
+namespace ui::screen_rules {
+std::ostream &operator<<(std::ostream &out, const Decision &d)
+{
+    const char *action = d.action == Action::Keep ? "keep" : d.action == Action::Wake ? "wake" : "dark";
+    return out << action << " (" << describe(d.why) << ")";
+}
+}  // namespace ui::screen_rules
 
 TEST(ScreenRules, night)
 {
-    using ui::screen_rules::is_night;
     EXPECT_TRUE(!is_night(22 * 60 + 29) && is_night(22 * 60 + 30) && is_night(0) && is_night(6 * 60 + 59) &&
                 !is_night(7 * 60))
         << "night from half past ten to seven";
 }
 
-TEST(ScreenRules, light_on_stays_lit)
+TEST(ScreenRules, the_light_on_keeps_it_lit)
 {
-    Schedule schedule;
-    Inputs   in = dark_room();
-    in.lit      = true;
-    in.phone    = false;
-    in.night    = true;
-    EXPECT_EQ(run(schedule, in, 0, 30 * MIN), Action::Keep) << "the light on: never dark, phone or not";
+    Panel panel;
+    panel.in.room_lit = true;
+    panel.in.phone    = false;
+    panel.in.night    = true;
+    EXPECT_EQ(panel.wait(30 * MIN), kept) << "phone or not, night or not";
 }
 
-TEST(ScreenRules, phone_by_day_stays_lit)
+TEST(ScreenRules, the_phone_by_day_keeps_it_lit)
 {
-    Schedule schedule;
-    Inputs   in = dark_room();
-    EXPECT_EQ(run(schedule, in, 0, 30 * MIN), Action::Keep) << "the light off, the phone here, by day";
+    Panel panel;
+    EXPECT_EQ(panel.wait(30 * MIN), kept);
 }
 
-TEST(ScreenRules, phone_at_night_a_minute)
+TEST(ScreenRules, the_phone_at_night_a_minute)
 {
-    Schedule schedule;
-    Inputs   in = dark_room();
-    in.night    = true;
-    EXPECT_EQ(run(schedule, in, 0, 59 * S), Action::Keep);
-    EXPECT_EQ(run(schedule, in, 60 * S, 60 * S), Action::Dark) << "a minute at night";
+    Panel panel;
+    panel.in.night = true;
+    EXPECT_EQ(panel.wait(59 * S), kept);
+    EXPECT_EQ(panel.wait(S), dark(Why::Night));
 }
 
-TEST(ScreenRules, phone_away_only_after_five_minutes)
+TEST(ScreenRules, the_phone_gone_only_after_five_minutes)
 {
-    Schedule schedule;
-    Inputs   in = dark_room();
-    run(schedule, in, 0, 10 * S);
-    in.phone = false;
-    EXPECT_EQ(run(schedule, in, 11 * S, 10 * S + 5 * MIN - S), Action::Keep) << "a phone unheard a while is no fluke";
-    EXPECT_EQ(run(schedule, in, 10 * S + 5 * MIN, 10 * S + 5 * MIN + 29 * S), Action::Keep)
-        << "the half minute starts once it counts as away";
-    EXPECT_EQ(run(schedule, in, 10 * S + 5 * MIN + 30 * S, 10 * S + 5 * MIN + 30 * S), Action::Dark);
+    Panel panel;
+    panel.wait(10 * S);
+    panel.in.phone = false;
+    EXPECT_EQ(panel.wait(5 * MIN - S), kept) << "a phone unheard a while is no fluke";
+    EXPECT_EQ(panel.wait(30 * S), kept) << "the half minute starts once it counts as gone";
+    EXPECT_EQ(panel.wait(S), dark(Why::Empty));
 }
 
-TEST(ScreenRules, phone_flickering_never_counts_as_away)
+TEST(ScreenRules, a_flickering_phone_never_counts_as_gone)
 {
-    Schedule schedule;
-    Inputs   in = dark_room();
-    for (std::int64_t t = 0; t < 30 * MIN; t += 4 * MIN) {
-        in.phone = false;
-        EXPECT_EQ(run(schedule, in, t, t + 4 * MIN - S), Action::Keep);
-        in.phone = true;
-        run(schedule, in, t + 4 * MIN - S, t + 4 * MIN - S);
+    Panel panel;
+    for (int i = 0; i < 8; ++i) {
+        panel.in.phone = false;
+        EXPECT_EQ(panel.wait(4 * MIN), kept);
+        panel.in.phone = true;
+        panel.wait(S);
     }
 }
 
-TEST(ScreenRules, not_heard_since_the_start_is_given_its_time)
+TEST(ScreenRules, a_phone_not_heard_since_the_start_gets_its_time)
 {
-    Schedule schedule;
-    Inputs   in = dark_room();
-    in.phone    = false;
-    EXPECT_EQ(run(schedule, in, 0, 5 * MIN - S), Action::Keep);
-    EXPECT_EQ(run(schedule, in, 5 * MIN, 5 * MIN + 30 * S), Action::Dark);
+    Panel panel;
+    panel.in.phone = false;
+    EXPECT_EQ(panel.wait(5 * MIN + 29 * S), kept);
+    EXPECT_EQ(panel.wait(S), dark(Why::Empty));
 }
 
-TEST(ScreenRules, a_touch_starts_the_wait_again)
+TEST(ScreenRules, a_touch_starts_the_wait_again_and_dark_all_the_same)
 {
-    Schedule schedule;
-    Inputs   in = dark_room();
-    in.night    = true;
-    run(schedule, in, 0, 50 * S);
-    in.untouched = 0;
-    EXPECT_EQ(schedule.step(in, 51 * S), Action::Keep);
-    in.untouched = 59 * S;
-    EXPECT_EQ(schedule.step(in, 110 * S), Action::Keep) << "a minute from the touch, not from the start";
-    in.untouched = 60 * S;
-    EXPECT_EQ(schedule.step(in, 111 * S), Action::Dark) << "and dark all the same";
+    Panel panel;
+    panel.in.night = true;
+    panel.wait(50 * S);
+    panel.touch();
+    EXPECT_EQ(panel.wait(59 * S), kept) << "a minute from the touch, not from the start";
+    EXPECT_EQ(panel.wait(S), dark(Why::Night));
 }
 
 TEST(ScreenRules, the_light_going_off_starts_the_wait)
 {
-    Schedule schedule;
-    Inputs   in = dark_room();
-    in.lit      = true;
-    in.phone    = false;
-    run(schedule, in, 0, 10 * MIN);
-    in.lit = false;
-    EXPECT_EQ(run(schedule, in, 10 * MIN + S, 10 * MIN + 30 * S), Action::Keep)
-        << "left alone ten minutes, it still waits the half minute";
-    EXPECT_EQ(run(schedule, in, 10 * MIN + 31 * S, 10 * MIN + 31 * S), Action::Dark);
+    Panel panel;
+    panel.in.room_lit = true;
+    panel.in.phone    = false;
+    panel.wait(10 * MIN);
+    panel.in.room_lit = false;
+    EXPECT_EQ(panel.wait(29 * S), kept) << "left alone ten minutes, it still waits the half minute";
+    EXPECT_EQ(panel.wait(S), dark(Why::Empty));
 }
 
-TEST(ScreenRules, morning_does_not_wake)
+TEST(ScreenRules, the_morning_does_not_wake_it)
 {
-    Schedule schedule;
-    Inputs   in = dark_room();
-    in.night    = true;
-    EXPECT_EQ(run(schedule, in, 0, 2 * MIN), Action::Dark);
-    in.night = false;
-    EXPECT_EQ(run(schedule, in, 2 * MIN + S, 3 * MIN), Action::Keep) << "the night ending lights nothing";
-    EXPECT_FALSE(in.screen_on);
+    Panel panel;
+    panel.in.night = true;
+    EXPECT_EQ(panel.wait(2 * MIN), dark(Why::Night));
+    panel.in.night = false;
+    EXPECT_EQ(panel.wait(MIN), kept);
+    EXPECT_FALSE(panel.in.screen_on);
 }
 
-TEST(ScreenRules, the_light_coming_on_wakes)
+TEST(ScreenRules, the_light_coming_on_wakes_it)
 {
-    Schedule schedule;
-    Inputs   in = dark_room();
-    in.night    = true;
-    run(schedule, in, 0, 2 * MIN);
-    in.lit = true;
-    EXPECT_EQ(schedule.step(in, 2 * MIN + S), Action::Wake);
+    Panel panel;
+    panel.in.night = true;
+    panel.wait(2 * MIN);
+    panel.in.room_lit = true;
+    EXPECT_EQ(panel.wait(S), wake(Why::LightOn));
+    EXPECT_EQ(panel.wait(30 * MIN), kept);
 }
 
-TEST(ScreenRules, the_phone_coming_back_wakes)
+TEST(ScreenRules, the_phone_coming_back_wakes_it)
 {
-    Schedule schedule;
-    Inputs   in = dark_room();
-    in.phone    = false;
-    EXPECT_EQ(run(schedule, in, 0, 6 * MIN), Action::Dark);
-    in.phone = true;
-    EXPECT_EQ(schedule.step(in, 6 * MIN + S), Action::Wake);
+    Panel panel;
+    panel.in.phone = false;
+    EXPECT_EQ(panel.wait(6 * MIN), dark(Why::Empty));
+    panel.in.phone = true;
+    EXPECT_EQ(panel.wait(S), wake(Why::PhoneBack));
 }
 
-TEST(ScreenRules, the_phone_back_from_a_fluke_does_not_wake)
+TEST(ScreenRules, the_phone_back_from_a_fluke_does_not_wake_it)
 {
-    Schedule schedule;
-    Inputs   in = dark_room();
-    in.night    = true;
-    EXPECT_EQ(run(schedule, in, 0, 2 * MIN), Action::Dark);
-    in.phone = false;
-    run(schedule, in, 2 * MIN + S, 3 * MIN);
-    in.phone = true;
-    EXPECT_EQ(run(schedule, in, 3 * MIN + S, 4 * MIN), Action::Keep) << "it never counted as away";
+    Panel panel;
+    panel.in.night = true;
+    EXPECT_EQ(panel.wait(2 * MIN), dark(Why::Night));
+    panel.in.phone = false;
+    panel.wait(MIN);
+    panel.in.phone = true;
+    EXPECT_EQ(panel.wait(MIN), kept) << "it never counted as gone";
 }
 
-TEST(ScreenRules, unknown_lights_stay_lit)
+TEST(ScreenRules, lights_not_told_yet_keep_it_lit)
 {
-    Schedule schedule;
-    Inputs   in;
-    in.phone = false;
-    EXPECT_EQ(run(schedule, in, 0, 30 * MIN), Action::Keep) << "before Home Assistant has told the lights";
+    Panel panel;
+    panel.in.room_known = false;
+    panel.in.phone      = false;
+    EXPECT_EQ(panel.wait(30 * MIN), kept);
 }
 
-TEST(ScreenRules, on_battery_away_from_the_desk_half_a_minute)
+TEST(ScreenRules, unplugged_away_from_the_desk_half_a_minute)
 {
-    Schedule schedule;
-    Inputs   in   = dark_room();
-    in.lit        = true;
-    in.on_battery = true;
-    EXPECT_EQ(run(schedule, in, 0, 29 * S), Action::Keep);
-    EXPECT_EQ(run(schedule, in, 30 * S, 30 * S), Action::Dark) << "away from the desk, whatever its lights";
+    Panel panel;
+    panel.in.room_lit  = true;
+    panel.in.unplugged = true;
+    EXPECT_EQ(panel.wait(29 * S), kept);
+    EXPECT_EQ(panel.wait(S), dark(Why::Away)) << "whatever its room's lights";
 }
 
-TEST(ScreenRules, on_battery_at_the_desk_as_plugged_in)
+TEST(ScreenRules, unplugged_at_the_desk_as_plugged_in)
 {
-    Schedule schedule;
-    Inputs   in    = dark_room();
-    in.lit         = true;
-    in.on_battery  = true;
-    in.desk_linked = true;
-    EXPECT_EQ(run(schedule, in, 0, 30 * MIN), Action::Keep) << "linked to the desk, the light on: lit";
-    in.lit   = false;
-    in.night = true;
-    EXPECT_EQ(run(schedule, in, 30 * MIN + S, 31 * MIN + S), Action::Dark) << "and the night's minute as anywhere";
+    Panel panel;
+    panel.in.room_lit  = true;
+    panel.in.unplugged = true;
+    panel.in.at_desk   = true;
+    EXPECT_EQ(panel.wait(30 * MIN), kept);
+    panel.in.room_lit = false;
+    panel.in.night    = true;
+    EXPECT_EQ(panel.wait(MIN), dark(Why::Night));
 }
 
-TEST(ScreenRules, a_notice_keeps_it_lit)
+TEST(ScreenRules, a_notice_wakes_it_and_it_goes_dark_after)
 {
-    Schedule schedule;
-    Inputs   in = dark_room();
-    in.phone    = false;
-    in.notice   = true;
-    EXPECT_EQ(run(schedule, in, 0, 30 * MIN), Action::Keep);
-    in.notice = false;
-    EXPECT_EQ(run(schedule, in, 30 * MIN + S, 30 * MIN + S), Action::Dark);
+    Panel panel;
+    panel.in.room_lit = true;
+    panel.in.screen_on = false;  // switched off by hand
+    panel.in.attention = true;
+    EXPECT_EQ(panel.wait(S), wake(Why::Attention));
+    EXPECT_EQ(panel.wait(20 * S), kept) << "lit for the notice's whole time";
+    panel.in.attention = false;
+    EXPECT_EQ(panel.wait(S), dark(Why::Attention)) << "lit for it alone, dark again after";
 }
 
-TEST(ScreenRules, the_film_has_its_own)
+TEST(ScreenRules, a_notice_touched_stays_lit)
 {
-    Schedule schedule;
-    Inputs   in = dark_room();
-    in.lit      = true;
-    in.video_ms = 15 * S;
-    EXPECT_EQ(run(schedule, in, 0, 15 * S), Action::Dark) << "its fifteen seconds, the light on or not";
+    Panel panel;
+    panel.in.room_lit  = true;
+    panel.in.screen_on = false;
+    panel.in.attention = true;
+    panel.wait(5 * S);
+    panel.touch();
+    panel.in.attention = false;
+    EXPECT_EQ(panel.wait(30 * MIN), kept) << "touched: someone is there, the light's rule again";
+}
 
-    Schedule kept;
-    Inputs   lit = dark_room();
-    lit.phone    = false;
-    lit.video_ms = ui::screen_rules::kNever;
-    EXPECT_EQ(run(kept, lit, 0, 30 * MIN), Action::Keep) << "its own switched off keeps it lit";
+TEST(ScreenRules, a_notice_holds_it_past_the_wait)
+{
+    Panel panel;
+    panel.in.phone     = false;
+    panel.in.attention = true;
+    EXPECT_EQ(panel.wait(30 * MIN), kept);
+    panel.in.attention = false;
+    EXPECT_EQ(panel.wait(S), dark(Why::Empty)) << "left alone all along";
+}
+
+TEST(ScreenRules, the_film_has_its_own_wait)
+{
+    Panel panel;
+    panel.in.room_lit = true;
+    panel.in.film_ms  = 15 * S;
+    EXPECT_EQ(panel.wait(14 * S), kept);
+    EXPECT_EQ(panel.wait(S), dark(Why::Film)) << "the light on or not";
+
+    Panel held;
+    held.in.phone   = false;
+    held.in.film_ms = kNever;
+    EXPECT_EQ(held.wait(30 * MIN), kept) << "its own switched off keeps it lit";
+}
+
+TEST(ScreenRules, a_skip_button_wakes_the_film)
+{
+    Panel panel;
+    panel.in.film_ms = 15 * S;
+    EXPECT_EQ(panel.wait(15 * S), dark(Why::Film));
+    panel.in.attention = true;
+    EXPECT_EQ(panel.wait(S), wake(Why::Attention));
+    EXPECT_EQ(panel.wait(MIN), kept) << "lit while it can be tapped";
 }
