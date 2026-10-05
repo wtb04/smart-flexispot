@@ -14,6 +14,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 #include <ctime>
 
@@ -44,6 +45,7 @@ std::mutex                             s_lock;
 Snapshot                               s_snapshot{};
 std::int64_t                           s_fetched_at = 0; // unix seconds of the last good reading
 std::unordered_map<std::string, Trail> s_trails;
+std::unordered_set<std::string>        s_without_photo;  // planespotters said so
 
 bool home(float &lat, float &lon)
 {
@@ -64,6 +66,12 @@ int trail(const char *hex, TrailPoint *out, int max)
     std::lock_guard<std::mutex> hold(s_lock);
     const auto                  found = s_trails.find(hex);
     return found != s_trails.end() ? oldest_first(found->second, out, max) : 0;
+}
+
+bool known_without_photo(const char *hex)
+{
+    std::lock_guard<std::mutex> hold(s_lock);
+    return s_without_photo.count(hex) != 0;
 }
 } // namespace radar
 
@@ -234,6 +242,10 @@ std::vector<std::uint16_t> fetch_photo(const char *hex, int &width, int &height,
     char         by[radar::kPhotographerLen] = "";
     if (lookup.status != 200 ||
         !radar::parse_photo(lookup.body.data(), lookup.body.size(), found, sizeof(found), by, sizeof(by))) {
+        if (lookup.status == 200 || lookup.status == 404) {
+            std::lock_guard<std::mutex> hold(radar::s_lock);
+            radar::s_without_photo.insert(hex);
+        }
         return pixels;
     }
     credit = by;
