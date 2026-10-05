@@ -5,7 +5,8 @@ import ServiceManagement
 
 private let log = Logger(subsystem: "nl.w-tb.desklink", category: "panel")
 
-/// What this Mac shares with the desk panel, and the panel's commands back.
+/// What this Mac shares with the desk panel, and the panel's commands back,
+/// every message sealed with the key the two share.
 @MainActor
 final class Link: ObservableObject {
     enum Reach { case unknown, answering, refused, unreachable }
@@ -14,6 +15,11 @@ final class Link: ObservableObject {
     @Published private(set) var cover: NSImage?
     @Published private(set) var heard: Date?
     @Published private(set) var reach = Reach.unknown
+    @Published private(set) var reachesBack: Bool?  // the panel's commands get here, as it last said
+    @Published private(set) var firmware = ""
+    @Published var sharesClaude: Bool {
+        didSet { defaults.set(sharesClaude, forKey: "claude") }
+    }
     @Published var sharing: Bool {
         didSet {
             defaults.set(sharing, forKey: "sharing")
@@ -24,7 +30,10 @@ final class Link: ObservableObject {
         didSet { defaults.set(panel, forKey: "panel") }
     }
     @Published var key: String {
-        didSet { Keychain.write(key) }
+        didSet {
+            Keychain.write(key)
+            seal = Seal(hex: key)
+        }
     }
     @Published var opensAtLogin: Bool {
         didSet {
@@ -41,10 +50,9 @@ final class Link: ObservableObject {
         "com.apple.Safari", "com.google.Chrome", "org.mozilla.firefox", "company.thebrowser.Browser",
         "com.microsoft.edgemac", "com.brave.Browser", "com.operasoftware.Opera", "com.vivaldi.Vivaldi",
     ]
-    // The panel forgets a laptop it has not heard from in 30 seconds; with
-    // nothing playing, a report now and then only keeps the menu's status true.
+    // The panel forgets a laptop it has not heard from in 30 seconds. It is
+    // told how this one is this often whatever plays, which is the ping.
     private static let heartbeat: TimeInterval = 10
-    private static let idleEvery = 3
 
     private let defaults = UserDefaults.standard
     private let source: NowPlayingSource
@@ -54,11 +62,13 @@ final class Link: ObservableObject {
     private var beat: Timer?
     private var awake: NSObjectProtocol?
     private var pendingReport: DispatchWorkItem?
+    private var seal: Seal?
     private let machine = Host.current().localizedName ?? ProcessInfo.processInfo.hostName
 
     init() {
-        defaults.register(defaults: ["sharing": true, "panel": "smart-flexispot"])
+        defaults.register(defaults: ["sharing": true, "panel": "smart-flexispot", "claude": true])
         sharing = defaults.bool(forKey: "sharing")
+        sharesClaude = defaults.bool(forKey: "claude")
         panel = defaults.string(forKey: "panel") ?? "smart-flexispot"
         // A key handed over with `defaults write nl.w-tb.desklink key ...` is
         // moved into the keychain at once.
@@ -66,7 +76,9 @@ final class Link: ObservableObject {
             Keychain.write(given)
             defaults.removeObject(forKey: "key")
         }
-        key = Keychain.read()
+        let stored = Keychain.read()
+        key = stored
+        seal = Seal(hex: stored)
         opensAtLogin = SMAppService.mainApp.status == .enabled
         source = NowPlayingSource(resources: Bundle.main.resourceURL!)
         server = CommandServer(port: Self.port) { [weak self] request in
@@ -89,12 +101,8 @@ final class Link: ObservableObject {
                                                       reason: "Telling the desk panel what plays")
         source.start()
         server.start()
-        var beats = 0
         beat = Timer.scheduledTimer(withTimeInterval: Self.heartbeat, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                beats += 1
-                if self?.track != nil || beats % Self.idleEvery == 0 { self?.report() }
-            }
+            Task { @MainActor in self?.report() }
         }
         report()
     }
@@ -111,6 +119,7 @@ final class Link: ObservableObject {
         cover = nil
         report()  // nothing playing, so the panel lets go at once
         reach = .unknown
+        reachesBack = nil
     }
 
     private func take(_ new: Track?) {
@@ -139,71 +148,119 @@ final class Link: ObservableObject {
     }
 
     private func report() {
-        guard !panel.isEmpty, !key.isEmpty, let url = URL(string: "http://\(panel)/laptop") else { return }
-        var body: [String: Any] = ["machine": machine, "port": Int(Self.port), "title": ""]
+        var state: [String: Any] = ["type": "state", "machine": machine, "port": Int(Self.port), "title": ""]
         if let track {
             var takes = ["pause"]
             if track.duration > 0 { takes.append("seek") }
             if track.skips { takes += ["next", "previous"] }
             if let percent = output.percent {
                 takes.append("volume")
-                body["volume"] = percent
-                body["muted"] = output.muted
+                state["volume"] = percent
+                state["muted"] = output.muted
             }
-            body["app"] = track.app
-            body["title"] = track.title
-            body["artist"] = track.artist
-            body["playing"] = track.playing
-            body["position"] = track.position()
-            body["duration"] = track.duration
-            body["art"] = artwork?.version ?? ""
+            state["app"] = track.app
+            state["title"] = track.title
+            state["artist"] = track.artist
+            state["playing"] = track.playing
+            state["position"] = track.position()
+            state["duration"] = track.duration
+            state["art"] = artwork?.version ?? ""
             // Now Playing does not say; a clip's cover is a wide frame, and
             // before one comes a browser is most likely playing a video.
-            body["video"] = artwork.map(\.wide) ?? Self.browsers.contains(track.bundle)
-            body["takes"] = takes
+            state["video"] = artwork.map(\.wide) ?? Self.browsers.contains(track.bundle)
+            state["takes"] = takes
         }
+        log.info("state \(self.track?.title ?? "nothing", privacy: .public), art \(self.artwork?.version ?? "none", privacy: .public)")
+        send(state) { [weak self] reach, pong in
+            guard let self, self.sharing else { return }
+            self.reach = reach
+            if let pong {
+                self.heard = Date()
+                self.firmware = pong["firmware"] as? String ?? ""
+                self.reachesBack = pong["reaches"] as? Bool
+            }
+        }
+    }
+
+    /// To the panel's /link, sealed; `done` hears how it went and, when the
+    /// panel answered as the panel, what it said.
+    private func send(_ message: [String: Any], done: ((Reach, [String: Any]?) -> Void)? = nil) {
+        guard !panel.isEmpty, let seal, let url = URL(string: "http://\(panel)/link"),
+              let body = seal.seal(message, to: "/link") else { return }
         var request = URLRequest(url: url, timeoutInterval: 3)
         request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(key, forHTTPHeaderField: "X-Laptop-Key")
-        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        log.info("report \(self.track?.title ?? "nothing", privacy: .public), art \(self.artwork?.version ?? "none", privacy: .public)")
-        URLSession.shared.dataTask(with: request) { [weak self] _, response, _ in
+        request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+        URLSession.shared.dataTask(with: request) { data, response, _ in
             let status = (response as? HTTPURLResponse)?.statusCode
             Task { @MainActor in
-                guard let self, self.sharing else { return }
-                self.reach = status == nil ? .unreachable : status == 403 ? .refused : .answering
-                if self.reach == .answering { self.heard = Date() }
+                guard let done else { return }
+                guard status != nil else { return done(.unreachable, nil) }
+                var opener = seal
+                guard status == 200, let data, let answer = opener.message(data, from: "/link reply") else {
+                    return done(.refused, nil)  // the wrong key, or whatever answers is not the panel
+                }
+                done(.answering, answer["type"] as? String == "pong" ? answer : nil)
             }
         }.resume()
     }
 
-    private func handle(_ request: Request) -> Response {
-        if request.method == "GET", request.path.hasPrefix("/art.jpg"), let artwork {
-            log.info("cover fetched, \(artwork.jpeg.count) bytes")
-            return Response(status: 200, type: "image/jpeg", body: artwork.jpeg)
+    /// An event from tools/claude-hook on this Mac, passed on sealed.
+    private func relay(_ event: Data) -> Response {
+        guard sharesClaude, let object = try? JSONSerialization.jsonObject(with: event) as? [String: Any] else {
+            return .noContent
         }
-        guard request.method == "POST", request.path == "/command" else { return .notFound }
-        guard !key.isEmpty, request.headers["x-laptop-key"] == key else { return Response(status: 403) }
-        guard let command = try? JSONSerialization.jsonObject(with: request.body) as? [String: Any],
-              let name = command["command"] as? String else { return Response(status: 400) }
-        switch name {
+        send(["type": "claude", "event": object])
+        return .noContent
+    }
+
+    private func handle(_ request: Request) -> Response {
+        if request.method == "POST", request.path == "/claude" {
+            return request.local ? relay(request.body) : Response(status: 403)
+        }
+        guard request.method == "POST", request.path == "/link" || request.path == "/cover",
+              seal != nil, let message = seal?.message(request.body, from: request.path),
+              let type = message["type"] as? String else { return Response(status: 403) }
+        let reply = request.path + " reply"
+        switch type {
+        case "cover":
+            guard let artwork, message["art"] as? String == artwork.version,
+                  let sealed = seal?.seal(artwork.jpeg, to: reply) else { return .notFound }
+            log.info("cover fetched, \(artwork.jpeg.count) bytes")
+            return Response(status: 200, type: "application/octet-stream", body: sealed)
+        case "ping":
+            return sealedAnswer(["type": "pong"], to: reply)
+        case "command":
+            guard command(message) else { return Response(status: 400) }
+            return sealedAnswer(["type": "ok"], to: reply)
+        default:
+            return Response(status: 400)
+        }
+    }
+
+    private func sealedAnswer(_ message: [String: Any], to path: String) -> Response {
+        guard let body = seal?.seal(message, to: path) else { return Response(status: 500) }
+        return Response(status: 200, type: "application/octet-stream", body: body)
+    }
+
+    private func command(_ command: [String: Any]) -> Bool {
+        switch command["command"] as? String {
         case "play": source.send(.play)
         case "pause": source.send(.pause)
         case "next": source.send(.next)
         case "previous": source.send(.previous)
         case "seek":
-            guard let position = (command["position"] as? NSNumber)?.doubleValue else { return Response(status: 400) }
+            guard let position = (command["position"] as? NSNumber)?.doubleValue else { return false }
             source.seek(to: position)
         case "volume":
-            guard let level = (command["level"] as? NSNumber)?.intValue else { return Response(status: 400) }
+            guard let level = (command["level"] as? NSNumber)?.intValue else { return false }
             output.set(percent: level)
         case "mute":
-            guard let muted = command["muted"] as? Bool else { return Response(status: 400) }
+            guard let muted = command["muted"] as? Bool else { return false }
             output.set(muted: muted)
         default:
-            return Response(status: 400)
+            return false
         }
-        return .noContent
+        return true
     }
 }
