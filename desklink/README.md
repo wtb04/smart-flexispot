@@ -1,16 +1,17 @@
 # Desk Link
 
-A menu bar app that shares what plays on this Mac with the desk panel: the title, the
-artist, the cover and where it is, from anything macOS shows under Now Playing,
-YouTube in Safari as much as Spotify. The panel's media card then plays, pauses,
-seeks and skips it.
+A menu bar app that connects this Mac to the desk panel. Whatever plays on the
+Mac, from any app that shows under Now Playing, appears on the panel with its
+cover and where it is, and the panel's buttons pause, seek, skip and change the
+volume here. Claude Code's sessions on this Mac reach the panel through it too.
 
 | The menu | Its settings |
 |---|---|
 | <picture><source media="(prefers-color-scheme: dark)" srcset="shots/menu-dark.png"><img src="shots/menu-light.png" alt="Desk Link's menu, under its icon in the menu bar"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="shots/settings-dark.png"><img src="shots/settings-light.png" alt="Desk Link's settings" width="380"></picture> |
 
-Its menu turns sharing on and off, says what it shares and whether the panel
-answers, and sets the panel's address and key and whether it opens at login.
+The menu shows what plays and whether the panel answers, and turns sharing on
+and off; its settings hold the panel's address and key, what is shared, and
+whether it opens at login.
 
 ## Build
 
