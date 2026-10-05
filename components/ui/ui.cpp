@@ -57,8 +57,6 @@ int           s_desk_control_count              = 0;
 }  // namespace
 
 
-bool s_notice_lit_screen = false;
-
 void set_screen_state(bool on)
 {
     if (on == status_state().screen_on || s_handlers.screen == nullptr) {
@@ -71,7 +69,6 @@ void set_screen_state(bool on)
 namespace {
 void wake_on_touch(lv_event_t *)
 {
-    s_notice_lit_screen = false;
     if (status_state().screen_on) {
         return;
     }
@@ -91,7 +88,6 @@ void wake_on_touch(lv_event_t *)
 
 void screen_off_cb(lv_event_t *)
 {
-    s_notice_lit_screen = false;
     set_screen_state(false);
 }
 
@@ -197,6 +193,7 @@ bool build_next_part()
             build_favourites(scr);
             build_focus_full(scr);
             create_notice_card();
+            start_screen_schedule();
             follow_pages();
             return true;
         default:
@@ -381,6 +378,7 @@ Slot<std::uint8_t>   p_neighbours;  // bit 0 an episode before, bit 1 one after
 Slot<std::uint8_t>   p_tracks;      // bit 0 a track back, bit 1 one on
 Slot<PillArgs>       p_pill[kPillCount];
 Slot<LightsArgs>     p_lights;
+Slot<bool>           p_room_lit;
 Slot<LightArgs>      p_light[kLightCount];
 Slot<ToggleArgs>     p_toggle[kDialToggleCount];
 Slot<RangeArgs>      p_range;
@@ -566,7 +564,6 @@ void apply_wifi(bool wifi)
 void apply_screen(bool on)
 {
     status_state().screen_on = on;
-    s_notice_lit_screen      = false;
     publish(Topic::Status);
 }
 
@@ -682,6 +679,9 @@ void apply_home_updates()
     }
     if (LightsArgs lights{}; take(p_lights, lights)) {
         apply_lights(lights.label.get(), lights.state.get(), lights.on);
+    }
+    if (bool lit = false; take(p_room_lit, lit)) {
+        lights_take_room(lit);
     }
     for (int i = 0; i < kLightCount; ++i) {
         if (LightArgs light{}; take(p_light[i], light)) {
@@ -963,6 +963,12 @@ esp_err_t set_light(int index, const char *name, const char *state, bool on)
     args.state.set(state);
     args.on = on;
     put(p_light[index], args);
+    return ESP_OK;
+}
+
+esp_err_t set_room_lit(bool lit)
+{
+    put(p_room_lit, lit);
     return ESP_OK;
 }
 

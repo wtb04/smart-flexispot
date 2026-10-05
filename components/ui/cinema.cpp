@@ -1,8 +1,7 @@
 #include "ui_internal.h"
 
-#include "status_model.h"
-
 #include "room_model.h"
+#include "screen_rules.h"
 #include "topics.h"
 
 #include <algorithm>
@@ -44,7 +43,7 @@ constexpr std::int32_t VOLUME_INSET  = 28;   // its speaker and level from its e
 constexpr std::uint8_t VOLUME_FILL_MIX = 64;  // of the text's colour into the bar's
 constexpr time_t       CLOCK_SET     = 1'700'000'000;  // any earlier and the clock is not set yet
 constexpr std::uint32_t TICK_MS      = 500;
-constexpr std::uint32_t DARK_AFTER_MS = 15 * units::kMsPerSecond;
+constexpr std::int64_t  DARK_AFTER_MS = 15 * units::kMsPerSecond;
 
 lv_obj_t     *s_view    = nullptr;
 lv_obj_t     *s_still   = nullptr;
@@ -73,8 +72,6 @@ lv_obj_t     *s_low_chip    = nullptr;  // quick actions in the row over the vie
 lv_obj_t     *s_lights_chip = nullptr;
 lv_obj_t     *s_screen_chip = nullptr;
 lv_timer_t   *s_tick    = nullptr;
-std::uint32_t s_woke_at = 0;  // lit for an intro to skip: kept lit a while from then
-bool          s_skip_was_offered = false;
 
 ViewId s_cinema = kNoView;
 
@@ -144,21 +141,6 @@ void show_progress()
     }
 }
 
-void keep_screen()
-{
-    const bool offered = media_skip_offer().text != nullptr;
-    if (offered && !s_skip_was_offered) {
-        s_woke_at = lv_tick_get();
-        set_screen_state(true);
-    }
-    s_skip_was_offered = offered;
-    const bool untouched = lv_display_get_inactive_time(nullptr) >= DARK_AFTER_MS &&
-                           lv_tick_elaps(s_woke_at) >= DARK_AFTER_MS;
-    if (s_auto_off && status_state().screen_on && untouched && !offered) {
-        set_screen_state(false);
-    }
-}
-
 void show_volume(int percent)
 {
     lv_obj_set_width(s_volume_fill, lv_obj_get_width(s_volume) * percent / 100);
@@ -223,8 +205,8 @@ void show_media()
     }
 }
 
-// What goes on with the time: how far, the intro or credits to skip, and the
-// screen going dark; and what is not followed yet, the room and the episodes.
+// What goes on with the time: how far and the intro or credits to skip; and
+// what is not followed yet, the room and the episodes.
 void tick(lv_timer_t *)
 {
     show_progress();
@@ -234,7 +216,6 @@ void tick(lv_timer_t *)
         theme::set_text(lv_obj_get_child(s_skip, 0), skip);
     }
     theme::light_chip(s_screen_chip, s_auto_off);
-    keep_screen();
 }
 
 lv_obj_t *button(lv_obj_t *parent, const char *text, std::int32_t w, std::int32_t h,
@@ -472,8 +453,6 @@ void build_cinema(lv_obj_t *screen)
     lv_timer_pause(s_tick);
     s_cinema = add_view({"cinema", ViewKind::Fullscreen, s_view,
                          [] {
-                             s_woke_at          = lv_tick_get();
-                             s_skip_was_offered = false;
                              lv_timer_resume(s_tick);
                              tick(s_tick);
                          },
@@ -501,5 +480,18 @@ void build_cinema(lv_obj_t *screen)
 void open_cinema()
 {
     open_view(s_cinema);
+}
+
+std::int64_t cinema_dark_after()
+{
+    if (!view_open(s_cinema)) {
+        return 0;
+    }
+    return s_auto_off ? DARK_AFTER_MS : screen_rules::kNever;
+}
+
+bool cinema_offers_skip()
+{
+    return view_open(s_cinema) && media_skip_offer().text != nullptr;
 }
 }  // namespace ui::detail
