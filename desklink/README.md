@@ -1,17 +1,23 @@
 # Desk Link
 
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="shots/menu-dark.png"><img src="shots/menu-light.png" alt="Desk Link's menu, under its icon in the menu bar" width="407"></picture></p>
+
 A menu bar app that connects this Mac to the desk panel. Whatever plays on the
 Mac, from any app that shows under Now Playing, appears on the panel with its
 cover and where it is, and the panel's buttons pause, seek, skip and change the
 volume here. Claude Code's sessions on this Mac reach the panel through it too.
 
-| The menu | Its settings |
-|---|---|
-| <picture><source media="(prefers-color-scheme: dark)" srcset="shots/menu-dark.png"><img src="shots/menu-light.png" alt="Desk Link's menu, under its icon in the menu bar"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="shots/settings-dark.png"><img src="shots/settings-light.png" alt="Desk Link's settings" width="380"></picture> |
+The menu shows what plays, with a button to pause it, and whether the panel
+answers; the switch beside that turns sharing off and on, and the menu behind
+the dots opens the settings.
 
-The menu shows what plays and whether the panel answers, and turns sharing on
-and off; its settings hold the panel's address and key, what is shared, and
-whether it opens at login.
+## Settings
+
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="shots/settings-dark.png"><img src="shots/settings-light.png" alt="Desk Link's settings" width="380"></picture></p>
+
+The panel's address and the key the two share, what this Mac shares with it,
+the volume keys for a display whose volume macOS cannot set, and whether Desk
+Link opens at login.
 
 ## Build
 
