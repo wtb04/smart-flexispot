@@ -1,0 +1,262 @@
+#pragma once
+
+// The design kit: every colour, size, surface, control and motion the panel
+// draws with, in one place. Components only ever add the kit's shared styles,
+// so switching the look, the accent or the glass restyles every screen at once,
+// and a screen that looks different from the others is one that styles itself.
+//
+// Solid for what stays, glass for what you touch or what floats. Solid things
+// are flat fills lifted by one soft shadow. Glass is the dock, the bar's
+// capsules, popovers and notices. Tick marks only where a value is read off a
+// scale; zone bands only where good, fair and poor are the point.
+
+#include "lvgl.h"
+
+#include <climits>
+#include <cstdint>
+#include <initializer_list>
+
+namespace ui::kit {
+
+enum class Look : std::uint8_t { Dark, Light };
+
+struct Palette {
+    std::uint32_t ground, surface, surface_hi, well, raised, raised_hi;
+    std::uint32_t ink;
+    lv_opa_t      ink2_opa, ink3_opa, hair_opa, tick_opa;
+    std::uint32_t hair;  // the colour hairlines and the grid are drawn in, at hair_opa
+    std::uint32_t accent, on_accent;
+    std::uint32_t green, amber, red, lamp, on_lamp, blue;
+    std::uint32_t shadow;
+    lv_opa_t      shadow_opa, edge_opa;
+    std::uint32_t glass;
+    lv_opa_t      glass_clear_opa, glass_solid_opa, rim_opa, glass_edge_opa, glass_shadow_opa;
+    std::uint32_t scrim;
+    lv_opa_t      scrim_opa;
+};
+
+namespace space {
+inline constexpr std::int32_t xs = 4;
+inline constexpr std::int32_t s  = 8;
+inline constexpr std::int32_t m  = 12;
+inline constexpr std::int32_t l  = 16;  // between tiles, around the screen
+inline constexpr std::int32_t xl = 20;  // inside a tile
+inline constexpr std::int32_t xxl = 24;
+}  // namespace space
+
+namespace radius {
+inline constexpr std::int32_t tile   = 26;
+inline constexpr std::int32_t inner  = 16;  // a well or a row inside a tile: tile minus its padding, rounded
+inline constexpr std::int32_t button = 16;
+inline constexpr std::int32_t pop    = 30;
+inline constexpr std::int32_t dock   = 34;
+inline constexpr std::int32_t round  = LV_RADIUS_CIRCLE;
+}  // namespace radius
+
+namespace size {
+inline constexpr std::int32_t touch     = 56;  // the smallest thing a finger is asked to hit
+inline constexpr std::int32_t button    = 56;
+inline constexpr std::int32_t button_lg = 72;
+inline constexpr std::int32_t bar       = 72;
+inline constexpr std::int32_t dock      = 112;
+inline constexpr std::int32_t screen_w  = 1280;
+inline constexpr std::int32_t screen_h  = 720;
+}  // namespace size
+
+namespace motion {
+inline constexpr std::uint32_t press_ms   = 70;
+inline constexpr std::uint32_t release_ms = 340;
+inline constexpr std::uint32_t pop_ms     = 520;   // to settle, the spring's tail included
+inline constexpr std::uint32_t close_ms   = 180;
+inline constexpr std::uint32_t move_ms    = 460;   // a needle, a knob, a segment's thumb
+inline constexpr std::uint32_t fade_ms    = 220;
+inline constexpr std::int32_t  press_scale = 248;  // of 256
+/** A damped spring with a little bounce, normalised to the animation's length. */
+int32_t spring(const lv_anim_t *a);
+/** The same with no bounce, for things that should arrive without wobbling. */
+int32_t settle(const lv_anim_t *a);
+}  // namespace motion
+
+enum class Role : std::uint8_t { Label, Small, Body, H3, H2, H1, ReadS, ReadM, ReadL, ReadXL, ReadXXL };
+enum class Ink : std::uint8_t { Primary, Secondary, Tertiary, Accent, OnAccent, Green, Amber, Red };
+
+/** Once, after the fonts and before anything is built. */
+void init(Look look = Look::Dark);
+void set_look(Look look);
+/** 0 is the clearest glass, 100 nearly solid. */
+void set_glass(int percent);
+void set_accent(std::uint32_t colour);
+Look look();
+int  glass();
+const Palette &colours();
+lv_color_t     colour(Ink ink);
+/** For widgets that colour their own parts: `cb` runs on every restyle while `owner` lives. */
+void           on_restyle(lv_obj_t *owner, void (*cb)(void *ctx), void *ctx);
+
+
+/** The ground every screen sits on: a warm, lamp-lit dark, or warm paper. */
+lv_obj_t *ground(lv_obj_t *parent);
+
+enum class Lift : std::uint8_t { Low, High };
+lv_obj_t *tile(lv_obj_t *parent, Lift lift = Lift::Low);
+lv_obj_t *well(lv_obj_t *parent);
+
+enum class Glass : std::uint8_t { Small, Large, Clear };
+lv_obj_t *glass(lv_obj_t *parent, Glass kind = Glass::Small);
+
+lv_obj_t *text(lv_obj_t *parent, Role role, const char *value, Ink ink = Ink::Primary);
+lv_obj_t *icon(lv_obj_t *parent, const char *glyph, std::int32_t px = 28, bool filled = false,
+               Ink ink = Ink::Primary);
+void      set_ink(lv_obj_t *label, Ink ink);
+void      set_icon(lv_obj_t *label, const char *glyph, bool filled);
+lv_obj_t *hairline(lv_obj_t *parent, bool vertical, std::int32_t length);
+
+enum class Button : std::uint8_t {
+    Raised,  // the ordinary button on a surface
+    Accent,  // the one primary action
+    Flat,    // on glass, or a bare glyph
+    Soft,    // accent-tinted, for a quiet "on"
+};
+/** A button with an optional icon and text. Checkable buttons fill with the accent when on. */
+lv_obj_t *button(lv_obj_t *parent, Button kind, const char *glyph, const char *label,
+                 bool round = false, bool checkable = false);
+/** A lamp-style toggle tile: a fill in `lamp` when on. */
+lv_obj_t *lamp_tile(lv_obj_t *parent, const char *glyph, const char *name, bool on);
+void      set_lamp(lv_obj_t *tile, bool on);
+
+/** Faded to 40% and untappable; never LVGL's grey. */
+void set_usable(lv_obj_t *obj, bool usable);
+
+lv_obj_t *toggle(lv_obj_t *parent, bool on);
+
+/** Segments in a well; the chosen one sits raised and slides to a tap. */
+lv_obj_t *segmented(lv_obj_t *parent, std::initializer_list<const char *> labels, int chosen,
+                    std::int32_t width);
+int  segmented_chosen(lv_obj_t *seg);
+void segmented_choose(lv_obj_t *seg, int index, bool animate);
+
+/** The bar's capsule: a small glass pill that related items share, split by hairlines. */
+lv_obj_t *capsule(lv_obj_t *parent);
+lv_obj_t *capsule_item(lv_obj_t *capsule, const char *glyph, const char *label, std::int32_t width);
+void      capsule_divider(lv_obj_t *capsule);
+
+// --- instruments -----------------------------------------------------------
+
+struct Zone {
+    std::int32_t from, to;
+    Ink          ink;
+};
+
+struct DialSpec {
+    std::int32_t size    = 200;
+    std::int32_t min     = 0;
+    std::int32_t max     = 100;
+    std::int32_t start   = 150;  // degrees clockwise from 3 o'clock, as LVGL counts
+    std::int32_t sweep   = 240;
+    std::int32_t ticks   = 31;   // total, minor and major
+    std::int32_t major   = 5;
+    std::int32_t decimals = 0;   // values are in tenths when this is 1
+    bool         needle  = true;
+    bool         fill    = false;  // an accent arc from the minimum to the target
+    bool         target  = false;  // a knob at the target, for a setting
+    bool         ends    = false;  // the range in small figures at the two ends
+    const char  *unit    = nullptr;
+    const Zone  *zones   = nullptr;
+    int          zone_count = 0;
+    Role         read    = Role::ReadM;
+};
+
+class Dial {
+  public:
+    Dial() = default;
+    Dial(const Dial &) = delete;
+    Dial &operator=(const Dial &) = delete;
+    Dial(lv_obj_t *parent, const DialSpec &spec);
+    lv_obj_t *obj() const { return m_root; }
+    /** Moves the needle and the readout there on a spring. */
+    void set_value(std::int32_t value, bool animate = true);
+    void set_target(std::int32_t value, bool animate = true);
+    void set_lit(int ticks);  // the first n ticks in the accent, for a timer
+    std::int32_t value() const { return m_value; }
+
+  private:
+    static void on_value(void *var, int32_t v);
+    static void on_target(void *var, int32_t v);
+    void place_needle(std::int32_t value);
+    void place_target(std::int32_t value);
+    void show_value(std::int32_t value);
+    void light_zone(std::int32_t value);
+    void restyle();
+    float angle_of(std::int32_t value) const;
+
+    DialSpec  m_spec{};
+    lv_obj_t *m_root   = nullptr;
+    lv_obj_t *m_scale  = nullptr;
+    lv_obj_t *m_needle = nullptr;
+    lv_obj_t *m_arc    = nullptr;
+    lv_obj_t *m_knob   = nullptr;
+    lv_obj_t *m_read   = nullptr;
+    lv_obj_t *m_unit   = nullptr;
+    lv_point_precise_t m_points[2]{};
+    lv_scale_section_t *m_zones[6]{};
+    lv_style_t          m_zone_styles[6]{};
+    lv_scale_section_t *m_lit_section = nullptr;
+    lv_style_t          m_lit_style{};
+    char                m_ends[2][12]{};
+    const char         *m_src[72]{};
+    std::int32_t m_value = 0, m_target = 0;
+    std::int32_t m_shown = INT32_MIN, m_lit = -1, m_zone = -1;
+    std::int32_t m_r_tick = 0, m_major_len = 0, m_r_arc = 0;
+};
+
+struct RailSpec {
+    std::int32_t length   = 300;
+    bool         vertical = false;
+    std::int32_t min = 0, max = 100;
+    std::int32_t ticks    = 0;  // 0: a plain track, as sliders and progress are
+    std::int32_t major    = 5;
+    bool         draggable = false;
+    bool         fill     = true;
+    const std::int32_t *notches = nullptr;  // marks for presets
+    int          notch_count = 0;
+};
+
+class Rail {
+  public:
+    Rail() = default;
+    Rail(const Rail &) = delete;
+    Rail &operator=(const Rail &) = delete;
+    Rail(lv_obj_t *parent, const RailSpec &spec);
+    lv_obj_t *obj() const { return m_root; }
+    void set_value(std::int32_t value, bool animate = true);
+    std::int32_t value() const { return m_value; }
+
+  private:
+    static void on_value(void *var, int32_t v);
+    static void on_press(lv_event_t *e);
+    void place(std::int32_t value);
+    void restyle();
+
+    RailSpec  m_spec{};
+    lv_obj_t *m_root = nullptr, *m_track = nullptr, *m_fill = nullptr, *m_knob = nullptr;
+    std::int32_t m_value = 0, m_shown = 0;
+};
+
+// --- popovers -------------------------------------------------------------
+
+enum class From : std::uint8_t { Below, Beside };
+
+/**
+ * A glass card that grows out of `source` on a spring, over a scrim that closes
+ * it on a tap. Returns the card to fill; its size is `w` by `h`.
+ */
+lv_obj_t *popover(lv_obj_t *source, std::int32_t w, std::int32_t h, From from = From::Below,
+                  bool blur_scrim = true);
+void      close_popover(bool animate = true);
+bool      popover_open();
+
+/** A slab that drops from under the bar with a notice, and leaves on its own. */
+lv_obj_t *notice(const char *source, const char *glyph, const char *title, const char *message,
+                 std::uint32_t timeout_ms);
+
+}  // namespace ui::kit

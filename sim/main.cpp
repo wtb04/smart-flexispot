@@ -11,6 +11,7 @@
 #include "updates.h"
 #include "ui.h"
 #include "ui_internal.h"
+#include "lab.h"
 
 #include "esp_heap_caps.h"
 #include "lvgl.h"
@@ -122,6 +123,7 @@ void save_screenshot()
 }
 
 bool s_quit = false;
+bool s_lab  = false;
 
 void toggle_help();
 
@@ -292,7 +294,11 @@ int on_event(void *, SDL_Event *event)
         s_quit = true;
     }
     if (event->type == SDL_KEYDOWN && event->key.repeat == 0) {
-        press(event->key.keysym.sym);
+        if (s_lab) {
+            ui::lab::key(event->key.keysym.sym);
+        } else {
+            press(event->key.keysym.sym);
+        }
     }
     return 0;
 }
@@ -364,6 +370,7 @@ struct Options {
     std::string out2;
     int         draw_page  = -1;  // --draw-page P N: page P drawn whole N times, timed, to profile drawing
     int         draw_times = 0;
+    bool        lab        = false;  // --lab: the design kit's lab in place of the panel
 };
 
 Options options(int argc, char **argv)
@@ -372,7 +379,9 @@ Options options(int argc, char **argv)
     for (int i = 1; i < argc; ++i) {
         const std::string name  = argv[i];
         const char       *value = i + 1 < argc ? argv[i + 1] : "0";
-        if (name == "--page") {
+        if (name == "--lab") {
+            o.lab = true;
+        } else if (name == "--page") {
             o.page = std::atoi(value);
             ++i;
         } else if (name == "--shot") {
@@ -471,6 +480,38 @@ int main(int argc, char **argv)
     }
     lv_sdl_mouse_create();
     SDL_AddEventWatch(on_event, nullptr);
+
+    if (opts.lab) {
+        s_lab = true;
+        ui::lab::build();
+        for (const char key : opts.keys) {
+            ui::lab::key(key);
+        }
+        const std::uint32_t shot_at = opts.shot_s >= 0 ? SDL_GetTicks() + opts.shot_s * 1000u : 0;
+        bool                tapped  = false;
+        while (!s_quit) {
+            if (!tapped) {
+                tapped = true;
+                for (const Options::Step &step : opts.taps) {
+                    if (step.wait_ms > 0) {
+                        run_for(step.wait_ms);
+                    } else {
+                        tap(step.at, step.hold_ms > 0 ? step.hold_ms : 120);
+                    }
+                }
+                for (const char key : opts.then) {
+                    ui::lab::key(key);
+                }
+            }
+            if (shot_at != 0 && SDL_GetTicks() >= shot_at) {
+                save_screenshot();
+                break;
+            }
+            const std::uint32_t idle = lv_timer_handler();
+            SDL_Delay(idle < 5 ? idle : 5);
+        }
+        return 0;
+    }
 
     ui::set_cards(CARDS, static_cast<int>(std::size(CARDS)));
     const char *dock = std::getenv("SIM_DOCK");
