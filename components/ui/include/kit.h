@@ -21,7 +21,8 @@ namespace ui::kit {
 enum class Look : std::uint8_t { Dark, Light };
 
 struct Palette {
-    std::uint32_t ground, surface, surface_hi, well, raised, raised_hi;
+    std::uint32_t ground, surface, surface_hi, raised, raised_hi;
+    lv_opa_t      fill_opa;  // a flat area, a track or a dial's arc: the ink, faintly, on whatever is under it
     std::uint32_t ink;
     lv_opa_t      ink2_opa, ink3_opa, hair_opa, tick_opa;
     std::uint32_t hair;  // the colour hairlines and the grid are drawn in, at hair_opa
@@ -57,6 +58,8 @@ namespace size {
 inline constexpr std::int32_t touch     = 56;  // the smallest thing a finger is asked to hit
 inline constexpr std::int32_t button    = 56;
 inline constexpr std::int32_t button_lg = 72;
+inline constexpr std::int32_t toggle_w  = 92;  // a switch a thumb lands on, not a fingertip
+inline constexpr std::int32_t toggle_h  = 52;
 inline constexpr std::int32_t bar       = 72;
 inline constexpr std::int32_t dock      = 112;
 inline constexpr std::int32_t screen_w  = 1280;
@@ -66,7 +69,7 @@ inline constexpr std::int32_t screen_h  = 720;
 // One spring for everything that moves, scaled to each duration: nine tenths
 // of the way in two fifths of it, past the end by half a percent, then still.
 namespace motion {
-inline constexpr std::uint32_t press_ms   = 0;     // the sink is on the first frame after the finger lands
+inline constexpr std::uint32_t press_ms   = 0;     // the press shows on the first frame after the finger lands
 inline constexpr std::uint32_t release_ms = 300;
 inline constexpr std::uint32_t pop_ms     = 450;   // to settle, the spring's tail included
 inline constexpr std::uint32_t close_ms   = 240;
@@ -131,6 +134,16 @@ lv_obj_t *icon(lv_obj_t *parent, const char *glyph, std::int32_t px = 28, bool f
 void      set_ink(lv_obj_t *label, Ink ink);
 void      set_icon(lv_obj_t *label, const char *glyph, bool filled);
 lv_obj_t *hairline(lv_obj_t *parent, bool vertical, std::int32_t length);
+/** A state at a glance: heating, warm enough, off; good, fair, poor. */
+lv_obj_t *dot(lv_obj_t *parent, Ink ink, std::int32_t px = 12);
+void      set_dot(lv_obj_t *dot, Ink ink);
+
+/** The bar's status as the panel has always drawn it: the time, Wi-Fi and the phone. */
+struct Status {
+    lv_obj_t *root = nullptr, *clock = nullptr, *wifi = nullptr, *phone = nullptr;
+};
+Status status(lv_obj_t *parent);
+void   set_status(const Status &s, const char *time, bool wifi, bool phone);
 
 enum class Button : std::uint8_t {
     Raised,  // the ordinary button on a surface
@@ -181,6 +194,8 @@ struct DialSpec {
     bool         fill    = false;  // an accent arc from the minimum to the target
     bool         target  = false;  // a knob at the target, for a setting
     bool         ends    = false;  // the range in small figures at the two ends
+    bool         span    = false;  // a setting by ticks alone: those from the reading up to the target lit, the target marked and read out
+    bool         bold    = false;  // heavier ticks, for a dial that is nothing but ticks
     const char  *unit    = nullptr;
     const Zone  *zones   = nullptr;
     int          zone_count = 0;
@@ -198,12 +213,15 @@ class Dial {
     void set_value(std::int32_t value, bool animate = true);
     void set_target(std::int32_t value, bool animate = true);
     void set_lit(int ticks);  // the first n ticks in the accent, for a timer
+    void set_caption(const char *caption);  // the small line under the readout
     std::int32_t value() const { return m_value; }
 
   private:
     static void on_value(void *var, int32_t v);
     static void on_target(void *var, int32_t v);
     void place_needle(std::int32_t value);
+    void place_line(lv_obj_t *line, lv_point_precise_t *points, std::int32_t value, float r0, float r1);
+    void light_span();
     void place_target(std::int32_t value);
     void show_value(std::int32_t value);
     void light_zone(std::int32_t value);
@@ -223,7 +241,9 @@ class Dial {
     lv_obj_t *m_face   = nullptr;  // the scale as a picture, shown in its place
     lv_draw_buf_t *m_face_buf   = nullptr;
     lv_timer_t    *m_face_timer = nullptr;
-    lv_point_precise_t m_points[2]{};
+    lv_obj_t *m_mark   = nullptr;  // the target, on a span dial
+    lv_point_precise_t m_points[2]{}, m_mark_points[2]{};
+    std::int32_t m_span_lo = 0, m_span_hi = -1;
     lv_scale_section_t *m_zones[6]{};
     lv_style_t          m_zone_styles[6]{};
     lv_scale_section_t *m_lit_section = nullptr;
