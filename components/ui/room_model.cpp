@@ -1,7 +1,7 @@
 #include "room_model.h"
 
 #include "topics.h"
-#include "ui_internal.h"
+#include "ui_core.h"
 
 #include <cstdio>
 

@@ -4,8 +4,6 @@
 #include "topics.h"
 
 namespace ui::detail {
-const Card *s_cards      = nullptr;
-int         s_card_count = 0;
 lv_obj_t   *s_row_value[kMaxCards][kMaxRows] = {};
 namespace {
 const char *glyph_symbol(Glyph glyph)

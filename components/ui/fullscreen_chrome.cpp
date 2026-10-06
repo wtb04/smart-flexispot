@@ -97,8 +97,6 @@ void build_power(Clock &clock, lv_obj_t *root)
     lv_obj_set_pos(clock.fill, 2 * CELL_LINE, 2 * CELL_LINE);
 }
 
-const char *s_pinned_clock = nullptr;
-std::time_t s_clock_shift  = 0;  // from the real time to the pinned clock's
 
 void tell_time(const Clock &clock)
 {
@@ -106,8 +104,8 @@ void tell_time(const Clock &clock)
     std::tm      local{};
     localtime_r(&now, &local);
     char text[8] = "";
-    if (s_pinned_clock != nullptr) {
-        std::snprintf(text, sizeof(text), "%s", s_pinned_clock);
+    if (pinned_clock() != nullptr) {
+        std::snprintf(text, sizeof(text), "%s", pinned_clock());
     } else if (now >= CLOCK_SET) {
         std::strftime(text, sizeof(text), "%H:%M", &local);
     }
@@ -242,31 +240,6 @@ void arrange_top()
 
 }  // namespace ui::detail
 
-namespace ui {
-void pin_clock(const char *text)
-{
-    detail::s_pinned_clock = text;
-    detail::s_clock_shift  = 0;
-    int hour = 0, minute = 0;
-    if (text == nullptr || std::sscanf(text, "%d:%d", &hour, &minute) != 2) {
-        return;
-    }
-    const std::time_t now = std::time(nullptr);
-    std::tm           local{};
-    localtime_r(&now, &local);
-    local.tm_hour = hour;
-    local.tm_min  = minute;
-    local.tm_sec  = 0;
-    detail::s_clock_shift = std::mktime(&local) - now;
-}
-}  // namespace ui
-
-namespace ui::detail {
-std::time_t wall_now()
-{
-    return std::time(nullptr) + s_clock_shift;
-}
-}  // namespace ui::detail
 
 namespace ui::detail {
 void create_top_bar(lv_obj_t *parent)

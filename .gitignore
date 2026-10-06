@@ -24,3 +24,5 @@ sdkconfig.old
 # defaults in ui_internal.h are what everyone else gets.
 components/room/room_config.h
 components/ui/ui_presets.h
+build_kit/
+sim/build-kit/
