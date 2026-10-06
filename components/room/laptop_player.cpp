@@ -23,8 +23,9 @@ public:
             view.source       = now.app.empty() ? "LAPTOP" : upper(now.app) + ", LAPTOP";
             view.title        = now.title;
             view.artist       = now.artist;
-            view.picture      = laptop::art_url(now);
-            view.still        = now.video ? view.picture : "";
+            // A video's channel picture on the card, where its frame would be cropped.
+            view.picture      = laptop::art_url(now.square.empty() ? now.art : now.square);
+            view.still        = now.video ? laptop::art_url(now.art) : "";
             view.position_s   = now.position_s;
             view.duration_s   = now.duration_s;
             view.position_key = now.title + ':' + std::to_string(now.position_s) + (now.playing ? "" : "p");
