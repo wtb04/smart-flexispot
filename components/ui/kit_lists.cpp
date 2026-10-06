@@ -998,7 +998,7 @@ void set_row_title(lv_obj_t *obj, const char *title, Ink ink)
 {
     if (Row *row = row_of(obj)) {
         set_text_if(row->title, title);
-        set_ink(row->title, ink);
+        ink_if(row->title, ink);
     }
 }
 
@@ -1030,6 +1030,60 @@ void centre_rows(lv_obj_t *parent)
         if (row_of(obj) != nullptr && h <= lv_obj_get_style_min_height(obj, LV_PART_MAIN)) {
             lv_obj_set_height(obj, h);
         }
+    }
+}
+
+// --- rows used again (Home and Calendar) -----------------------------------
+
+void ink_if(lv_obj_t *label, Ink ink)
+{
+    const Palette &p   = colours();
+    const lv_opa_t opa = ink == Ink::Secondary ? p.ink2_opa : ink == Ink::Tertiary ? p.ink3_opa : LV_OPA_COVER;
+    if (!lv_color_eq(lv_obj_get_style_text_color(label, LV_PART_MAIN), colour(ink)) ||
+        lv_obj_get_style_text_opa(label, LV_PART_MAIN) != opa) {
+        set_ink(label, ink);
+    }
+}
+
+namespace {
+// The lead and the mark come before the column of words, in the order row() makes them.
+lv_obj_t *row_part(lv_obj_t *obj, bool mark)
+{
+    const Row *row = row_of(obj);
+    if (row == nullptr) {
+        return nullptr;
+    }
+    const lv_obj_t *words = lv_obj_get_parent(row->title);
+    for (std::uint32_t i = 0; i < lv_obj_get_child_count(obj); ++i) {
+        lv_obj_t *c = lv_obj_get_child(obj, static_cast<std::int32_t>(i));
+        if (c == words) {
+            break;
+        }
+        const bool label = lv_obj_check_type(c, &lv_label_class);
+        if (mark && !label && lv_obj_get_style_width(c, LV_PART_MAIN) == MARK_W) {
+            return c;
+        }
+        if (!mark && label && lv_obj_get_user_data(c) == nullptr) {  // an icon keeps its size there
+            return c;
+        }
+    }
+    return nullptr;
+}
+}  // namespace
+
+void set_row_lead(lv_obj_t *obj, const char *lead, Ink ink)
+{
+    if (lv_obj_t *l = row_part(obj, false)) {
+        set_text_if(l, lead);
+        ink_if(l, ink);
+    }
+}
+
+void set_row_mark(lv_obj_t *obj, std::uint32_t colour)
+{
+    lv_obj_t *m = row_part(obj, true);
+    if (m != nullptr && !lv_color_eq(lv_obj_get_style_bg_color(m, LV_PART_MAIN), lv_color_hex(colour))) {
+        lv_obj_set_style_bg_color(m, lv_color_hex(colour), 0);
     }
 }
 
