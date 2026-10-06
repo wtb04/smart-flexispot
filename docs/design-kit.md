@@ -67,7 +67,7 @@ One spring moves everything (`motion::spring`, damping 0.86), scaled to each
 duration, plus `motion::settle` for going back into something without
 overshooting:
 
-- **Press and release:** a press sinks on the first frame after the finger
+- **Press and release:** a press gives a little on the first frame after the finger
   lands, and lets go on the spring.
 - **Popovers:** a popover grows out of its source, and its frost spreads out
   from the source in bands. On closing it shrinks back into the source, and the
