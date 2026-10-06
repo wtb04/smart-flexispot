@@ -94,6 +94,12 @@ struct ZoomFrame {
     std::uint16_t        ring_ink   = 0;
 };
 esp_err_t zoom_begin(const lv_area_t *keep, int count);
+
+/** The frame on show, turned back the way LVGL draws it and shrunk by the PPA
+ *  to `w` by `h` into `out` (RGB565, cache-line aligned, `out_bytes` long): a
+ *  picture of the screen as it is, for a blurred backdrop, without drawing it
+ *  again. The shrink is in steps of 1/16. */
+esp_err_t shrink_shown(std::uint8_t *out, std::size_t out_bytes, std::uint32_t w, std::uint32_t h);
 esp_err_t zoom_frame(const ZoomFrame &frame);
 void      zoom_end();
 

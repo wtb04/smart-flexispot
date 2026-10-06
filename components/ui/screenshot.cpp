@@ -173,11 +173,38 @@ static void blend_top(lv_draw_buf_t *shot)
     lv_draw_buf_destroy(top);
 }
 
+// When there is no room for the full-colour picture: the screen drawn straight
+// into the one RGB565 buffer handed back, the top layer left out.
+static std::uint16_t *capture_lean(int &width, int &height)
+{
+    lv_display_t      *disp = lv_display_get_default();
+    const std::int32_t w = lv_display_get_horizontal_resolution(disp), h = lv_display_get_vertical_resolution(disp);
+    const std::uint32_t stride = lv_draw_buf_width_to_stride(static_cast<std::uint32_t>(w), LV_COLOR_FORMAT_RGB565);
+    const std::size_t   bytes  = static_cast<std::size_t>(stride) * h;
+    auto *out = static_cast<std::uint16_t *>(heap_caps_aligned_alloc(LV_DRAW_BUF_ALIGN, bytes, MALLOC_CAP_SPIRAM));
+    if (out == nullptr || !lvgl_port_lock(LOCK_TIMEOUT_MS)) {
+        heap_caps_free(out);
+        return nullptr;
+    }
+    lv_draw_buf_t buf;
+    const bool ok = lv_draw_buf_init(&buf, static_cast<std::uint32_t>(w), static_cast<std::uint32_t>(h),
+                                     LV_COLOR_FORMAT_RGB565, stride, out, static_cast<std::uint32_t>(bytes)) == LV_RESULT_OK &&
+                    lv_snapshot_take_to_draw_buf(lv_screen_active(), LV_COLOR_FORMAT_RGB565, &buf) == LV_RESULT_OK;
+    lvgl_port_unlock();
+    if (!ok) {
+        heap_caps_free(out);
+        return nullptr;
+    }
+    width  = static_cast<int>(w);
+    height = static_cast<int>(h);
+    return out;
+}
+
 std::uint16_t *capture(int &width, int &height)
 {
     lv_draw_buf_t *shot = take_snapshot();
     if (shot == nullptr) {
-        return nullptr;
+        return capture_lean(width, height);
     }
     blend_top(shot);
     width  = static_cast<int>(shot->header.w);

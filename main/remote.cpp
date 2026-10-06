@@ -19,6 +19,7 @@
 #include "net_stream.h"
 #include "ota.h"
 #include "power.h"
+#include "lab.h"
 #include "ui.h"
 #include "units.h"
 
@@ -506,6 +507,15 @@ esp_err_t bench_page(httpd_req_t *req)
     if (lvgl_port_lock(STATS_LOCK_MS)) {
         char query[8] = "";
         httpd_req_get_url_query_str(req, query, sizeof(query));
+        if (std::strcmp(query, "lab") == 0) {
+            if (!ui::lab::built()) {
+                ui::lab::build([]() { return static_cast<std::uint64_t>(esp_timer_get_time()); });
+            }
+            ui::lab::bench();
+            n = std::snprintf(text, sizeof(text), "the lab is up and its bench running; /bench?report in a minute\n");
+        } else if (std::strcmp(query, "report") == 0) {
+            n = ui::lab::report(text, sizeof(text));
+        } else
         n = std::strcmp(query, "open") == 0     ? ui::bench_radar_open(text, sizeof(text))
             : std::strcmp(query, "map") == 0    ? ui::bench_radar_map(text, sizeof(text), true)
             : std::strcmp(query, "back") == 0   ? ui::bench_radar_map(text, sizeof(text), false)

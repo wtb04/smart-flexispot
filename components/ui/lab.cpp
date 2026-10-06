@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <iterator>
 
 namespace ui::lab {
@@ -19,7 +20,9 @@ constexpr std::int32_t SHEET_Y = 76, SHEET_H = CONTENT_H - SHEET_Y;
 constexpr std::uint32_t ACCENTS[] = {0, 0x5aa9ff, 0x7ccf6a, 0xb48cff, 0xff6f8e, 0x3fd0c0};
 constexpr int GLASS_STEPS[] = {0, 35, 50, 70, 100};
 
-lv_obj_t *s_sheets[4]{};
+lv_obj_t *s_sheets[5]{};
+lv_obj_t *s_perf = nullptr;
+lv_obj_t *s_light_item = nullptr, *s_bench_btn = nullptr, *s_bench_seg = nullptr, *s_slab = nullptr;
 lv_obj_t *s_picker = nullptr;
 lv_obj_t *s_state  = nullptr;
 int       s_accent = 0;
@@ -55,15 +58,17 @@ void show_state()
     if (s_state == nullptr) {
         return;
     }
-    char buf[96];
-    std::snprintf(buf, sizeof buf, "%s, glass %d%%, scrim %s", look() == Look::Dark ? "Dark" : "Light", glass(),
-                  s_blur_scrim ? "blurred" : "plain");
+    char buf[112];
+    std::snprintf(buf, sizeof buf, "%s, glass %d%%, popovers %s", look() == Look::Dark ? "Dark" : "Light", glass(),
+                  pop_glass() == PopGlass::Frozen ? (pop_motion() == PopMotion::Rise ? "frozen, rising" : "frozen, growing")
+                                                  : s_blur_scrim ? "live" : "live, scrim plain");
     lv_label_set_text(s_state, buf);
 }
 
 void choose_sheet(int index)
 {
-    for (int i = 0; i < 4; ++i) {
+    lv_obj_scroll_to_y(layer(Layer::Content), 0, LV_ANIM_OFF);
+    for (int i = 0; i < 5; ++i) {
         if (s_sheets[i] != nullptr) {
             if (i == index) {
                 lv_obj_remove_flag(s_sheets[i], LV_OBJ_FLAG_HIDDEN);
@@ -99,9 +104,9 @@ lv_obj_t *head(lv_obj_t *body, const char *title, const char *sub)
     return row;
 }
 
-void open_lights(lv_event_t *e)
+void open_lights_from(lv_obj_t *source)
 {
-    lv_obj_t *body = popover(lv_event_get_current_target_obj(e), 430, 380, From::Below, s_blur_scrim);
+    lv_obj_t *body = popover(source, 430, 380, From::Below, s_blur_scrim);
     lv_obj_set_flex_flow(body, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(body, space::l, 0);
     lv_obj_t *row = head(body, "Lights", "2 of 4 on");
@@ -116,6 +121,8 @@ void open_lights(lv_event_t *e)
         lv_obj_set_size(t, 185, 120);
     }
 }
+
+void open_lights(lv_event_t *e) { open_lights_from(lv_event_get_current_target_obj(e)); }
 
 void open_heating(lv_event_t *e)
 {
@@ -338,7 +345,7 @@ void build_bar(lv_obj_t *scr)
     spacer(bar);
 
     lv_obj_t *room  = capsule(bar);
-    lv_obj_t *light = capsule_item(room, ic::lightbulb, "2", 118);
+    lv_obj_t *light = s_light_item = capsule_item(room, ic::lightbulb, "2", 118);
     lv_obj_set_style_text_font(lv_obj_get_child(light, 0), fonts::icon(28, true), 0);
     lv_obj_set_style_text_color(lv_obj_get_child(light, 0), lv_color_hex(colours().lamp), 0);
     lv_obj_add_event_cb(light, open_lights, LV_EVENT_CLICKED, nullptr);
@@ -474,7 +481,7 @@ void build_controls(lv_obj_t *scr)
     lv_obj_t *buttons = column_tile(s, "BUTTONS", 360);
     lv_obj_t *wrap    = box(buttons, LV_FLEX_FLOW_ROW_WRAP, space::m);
     lv_obj_set_width(wrap, LV_PCT(100));
-    button(wrap, Button::Raised, nullptr, "Raised");
+    s_bench_btn = button(wrap, Button::Raised, nullptr, "Raised");
     button(wrap, Button::Raised, ic::keyboard_arrow_up, "Hold");
     button(wrap, Button::Accent, ic::pause, "Pause");
     button(wrap, Button::Soft, nullptr, "Soft");
@@ -496,7 +503,7 @@ void build_controls(lv_obj_t *scr)
     lv_obj_add_event_cb(
         looks, [](lv_event_t *e) { set_look(segmented_chosen(lv_event_get_target_obj(e)) == 0 ? Look::Dark : Look::Light); show_state(); },
         LV_EVENT_VALUE_CHANGED, nullptr);
-    segmented(choices, {"Normal", "Flipped", "Auto"}, 0, 320);
+    s_bench_seg = segmented(choices, {"Normal", "Flipped", "Auto"}, 0, 320);
     for (const char *name : {"While I'm away, use Room", "Dimmer on battery"}) {
         lv_obj_t *row = box(choices, LV_FLEX_FLOW_ROW, space::m);
         lv_obj_set_size(row, LV_PCT(100), 56);
@@ -682,7 +689,7 @@ void build_glass(lv_obj_t *scr)
         LV_EVENT_VALUE_CHANGED, nullptr);
 
     // a slab to drag over the tiles, to see the blur follow
-    lv_obj_t *slab = glass(s, Glass::Large);
+    lv_obj_t *slab = s_slab = glass(s, Glass::Large);
     lv_obj_add_flag(slab, LV_OBJ_FLAG_IGNORE_LAYOUT);
     lv_obj_set_style_radius(slab, radius::pop, 0);
     lv_obj_set_size(slab, 320, 190);
@@ -702,44 +709,288 @@ void build_glass(lv_obj_t *scr)
         LV_EVENT_PRESSING, nullptr);
 }
 
+void build_layers(lv_obj_t *parent)
+{
+    lv_obj_t *s = s_sheets[4] = sheet(parent);
+    lv_obj_set_height(s, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(s, LV_FLEX_FLOW_ROW_WRAP);
+    lv_obj_t *intro = tile(s, Lift::Low);
+    lv_obj_set_size(intro, CONTENT_W, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(intro, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(intro, space::s, 0);
+    text(intro, Role::Label, "LAYERS", Ink::Secondary);
+    lv_obj_t *n = text(intro, Role::Body,
+                       "Scroll this sheet. The content slides under the bar and past the dock, which stay above it: "
+                       "frosted, casting onto what passes beneath, with an edge fading in under the bar.");
+    lv_obj_set_width(n, LV_PCT(100));
+    lv_label_set_long_mode(n, LV_LABEL_LONG_MODE_WRAP);
+    const char *reads[] = {"640", "120", "48", "20.5°", "13:45", "74.0", "37,000", "404", "17", "24:51", "112.0", "66.0"};
+    for (int i = 0; i < 12; ++i) {
+        if (i == 4 || i == 9) {
+            lv_obj_t *t = lamp_tile(s, ic::desk, i == 4 ? "Desk lamp" : "Wall lamp", true);
+            lv_obj_set_size(t, 363, 200);
+            continue;
+        }
+        lv_obj_t *t = tile(s, Lift::Low);
+        lv_obj_set_size(t, 363, 200);
+        text(t, Role::Label, "UNDER THE CHROME", Ink::Secondary);
+        lv_obj_align(text(t, Role::ReadL, reads[i]), LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    }
+}
+
+// --- bench ----------------------------------------------------------------
+
+struct Phase {
+    const char *name;
+    std::uint32_t ms;
+    void (*setup)();
+    void (*tick)(std::uint32_t at, std::uint32_t frame);
+};
+
+void no_tick(std::uint32_t, std::uint32_t) {}
+
+const Phase PHASES[] = {
+    {"idle", 800, [] { choose_sheet(1); }, no_tick},
+    {"button press", 1400, nullptr,
+     [](std::uint32_t at, std::uint32_t) {
+         if (at % 200 < 16) {
+             if (lv_obj_has_state(s_bench_btn, LV_STATE_PRESSED)) {
+                 lv_obj_remove_state(s_bench_btn, LV_STATE_PRESSED);
+             } else {
+                 lv_obj_add_state(s_bench_btn, LV_STATE_PRESSED);
+             }
+         }
+     }},
+    {"segmented", 1600, nullptr,
+     [](std::uint32_t at, std::uint32_t) {
+         if (at % 400 < 16) {
+             segmented_choose(s_bench_seg, static_cast<int>(at / 400 % 3), true);
+         }
+     }},
+    {"dials", 2000, [] { choose_sheet(2); },
+     [](std::uint32_t at, std::uint32_t) {
+         if (at % 500 < 16) {
+             s_co2->set_value(500 + std::rand() % 1100, true);
+             s_hum->set_value(25 + std::rand() % 55, true);
+             s_heat->set_target(160 + std::rand() % 80, true);
+         }
+     }},
+    {"popover, live", 1300, [] { choose_sheet(0); set_pop_glass(PopGlass::Live); },
+     [](std::uint32_t at, std::uint32_t frame) {
+         if (frame == 0) {
+             open_lights_from(s_light_item);
+         } else if (at >= 800 && popover_open()) {
+             close_popover(true);
+         }
+     }},
+    {"popover, frozen", 1300, [] { set_pop_glass(PopGlass::Frozen); set_pop_motion(PopMotion::Grow); },
+     [](std::uint32_t at, std::uint32_t frame) {
+         if (frame == 0) {
+             open_lights_from(s_light_item);
+         } else if (at >= 800 && popover_open()) {
+             close_popover(true);
+         }
+     }},
+    {"popover, rise", 1300, [] { set_pop_glass(PopGlass::Frozen); set_pop_motion(PopMotion::Rise); },
+     [](std::uint32_t at, std::uint32_t frame) {
+         if (frame == 0) {
+             open_lights_from(s_light_item);
+         } else if (at >= 800 && popover_open()) {
+             close_popover(true);
+         }
+     }},
+    {"drag glass", 1000, [] { set_pop_motion(PopMotion::Grow); choose_sheet(3); },
+     [](std::uint32_t at, std::uint32_t) {
+         lv_obj_set_x(s_slab, 60 + static_cast<std::int32_t>(at < 500 ? at : 1000 - at) * 3 / 5);
+     }},
+    {"scroll under bar", 1600, [] { choose_sheet(4); },
+     [](std::uint32_t at, std::uint32_t) {
+         lv_obj_scroll_to_y(layer(Layer::Content), static_cast<std::int32_t>(at < 800 ? at : 1600 - at) * 3 / 4, LV_ANIM_OFF);
+     }},
+    {"notice", 1200, [] { choose_sheet(0); },
+     [](std::uint32_t, std::uint32_t frame) {
+         if (frame == 0) {
+             notice("HOME ASSISTANT", glyph::local_laundry_service, "Washing machine", "The wash is done", 900);
+         }
+     }},
+};
+
+char s_report[4000] = "no bench run yet\n";
+char s_frames[3][200]{};
+
+struct Config {
+    const char *name;
+    bool        blur, shadows;
+};
+constexpr Config CONFIGS[] = {{"with shadows", true, true}, {"no shadows", true, false}};
+
+struct Bench {
+    int           config = 0;
+    int           phase = -1;
+    std::uint32_t frame = 0, began = 0;
+    bool          settling = false;
+    perf::Stats   results[std::size(PHASES)];
+    PopGlass      was = PopGlass::Frozen;
+} s_bench;
+
+void bench_step(lv_timer_t *timer)
+{
+    const std::uint32_t now = lv_tick_get();
+    if (s_bench.settling) {
+        if (now - s_bench.began < 300) {
+            return;
+        }
+        s_bench.settling = false;
+        s_bench.began    = now;
+        s_bench.frame    = 0;
+        perf::begin();
+    }
+    const Phase &ph = PHASES[s_bench.phase];
+    const std::uint32_t at = now - s_bench.began;
+    if (at < ph.ms) {
+        ph.tick(at, s_bench.frame++);
+        return;
+    }
+    s_bench.results[s_bench.phase] = perf::end();
+    if (std::strncmp(PHASES[s_bench.phase].name, "popover", 7) == 0 && s_bench.config == 0) {
+        const std::uint16_t *each = nullptr;
+        const int count = perf::frames(&each);
+        int n = std::snprintf(s_frames[s_bench.phase % 3], sizeof s_frames[0], "  %s, each frame:", PHASES[s_bench.phase].name);
+        for (int i = 0; i < count && n < static_cast<int>(sizeof s_frames[0]) - 6; ++i) {
+            n += std::snprintf(s_frames[s_bench.phase % 3] + n, sizeof s_frames[0] - n, " %u", static_cast<unsigned>(each[i]));
+        }
+        std::snprintf(s_frames[s_bench.phase % 3] + n, sizeof s_frames[0] - n, "\n");
+    }
+    if (++s_bench.phase == static_cast<int>(std::size(PHASES))) {
+        int n = static_cast<int>(std::strlen(s_report));
+        n += std::snprintf(s_report + n, sizeof s_report - n, "%s\n", CONFIGS[s_bench.config].name);
+        for (std::size_t i = 0; i < std::size(PHASES) && n < static_cast<int>(sizeof s_report); ++i) {
+            const perf::Stats &r = s_bench.results[i];
+            n += std::snprintf(s_report + n, sizeof s_report - n,
+                               "  %-18s %4u frames  %5.1f fps  avg %6.2f ms  worst %6.2f ms\n", PHASES[i].name,
+                               static_cast<unsigned>(r.frames), r.span_ms ? r.frames * 1000.0 / r.span_ms : 0.0,
+                               static_cast<double>(r.avg_ms), static_cast<double>(r.worst_ms));
+        }
+        std::printf("%s", s_report);
+        if (++s_bench.config < static_cast<int>(std::size(CONFIGS))) {
+            set_effects(CONFIGS[s_bench.config].blur, CONFIGS[s_bench.config].shadows);
+            s_bench.phase = 0;
+            PHASES[0].setup();
+            s_bench.settling = true;
+            s_bench.began    = now;
+            return;
+        }
+        lv_timer_delete(timer);
+        set_effects(true, true);
+        set_pop_glass(s_bench.was);
+        s_bench.phase = -1;
+        show_state();
+        return;
+    }
+    if (PHASES[s_bench.phase].setup != nullptr) {
+        PHASES[s_bench.phase].setup();
+    }
+    s_bench.settling = true;
+    s_bench.began    = now;
+}
+
+void run_bench()
+{
+    if (s_bench.phase >= 0) {
+        return;
+    }
+    s_bench.was    = pop_glass();
+    s_bench.phase  = 0;
+    s_bench.config = 0;
+    set_effects(true, true);
+    std::snprintf(s_report, sizeof s_report, "kit bench, %s, glass %d%%\n", look() == Look::Dark ? "dark" : "light", glass());
+    if (PHASES[0].setup != nullptr) {
+        PHASES[0].setup();
+    }
+    s_bench.settling = true;
+    s_bench.began    = lv_tick_get();
+    lv_timer_create(bench_step, 16, nullptr);
+}
+
+void show_perf(lv_timer_t *)
+{
+    if (s_perf == nullptr) {
+        return;
+    }
+    const perf::Stats st = perf::last_second();
+    char buf[96];
+    if (s_bench.phase >= 0) {
+        std::snprintf(buf, sizeof buf, "BENCH: %s", PHASES[s_bench.phase].name);
+    } else if (st.frames == 0) {
+        std::snprintf(buf, sizeof buf, "NOTHING REDRAWN IN THE LAST SECOND");
+    } else {
+        std::snprintf(buf, sizeof buf, "%u FPS, %.1f MS A FRAME, WORST %.1f", static_cast<unsigned>(st.frames),
+                      static_cast<double>(st.avg_ms), static_cast<double>(st.worst_ms));
+    }
+    lv_label_set_text(s_perf, buf);
+}
+
 }  // namespace
 
-void build()
+void build(perf::Clock clock)
 {
     kit::init(Look::Dark);
-    lv_obj_t *scr = lv_screen_active();
-    lv_obj_clean(scr);
-    lv_obj_remove_style_all(scr);
-    lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
-    ground(scr);
+    perf::start(clock);
+    // a screen of its own: whatever else is built stays as it is, behind it
+    lv_obj_t *scr = lv_obj_create(nullptr);
+    lv_screen_load(scr);
+    screen(scr);
+    lv_obj_t *content = layer(Layer::Content), *chrome = layer(Layer::Chrome);
 
-    lv_obj_t *header = box(scr, LV_FLEX_FLOW_ROW, space::l);
+    lv_obj_t *header = box(content, LV_FLEX_FLOW_ROW, space::l);
     lv_obj_set_pos(header, CONTENT_X, CONTENT_Y);
     lv_obj_set_size(header, CONTENT_W, 60);
     lv_obj_set_flex_align(header, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    s_picker = segmented(header, {"Surfaces", "Controls", "Instruments", "Glass"}, 0, 600);
+    s_picker = segmented(header, {"Surfaces", "Controls", "Instruments", "Glass", "Layers"}, 0, 640);
     lv_obj_add_event_cb(
         s_picker, [](lv_event_t *e) { choose_sheet(segmented_chosen(lv_event_get_target_obj(e))); },
         LV_EVENT_VALUE_CHANGED, nullptr);
     lv_obj_t *col = box(header, LV_FLEX_FLOW_COLUMN, 2);
     s_state = text(col, Role::Small, "", Ink::Secondary);
-    text(col, Role::Label, "KEYS: 1-4 SHEETS, L LOOK, G GLASS, A ACCENT, N NOTICE", Ink::Tertiary);
+    s_perf = text(col, Role::Label, "", Ink::Tertiary);
+    lv_timer_create(show_perf, 500, nullptr);
 
-    build_surfaces(scr);
-    build_controls(scr);
-    build_instruments(scr);
-    build_glass(scr);
+    build_surfaces(content);
+    build_controls(content);
+    build_instruments(content);
+    build_glass(content);
+    build_layers(content);
     choose_sheet(0);
-    build_dock(scr);
-    build_bar(scr);
+    build_dock(chrome);
+    build_bar(chrome);
     show_state();
+}
+
+bool built() { return s_picker != nullptr; }
+
+void bench() { run_bench(); }
+
+int report(char *out, int size)
+{
+    const int n = std::snprintf(out, static_cast<std::size_t>(size), "%s%s%s%s%s", s_report, s_frames[0], s_frames[1],
+                                s_frames[2], kit::freeze_report());
+    return std::min(n, size - 1);
 }
 
 void key(int code)
 {
     switch (code) {
-    case '1': case '2': case '3': case '4':
+    case '1': case '2': case '3': case '4': case '5':
         choose_sheet(code - '1');
+        break;
+    case 'f':
+        set_pop_glass(pop_glass() == PopGlass::Frozen ? PopGlass::Live : PopGlass::Frozen);
+        break;
+    case 'm':
+        set_pop_motion(pop_motion() == PopMotion::Grow ? PopMotion::Rise : PopMotion::Grow);
+        break;
+    case 'p':
+        run_bench();
         break;
     case 'l':
         set_look(look() == Look::Dark ? Look::Light : Look::Dark);
