@@ -18,21 +18,21 @@ constexpr Palette DARK{
     .accent = 0xff8a3d, .on_accent = 0x1f0e03,
     .green = 0x86d27c, .amber = 0xffbe55, .red = 0xff6b5e, .lamp = 0xffd36b, .on_lamp = 0x2e1f00,
     .blue = 0x6fb6ff,
-    .shadow = 0x000000, .shadow_opa = 150, .edge_opa = 120,
+    .shadow = 0x000000, .shadow_opa = 110, .edge_opa = 120,
     .glass = 0x48423d, .glass_clear_opa = 56, .glass_solid_opa = 214, .rim_opa = 38,
     .glass_edge_opa = 115, .glass_shadow_opa = 170,
     .scrim = 0x080605, .scrim_opa = 107,
 };
 
 constexpr Palette LIGHT{
-    .ground = 0xe9e3db, .surface = 0xfbf8f4, .surface_hi = 0xffffff, .well = 0xefe9e2,
+    .ground = 0xe9e3db, .surface = 0xfbf8f4, .surface_hi = 0xfffbf5, .well = 0xefe9e2,
     .raised = 0xf1ebe4, .raised_hi = 0xe8e0d7,
     .ink = 0x1d1813, .ink2_opa = 158, .ink3_opa = 97, .hair_opa = 20, .tick_opa = 77,
     .hair = 0x1d1813,
     .accent = 0xf2711c, .on_accent = 0xffffff,
     .green = 0x3f9f45, .amber = 0xd68a00, .red = 0xe0483b, .lamp = 0xf4b400, .on_lamp = 0x2e1f00,
     .blue = 0x2f86e0,
-    .shadow = 0x50371e, .shadow_opa = 72, .edge_opa = 20,
+    .shadow = 0x50371e, .shadow_opa = 46, .edge_opa = 22,
     .glass = 0xfcf9f5, .glass_clear_opa = 87, .glass_solid_opa = 224, .rim_opa = 230,
     .glass_edge_opa = 31, .glass_shadow_opa = 85,
     .scrim = 0xe9e3db, .scrim_opa = 128,
@@ -181,8 +181,9 @@ void apply()
         lv_style_set_pad_all(st, space::xl);
         lv_style_set_text_color(st, hex(s_pal.ink));
     }
-    set_shadow(&s_tile, 36, 12, -8, s_pal.shadow_opa);
-    set_shadow(&s_tile_hi, 60, 22, -12, s_pal.shadow_opa);
+    // under the tile rather than round it: tight, pushed down, and pulled in at the sides
+    set_shadow(&s_tile, 26, 10, -10, s_pal.shadow_opa);
+    set_shadow(&s_tile_hi, 40, 16, -12, s_pal.shadow_opa);
 
     lv_style_set_bg_color(&s_well, hex(s_pal.well));
     lv_style_set_bg_opa(&s_well, LV_OPA_COVER);
@@ -227,7 +228,7 @@ void apply()
     lv_style_set_transform_pivot_x(&s_btn, lv_pct(50));
     lv_style_set_transform_pivot_y(&s_btn, lv_pct(50));
     lv_style_set_transition(&s_btn, &s_release_tr);
-    set_shadow(&s_btn, 12, 3, -2, s_look == Look::Dark ? 140 : 60);
+    set_shadow(&s_btn, 10, 4, -3, s_look == Look::Dark ? 120 : 44);
 
     lv_style_set_transform_scale_x(&s_btn_pressed, motion::press_scale);
     lv_style_set_transform_scale_y(&s_btn_pressed, motion::press_scale);
@@ -299,7 +300,7 @@ void apply()
     lv_style_set_bg_opa(&s_seg_item, LV_OPA_TRANSP);
     lv_style_set_text_color(&s_seg_item, hex(s_pal.ink));
     lv_style_set_text_opa(&s_seg_item, s_pal.ink2_opa);
-    lv_style_set_bg_color(&s_seg_thumb, hex(s_look == Look::Dark ? s_pal.raised_hi : 0xffffff));
+    lv_style_set_bg_color(&s_seg_thumb, hex(s_look == Look::Dark ? s_pal.raised_hi : s_pal.surface_hi));
     lv_style_set_bg_opa(&s_seg_thumb, LV_OPA_COVER);
     lv_style_set_radius(&s_seg_thumb, 13);
     set_shadow(&s_seg_thumb, 10, 2, -2, s_look == Look::Dark ? 140 : 50);
