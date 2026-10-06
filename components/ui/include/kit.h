@@ -725,4 +725,9 @@ class Reading : public InPsram {
     int         m_zone = -2;
 };
 
+// --- the bar's cards ------------------------------------------------------
+
+/** The open popover as tall as what is on it now: for a card whose content comes and goes while it is out. */
+void fit_popover();
+
 }  // namespace ui::kit
