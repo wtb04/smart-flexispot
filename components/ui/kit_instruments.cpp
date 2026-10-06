@@ -566,7 +566,8 @@ void Rail::place(std::int32_t value)
         }
     };
     if (m_fill != nullptr) {
-        const std::int32_t w = v ? TRACK : at + TRACK, h = v ? at + TRACK : TRACK;
+        const std::int32_t thick = m_spec.quiet ? 4 : TRACK;  // a quiet track's line, which would cut a thicker fill in half
+        const std::int32_t w = v ? thick : at + TRACK, h = v ? at + TRACK : thick;
         if (lv_obj_get_style_width(m_fill, LV_PART_MAIN) != w || lv_obj_get_style_height(m_fill, LV_PART_MAIN) != h) {
             lv_obj_set_size(m_fill, w, h);
         }

@@ -992,4 +992,45 @@ lv_obj_t *sheet_row(lv_obj_t *body, const char *label, const char *value)
     return v;
 }
 
+// --- rows told again, for Setup --------------------------------------------
+
+void set_row_title(lv_obj_t *obj, const char *title, Ink ink)
+{
+    if (Row *row = row_of(obj)) {
+        set_text_if(row->title, title);
+        set_ink(row->title, ink);
+    }
+}
+
+void set_row_glyph(lv_obj_t *obj, const char *glyph)
+{
+    if (row_of(obj) == nullptr) {
+        return;
+    }
+    lv_obj_t *sq = lv_obj_get_child(obj, 0);
+    if (sq == nullptr || sq->style_cnt == 0) {
+        return;
+    }
+    bool square = false;
+    for (std::uint32_t i = 0; i < sq->style_cnt; ++i) {
+        square = square || sq->styles[i].style == &s_square;
+    }
+    lv_obj_t *g = square ? lv_obj_get_child(sq, 0) : nullptr;
+    if (g != nullptr && std::strcmp(lv_label_get_text(g), glyph) != 0) {
+        lv_label_set_text(g, glyph);
+    }
+}
+
+void centre_rows(lv_obj_t *parent)
+{
+    lv_obj_update_layout(parent);
+    for (std::uint32_t i = 0; i < lv_obj_get_child_count(parent); ++i) {
+        lv_obj_t *obj = lv_obj_get_child(parent, static_cast<std::int32_t>(i));
+        const std::int32_t h = lv_obj_get_height(obj);
+        if (row_of(obj) != nullptr && h <= lv_obj_get_style_min_height(obj, LV_PART_MAIN)) {
+            lv_obj_set_height(obj, h);
+        }
+    }
+}
+
 }  // namespace ui::kit

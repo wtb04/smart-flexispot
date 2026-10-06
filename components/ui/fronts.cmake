@@ -7,4 +7,5 @@ set(UI_CLASSIC_SOURCES
     modal_overlay.cpp)
 set(UI_KIT_SOURCES
     kit_front.cpp kit_front_dock.cpp kit_front_desk.cpp kit_front_bar.cpp kit_front_cards.cpp kit_front_home.cpp
-    kit_front_calendar.cpp kit_front_radar.cpp kit_front_radar_view.cpp kit_front_setup.cpp kit_front_views.cpp)
+    kit_front_calendar.cpp kit_front_radar.cpp kit_front_radar_view.cpp kit_front_setup.cpp kit_front_views.cpp
+    kit_front_setup_diag.cpp)
