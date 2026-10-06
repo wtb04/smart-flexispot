@@ -42,6 +42,9 @@ constexpr int           CONN_ITVL_UNIT_US = 1250;
 constexpr std::uint16_t ITVL_MIN_UNITS    = 6;    // 7.5 ms, the floor the spec allows
 constexpr std::uint16_t ITVL_MAX_UNITS    = 8;    // 10 ms
 constexpr std::uint16_t SUPERVISION_UNITS = 400;  // 4 s
+// Dark, a desk moved from Home Assistant does not need its link quick: half a
+// second between events is some 7 mA less from the battery, measured.
+constexpr std::uint16_t DARK_ITVL_UNITS   = 400;  // 500 ms
 
 // Scanning flat out while connecting: a 10 ms window every 10 ms, in 0.625 ms.
 constexpr std::uint16_t CONNECT_SCAN_UNITS = 0x0010;
@@ -57,6 +60,19 @@ bool          s_connecting = false;
 void (*s_rescan)() = nullptr;
 
 std::atomic<bool> s_up{false};
+
+std::atomic<bool> s_dark{false};
+
+void ask_interval(std::uint16_t conn)
+{
+    const bool          dark = s_dark.load(std::memory_order_relaxed);
+    ble_gap_upd_params params{};
+    params.itvl_min            = dark ? DARK_ITVL_UNITS : ITVL_MIN_UNITS;
+    params.itvl_max            = dark ? DARK_ITVL_UNITS : ITVL_MAX_UNITS;
+    params.latency             = 0;
+    params.supervision_timeout = SUPERVISION_UNITS;
+    ble_gap_update_params(conn, &params);
+}
 
 // The proxy reports at least once a second; a link that says nothing for this
 // long is up in name only, and is dropped so the scanner finds it again.
@@ -171,12 +187,7 @@ int on_chr(std::uint16_t conn, const ble_gatt_error *error, const ble_gatt_chr *
         return 0;
     }
 
-    ble_gap_upd_params params{};
-    params.itvl_min            = ITVL_MIN_UNITS;
-    params.itvl_max            = ITVL_MAX_UNITS;
-    params.latency             = 0;
-    params.supervision_timeout = SUPERVISION_UNITS;
-    ble_gap_update_params(conn, &params);
+    ask_interval(conn);
 
     s_heard_us.store(esp_timer_get_time(), std::memory_order_relaxed);
     s_up.store(true, std::memory_order_relaxed);
@@ -414,6 +425,13 @@ bool handle(ble_gap_event *event)
 
         default:
             return false;
+    }
+}
+
+void set_dark(bool dark)
+{
+    if (s_dark.exchange(dark) != dark && s_up.load(std::memory_order_relaxed)) {
+        ask_interval(s_conn);
     }
 }
 

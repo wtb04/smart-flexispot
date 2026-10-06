@@ -143,6 +143,15 @@ esp_err_t esp_lcd_dpi_panel_get_frame_buffer(esp_lcd_panel_handle_t dpi_panel, u
 esp_err_t esp_lcd_dpi_panel_set_pattern(esp_lcd_panel_handle_t dpi_panel, mipi_dsi_pattern_type_t pattern);
 
 /**
+ * @brief Stop or start the stream of frames to the panel. Stopped, nothing is
+ *        read from the frame buffers, the link idles in command mode and the
+ *        CPU is let go to slow down; started again, it begins at a frame's start.
+ *
+ * @note Not in ESP-IDF: for a panel that is dark.
+ */
+esp_err_t esp_lcd_dpi_panel_set_streaming(esp_lcd_panel_handle_t dpi_panel, bool on);
+
+/**
  * @brief Set color conversion configuration for DPI panel
  *
  * @param[in] dpi_panel MIPI DPI panel handle, returned from esp_lcd_new_panel_dpi()

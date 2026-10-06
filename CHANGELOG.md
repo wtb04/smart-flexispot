@@ -14,6 +14,8 @@ The versions are the points where the panel was a step further on my desk. None 
 - The screen lights again for the main light or the phone coming back, never for the morning
 - A notice keeps the screen lit for its whole time, also over a film
 - `room_config.h` takes `MAIN_LIGHT_ENTITY`, the light that says someone is in: add it to yours
+- Dark, the panel draws a quarter less from the battery, 88 mA instead of about 120: the display's stream stops, the CPU slows and the desk's link with it
+- A knock on the glass wakes the dark screen, as the touch is off while it is dark
 
 ## v0.9.0, 4 October 2026
 
