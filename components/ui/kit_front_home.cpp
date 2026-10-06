@@ -159,6 +159,7 @@ void paint_air()
         lv_obj_set_hidden(air.words, number);
         if (number) {
             set_text_if(air.figure, figure);
+            ink_if(air.figure, std::strcmp(figure, "--") == 0 ? Ink::Tertiary : Ink::Primary);
             set_text_if(air.unit, unit);
             lv_obj_set_x(air.unit, widest(Role::ReadXL, {figure}) + space::xs);
             lv_obj_set_width(air.unit, widest(Role::Body, {unit}));

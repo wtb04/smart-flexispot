@@ -562,7 +562,7 @@ struct Slot {  // a day's name, or an event, in the coming week's list
 lv_obj_t *s_overview = nullptr, *s_week = nullptr;
 bool      s_detailed = false;
 
-lv_obj_t *s_card = nullptr, *s_top = nullptr, *s_none = nullptr;
+lv_obj_t *s_card = nullptr, *s_top = nullptr, *s_none = nullptr, *s_card_gap = nullptr;
 lv_obj_t *s_kind_dot = nullptr, *s_kind = nullptr, *s_title = nullptr, *s_session = nullptr;
 lv_obj_t *s_start = nullptr, *s_until = nullptr, *s_place = nullptr;
 
@@ -592,6 +592,7 @@ void show_next(const ical::Event *first, std::int64_t now)
 {
     lv_obj_set_hidden(s_top, first == nullptr);
     lv_obj_set_hidden(s_none, first != nullptr);
+    lv_obj_set_hidden(s_card_gap, first == nullptr);  // the empty card's line in its middle
     if (first == nullptr) {
         return;
     }
@@ -931,7 +932,7 @@ void build_card(lv_obj_t *parent)
     lv_obj_set_flex_flow(s_card, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(s_card, space::s, 0);
     build_top(s_card);
-    filler(s_card);
+    s_card_gap = filler(s_card);
     build_foot(s_card);
 }
 
