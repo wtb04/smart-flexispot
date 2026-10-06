@@ -322,9 +322,11 @@ void host_task(void *)
     nimble_port_freertos_deinit();
 }
 
-// Listens for the phone less often while the screen is dark.
+// Listens for the phone less often while the screen is dark, and the desk's
+// link slows.
 void set_dark(bool dark)
 {
+    proxy::set_dark(dark);
     const std::uint16_t wanted = dark ? DARK_INTERVAL_MS : SCAN_INTERVAL_MS;
     if (s_interval_ms.exchange(wanted) != wanted && s_ready.load(std::memory_order_relaxed)) {
         ble_npl_eventq_put(nimble_port_get_dflt_eventq(), &s_rescan);

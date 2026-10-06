@@ -3,14 +3,16 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
-// The one change from ESP-IDF v5.5.5's copy, whose esp_lcd this component
-// stands in for: the DMA reads the frame buffers through a ring of whole
-// frames that it goes round by itself. IDF's restarts it from an interrupt
-// after every frame, within the 2.6 ms of blanking between two; anything that
-// held interrupts off longer at that moment left the panel without a frame,
-// which it shows flat blue. Here the interrupt only keeps the ring valid and
-// pointed at the buffer wanted, and can be late by frames. A new buffer is
-// taken up at a frame's start, never partway through one.
+// Two changes from ESP-IDF v5.5.5's copy, whose esp_lcd this component stands
+// in for. The stream can stop while the panel is dark, and start again at a
+// frame's start: esp_lcd_dpi_panel_set_streaming(). And the DMA reads the frame
+// buffers through a ring of whole frames that it goes round by itself. IDF's
+// restarts it from an interrupt after every frame, within the 2.6 ms of
+// blanking between two; anything that held interrupts off longer at that moment
+// left the panel without a frame, which it shows flat blue. Here the interrupt
+// only keeps the ring valid and pointed at the buffer wanted, and can be late
+// by frames. A new buffer is taken up at a frame's start, never partway through
+// one.
 #include <sys/param.h>
 #include "esp_lcd_panel_interface.h"
 #include "esp_lcd_mipi_dsi.h"
@@ -24,6 +26,7 @@
 #include "hal/color_hal.h"
 #include "hal/dw_gdma_ll.h"
 #include "soc/dw_gdma_struct.h"
+#include "esp_rom_sys.h"
 
 // Frames the DMA can go on showing with its interrupt held off.
 #define DPI_PANEL_RING_ITEMS 8
@@ -55,6 +58,7 @@ struct esp_lcd_dpi_panel_t {
     esp_async_fbcpy_handle_t fbcpy_handle; // Use DMA2D to do frame buffer copy
     SemaphoreHandle_t draw_sem;            // A semaphore used to synchronize the draw operations when DMA2D is used
     esp_pm_lock_handle_t pm_lock;          // Power management lock
+    volatile bool stopping;                // the ring left to run out, at a frame's end
     esp_lcd_dpi_panel_color_trans_done_cb_t on_color_trans_done; // Callback invoked when color data transfer has finished
     esp_lcd_dpi_panel_frame_buf_complete_cb_t on_frame_buf_complete; // Callback invoked when the frame buffer can be reused safely
     esp_lcd_dpi_panel_vsync_cb_t on_vsync; // VSYNC event callback
@@ -116,6 +120,9 @@ IRAM_ATTR static bool mipi_dsi_dma_block_done_cb(dw_gdma_channel_handle_t chan, 
 {
     bool yield_needed = false;
     esp_lcd_dpi_panel_t *dpi_panel = (esp_lcd_dpi_panel_t *)user_data;
+    if (dpi_panel->stopping) {
+        return false;
+    }
     dpi_panel_ring_refresh(dpi_panel);
     dpi_panel->shown_fb_index = dpi_panel_reading(dpi_panel);
 
@@ -142,6 +149,9 @@ IRAM_ATTR static bool mipi_dsi_dma_block_done_cb(dw_gdma_channel_handle_t chan, 
 IRAM_ATTR static bool mipi_dsi_dma_invalid_block_cb(dw_gdma_channel_handle_t chan, const dw_gdma_break_event_data_t *event_data, void *user_data)
 {
     esp_lcd_dpi_panel_t *dpi_panel = (esp_lcd_dpi_panel_t *)user_data;
+    if (dpi_panel->stopping) {
+        return false;
+    }
     dpi_panel_ring_refresh(dpi_panel);
     // dw_gdma_channel_continue() is not in IRAM; what it does, inline.
     dw_gdma_ll_channel_resume_multi_block_transfer(&DW_GDMA, dpi_panel->dma_chan_id);
@@ -663,6 +673,64 @@ esp_err_t esp_lcd_dpi_panel_set_pattern(esp_lcd_panel_handle_t panel, mipi_dsi_p
         mipi_dsi_brg_ll_update_dpi_config(hal->bridge);
     }
 
+    return ESP_OK;
+}
+
+// Stopped where a frame ends, so that it starts again where one starts:
+// stopped partway through, the bridge kept what it had taken in of the frame,
+// and the picture came back shifted down by it. Every item of the ring marked
+// the last, the DMA ends with the frame it is on, or the one after if it had
+// fetched the next item already; the bridge sends what it holds of it within
+// some lines, then has the 220 lines of the front porch, 2.5 ms, with nothing
+// to send, and its output is turned off in them.
+#define DPI_PANEL_STOP_WAIT_US  (100 * 1000)  // some frames
+#define DPI_PANEL_DRAIN_US      500           // past the frame's last lines, inside the front porch
+#define DPI_PANEL_ISR_DONE_US   1000          // a frame's interrupt, however far along, is done
+
+esp_err_t esp_lcd_dpi_panel_set_streaming(esp_lcd_panel_handle_t panel, bool on)
+{
+    ESP_RETURN_ON_FALSE(panel, ESP_ERR_INVALID_ARG, TAG, "invalid argument");
+    esp_lcd_dpi_panel_t *dpi_panel = __containerof(panel, esp_lcd_dpi_panel_t, base);
+    mipi_dsi_hal_context_t *hal = &dpi_panel->bus->hal;
+    if (!on) {
+        dpi_panel->stopping = true;
+        // Twice: a frame's interrupt already past the flag when it was set may
+        // have made the ring endless again meanwhile.
+        for (int pass = 0; pass < 2; pass++) {
+            for (int i = 0; i < DPI_PANEL_RING_ITEMS; i++) {
+                dw_gdma_link_list_item_t *lli = (dw_gdma_link_list_item_t *)dw_gdma_link_list_get_item(dpi_panel->ring, i);
+                dw_gdma_ll_lli_set_block_markers(lli, true, true, true);
+            }
+            esp_rom_delay_us(pass == 0 ? DPI_PANEL_ISR_DONE_US : 0);
+        }
+        const uint32_t running = 1u << dpi_panel->dma_chan_id;
+        for (int waited = 0; (DW_GDMA.chen0.val & running) && waited < DPI_PANEL_STOP_WAIT_US; waited += 100) {
+            esp_rom_delay_us(100);
+        }
+        if (DW_GDMA.chen0.val & running) {
+            ESP_LOGW(TAG, "the stream did not end with a frame, stopped where it was");
+            dw_gdma_channel_enable_ctrl(dpi_panel->dma_chan, false);
+        }
+        esp_rom_delay_us(DPI_PANEL_DRAIN_US);
+        mipi_dsi_brg_ll_enable_dpi_output(hal->bridge, false);
+        mipi_dsi_brg_ll_update_dpi_config(hal->bridge);
+        mipi_dsi_host_ll_enable_video_mode(hal->host, false);
+        if (dpi_panel->pm_lock) {
+            esp_pm_lock_release(dpi_panel->pm_lock);
+        }
+        return ESP_OK;
+    }
+    if (dpi_panel->pm_lock) {
+        esp_pm_lock_acquire(dpi_panel->pm_lock);
+    }
+    dpi_panel->stopping = false;
+    dpi_panel->shown_fb_index = dpi_panel->cur_fb_index;
+    dpi_panel_ring_refresh(dpi_panel);
+    dw_gdma_channel_use_link_list(dpi_panel->dma_chan, dpi_panel->ring);
+    dw_gdma_channel_enable_ctrl(dpi_panel->dma_chan, true);
+    mipi_dsi_host_ll_enable_video_mode(hal->host, true);
+    mipi_dsi_brg_ll_enable_dpi_output(hal->bridge, true);
+    mipi_dsi_brg_ll_update_dpi_config(hal->bridge);
     return ESP_OK;
 }
 
