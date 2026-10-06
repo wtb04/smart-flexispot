@@ -2,10 +2,12 @@
 
 #include "kit_fonts.h"
 #include "kit_pixels.h"
+#include "lvgl_private.h"  // areas, and what a cover check asks; the version is pinned in dependencies.lock
 
 #include <algorithm>
-#include <cstdio>
 #include <atomic>
+#include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
@@ -26,6 +28,8 @@ PopMotion      s_motion = PopMotion::Grow;
 char           s_freeze_report[96] = "";
 char           s_up_report[96]     = "";
 char           s_ahead_report[96]  = "";
+char           s_card_report[96]   = "";
+float          s_picture_ms = 0, s_shadow_ms = 0;
 lv_draw_buf_t *s_frozen = nullptr;
 
 // One picture of the screen, blurred: brought down to a quarter, smeared with
@@ -299,26 +303,70 @@ void blur_small()
 
 // The card's shadow painted into the picture once, where the card comes to
 // rest, so the card draws none while it moves: a soft shadow of a moving
-// shape is recomputed every frame, and is most of what a frame costs.
-void bake_shadow(const lv_area_t &at)
+// shape is recomputed every frame, and is most of what a frame costs. Worked
+// out here and dithered, as LVGL's own breaks into rings on RGB565.
+constexpr std::int32_t SHADOW_W = 80, SHADOW_Y = 28, SHADOW_SPREAD = -8;  // big glass's own
+
+// A rounded rectangle's distance, below zero inside; the square root only in
+// its corners, as along its sides a step across is a step nearer.
+float distance(float x, float y, float cx, float cy, float hx, float hy, float r)
 {
-    lv_obj_t *canvas = lv_canvas_create(layer(Layer::Overlay));
-    lv_canvas_set_draw_buf(canvas, s_frozen);
-    lv_obj_add_flag(canvas, LV_OBJ_FLAG_HIDDEN);
-    lv_layer_t paint;
-    lv_canvas_init_layer(canvas, &paint);
-    lv_draw_rect_dsc_t dsc;
-    lv_draw_rect_dsc_init(&dsc);
-    dsc.radius        = radius::pop;
-    dsc.bg_opa        = LV_OPA_TRANSP;
-    dsc.shadow_width  = 70;
-    dsc.shadow_offset_y = 24;
-    dsc.shadow_spread = -10;
-    dsc.shadow_color  = lv_color_hex(colours().shadow);
-    dsc.shadow_opa    = colours().glass_shadow_opa;
-    lv_draw_rect(&paint, &dsc, &at);
-    lv_canvas_finish_layer(canvas, &paint);
-    lv_obj_delete(canvas);
+    const float qx = std::fabs(x - cx) - hx, qy = std::fabs(y - cy) - hy;
+    if (qx > 0.0f && qy > 0.0f) {
+        return std::sqrt(qx * qx + qy * qy) - r;
+    }
+    return std::max(qx, qy) - r;
+}
+
+void bake_shadow(const lv_area_t &at, const lv_area_t &reach)
+{
+    // the shadow's edge, half dark, is the card's own pulled in by the spread and pushed down
+    const float r  = static_cast<float>(std::max<std::int32_t>(0, radius::pop + SHADOW_SPREAD));
+    const float cx = (at.x1 + at.x2 + 1) / 2.0f, cy = (at.y1 + at.y2 + 1) / 2.0f + SHADOW_Y;
+    const float hx = lv_area_get_width(&at) / 2.0f + SHADOW_SPREAD - r;
+    const float hy = lv_area_get_height(&at) / 2.0f + SHADOW_SPREAD - r;
+    const std::uint32_t c = colours().shadow;
+    const int sr = static_cast<int>((c >> 16) & 0xff), sg = static_cast<int>((c >> 8) & 0xff), sb = static_cast<int>(c & 0xff);
+    // how dark at each quarter pixel from the edge, out to a little past
+    // LVGL's half width, for the longer tail its blur has. LVGL rounds each
+    // blend down, which on the dark ground makes its shadows darker than they
+    // say by half again: as dark as those the look was set by.
+    constexpr int SOFT = SHADOW_W * 6 / 10, STEPS = SOFT * 8;
+    static std::uint16_t dark[STEPS + 1];
+    const float opa = colours().glass_shadow_opa * (look() == Look::Dark ? 1.45f : 1.0f);
+    for (int i = 0; i <= STEPS; ++i) {
+        const float t = static_cast<float>(i) / STEPS;
+        dark[i] = static_cast<std::uint16_t>(std::min(256.0f, opa * (1.0f - t * t * (3.0f - 2.0f * t)) * 256.0f / 255.0f));
+    }
+    const float card_r = radius::pop, card_cy = cy - SHADOW_Y;
+    const float card_hx = lv_area_get_width(&at) / 2.0f - card_r, card_hy = lv_area_get_height(&at) / 2.0f - card_r;
+    for (std::int32_t y = reach.y1; y <= reach.y2; ++y) {
+        auto *row = reinterpret_cast<std::uint16_t *>(s_frozen->data + y * s_frozen->header.stride);
+        const bool card_rows = y >= at.y1 && y <= at.y2, straight_rows = y >= at.y1 + radius::pop && y <= at.y2 - radius::pop;
+        for (std::int32_t x = reach.x1; x <= reach.x2; ++x) {
+            if (card_rows && x >= at.x1 && x <= at.x2) {
+                if (straight_rows || (x >= at.x1 + radius::pop && x <= at.x2 - radius::pop)) {
+                    x = straight_rows ? at.x2 : at.x2 - radius::pop;  // under the card, which casts nothing through itself
+                    continue;
+                }
+                if (distance(x + 0.5f, y + 0.5f, cx, card_cy, card_hx, card_hy, card_r) < 0.0f) {
+                    continue;
+                }
+            }
+            const float d = distance(x + 0.5f, y + 0.5f, cx, cy, hx, hy, r);
+            const int i = static_cast<int>((d + SOFT) * 4.0f);
+            const int a = i <= 0 ? dark[0] : i >= STEPS ? 0 : dark[i];
+            if (a == 0) {
+                if (x > cx) {
+                    break;  // past its right side, where it only gets lighter
+                }
+                continue;
+            }
+            const std::uint16_t px = row[x];
+            const int pr = (px >> 11) << 3, pg = ((px >> 5) & 0x3f) << 2, pb = (px & 0x1f) << 3;
+            row[x] = pixels::dither(pr + (sr - pr) * a / 256, pg + (sg - pg) * a / 256, pb + (sb - pb) * a / 256, x, y);
+        }
+    }
 }
 
 bool buffers()
@@ -448,81 +496,420 @@ void freeze()
 }
 
 constexpr std::int32_t MARGIN = space::l, GAP = space::m, PROGRESS = 1024;
+constexpr std::int32_t RISE  = 16;  // how far a rising card comes up
+constexpr int          WAVES = 4;   // the frames the live screen comes back in as a popover goes
 
 struct Pop {
-    lv_obj_t *scrim  = nullptr;
-    lv_obj_t *card   = nullptr;
-    lv_obj_t *body   = nullptr;
-    lv_obj_t *source = nullptr;
+    lv_obj_t *scrim    = nullptr;
+    lv_obj_t *backdrop = nullptr;  // the frozen picture, outside what has been given back to the live screen
+    lv_obj_t *card     = nullptr;
+    lv_obj_t *body     = nullptr;
+    lv_obj_t *source   = nullptr;
     lv_area_t from{}, to{};
-    bool      closing = false;
+    std::int32_t p        = 0;
+    bool      closing     = false;
+    bool      waiting     = false;  // to start once the first frame, the backdrop's, is out
+    bool      pictured    = false;  // the card is drawn from its picture
+    bool      shadowed    = false;  // its shadow is painted into the backdrop
+    lv_opa_t  glass_opa   = 0;
+    lv_draw_buf_t *picture = nullptr;  // the card at its place, over its backdrop and without its edge
+    lv_area_t      picture_at{};
+    lv_draw_buf_t *under = nullptr;    // the backdrop where the shadow went, to take it out again
+    lv_area_t      under_at{};
+    bool          rows   = true;        // the live screen comes back in bands of rows, or of columns
+    std::int32_t  centre = 0, reach = 0, lo = 1, hi = 0;  // given back so far: lo to hi
+    int           wave   = 0;
+    std::uint32_t wave_frame = 0, wave_ms = 0;
+    lv_timer_t   *stepper = nullptr;
 } s_pop;
 
-lv_obj_t *s_notice = nullptr;
-
-// Setting a style marks the whole object for redrawing even when the value is
-// the one it had, and the scrim is the whole screen: only ever set what changed.
-void set_opa(lv_obj_t *obj, lv_opa_t opa)
-{
-    if (lv_obj_get_style_opa(obj, LV_PART_MAIN) != opa) {
-        lv_obj_set_style_opa(obj, opa, 0);
-    }
-}
+std::uint32_t s_frames = 0;
+lv_obj_t     *s_notice = nullptr;
 
 std::int32_t lerp(std::int32_t a, std::int32_t b, std::int32_t p) { return a + (b - a) * p / PROGRESS; }
 
-// The card's outline grows from the source to its place while what is on it
-// stays still on the screen, so it reads as opening out of what was tapped.
-void rise(int32_t p);
+constexpr lv_area_t SCREEN{0, 0, size::screen_w - 1, size::screen_h - 1};
 
-void grow(void *, int32_t p)
+lv_area_t on_screen(lv_area_t a)
+{
+    lv_area_t out{};
+    if (!lv_area_intersect(&out, &a, &SCREEN)) {
+        return {0, 0, -1, -1};
+    }
+    return out;
+}
+
+lv_area_t span(const lv_area_t &a, const lv_area_t &b)
+{
+    return {std::min(a.x1, b.x1), std::min(a.y1, b.y1), std::max(a.x2, b.x2), std::max(a.y2, b.y2)};
+}
+
+// --- the backdrop ---------------------------------------------------------
+
+// The part of the screen the frozen picture still covers, along the bands:
+// everything but lo to hi.
+bool still_frozen(std::int32_t a, std::int32_t b) { return s_pop.lo > s_pop.hi || b < s_pop.lo || a > s_pop.hi; }
+
+// The frozen picture as an object of its own rather than the overlay's
+// background, so it can be taken away a band at a time. Opaque wherever it
+// still is: LVGL starts drawing there and skips everything under it.
+void on_backdrop(lv_event_t *e)
+{
+    const lv_event_code_t code = lv_event_get_code(e);
+    if (code == LV_EVENT_COVER_CHECK) {
+        auto *info = static_cast<lv_cover_check_info_t *>(lv_event_get_param(e));
+        if (info->res != LV_COVER_RES_MASKED) {
+            const lv_area_t *a = info->area;
+            info->res = still_frozen(s_pop.rows ? a->y1 : a->x1, s_pop.rows ? a->y2 : a->x2) ? LV_COVER_RES_COVER
+                                                                                        : LV_COVER_RES_NOT_COVER;
+        }
+        return;
+    }
+    if (code != LV_EVENT_DRAW_MAIN || s_frozen == nullptr) {
+        return;
+    }
+    lv_layer_t *paint = lv_event_get_layer(e);
+    const lv_area_t clip = paint->_clip_area;
+    lv_draw_image_dsc_t dsc;
+    lv_draw_image_dsc_init(&dsc);
+    dsc.src = s_frozen;
+    // the whole picture each time, cut to what is left: a plain copy the PPA takes
+    lv_area_t parts[2] = {SCREEN, SCREEN};
+    const int n = s_pop.lo > s_pop.hi ? 1 : 2;
+    if (n == 2) {
+        (s_pop.rows ? parts[0].y2 : parts[0].x2) = s_pop.lo - 1;
+        (s_pop.rows ? parts[1].y1 : parts[1].x1) = s_pop.hi + 1;
+    }
+    for (int i = 0; i < n; ++i) {
+        lv_area_t part;
+        if (lv_area_intersect(&part, &parts[i], &clip)) {
+            paint->_clip_area = part;
+            lv_draw_image(paint, &dsc, &SCREEN);
+        }
+    }
+    paint->_clip_area = clip;
+}
+
+lv_area_t shadow_area(const lv_area_t &at)
+{
+    constexpr std::int32_t REACH = SHADOW_W / 2 + 2;
+    return on_screen({at.x1 - REACH, at.y1 + SHADOW_Y - REACH, at.x2 + REACH, at.y2 + SHADOW_Y + REACH});
+}
+
+void copy_rows(lv_draw_buf_t *to, const lv_area_t &to_at, const lv_draw_buf_t *from, const lv_area_t &from_at,
+               const lv_area_t &a)
+{
+    const std::int32_t w = lv_area_get_width(&a);
+    for (std::int32_t y = a.y1; y <= a.y2; ++y) {
+        std::memcpy(to->data + (y - to_at.y1) * to->header.stride + (a.x1 - to_at.x1) * 2,
+                    from->data + (y - from_at.y1) * from->header.stride + (a.x1 - from_at.x1) * 2,
+                    static_cast<std::size_t>(w) * 2);
+    }
+}
+
+// The card's shadow into the backdrop, keeping what it covers so it can go
+// with the card.
+void shadow_on(const lv_area_t &at)
+{
+    s_pop.under_at = shadow_area(at);
+    s_pop.under    = lv_draw_buf_create(lv_area_get_width(&s_pop.under_at), lv_area_get_height(&s_pop.under_at),
+                                        LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO);
+    if (s_pop.under == nullptr) {
+        return;
+    }
+    copy_rows(s_pop.under, s_pop.under_at, s_frozen, SCREEN, s_pop.under_at);
+    const std::uint64_t t0 = perf::now_us();
+    bake_shadow(at, s_pop.under_at);
+    s_shadow_ms = static_cast<float>(perf::now_us() - t0) / 1000.0f;
+    s_pop.shadowed = true;
+#if defined(ESP_PLATFORM)
+    s_made_at_gen.store(0, std::memory_order_relaxed);  // a shadow painted in: never this picture again
+    s_made_from_us.store(0, std::memory_order_relaxed);
+#endif
+    if (s_pop.backdrop != nullptr) {
+        lv_obj_invalidate_area(s_pop.backdrop, &s_pop.under_at);
+    }
+}
+
+void shadow_off()
+{
+    if (s_pop.under == nullptr) {
+        return;
+    }
+    if (s_pop.shadowed) {
+        copy_rows(s_frozen, SCREEN, s_pop.under, s_pop.under_at, s_pop.under_at);
+        if (s_pop.backdrop != nullptr) {
+            lv_obj_invalidate_area(s_pop.backdrop, &s_pop.under_at);
+        }
+    }
+    lv_draw_buf_destroy(s_pop.under);
+    s_pop.under    = nullptr;
+    s_pop.shadowed = false;
+}
+
+// --- the card's picture ---------------------------------------------------
+
+void drop_picture()
+{
+    if (s_pop.picture != nullptr) {
+        lv_image_cache_drop(s_pop.picture);
+        lv_draw_buf_destroy(s_pop.picture);
+        s_pop.picture = nullptr;
+    }
+}
+
+// The card as it looks at rest, drawn once over the backdrop it rests on: a
+// frame of it growing or rising is then a copy of part of this, rather than
+// its glass, its contents and their shadows all drawn again. `at` may reach
+// past the card, where the glass goes on plain, for an outline that comes
+// from outside it.
+bool paint_picture(lv_area_t at)
+{
+    at = on_screen(at);
+    const std::int32_t w = lv_area_get_width(&at), h = lv_area_get_height(&at);
+    if (s_frozen == nullptr || w <= 0 || h <= 0) {
+        return false;
+    }
+    if (s_pop.picture == nullptr || s_pop.picture->header.w != static_cast<std::uint32_t>(w) ||
+        s_pop.picture->header.h != static_cast<std::uint32_t>(h)) {
+        drop_picture();
+        s_pop.picture = lv_draw_buf_create(w, h, LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO);
+        if (s_pop.picture == nullptr) {
+            return false;
+        }
+    }
+    const std::uint64_t t0 = perf::now_us();
+    copy_rows(s_pop.picture, at, s_frozen, SCREEN, at);
+
+    lv_obj_set_pos(s_pop.card, s_pop.to.x1, s_pop.to.y1);
+    lv_obj_set_size(s_pop.card, lv_area_get_width(&s_pop.to), lv_area_get_height(&s_pop.to));
+    lv_obj_set_pos(s_pop.body, 0, 0);
+    lv_obj_remove_flag(s_pop.body, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_update_layout(s_pop.card);
+
+    lv_obj_t *canvas = lv_canvas_create(layer(Layer::Overlay));
+    lv_obj_add_flag(canvas, LV_OBJ_FLAG_HIDDEN);
+    lv_canvas_set_draw_buf(canvas, s_pop.picture);
+    lv_layer_t paint;
+    lv_canvas_init_layer(canvas, &paint);
+    paint.buf_area = paint._clip_area = paint.phy_clip_area = at;
+    lv_draw_rect_dsc_t glass;
+    lv_draw_rect_dsc_init(&glass);
+    glass.bg_color      = lv_obj_get_style_bg_color(s_pop.card, LV_PART_MAIN);
+    glass.bg_opa        = s_pop.glass_opa;
+    glass.radius        = 0;
+    glass.border_width  = 0;
+    glass.outline_width = 0;
+    glass.shadow_width  = 0;
+    lv_draw_rect(&paint, &glass, &at);
+    lv_obj_redraw(&paint, s_pop.body);
+    lv_canvas_finish_layer(canvas, &paint);
+    lv_obj_delete(canvas);
+    lv_image_cache_drop(s_pop.picture);  // drawn into again: nothing kept of what it was
+    s_pop.picture_at = at;
+    s_picture_ms = static_cast<float>(perf::now_us() - t0) / 1000.0f;
+    std::snprintf(s_card_report, sizeof s_card_report, "  last popover: its picture %.1f ms, its shadow %.1f ms\n",
+                  static_cast<double>(s_picture_ms), static_cast<double>(s_shadow_ms));
+    return true;
+}
+
+void show_picture(bool on)
+{
+    s_pop.pictured = on && s_pop.picture != nullptr;
+    if (s_pop.pictured) {
+        lv_obj_add_flag(s_pop.body, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_bg_opa(s_pop.card, LV_OPA_TRANSP, 0);
+    } else {
+        lv_obj_remove_flag(s_pop.body, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_local_style_prop(s_pop.card, LV_STYLE_BG_OPA, 0);
+    }
+}
+
+// Under the card's own edge, which it still draws: the picture, inside the
+// outline as it is now.
+void draw_picture(lv_event_t *e)
+{
+    if (!s_pop.pictured) {
+        return;
+    }
+    lv_layer_t *paint = lv_event_get_layer(e);
+    lv_area_t card;
+    lv_obj_get_coords(s_pop.card, &card);
+    lv_area_t at = s_pop.picture_at;
+    if (s_motion == PopMotion::Rise && !s_pop.closing) {
+        lv_area_move(&at, card.x1 - s_pop.to.x1, card.y1 - s_pop.to.y1);  // what is on it comes up with it
+    }
+    const std::int32_t r = std::min({radius::pop, lv_area_get_width(&card) / 2, lv_area_get_height(&card) / 2});
+    const lv_area_t clip = paint->_clip_area;
+    lv_draw_image_dsc_t dsc;
+    lv_draw_image_dsc_init(&dsc);
+    dsc.src = s_pop.picture;
+    // the rows through the rounded corners masked, the rest a plain copy the PPA takes
+    const lv_area_t rows[3] = {{card.x1, card.y1, card.x2, card.y1 + r - 1},
+                               {card.x1, card.y1 + r, card.x2, card.y2 - r},
+                               {card.x1, card.y2 - r + 1, card.x2, card.y2}};
+    for (int i = 0; i < 3; ++i) {
+        lv_area_t part;
+        if (!lv_area_intersect(&part, &rows[i], &clip) || !lv_area_intersect(&part, &part, &at)) {
+            continue;
+        }
+        paint->_clip_area = part;
+        dsc.clip_radius   = i == 1 ? 0 : r;
+        dsc.image_area    = i == 1 ? at : card;  // the corners' mask is the outline's
+        lv_draw_image(paint, &dsc, &at);
+    }
+    paint->_clip_area = clip;
+}
+
+// --- motion ---------------------------------------------------------------
+
+void run(std::int32_t from, std::int32_t to, std::uint32_t ms, lv_anim_path_cb_t path, lv_anim_completed_cb_t done);
+void back_in_source(lv_anim_t *);
+
+// Grow: the outline opens out of the source while what is on the card stays
+// still on the screen, so it reads as opening out of what was tapped. Rise:
+// the card at its place from the start, coming up a little, so the area that
+// changes is the card's own and never grows. Either goes back into the source.
+// No fades: an object faded with what is on it is drawn off-screen first,
+// every frame, which costs the panel more than all the rest.
+void place(std::int32_t p)
 {
     if (s_pop.card == nullptr) {
         return;
     }
-    if (s_motion == PopMotion::Rise) {
-        rise(p);
+    // the spring's last percent and a half is a pixel or two over a quarter
+    // of a second, each a frame of the whole card: it ends where it would
+    // have, rather than creeping there
+    if (s_pop.closing ? p <= PROGRESS * 15 / 1000 : p >= PROGRESS * 985 / 1000) {
+        p = s_pop.closing ? 0 : PROGRESS;
+    }
+    s_pop.p = p;
+    if (s_motion == PopMotion::Grow || s_pop.closing) {
+        const std::int32_t x = lerp(s_pop.from.x1, s_pop.to.x1, p), y = lerp(s_pop.from.y1, s_pop.to.y1, p);
+        const std::int32_t w = std::max<std::int32_t>(lerp(lv_area_get_width(&s_pop.from), lv_area_get_width(&s_pop.to), p), 8);
+        const std::int32_t h = std::max<std::int32_t>(lerp(lv_area_get_height(&s_pop.from), lv_area_get_height(&s_pop.to), p), 8);
+        lv_obj_set_pos(s_pop.card, x, y);
+        lv_obj_set_size(s_pop.card, w, h);
+        lv_obj_set_pos(s_pop.body, s_pop.to.x1 - x, s_pop.to.y1 - y);
+    } else {
+        lv_obj_set_pos(s_pop.card, s_pop.to.x1, s_pop.to.y1 + RISE * (PROGRESS - p) / PROGRESS);
+        lv_obj_set_size(s_pop.card, lv_area_get_width(&s_pop.to), lv_area_get_height(&s_pop.to));
+        lv_obj_set_pos(s_pop.body, 0, 0);
+    }
+    // the shadow lands with the card, in the last few percent, rather than after it has come to rest
+    if (!s_pop.closing && !s_pop.shadowed && s_pop.backdrop != nullptr && p >= PROGRESS * 97 / 100) {
+        shadow_on(s_pop.to);
+    }
+    if (s_pop.closing && p == 0) {
+        back_in_source(nullptr);
+    }
+}
+
+void landed(lv_anim_t *)
+{
+    show_picture(false);  // from here on what is on it is live
+    if (s_pop.card != nullptr) {
+        lv_obj_invalidate(s_pop.card);
+    }
+}
+
+void picture_card(void *)
+{
+    if (s_pop.card == nullptr || s_pop.closing || s_pop.pictured || s_pop.backdrop == nullptr) {
         return;
     }
-    const std::int32_t x = lerp(s_pop.from.x1, s_pop.to.x1, p), y = lerp(s_pop.from.y1, s_pop.to.y1, p);
-    const std::int32_t w = std::max<std::int32_t>(lerp(lv_area_get_width(&s_pop.from), lv_area_get_width(&s_pop.to), p), 8);
-    const std::int32_t h = std::max<std::int32_t>(lerp(lv_area_get_height(&s_pop.from), lv_area_get_height(&s_pop.to), p), 8);
-    lv_obj_set_pos(s_pop.card, x, y);
-    lv_obj_set_size(s_pop.card, w, h);
-    lv_obj_set_pos(s_pop.body, s_pop.to.x1 - x, s_pop.to.y1 - y);
-    set_opa(s_pop.body, LV_OPA_COVER);  // the growing outline reveals it; a fade would draw it off-screen
-    // the frozen scrim is a whole-screen picture: fade it in quickly, so only a few frames blend it all
-    const lv_opa_t scrim = s_how == PopGlass::Frozen ? LV_OPA_COVER
-                                                     : static_cast<lv_opa_t>(std::clamp<std::int32_t>(p * 255 / PROGRESS, 0, 255));
-    set_opa(s_pop.scrim, scrim);
+    if (paint_picture(s_motion == PopMotion::Grow ? span(s_pop.from, s_pop.to) : s_pop.to)) {
+        show_picture(true);
+    }
+    place(s_pop.p);
 }
 
-// The card at its place from the start, coming up a little and into view: the
-// area that changes is the card's own and never grows.
-void rise(int32_t p)
+void finish_close()
 {
-    // no fades: an object faded with what is on it is drawn off-screen first,
-    // every frame, which costs the panel more than all the rest
-    const std::int32_t lift = 14 * (PROGRESS - p) / PROGRESS;
-    lv_obj_set_pos(s_pop.card, s_pop.to.x1, s_pop.to.y1 + lift);
-    lv_obj_set_size(s_pop.card, lv_area_get_width(&s_pop.to), lv_area_get_height(&s_pop.to));
-    lv_obj_set_pos(s_pop.body, 0, 0);
-    set_opa(s_pop.body, LV_OPA_COVER);
-    set_opa(s_pop.scrim, LV_OPA_COVER);
-}
-
-void finish_close(lv_anim_t *)
-{
+    // all given back: the full-screen objects go without drawing the screen again
+    lv_display_t *disp = lv_display_get_default();
+    const bool quiet = s_pop.backdrop != nullptr && s_pop.wave >= WAVES && lv_display_is_invalidation_enabled(disp);
+    if (quiet) {
+        lv_display_enable_invalidation(disp, false);
+    }
     s_open.store(false, std::memory_order_release);
     if (s_pop.source != nullptr) {
         lv_obj_remove_state(s_pop.source, LV_STATE_USER_1);
     }
-    lv_obj_t *overlay = lv_obj_get_parent(s_pop.scrim);
-    lv_obj_set_style_bg_image_src(overlay, nullptr, 0);
-    lv_obj_set_style_bg_opa(overlay, LV_OPA_TRANSP, 0);
-    lv_obj_delete(s_pop.scrim);
-    lv_obj_delete(s_pop.card);
+    if (s_pop.stepper != nullptr) {
+        lv_timer_delete(s_pop.stepper);
+    }
+    shadow_off();
+    drop_picture();
+    for (lv_obj_t *obj : {s_pop.scrim, s_pop.card, s_pop.backdrop}) {
+        if (obj != nullptr) {
+            lv_obj_delete(obj);
+        }
+    }
     s_pop = Pop{};
+    if (quiet) {
+        lv_display_enable_invalidation(disp, true);
+    }
+}
+
+// The live screen back from where the card went, a band of the screen each
+// frame, outward: drawing all of it again in one frame is the slowest frame
+// the panel has, and this is the same work spread over a few.
+void give_back()
+{
+    const std::int32_t length = s_pop.rows ? size::screen_h : size::screen_w;
+    const std::int32_t r = s_pop.reach * ++s_pop.wave / WAVES;
+    const std::int32_t lo = std::max<std::int32_t>(0, s_pop.centre - r), hi = std::min<std::int32_t>(length - 1, s_pop.centre + r);
+    const auto band = [](std::int32_t a, std::int32_t b) {
+        if (a > b) {
+            return;
+        }
+        lv_area_t area = s_pop.rows ? lv_area_t{0, a, size::screen_w - 1, b} : lv_area_t{a, 0, b, size::screen_h - 1};
+        lv_obj_invalidate_area(s_pop.backdrop, &area);
+    };
+    if (s_pop.lo > s_pop.hi) {
+        band(lo, hi);
+    } else {
+        band(lo, s_pop.lo - 1);
+        band(s_pop.hi + 1, hi);
+    }
+    s_pop.lo = lo;
+    s_pop.hi = hi;
+    if (s_pop.card != nullptr) {  // it is back in its source, which is in the first band
+        lv_obj_delete(s_pop.card);
+        s_pop.card = s_pop.body = nullptr;
+    }
+    s_pop.wave_frame = s_frames;
+    s_pop.wave_ms    = lv_tick_get();
+}
+
+void back_in_source(lv_anim_t *)
+{
+    if (s_pop.wave > 0 || s_pop.scrim == nullptr) {
+        return;  // already on its way back
+    }
+    if (s_pop.backdrop == nullptr) {
+        finish_close();
+        return;
+    }
+    const lv_area_t &src = s_pop.from;
+    s_pop.centre = s_pop.rows ? (src.y1 + src.y2) / 2 : (src.x1 + src.x2) / 2;
+    const std::int32_t length = s_pop.rows ? size::screen_h : size::screen_w;
+    s_pop.reach = std::max(s_pop.centre, length - 1 - s_pop.centre) + 1;
+    give_back();
+    s_pop.stepper = lv_timer_create(
+        [](lv_timer_t *) {
+            // a band a frame, or on regardless if no frame comes
+            if (s_frames == s_pop.wave_frame && lv_tick_elaps(s_pop.wave_ms) < 150) {
+                return;
+            }
+            if (s_pop.wave >= WAVES) {
+                finish_close();
+            } else {
+                give_back();
+            }
+        },
+        1, nullptr);
 }
 
 void run(std::int32_t from, std::int32_t to, std::uint32_t ms, lv_anim_path_cb_t path, lv_anim_completed_cb_t done)
@@ -532,13 +919,24 @@ void run(std::int32_t from, std::int32_t to, std::uint32_t ms, lv_anim_path_cb_t
     lv_anim_init(&a);
     lv_anim_set_var(&a, &s_pop);
     lv_anim_set_values(&a, from, to);
-    lv_anim_set_custom_exec_cb(&a, [](lv_anim_t *an, int32_t v) { grow(an, v); });
+    lv_anim_set_custom_exec_cb(&a, [](lv_anim_t *, int32_t v) { place(v); });
     lv_anim_set_duration(&a, ms);
     lv_anim_set_path_cb(&a, path);
     if (done != nullptr) {
         lv_anim_set_completed_cb(&a, done);
     }
     lv_anim_start(&a);
+}
+
+// The clock starts once the frame that brings the backdrop is out, so the
+// first frame of the motion is its start and not a jump a slow frame long.
+void on_frame(lv_event_t *)
+{
+    ++s_frames;
+    if (s_pop.waiting) {
+        s_pop.waiting = false;
+        run(0, PROGRESS, motion::pop_ms, motion::spring, landed);
+    }
 }
 
 }  // namespace
@@ -567,8 +965,8 @@ const lv_draw_buf_t *frozen_picture() { return s_frozen; }
 
 const char *freeze_report()
 {
-    static char both[300];
-    std::snprintf(both, sizeof both, "%s%s%s", s_freeze_report, s_up_report, s_ahead_report);
+    static char both[400];
+    std::snprintf(both, sizeof both, "%s%s%s%s", s_freeze_report, s_up_report, s_ahead_report, s_card_report);
     return both;
 }
 PopGlass pop_glass() { return s_how; }
@@ -594,7 +992,14 @@ lv_obj_t *popover(lv_obj_t *source, std::int32_t w, std::int32_t h, From from, b
     s_pop.to     = {x, y, x + w - 1, y + h - 1};
     s_pop.from   = src;
     s_pop.source = source;
+    s_pop.rows   = from == From::Below;
     lv_obj_add_state(source, LV_STATE_USER_1);
+
+    static bool watching = false;
+    if (!watching) {
+        watching = true;
+        lv_display_add_event_cb(lv_obj_get_display(top), on_frame, LV_EVENT_REFR_READY, nullptr);
+    }
 
     const bool frozen = s_how == PopGlass::Frozen;
     if (frozen) {
@@ -602,17 +1007,17 @@ lv_obj_t *popover(lv_obj_t *source, std::int32_t w, std::int32_t h, From from, b
     }
     s_open.store(true, std::memory_order_release);
     if (frozen && s_frozen != nullptr) {
-        // the overlay plane itself takes the picture as its opaque background, so
-        // LVGL starts drawing there and skips everything the picture hides
-        lv_obj_set_style_bg_image_src(top, s_frozen, 0);
-        lv_obj_set_style_bg_opa(top, LV_OPA_COVER, 0);
-        s_pop.scrim = lv_obj_create(top);
-        lv_obj_remove_style_all(s_pop.scrim);
-        lv_obj_set_size(s_pop.scrim, size::screen_w, size::screen_h);
-    } else {
-        s_pop.scrim = lv_obj_create(top);
-        lv_obj_remove_style_all(s_pop.scrim);
-        lv_obj_set_size(s_pop.scrim, size::screen_w, size::screen_h);
+        s_pop.backdrop = lv_obj_create(top);
+        lv_obj_remove_style_all(s_pop.backdrop);
+        lv_obj_set_size(s_pop.backdrop, size::screen_w, size::screen_h);
+        lv_obj_remove_flag(s_pop.backdrop, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(s_pop.backdrop, on_backdrop, LV_EVENT_COVER_CHECK, nullptr);
+        lv_obj_add_event_cb(s_pop.backdrop, on_backdrop, LV_EVENT_DRAW_MAIN, nullptr);
+    }
+    s_pop.scrim = lv_obj_create(top);
+    lv_obj_remove_style_all(s_pop.scrim);
+    lv_obj_set_size(s_pop.scrim, size::screen_w, size::screen_h);
+    if (s_pop.backdrop == nullptr) {
         lv_obj_set_style_bg_color(s_pop.scrim, lv_color_hex(colours().scrim), 0);
         lv_obj_set_style_bg_opa(s_pop.scrim, colours().scrim_opa, 0);
         if (blur_scrim) {
@@ -625,16 +1030,19 @@ lv_obj_t *popover(lv_obj_t *source, std::int32_t w, std::int32_t h, From from, b
 
     s_pop.card = glass(top, Glass::Large);
     lv_obj_set_style_radius(s_pop.card, radius::pop, 0);
-    if (!frozen || s_frozen == nullptr) {
+    s_pop.glass_opa = lv_obj_get_style_bg_opa(s_pop.card, LV_PART_MAIN);
+    if (s_pop.backdrop == nullptr) {
         lv_obj_set_style_blur_backdrop(s_pop.card, true, 0);
         lv_obj_set_style_blur_radius(s_pop.card, 40, 0);
-    } else if (s_motion == PopMotion::Rise) {
-        bake_shadow(s_pop.to);
-#if defined(ESP_PLATFORM)
-        s_made_at_gen.store(0, std::memory_order_relaxed);  // a shadow painted in: never this picture again
-        s_made_from_us.store(0, std::memory_order_relaxed);
-#endif
+    } else {
+        // the shadow is painted into the backdrop: a soft shadow of a moving
+        // shape is drawn again every frame, and is most of what a frame costs
         lv_obj_set_style_shadow_width(s_pop.card, 0, 0);
+        if (s_motion == PopMotion::Rise) {
+            shadow_on(s_pop.to);
+        }
+        lv_obj_add_event_cb(s_pop.card, draw_picture, LV_EVENT_DRAW_MAIN_BEGIN, nullptr);
+        lv_async_call(picture_card, nullptr);  // once whoever opened it has filled it
     }
     lv_obj_set_style_pad_all(s_pop.card, 0, 0);
     lv_obj_add_flag(s_pop.card, LV_OBJ_FLAG_CLICKABLE);
@@ -646,26 +1054,51 @@ lv_obj_t *popover(lv_obj_t *source, std::int32_t w, std::int32_t h, From from, b
     lv_obj_remove_flag(s_pop.body, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(s_pop.body, LV_OBJ_FLAG_IGNORE_LAYOUT);
 
-    grow(nullptr, 0);
-    run(0, PROGRESS, motion::pop_ms, motion::spring, nullptr);
+    place(0);
+    s_pop.waiting = true;
     return s_pop.body;
 }
 
 void close_popover(bool animate)
 {
-    if (s_pop.card == nullptr || s_pop.closing) {
+    if (s_pop.scrim == nullptr) {
         return;
     }
     if (!animate) {
         lv_anim_delete(&s_pop, nullptr);
-        finish_close(nullptr);
+        finish_close();
+        return;
+    }
+    if (s_pop.closing) {
         return;
     }
     s_pop.closing = true;
-    run(PROGRESS, 0, motion::close_ms, lv_anim_path_ease_in, finish_close);
+    s_pop.waiting = false;
+    if (s_pop.backdrop != nullptr) {
+        shadow_off();  // the shadow goes with the card
+        if (paint_picture(span(s_pop.from, s_pop.to))) {
+            show_picture(true);
+        }
+        place(s_pop.p);
+    }
+    // quick, and into the source without passing it
+    run(s_pop.p, 0, motion::close_ms, motion::settle, back_in_source);
 }
 
 // --- notices --------------------------------------------------------------
+
+namespace motion {
+void moving(lv_obj_t *obj, bool moving)
+{
+    if (!moving) {
+        lv_obj_remove_local_style_prop(obj, LV_STYLE_SHADOW_WIDTH, 0);
+        lv_obj_remove_local_style_prop(obj, LV_STYLE_SHADOW_OFFSET_Y, 0);
+        return;
+    }
+    lv_obj_set_style_shadow_width(obj, std::min<std::int32_t>(lv_obj_get_style_shadow_width(obj, LV_PART_MAIN), 20), 0);
+    lv_obj_set_style_shadow_offset_y(obj, 6, 0);
+}
+}  // namespace motion
 
 namespace {
 void drop(void *obj, int32_t y) { lv_obj_set_y(static_cast<lv_obj_t *>(obj), y); }
@@ -676,12 +1109,14 @@ void leave(lv_obj_t *slab)
         return;
     }
     lv_obj_add_flag(slab, LV_OBJ_FLAG_USER_4);
+    lv_anim_delete(slab, nullptr);
+    motion::moving(slab, true);
     lv_anim_t a;
     lv_anim_init(&a);
     lv_anim_set_var(&a, slab);
     lv_anim_set_values(&a, lv_obj_get_y(slab), -lv_obj_get_height(slab) - 40);
     lv_anim_set_exec_cb(&a, drop);
-    lv_anim_set_duration(&a, motion::close_ms + 60);
+    lv_anim_set_duration(&a, motion::leave_ms);
     lv_anim_set_path_cb(&a, lv_anim_path_ease_in);
     lv_anim_set_completed_cb(&a, [](lv_anim_t *an) {
         auto *gone = static_cast<lv_obj_t *>(an->var);
@@ -711,10 +1146,19 @@ lv_obj_t *notice(const char *source, const char *glyph, const char *title, const
     lv_obj_set_style_pad_column(slab, space::l, 0);
     lv_obj_add_flag(slab, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(slab, [](lv_event_t *e) { leave(lv_event_get_target_obj(e)); }, LV_EVENT_CLICKED, nullptr);
+    lv_obj_add_event_cb(
+        slab,
+        [](lv_event_t *e) {
+            if (lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_TOP) {
+                leave(lv_event_get_target_obj(e));  // flicked back up where it came from
+            }
+        },
+        LV_EVENT_GESTURE, nullptr);
 
     lv_obj_t *mark = well(slab);
     lv_obj_set_size(mark, 76, 76);
     lv_obj_set_style_pad_all(mark, 0, 0);
+    lv_obj_remove_flag(mark, LV_OBJ_FLAG_CLICKABLE);  // a tap on it is a tap on the notice
     lv_obj_center(icon(mark, glyph, 34, true));
 
     lv_obj_t *col = lv_obj_create(slab);
@@ -741,11 +1185,24 @@ lv_obj_t *notice(const char *source, const char *glyph, const char *title, const
     lv_obj_set_style_margin_top(line, space::m, 0);
     lv_obj_remove_flag(line, LV_OBJ_FLAG_CLICKABLE);
 
+    motion::moving(slab, true);
     lv_anim_t a;
     lv_anim_init(&a);
     lv_anim_set_var(&a, slab);
     lv_anim_set_values(&a, -H, Y);
-    lv_anim_set_exec_cb(&a, drop);
+    lv_anim_set_custom_exec_cb(&a, [](lv_anim_t *an, int32_t y) {
+        auto *obj = static_cast<lv_obj_t *>(an->var);
+        // the last pixels of the spring, where it has all but stopped, at
+        // once: from there on it is still, its big shadow back
+        if (y >= an->end_value - 3) {
+            y = an->end_value;
+            if (!lv_obj_has_flag(obj, LV_OBJ_FLAG_USER_3)) {
+                lv_obj_add_flag(obj, LV_OBJ_FLAG_USER_3);
+                motion::moving(obj, false);  // landed: its big shadow back
+            }
+        }
+        lv_obj_set_y(obj, y);
+    });
     lv_anim_set_duration(&a, motion::pop_ms);
     lv_anim_set_path_cb(&a, motion::spring);
     lv_anim_start(&a);
