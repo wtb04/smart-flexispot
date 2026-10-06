@@ -587,8 +587,8 @@ void paint_heat_card()
         lv_obj_t *row = c->toggles[i];
         set_hidden_if(row, toggle.label[0] == 0);
         shape |= toggle.label[0] != 0 ? 1u << i : 0u;
-        set_text_if(lv_obj_get_child(lv_obj_get_child(row, 0), 0), toggle.label);
-        set_checked_if(row_trail(row), toggle.on);
+        set_text_if(lv_obj_get_child(row, 0), toggle.label);
+        set_checked_if(row, toggle.on);
     }
     if (shape != c->shape) {
         c->shape = shape;
@@ -661,18 +661,19 @@ void build_heat_card(lv_obj_t *body)
         }
     }, LV_EVENT_VALUE_CHANGED, nullptr);
 
+    // A toggle's label is what it is set to ("1" or "2" for which radiator, say),
+    // not what it does, so it is a button showing it, lit when on, as the old card's chips were.
+    lv_obj_t *pair = flow(body, LV_FLEX_FLOW_ROW, space::m);
+    lv_obj_set_width(pair, HEAT_INNER);
     for (int i = 0; i < kDialToggleCount; ++i) {
-        RowSpec spec;
-        spec.title = "";
-        spec.trail = Trail::Toggle;
-        lv_obj_t *row = kit::row(body, spec);
-        lv_obj_set_style_pad_hor(row, 0, 0);
-        lv_obj_add_event_cb(row_trail(row), [](lv_event_t *e) {
+        lv_obj_t *toggle = button(pair, Button::Raised, nullptr, " ", false, true);
+        lv_obj_set_flex_grow(toggle, 1);
+        lv_obj_add_event_cb(toggle, [](lv_event_t *e) {
             if (detail::s_handlers.dial_toggle != nullptr) {
                 detail::s_handlers.dial_toggle(index_of(e));
             }
-        }, LV_EVENT_VALUE_CHANGED, index_data(i));
-        c->toggles[i] = row;
+        }, LV_EVENT_CLICKED, index_data(i));
+        c->toggles[i] = toggle;
     }
     lv_obj_add_event_cb(body, [](lv_event_t *) {
         delete s_heat;
