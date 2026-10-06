@@ -167,10 +167,11 @@ the screen changes, so:
    glass about 4; the whole page scrolling under the bar about 6 to 8, with 6
    times the pixels. A sheet's body scrolls over a picture of the glass under
    it, a fifth of what the same body on plain glass costs.
-10. **Change pages in bands.** A page change is a wipe from the dock side
-   in eight bands, one a frame, so each frame redraws an eighth of the page
-   and the change takes about as much drawing as one full frame. Pages are
-   made once and hidden, never rebuilt. The bar and the dock stay as they are.
+10. **Pages change at once.** The new page is there in the next frame and
+   only the dock's mark slides over to the chosen item. A whole-page wipe in
+   bands was tried and dropped: it looked worse than no animation. Pages are
+   made once and hidden, never rebuilt, and the bar and the dock stay as they
+   are.
 11. **Big buffers once, in PSRAM.** They are made once and freed when done.
    Free PSRAM is tight while the old UI still runs alongside.
 

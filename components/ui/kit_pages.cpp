@@ -48,7 +48,7 @@ struct Page {
 Page   s_pages[MAX_PAGES];
 int    s_page_count = 0;
 int    s_shown      = -1;
-Change s_how        = Change::Wipe;
+Change s_how        = Change::Instant;
 void (*s_told)(int) = nullptr;
 lv_obj_t *s_mark    = nullptr;
 lv_obj_t *s_grids[MAX_PAGES]{};
