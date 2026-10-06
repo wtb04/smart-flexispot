@@ -752,4 +752,9 @@ void ink_if(lv_obj_t *label, Ink ink);
 void set_row_lead(lv_obj_t *row, const char *lead, Ink ink);
 void set_row_mark(lv_obj_t *row, std::uint32_t colour);
 
+// --- the bar's cards ------------------------------------------------------
+
+/** The open popover as tall as what is on it now: for a card whose content comes and goes while it is out. */
+void fit_popover();
+
 }  // namespace ui::kit

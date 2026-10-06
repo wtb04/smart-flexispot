@@ -45,6 +45,10 @@ void open_media(lv_obj_t *source);
 void open_lights(lv_obj_t *source);
 void open_heating(lv_obj_t *source);
 void build_claude(lv_obj_t *bar);
+/** What plays, fullscreen: the music view, or the cinema's for a video. kit_front_views.cpp */
+void open_now_playing();
+/** The favourites, to start one of them. kit_front_views.cpp */
+void open_favourites();
 
 // Each part's own, in kit_front_<part>.cpp.
 DockItems build_dock(lv_obj_t *chrome);  // the dock, its desk and focus, and the items that choose the pages
