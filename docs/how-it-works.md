@@ -26,10 +26,10 @@ renders the main views, offline and the same each time, to
 
 ### Tests
 
-The parts that decide and parse — the request scheduler, the stream and job
+The parts that decide and parse (the request scheduler, the stream and job
 schedulers, the watchdog, the desk and companion protocols, the Home Assistant
 and Jellyfin protocols, the calendar, journey and radar parsers, the battery
-gauge, the focus timer, the Claude Code sessions' table — are plain C++ with no ESP-IDF in them, and are tested
+gauge, the focus timer, the Claude Code sessions' table) are plain C++ with no ESP-IDF in them, and are tested
 on the host under GoogleTest:
 
 ```sh
@@ -103,7 +103,9 @@ and returns; everything after that runs on tasks of its own.
 | `proxy/` | The companion's firmware |
 | `sim/`, `test/` | The simulator and the host tests |
 
-**The network.** Every HTTP request goes through `net`: it says what it is for
+### The network
+
+Every HTTP request goes through `net`: it says what it is for
 (something waited on at the screen, something due, or something wanted
 before it is asked for), and `net` decides when it goes, on a connection
 kept for its host. It merges or replaces requests with the same key, retries
@@ -113,13 +115,17 @@ websocket and MQTT and Jellyfin's websocket, are kept by `net` too: connected
 when the network is, begun again with a back-off when they drop, and let go
 when they open and never get going.
 
-**Periodic work** runs as jobs on two shared workers rather than a task each:
+### Periodic work
+
+Periodic work runs as jobs on two shared workers rather than a task each:
 one for the quick ones (the clock, orientation, the battery, the network
 publish, the radar's planning), one for those that wait on a fetch (the
 calendar, the journey, the favourites). The stacks that saved were most of the
 internal RAM the radio and TLS need.
 
-**When things go wrong.** A shared worker stuck on one thing past its limit
+### When things go wrong
+
+A shared worker stuck on one thing past its limit
 is named in the log and restarts the panel. A crash leaves its last log lines
 in memory the restart keeps, and the whole crash in the core dump partition,
 both in the next run's `/restart`. An update that does not reach the network
@@ -127,7 +133,9 @@ in time is rolled back. The Wi-Fi co-processor is switched off and on at every
 boot, and if it stays out of reach the panel restarts from cold, at most twice
 in a row.
 
-**The display** is fed by DMA from PSRAM, and the panel shows flat blue for
+### The display
+
+The display is fed by DMA from PSRAM, and the panel shows flat blue for
 any frame it goes without. The DMA runs round a ring of eight frames by itself
 (`components/esp_lcd`), so an interrupt held off for a while no longer costs a
 frame, and the panel's interrupts run through flash writes. The backlight is
@@ -151,15 +159,15 @@ draw.
 
 ### The desk, in detail
 
-**The desk moves one short step per frame it receives**, so holding a button
+The desk moves one short step per frame it receives, so holding a button
 means retransmitting: the driver task repeats the key frame every
 `CONFIG_LOCTEK_REPEAT_MS`. Releasing sends the "no keys pressed" frame rather
 than merely going quiet, which stops the desk promptly instead of letting it
-coast. While idle, that same frame doubles as a keep-awake poll — the control
+coast. While idle, that same frame doubles as a keep-awake poll: the control
 box only reports its height in reply to something, and its panel sleeps after
 about ten seconds.
 
-**One driver task writes every key frame.** Callers post what they want into
+One driver task writes every key frame. Callers post what they want into
 mailboxes that hold only the latest wish, so a Stop can never queue behind
 anything; the receive task only decodes and hands heights on. Any key whose
 height stops changing for 2.5 s is released, whatever asked for it, and a
@@ -167,7 +175,7 @@ travel that sees the desk move away from its target gives up. A move asked
 for over the network is let go of after 1.5 s unless it is asked for again,
 since nobody's finger is on it.
 
-**Presets**: a tap sends the desk to one of the box's four, and the box runs
+Presets 1 to 4 are the box's own: a tap sends the desk there, and the box runs
 the move itself and ignores a plain stop while it does, so tapping the same
 preset again is what cancels it. A long press stores the current height there,
 as the M key followed by the preset key. Presets 5 and 6 are the panel's own: a
@@ -191,8 +199,8 @@ wired alongside `LV_EVENT_RELEASED` so a finger sliding off a button cannot
 leave the desk travelling, and the transmit task carries a
 `CONFIG_LOCTEK_MOVE_TIMEOUT_MS` failsafe behind that.
 
-**A control box left alone goes completely silent** — no height, no heartbeat —
-and in that state it ignores movement frames too, so the first button press
+A control box left alone goes completely silent, with no height and no
+heartbeat, and in that state it ignores movement frames too, so the first button press
 does nothing. Waking it takes an edge on the wake line: dropped low briefly,
 then raised, which is `turnon()` from the upstream Arduino sketch. Unlike that
 sketch the line is then *left high*: returning it low is what lets the box go

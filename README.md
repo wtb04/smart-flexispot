@@ -24,10 +24,10 @@
 Smart Flexispot is firmware for an [M5Stack Tab5](https://docs.m5stack.com/en/core/Tab5) that sits on my desk and drives the Flexispot under it. It replaces the desk's own keypad and controls the room from there: the lights and the heating through Home Assistant, and the desk itself. Along the way it also picked up what is playing on Jellyfin, my timetable with when to leave for it, the planes going over, and a focus timer.
 
 > [!NOTE]
-> **This is a showcase, not a product.** It is built around my desk, my room, my Home Assistant, my calendars and my phone, so a lot of it only makes sense in my setup. Treat it as a demo of what a desk panel can do and take whatever ideas or pieces are useful. Getting it running for yourself will mean changing things.
+> It is built around my desk, my room, my Home Assistant, my calendars and my phone, so a lot of it only makes sense in my setup. Treat it as a demo of what a desk panel can do and take whatever ideas or pieces are useful. Getting it running for yourself will mean changing things.
 
 > [!NOTE]
-> **Built with AI.** Most of the code was written with AI rather than by hand, so this is not so much a showcase of my coding skills (if those still count for much nowadays) as of how I think using something like this should feel. It is also just a fun project for myself, and building it this way made it a matter of weeks instead of months.
+> Most of the code was written with AI rather than by hand, so it shows less of my coding skills (if those still count for much nowadays) and more of how I think using something like this should feel. It is also just a fun project for myself, and building it this way made it a matter of weeks instead of months.
 
 Issues are welcome; for pull requests, expect slow answers, as this is a project for my own desk.
 
@@ -35,15 +35,15 @@ I am not affiliated with, or endorsed by, any of the products or services named 
 
 ## Highlights
 
-- **The room.** The lights, the heating and the air from Home Assistant, and the panel itself shows up in Home Assistant over MQTT.
-- **The desk.** Height, Stand and Sit, six presets instead of the control box's four, over a cable or over Bluetooth.
-- **Films and series.** Follows what plays on Jellyfin, with a cinema view that has the lights and the desk within reach.
-- **Planes overhead.** A live radar with who is flying, where to, their photo and their trail.
-- **The day.** The next lecture, a countdown, and when to leave to get there on time.
-- **Desk Link**, a menu bar app that connects my Mac to the panel: what plays there shows on the panel and is steered from it, and Claude Code's sessions come through it.
-- **Claude Code** on the laptops: a pill in the control bar while a session works, amber when one waits on you.
-- **Focus timer**, a **presence sensor** from your phone, and **diagnostics** for every part, on the panel itself.
-- **A simulator** that runs the real UI on a Mac, and host tests with coverage in CI.
+- The lights, the heating and the air from Home Assistant, and the panel itself shows up in Home Assistant over MQTT.
+- The desk's height, Stand and Sit, and six presets instead of the control box's four, over a cable or over Bluetooth.
+- What plays on Jellyfin, with a cinema view that has the lights and the desk within reach.
+- A live radar of the planes overhead: who is flying, where to, their photo and their trail.
+- The next lecture, a countdown, and when to leave to get there on time.
+- Desk Link, a menu bar app that connects my Mac to the panel: what plays there shows on the panel and is steered from it, and Claude Code's sessions come through it.
+- A pill in the control bar while a Claude Code session on a laptop works, amber when one waits on you.
+- A focus timer, a presence sensor from your phone, and diagnostics for every part, on the panel itself.
+- A simulator that runs the real UI on a Mac, and host tests with coverage in CI.
 
 ## Why
 
