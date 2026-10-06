@@ -4,6 +4,10 @@
 #include "kit_fonts.h"
 #include "lvgl_private.h"  // invalidating an area of the display, and how far an object draws past itself
 
+#if defined(ESP_PLATFORM)
+#include "board.h"
+#endif
+
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -284,6 +288,12 @@ void finish()
         s_run.stepper = nullptr;
     }
     lv_anim_delete(&s_run, nullptr);
+#if defined(ESP_PLATFORM)
+    if (board::glide_held()) {  // cut short: the new page at rest, and LVGL drawing again
+        board::glide_end();
+        lv_timer_resume(lv_display_get_refr_timer(lv_display_get_default()));
+    }
+#endif
     for (int i = 0; i < s_run.unit_count; ++i) {
         lv_obj_remove_local_style_prop(s_run.units[i], LV_STYLE_OPA, 0);
     }
@@ -564,6 +574,60 @@ void hide_pages()
     edge_follows(layer(Layer::Content));
 }
 
+#if defined(ESP_PLATFORM)
+// On the panel a slide is copied, not drawn: the new page drawn once, at
+// rest, into a frame held back, then laid beside the old one a step a frame.
+// Between the bar and the bottom only, so the bar and the dock stay.
+bool glide(int from, int to)
+{
+    const lv_area_t region{PAGES.x1, inset::top - space::l, size::screen_w - 1, size::screen_h - 1};
+    if (!board::glide_begin(region)) {
+        return false;
+    }
+    quiet(true);
+    if (s_told != nullptr) {
+        s_told(to);
+    }
+    lv_obj_set_hidden(s_pages[from].obj, true);
+    lv_obj_set_hidden(s_pages[to].obj, false);
+    s_shown = to;
+    quiet(false);
+    bake::now();
+    mark(to, false);
+    edge_follows(s_pages[to].obj);
+    lv_display_t *disp = lv_display_get_default();
+    lv_obj_invalidate_area(lv_screen_active(), &region);
+    lv_refr_now(disp);
+    if (!board::glide_held()) {
+        board::glide_end();
+        return true;
+    }
+    lv_timer_pause(lv_display_get_refr_timer(disp));
+    s_run.ready_us = perf::now_us();
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, &s_run);
+    lv_anim_set_values(&a, 0, lv_area_get_width(&region));
+    lv_anim_set_custom_exec_cb(&a, [](lv_anim_t *, int32_t shift) { board::glide_step(shift); });
+    lv_anim_set_duration(&a, motion::pop_ms);
+    lv_anim_set_path_cb(&a, motion::spring);
+    lv_anim_set_completed_cb(&a, [](lv_anim_t *) {
+        board::glide_end();
+        lv_display_t *d = lv_display_get_default();
+        lv_timer_resume(lv_display_get_refr_timer(d));
+        const board::GlideTimes t = board::glide_times();
+        std::snprintf(s_report, sizeof s_report, "glide: %u frames in %.0f ms, the new page drawn in %.1f ms, %.1f ms a frame copying",
+                      static_cast<unsigned>(t.frames), static_cast<double>(perf::now_us() - s_run.began_us) / 1000.0,
+                      static_cast<double>(s_run.ready_us - s_run.began_us) / 1000.0,
+                      t.frames != 0 ? static_cast<double>(t.copy_us) / 1000.0 / t.frames : 0.0);
+        s_run = Run{};
+        ++s_run_id;
+    });
+    lv_anim_start(&a);
+    return true;
+}
+#endif
+
 void show_page(int index, bool animate)
 {
     if (index < 0 || index >= s_page_count) {
@@ -579,6 +643,19 @@ void show_page(int index, bool animate)
     const int from = s_shown >= 0 && !lv_obj_is_hidden(s_pages[s_shown].obj) ? s_shown : -1;
     lv_obj_update_layout(to.obj);
     const Change how = !animate ? Change::Instant : from < 0 && whole(s_how) ? Change::Instant : s_how;
+#if defined(ESP_PLATFORM)
+    if (how == Change::Slide) {
+        s_run.active = true;
+        s_run.how    = how;
+        s_run.from   = from;
+        s_run.to     = index;
+        if (glide(from, index)) {
+            return;
+        }
+        s_run = Run{};
+        s_run.began_us = perf::now_us();
+    }
+#endif
 
     s_run.active = true;
     s_run.how    = how;
