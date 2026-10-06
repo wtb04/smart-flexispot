@@ -54,7 +54,6 @@ int       s_accent = 0;
 int       s_glass_step = 2;
 bool      s_blur_scrim = true;
 
-Dial *s_co2 = nullptr, *s_hum = nullptr, *s_heat = nullptr, *s_focus = nullptr;
 Rail *s_glass_rail = nullptr;
 int   s_focus_lit = 1;
 
@@ -190,39 +189,30 @@ void open_lights(lv_event_t *e) { open_lights_from(lv_event_get_current_target_o
 
 void open_heating(lv_event_t *e)
 {
-    lv_obj_t *body = popover(lv_event_get_current_target_obj(e), 440, 590, From::Below, s_blur_scrim);
+    lv_obj_t *body = popover(lv_event_get_current_target_obj(e), 440, 420, From::Below, s_blur_scrim);
     lv_obj_set_flex_flow(body, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(body, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_row(body, space::l, 0);
-    head(body, "Heating", "Now 20.5 °C");
-    DialSpec spec;
-    spec.size = 290, spec.min = 150, spec.max = 250, spec.start = 135, spec.sweep = 270;
-    spec.ticks = 41, spec.major = 5, spec.decimals = 1, spec.needle = false, spec.span = true;
-    spec.unit = "HEATING", spec.read = Role::ReadXL;
-    auto *dial = new Dial(body, spec);
-    own(dial->obj(), dial);
-    dial->set_value(205, false);
-    dial->set_target(210, false);  // still while it opens: it opens from a picture of itself
-    // the readout shows the target here: what a tap changes
+    head(body, "Heating", "The room is at 20.5°");
+    static int target = 210;
+    lv_obj_t *read = text(body, Role::ReadXXL, "");
+    lv_label_set_text_fmt(read, "%d.%d°", target / 10, target % 10);
     lv_obj_t *row = box(body, LV_FLEX_FLOW_ROW, space::m);
     lv_obj_set_width(row, LV_PCT(100));
     for (int dir : {-1, 1}) {
         lv_obj_t *b = button(row, Button::Raised, dir < 0 ? ic::remove : ic::add, nullptr);
         lv_obj_set_flex_grow(b, 1);
-        lv_obj_set_height(b, 64);
+        lv_obj_set_height(b, size::button_lg);
         lv_obj_add_event_cb(
             b,
             [](lv_event_t *ev) {
-                auto *d   = static_cast<Dial *>(lv_event_get_user_data(ev));
                 const int step = lv_obj_get_index(lv_event_get_current_target_obj(ev)) == 0 ? -5 : 5;
-                static int target = 210;
                 target = std::clamp(target + step, 150, 250);
-                d->set_target(target, true);
+                lv_label_set_text_fmt(static_cast<lv_obj_t *>(lv_event_get_user_data(ev)), "%d.%d°", target / 10, target % 10);
             },
-            LV_EVENT_CLICKED, dial);
+            LV_EVENT_CLICKED, read);
     }
-    lv_obj_t *mode = segmented(body, {"Heat", "Off"}, 0, 392);
-    (void)mode;
+    segmented(body, {"Heat", "Off"}, 0, 392);
 }
 
 void open_desk(lv_event_t *e)
@@ -637,89 +627,111 @@ void build_controls(lv_obj_t *scr)
     p->set_value(21, false);
 }
 
-const Zone CO2_ZONES[] = {{400, 800, Ink::Green}, {800, 1200, Ink::Amber}, {1200, 2000, Ink::Red}};
-const Zone HUM_ZONES[] = {{0, 30, Ink::Red}, {30, 40, Ink::Amber}, {40, 60, Ink::Green}, {60, 70, Ink::Amber}, {70, 100, Ink::Red}};
+const Zone CO2_ZONES[] = {{400, 800, Ink::Green, "Good"}, {800, 1200, Ink::Amber, "Fair"}, {1200, 2000, Ink::Red, "Poor"}};
+const Zone VOC_ZONES[] = {{0, 333, Ink::Green, "Good"}, {333, 666, Ink::Amber, "Fair"}, {666, 1000, Ink::Red, "Poor"}};
+const Zone HUM_ZONES[] = {{0, 30, Ink::Red, "Very dry"}, {30, 40, Ink::Amber, "Dry"}, {40, 60, Ink::Green, "Good"},
+                          {60, 70, Ink::Amber, "Damp"}, {70, 100, Ink::Red, "Very damp"}};
+const Zone PM_ZONES[]  = {{0, 12, Ink::Green, "Good"}, {12, 35, Ink::Amber, "Fair"}, {35, 75, Ink::Red, "Poor"}};
 
-lv_obj_t *dial_tile(lv_obj_t *parent, const char *title, const char *note)
+Reading  *s_readings[4]{};
+lv_obj_t *s_room = nullptr;
+lv_obj_t *s_room_line = nullptr, *s_focus_fill = nullptr;
+
+void wander_readings(bool animate)
 {
-    lv_obj_t *t = column_tile(parent, title, 268);
-    lv_obj_set_flex_align(t, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
-    lv_obj_t *n = text(t, Role::Small, note, Ink::Tertiary);
-    lv_obj_set_width(n, LV_PCT(100));
-    lv_label_set_long_mode(n, LV_LABEL_LONG_MODE_WRAP);
-    return t;
+    const std::int32_t values[4] = {500 + std::rand() % 1100, 40 + std::rand() % 500, 25 + std::rand() % 55,
+                                    std::rand() % 40};
+    for (int i = 0; i < 4; ++i) {
+        if (s_readings[i] != nullptr) {
+            s_readings[i]->set_value(values[i], animate);
+        }
+    }
 }
 
 void build_instruments(lv_obj_t *scr)
 {
     lv_obj_t *s = s_sheets[2] = sheet(scr);
-
-    lv_obj_t *t1 = dial_tile(s, "CO2", "Zones on the rim; only the one the needle is in is bright. It wanders, to see it move.");
-    DialSpec co2;
-    co2.size = 224, co2.min = 400, co2.max = 2000, co2.ticks = 31, co2.major = 5, co2.zones = CO2_ZONES;
-    co2.zone_count = 3, co2.ends = true, co2.unit = "PPM", co2.read = Role::ReadM;
-    s_co2 = new Dial(t1, co2);
-    own(s_co2->obj(), s_co2);
-    s_co2->set_value(640, false);
-
-    lv_obj_t *t2 = dial_tile(s, "HUMIDITY", "Good is in the middle, so the green sits there.");
-    DialSpec hum = co2;
-    hum.min = 0, hum.max = 100, hum.zones = HUM_ZONES, hum.zone_count = 5, hum.unit = "%";
-    s_hum = new Dial(t2, hum);
-    own(s_hum->obj(), s_hum);
-    s_hum->set_value(48, false);
-
-    lv_obj_t *t3 = dial_tile(s, "HEATING", "The target in the middle and marked in the accent; the ticks up to it from the room light while it heats.");
-    DialSpec heat;
-    heat.size = 224, heat.min = 150, heat.max = 250, heat.start = 135, heat.sweep = 270, heat.ticks = 41;
-    heat.major = 5, heat.decimals = 1, heat.span = true, heat.needle = false, heat.unit = "ROOM 20.5°";
-    heat.read = Role::ReadL;
-    s_heat = new Dial(t3, heat);
-    own(s_heat->obj(), s_heat);
-    s_heat->set_value(205, false);
-    s_heat->set_target(210, false);
-    lv_obj_t *row = box(t3, LV_FLEX_FLOW_ROW, space::m);
-    for (int dir : {-1, 1}) {
-        lv_obj_t *b = button(row, Button::Raised, dir < 0 ? ic::remove : ic::add, nullptr, true);
-        lv_obj_set_size(b, 96, 56);
-        lv_obj_add_event_cb(
-            b,
-            [](lv_event_t *e) {
-                const int step = lv_obj_get_index(lv_event_get_current_target_obj(e)) == 0 ? -5 : 5;
-                static int target = 210;
-                target = std::clamp(target + step, 150, 250);
-                s_heat->set_target(target, true);
-            },
-            LV_EVENT_CLICKED, nullptr);
+    constexpr std::int32_t AIR_W = 268, HALF = (SHEET_H - space::l) / 2;
+    lv_obj_t *air = box(s, LV_FLEX_FLOW_ROW_WRAP, space::l);
+    lv_obj_set_size(air, 2 * AIR_W + space::l, SHEET_H);
+    struct R { const char *caption, *unit; std::int32_t min, max; const Zone *zones; int n; const char *note; std::int32_t v; };
+    const R specs[4] = {{"CO2", "ppm", 400, 2000, CO2_ZONES, 3, "Good up to 800", 640},
+                        {"VOC", "ppb", 0, 1000, VOC_ZONES, 3, "Good up to 333", 120},
+                        {"Humidity", "%", 0, 100, HUM_ZONES, 5, "Good from 40 to 60", 48},
+                        {"PM2.5", "µg/m³", 0, 75, PM_ZONES, 3, "Good up to 12", 4}};
+    for (int i = 0; i < 4; ++i) {
+        lv_obj_t *t = tile(air, Lift::Low);
+        lv_obj_set_size(t, AIR_W, HALF);
+        ReadingSpec rs;
+        rs.caption = specs[i].caption, rs.unit = specs[i].unit, rs.min = specs[i].min, rs.max = specs[i].max;
+        rs.zones = specs[i].zones, rs.zone_count = specs[i].n, rs.note = specs[i].note;
+        s_readings[i] = new Reading(t, rs);
+        s_readings[i]->set_value(specs[i].v, false);
     }
 
-    lv_obj_t *t4 = dial_tile(s, "FOCUS", "A tick a minute, lit as the round goes. No needle: the time is the reading.");
-    DialSpec focus;
-    focus.size = 224, focus.min = 0, focus.max = 24, focus.start = 270, focus.sweep = 346, focus.ticks = 25;
-    focus.major = 5, focus.needle = false, focus.bold = true, focus.read = Role::ReadM, focus.unit = "UNTIL 10:06";
-    s_focus = new Dial(t4, focus);
-    own(s_focus->obj(), s_focus);
-    lv_label_set_text(lv_obj_get_child(lv_obj_get_child(s_focus->obj(), -1), 0), "24:51");
-    s_focus->set_lit(1);
+    lv_obj_t *right = box(s, LV_FLEX_FLOW_COLUMN, space::l);
+    lv_obj_set_size(right, CONTENT_W - 2 * AIR_W - 2 * space::l, SHEET_H);
+
+    lv_obj_t *heat = tile(right, Lift::Low);
+    lv_obj_set_size(heat, LV_PCT(100), HALF);
+    lv_obj_set_flex_flow(heat, LV_FLEX_FLOW_COLUMN);
+    lv_obj_t *title = box(heat, LV_FLEX_FLOW_ROW, space::s);
+    lv_obj_set_flex_align(title, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    dot(title, Ink::Accent);
+    text(title, Role::H3, "Heating");
+    spacer(heat);
+    lv_obj_t *row = box(heat, LV_FLEX_FLOW_ROW, space::l);
+    lv_obj_set_width(row, LV_PCT(100));
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
+    lv_obj_t *now = box(row, LV_FLEX_FLOW_COLUMN, 0);
+    s_room = text(now, Role::ReadXL, "20.5°");
+    s_room_line = text(now, Role::Body, "Heating to 21.0°", Ink::Secondary);
+    StepperSpec target;
+    target.min = 150, target.max = 250, target.step = 5, target.value = 210, target.decimals = 1, target.unit = "°";
+    auto *stepper = new Stepper(row, target);
+    own(stepper->obj(), stepper);
+    lv_obj_add_event_cb(
+        stepper->obj(),
+        [](lv_event_t *e) {
+            auto *st = static_cast<Stepper *>(lv_event_get_user_data(e));
+            char line[32];
+            std::snprintf(line, sizeof line, "Heating to %d.%d°", static_cast<int>(st->value() / 10),
+                          static_cast<int>(st->value() % 10));
+            lv_label_set_text(s_room_line, line);
+        },
+        LV_EVENT_VALUE_CHANGED, stepper);
+
+    lv_obj_t *focus = tile(right, Lift::Low);
+    lv_obj_set_size(focus, LV_PCT(100), HALF);
+    lv_obj_set_flex_flow(focus, LV_FLEX_FLOW_COLUMN);
+    text(focus, Role::H3, "Focus");
+    spacer(focus);
+    text(focus, Role::ReadXL, "24:51");
+    text(focus, Role::Body, "Until 10:06", Ink::Secondary);
+    lv_obj_t *track = well(focus);
+    lv_obj_set_size(track, LV_PCT(100), 6);
+    lv_obj_set_style_pad_all(track, 0, 0);
+    lv_obj_set_style_radius(track, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_margin_top(track, space::m, 0);
+    s_focus_fill = lv_obj_create(track);
+    lv_obj_remove_style_all(s_focus_fill);
+    lv_obj_set_size(s_focus_fill, LV_PCT(4), LV_PCT(100));
+    lv_obj_set_style_radius(s_focus_fill, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(s_focus_fill, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(s_focus_fill, colour(Ink::Accent), 0);
+    on_restyle(s_focus_fill, [](void *o) { lv_obj_set_style_bg_color(static_cast<lv_obj_t *>(o), colour(Ink::Accent), 0); },
+               s_focus_fill);
 
     lv_timer_create(
         [](lv_timer_t *) {
-            if (s_co2 != nullptr) {
-                s_co2->set_value(500 + std::rand() % 1100, true);
-            }
-            if (s_hum != nullptr) {
-                s_hum->set_value(25 + std::rand() % 55, true);
-            }
-            if (s_heat != nullptr) {
+            wander_readings(true);
+            if (s_room != nullptr) {
                 const int room = 195 + std::rand() % 25;
-                char caption[24];
-                std::snprintf(caption, sizeof caption, "ROOM %d.%d°", room / 10, room % 10);
-                s_heat->set_value(room, true);
-                s_heat->set_caption(caption);
+                lv_label_set_text_fmt(s_room, "%d.%d°", room / 10, room % 10);
             }
-            if (s_focus != nullptr) {
+            if (s_focus_fill != nullptr) {
                 s_focus_lit = s_focus_lit % 25 + 1;
-                s_focus->set_lit(s_focus_lit);
+                lv_obj_set_width(s_focus_fill, lv_pct(s_focus_lit * 4));
             }
         },
         2600, nullptr);
@@ -893,12 +905,10 @@ const Phase PHASES[] = {
              segmented_choose(s_bench_seg, static_cast<int>(at / 400 % 3), true);
          }
      }},
-    {"dials", 2000, [] { choose_sheet(2); },
+    {"readings", 2000, [] { choose_sheet(2); },
      [](std::uint32_t at, std::uint32_t) {
          if (at % 500 < 16) {
-             s_co2->set_value(500 + std::rand() % 1100, true);
-             s_hum->set_value(25 + std::rand() % 55, true);
-             s_heat->set_target(160 + std::rand() % 80, true);
+             wander_readings(true);
          }
      }},
     {"popover, live", 1300, [] { choose_sheet(0); set_pop_glass(PopGlass::Live); },
@@ -1181,7 +1191,7 @@ void build(perf::Clock clock)
     lv_obj_set_pos(header, CONTENT_X, CONTENT_Y);
     lv_obj_set_size(header, CONTENT_W, 60);
     lv_obj_set_flex_align(header, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    s_picker = segmented(header, {"Surfaces", "Controls", "Instruments", "Glass", "Layers", "Pictures", "Lists", "Pages"}, 0, 860);
+    s_picker = segmented(header, {"Surfaces", "Controls", "Readings", "Glass", "Layers", "Pictures", "Lists", "Pages"}, 0, 860);
     lv_obj_add_event_cb(
         s_picker, [](lv_event_t *e) { choose_sheet(segmented_chosen(lv_event_get_target_obj(e))); },
         LV_EVENT_VALUE_CHANGED, nullptr);

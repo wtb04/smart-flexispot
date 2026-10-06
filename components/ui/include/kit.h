@@ -182,6 +182,7 @@ void      capsule_divider(lv_obj_t *capsule);
 struct Zone {
     std::int32_t from, to;
     Ink          ink;
+    const char  *word = nullptr;  // what a reading in it is: "Good", "Fair", "Poor"
 };
 
 struct DialSpec {
@@ -637,5 +638,63 @@ class Stepper {
 lv_obj_t *sheet(lv_obj_t *source, const char *title, std::int32_t w = 760, std::int32_t h = 600);
 /** A label and its value, a line of a sheet. Returns the value's label. */
 lv_obj_t *sheet_row(lv_obj_t *body, const char *label, const char *value);
+
+// --- readings --------------------------------------------------------------
+
+/** A thin bar of zones with a dot at the reading: the zone it is in bright, the rest faint. */
+class Scale {
+  public:
+    Scale() = default;
+    Scale(const Scale &) = delete;
+    Scale &operator=(const Scale &) = delete;
+    /** `width` 0: as wide as its parent's content, laid out again as that changes. */
+    Scale(lv_obj_t *parent, std::int32_t width, std::int32_t min, std::int32_t max, const Zone *zones, int count);
+    ~Scale();
+    lv_obj_t *obj() const { return m_root; }
+    void      set_value(std::int32_t value, bool animate = true);
+
+  private:
+    static void on_move(void *var, int32_t v);
+    void        place(std::int32_t value);
+    void        lay_out();
+    void        restyle();
+    int         zone_of(std::int32_t value) const;
+
+    lv_obj_t    *m_root = nullptr, *m_dot = nullptr;
+    lv_obj_t    *m_bands[6]{};
+    const Zone  *m_zones = nullptr;
+    int          m_count = 0, m_lit = -2;
+    std::int32_t m_min = 0, m_max = 100, m_w = 0, m_value = 0, m_shown = INT32_MIN;
+};
+
+struct ReadingSpec {
+    const char  *caption = nullptr;  // in sentence case: "CO₂", "Humidity"
+    const char  *unit    = nullptr;
+    std::int32_t min = 0, max = 100;  // the scale's ends; the figure's width is that of the widest of these
+    const Zone  *zones = nullptr;
+    int          zone_count = 0;
+    const char  *note = nullptr;  // a quiet line under the scale: "Good up to 800"
+};
+
+/** What a reading is, at a glance: its name, a big figure, one word in its zone's ink, and the scale it sits on. */
+class Reading {
+  public:
+    Reading(const Reading &) = delete;
+    Reading &operator=(const Reading &) = delete;
+    /** Fills `parent`, a tile, from top to bottom. */
+    Reading(lv_obj_t *parent, const ReadingSpec &spec);
+    void set_value(std::int32_t value, bool animate = true);
+    /** No reading: a dash, no word, no dot. */
+    void clear();
+
+  private:
+    void        show(std::int32_t value);
+
+    ReadingSpec m_spec{};
+    lv_obj_t   *m_figure = nullptr, *m_unit = nullptr, *m_word = nullptr;
+    std::int32_t m_shown = INT32_MIN;
+    Scale      *m_scale = nullptr;
+    int         m_zone = -2;
+};
 
 }  // namespace ui::kit

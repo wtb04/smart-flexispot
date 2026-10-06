@@ -795,7 +795,7 @@ lv_obj_t *widget(lv_obj_t *grid, Span span_of, const char *caption)
     lv_obj_set_flex_flow(t, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(t, space::s, 0);
     lv_obj_set_clickable(t, false);
-    text(t, Role::Label, caption, Ink::Secondary);
+    text(t, Role::Small, caption, Ink::Secondary);
     lv_obj_t *body = lv_obj_create(t);
     lv_obj_remove_style_all(body);
     lv_obj_set_width(body, LV_PCT(100));

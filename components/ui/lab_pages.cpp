@@ -14,7 +14,8 @@ namespace ic = ui::kit::glyph;
 
 enum : int { HOME, AGENDA, RADAR, CHANGES };
 
-const Zone CO2_ZONES[] = {{400, 800, Ink::Green}, {800, 1200, Ink::Amber}, {1200, 2000, Ink::Red}};
+const Zone CO2_ZONES[] = {{400, 800, Ink::Green, "Good"}, {800, 1200, Ink::Amber, "Fair"}, {1200, 2000, Ink::Red, "Poor"}};
+const Zone VOC_ZONES[] = {{0, 333, Ink::Green, "Good"}, {333, 666, Ink::Amber, "Fair"}, {666, 1000, Ink::Red, "Poor"}};
 
 struct Option {
     const char *name;
@@ -68,21 +69,23 @@ void build_home(lv_obj_t *page)
 {
     lv_obj_t *grid = widget_grid(page);
 
-    lv_obj_t *air = widget(grid, Span::Big, "AIR");
-    lv_obj_set_flex_flow(air, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(air, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    DialSpec co2;
-    co2.size = 290, co2.min = 400, co2.max = 2000, co2.ticks = 31, co2.major = 5, co2.zones = CO2_ZONES;
-    co2.zone_count = 3, co2.ends = true, co2.unit = "PPM CO2", co2.read = Role::ReadL;
-    auto *dial = new Dial(air, co2);
-    lv_obj_add_event_cb(dial->obj(), [](lv_event_t *e) { delete static_cast<Dial *>(lv_event_get_user_data(e)); },
-                        LV_EVENT_DELETE, dial);
-    dial->set_value(640, false);
+    lv_obj_t *air = widget(grid, Span::Big, "Air");
+    lv_obj_set_flex_flow(air, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_column(air, space::xxl, 0);
+    struct R { const char *caption, *unit; std::int32_t min, max; const Zone *zones; std::int32_t v; };
+    for (const R &r : {R{"CO2", "ppm", 400, 2000, CO2_ZONES, 640}, R{"VOC", "ppb", 0, 1000, VOC_ZONES, 120}}) {
+        lv_obj_t *half = box(air, LV_FLEX_FLOW_COLUMN, 0);
+        lv_obj_set_flex_grow(half, 1);
+        lv_obj_set_height(half, LV_PCT(100));
+        ReadingSpec rs;
+        rs.caption = r.caption, rs.unit = r.unit, rs.min = r.min, rs.max = r.max, rs.zones = r.zones, rs.zone_count = 3;
+        (new Reading(half, rs))->set_value(r.v, false);
+    }
 
-    readout(widget(grid, Span::One, "HUMIDITY"), "48%", "Good", Ink::Green);
-    readout(widget(grid, Span::One, "OUTSIDE"), "13°", "Rain from 16:00", Ink::Secondary);
+    readout(widget(grid, Span::One, "Humidity"), "48%", "Good", Ink::Green);
+    readout(widget(grid, Span::One, "Outside"), "13°", "Rain from 16:00", Ink::Secondary);
 
-    lv_obj_t *sky = widget(grid, Span::Tall, "OVERHEAD");
+    lv_obj_t *sky = widget(grid, Span::Tall, "Overhead");
     lv_obj_set_flex_flow(sky, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(sky, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     lv_obj_t *middle = box(sky, LV_FLEX_FLOW_ROW, 0);
@@ -101,7 +104,7 @@ void build_home(lv_obj_t *page)
     text(col, Role::Small, "37,000 ft, 65 km south", Ink::Secondary);
     widget_opens(sky, RADAR);
 
-    lv_obj_t *next = widget(grid, Span::Wide, "NEXT");
+    lv_obj_t *next = widget(grid, Span::Wide, "Next");
     lv_obj_set_flex_flow(next, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(next, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
     lv_obj_set_style_pad_column(next, space::xl, 0);
@@ -112,8 +115,8 @@ void build_home(lv_obj_t *page)
     wrapped(what, Role::H3, "Computing and Communications", Ink::Primary);
     text(what, Role::Small, "Lecture, tomorrow, Hall 2", Ink::Secondary);
 
-    readout(widget(grid, Span::One, "DESK"), "74.0", "CM", Ink::Tertiary);
-    readout(widget(grid, Span::One, "FOCUS"), "24:51", "Until 10:06", Ink::Secondary);
+    readout(widget(grid, Span::One, "Desk"), "74.0", "cm", Ink::Tertiary);
+    readout(widget(grid, Span::One, "Focus"), "24:51", "Until 10:06", Ink::Secondary);
 }
 
 // --- Agenda: a list that runs past the screen -----------------------------
