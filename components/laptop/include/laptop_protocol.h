@@ -13,10 +13,12 @@
 //   {"type": "state", "at": 1791223792000, "machine": "wtb-mbp", "port": 47801,
 //    "app": "Safari", "playing": true,
 //    "title": "...", "artist": "...", "position": 167.4, "duration": 540,
-//    "art": "3f2a", "video": true, "volume": 40, "muted": false,
+//    "art": "3f2a", "square": "9c1e", "video": true, "volume": 40, "muted": false,
 //    "takes": ["pause", "seek", "next", "previous", "volume"]}
 // An empty title is nothing playing. "art", when there is any, changes with
-// the picture, which the panel asks the laptop's /cover for. "volume" is the
+// the picture, which the panel asks the laptop's /cover for; "square" is one
+// for where a square is drawn, as a channel's picture beside its video's frame,
+// asked for the same way. "volume" is the
 // laptop's own output, in percent, where it can be set; "volume_step" in
 // "takes" is an output that only steps, as a display's does through
 // MonitorControl, moved by "volume_up" and "volume_down". "claude" carries an
@@ -34,6 +36,7 @@ struct NowPlaying {
     std::string title;
     std::string artist;
     std::string art;
+    std::string square;
     bool        video = false;  // a film or a clip rather than a song: the cinema shows it
     int         position_s = 0;
     int         duration_s = 0;

@@ -71,6 +71,7 @@ final class Link: ObservableObject {
     private var coverFrom: Data?   // what artwork and cover are made from
     private var lookedUp = ""      // the browser's video a YouTube thumbnail was asked for
     private var thumbnail: Data?   // and the one found
+    private var square: Artwork?   // its channel's picture, for where the panel draws a square
     private let machine = Host.current().localizedName ?? ProcessInfo.processInfo.hostName
 
     // On the charger macOS may keep a sleeping Mac half awake for hours, its
@@ -156,6 +157,7 @@ final class Link: ObservableObject {
         showCover(nil)
         lookedUp = ""
         thumbnail = nil
+        square = nil
         report()  // nothing playing, so the panel lets go at once
         reach = .unknown
         reachesBack = nil
@@ -180,8 +182,12 @@ final class Link: ObservableObject {
 
     private func apply(_ new: Track?) {
         vanishing = nil
-        if let new, Self.browsers.contains(new.bundle), new.title + "\n" + new.artist != lookedUp {
-            look(for: new)
+        if let new, Self.browsers.contains(new.bundle) {
+            if new.title + "\n" + new.artist != lookedUp { look(for: new) }
+        } else {
+            lookedUp = ""  // what was found for a browser's video is not this one's
+            thumbnail = nil
+            square = nil
         }
         showCover(thumbnail ?? new?.artwork)
         let paused = new?.playing != track?.playing && new?.title == track?.title
@@ -206,11 +212,13 @@ final class Link: ObservableObject {
         let wanted = track.title + "\n" + track.artist
         lookedUp = wanted
         thumbnail = nil
+        square = nil
         Task { [weak self] in
             let found = await YouTubeCover.find(title: track.title, channel: track.artist, small: track.artwork)
             guard let self, self.lookedUp == wanted, let found else { return }
-            self.thumbnail = found
-            self.showCover(found)
+            self.thumbnail = found.thumbnail
+            self.square = found.channel.flatMap(Artwork.init)
+            self.showCover(found.thumbnail)
             self.reportSoon()
         }
     }
@@ -258,12 +266,13 @@ final class Link: ObservableObject {
             state["position"] = track.position()
             state["duration"] = track.duration
             state["art"] = artwork?.version ?? ""
+            state["square"] = square?.version ?? ""
             // Now Playing does not say; a clip's cover is a wide frame, and
             // before one comes a browser is most likely playing a video.
             state["video"] = artwork.map(\.wide) ?? Self.browsers.contains(track.bundle)
             state["takes"] = takes
         }
-        log.info("state \(track?.title ?? (away ? "nothing, away" : "nothing"), privacy: .public), art \(self.artwork?.version ?? "none", privacy: .public)")
+        log.info("state \(track?.title ?? (away ? "nothing, away" : "nothing"), privacy: .public), art \(self.artwork?.version ?? "none", privacy: .public), square \(self.square?.version ?? "none", privacy: .public)")
         send(state) { [weak self] reach, pong in
             guard let self, self.sharing else { return }
             self.reach = reach
@@ -317,9 +326,10 @@ final class Link: ObservableObject {
         let reply = request.path + " reply"
         switch type {
         case "cover":
-            guard let artwork, message["art"] as? String == artwork.version,
-                  let sealed = seal?.seal(artwork.jpeg, to: reply) else { return .notFound }
-            log.info("cover fetched, \(artwork.jpeg.count) bytes")
+            let wanted = message["art"] as? String
+            guard let picture = [artwork, square].compactMap({ $0 }).first(where: { $0.version == wanted }),
+                  let sealed = seal?.seal(picture.jpeg, to: reply) else { return .notFound }
+            log.info("cover fetched, \(picture.jpeg.count) bytes")
             return Response(status: 200, type: "application/octet-stream", body: sealed)
         case "ping":
             return sealedAnswer(["type": "pong"], to: reply)

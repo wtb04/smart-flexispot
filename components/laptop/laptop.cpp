@@ -432,9 +432,9 @@ void step_volume(bool up)
     send(up ? Command::VolumeUp : Command::VolumeDown);
 }
 
-std::string art_url(const NowPlaying &now)
+std::string art_url(const std::string &art)
 {
-    return now.art.empty() ? "" : std::string(kCoverScheme) + now.art;
+    return art.empty() ? "" : std::string(kCoverScheme) + art;
 }
 
 std::size_t fetch_cover(const char *url, std::uint8_t *into, std::size_t size)
