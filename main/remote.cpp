@@ -525,7 +525,7 @@ esp_err_t bench_page(httpd_req_t *req)
     if (!ota::authorised(req)) {
         return refuse(req);
     }
-    static char text[4096];
+    static char text[7000];
     int         n = 0;
     if (lvgl_port_lock(STATS_LOCK_MS)) {
         char query[8] = "";
