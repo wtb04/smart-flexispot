@@ -103,6 +103,13 @@ void show_preset_active(int index, bool active)
     }
 }
 
+void show_preset_height(int index, int height_mm)
+{
+    if (s_view.preset_height != nullptr) {
+        s_view.preset_height(index, height_mm);
+    }
+}
+
 void show_height(int height_mm)
 {
     if (s_view.height != nullptr) {
@@ -208,6 +215,7 @@ void remember_preset(int index, int height_mm)
     }
     s_preset_mm[index] = height_mm;
     s_presets_dirty    = true;
+    show_preset_height(index, height_mm);
     ESP_LOGI(TAG, "preset %d is %d mm", index + 1, height_mm);
 }
 
@@ -468,6 +476,9 @@ esp_err_t start(Link link, const View &view)
     s_preset_queue = presets;
 
     load_presets();
+    for (int i = 0; i < deskproto::kPresetCount; ++i) {
+        show_preset_height(i, s_preset_mm[i]);
+    }
     detail::start_trace();
 
     s_link = link == Link::Bluetooth ? &detail::bluetooth() : &detail::wire();

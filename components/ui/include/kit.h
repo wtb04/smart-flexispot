@@ -303,6 +303,7 @@ class Rail : public InPsram {
     Rail(const Rail &) = delete;
     Rail &operator=(const Rail &) = delete;
     Rail(lv_obj_t *parent, const RailSpec &spec);
+    ~Rail() { lv_anim_delete(&m_shown, nullptr); }  // a spring still under way would write into what is gone
     lv_obj_t *obj() const { return m_root; }
     void set_value(std::int32_t value, bool animate = true);
     std::int32_t value() const { return m_value; }

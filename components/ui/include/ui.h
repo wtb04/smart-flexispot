@@ -354,6 +354,8 @@ esp_err_t set_preset_active(int index, bool active);
 
 /** Unavailable dims and disables every desk control, so nothing can be pressed in vain. */
 esp_err_t set_desk_available(bool available);
+/** How high a preset takes the desk, in tenths of a centimetre; negative while it has none. */
+esp_err_t set_preset_height(int index, int height_mm);
 
 /** Pass nullptr while the time is unknown. */
 esp_err_t set_time(const char *text);

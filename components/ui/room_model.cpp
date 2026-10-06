@@ -149,6 +149,15 @@ void desk_take_height(int height_mm)
     publish(Topic::Desk);
 }
 
+void desk_take_preset_height(int index, int height_mm)
+{
+    if (index < 0 || index >= kPresetCount || s_desk.preset_mm[index] == height_mm) {
+        return;
+    }
+    s_desk.preset_mm[index] = height_mm < 0 ? -1 : height_mm;
+    publish(Topic::Desk);
+}
+
 void desk_take_available(bool available)
 {
     s_desk.available = available;
