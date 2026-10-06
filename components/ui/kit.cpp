@@ -559,12 +559,23 @@ void restyle_edge(void *)
     lv_obj_set_style_bg_grad_color(s_edge, hex(s_pal.ground), 0);
 }
 
-void on_content_scroll(lv_event_t *e)
+void edge_at(lv_obj_t *scroller)
 {
-    const std::int32_t y = lv_obj_get_scroll_y(lv_event_get_target_obj(e));
-    lv_obj_set_style_opa(s_edge, static_cast<lv_opa_t>(std::clamp<std::int32_t>(y * 6, 0, 255)), 0);
+    const auto opa = static_cast<lv_opa_t>(std::clamp<std::int32_t>(lv_obj_get_scroll_y(scroller) * 6, 0, 255));
+    if (s_edge != nullptr && lv_obj_get_style_opa(s_edge, LV_PART_MAIN) != opa) {
+        lv_obj_set_style_opa(s_edge, opa, 0);
+    }
 }
+
+void on_content_scroll(lv_event_t *e) { edge_at(lv_event_get_target_obj(e)); }
 }  // namespace
+
+void edge_follows(lv_obj_t *scroller)
+{
+    lv_obj_remove_event_cb(scroller, on_content_scroll);
+    lv_obj_add_event_cb(scroller, on_content_scroll, LV_EVENT_SCROLL, nullptr);
+    edge_at(scroller);
+}
 
 void screen(lv_obj_t *scr)
 {
@@ -586,7 +597,6 @@ void screen(lv_obj_t *scr)
     lv_obj_set_scroll_dir(content, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(content, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_style_pad_bottom(content, space::l, 0);
-    lv_obj_add_event_cb(content, on_content_scroll, LV_EVENT_SCROLL, nullptr);
 
     s_edge = lv_obj_create(s_layers[static_cast<int>(Layer::Chrome)]);
     lv_obj_remove_style_all(s_edge);
@@ -600,6 +610,7 @@ void screen(lv_obj_t *scr)
     lv_obj_remove_flag(s_edge, LV_OBJ_FLAG_CLICKABLE);
     restyle_edge(nullptr);
     on_restyle(s_edge, restyle_edge, nullptr);
+    edge_follows(content);
 }
 
 lv_obj_t *layer(Layer which)
