@@ -82,6 +82,11 @@ void show_height(int height_mm)
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_height(height_mm));
 }
 
+void show_preset_height(int index, int height_mm)
+{
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_preset_height(index, height_mm));
+}
+
 void show_desk_available(bool linked)
 {
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_desk_available(linked));
@@ -455,6 +460,7 @@ extern "C" void app_main(void)
         .height        = show_height,
         .available     = show_desk_available,
         .notice        = show_notice,
+        .preset_height = show_preset_height,
     };
     ESP_ERROR_CHECK_WITHOUT_ABORT(desk::start(settings::enabled(settings::Key::DeskBluetooth)
                                                   ? desk::Link::Bluetooth

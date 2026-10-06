@@ -26,6 +26,7 @@ struct View {
     void (*height)(int height_mm);  // negative when not known
     void (*available)(bool linked);
     void (*notice)(const char *message, Tone tone, int timeout_ms);
+    void (*preset_height)(int index, int height_mm);  // as loaded, and as each is stored; negative unset
 };
 
 esp_err_t start(Link link, const View &view);

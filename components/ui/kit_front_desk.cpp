@@ -49,9 +49,6 @@ struct Card : InPsram {
 };
 
 Card *s_card = nullptr;
-// Where each preset was last seen, the desk standing still at it: the panel is
-// not told the heights the box keeps.
-int s_seen_mm[kPresetCount] = {-1, -1, -1, -1, -1, -1};
 
 bool guests_shown()
 {
@@ -66,19 +63,6 @@ void set_text(lv_obj_t *label, const char *value)
 {
     if (std::strcmp(lv_label_get_text(label), value) != 0) {
         lv_label_set_text(label, value);
-    }
-}
-
-void learn()
-{
-    const DeskState &desk = desk_state();
-    if (desk.height_mm < 0 || desk.moving != 0 || desk.travelling >= 0) {
-        return;
-    }
-    for (int i = 0; i < kPresetCount; ++i) {
-        if (desk.preset_active[i]) {
-            s_seen_mm[i] = desk.height_mm;
-        }
     }
 }
 
@@ -119,8 +103,8 @@ void paint_tile(Card &card, int index)
     char detail[16] = "";
     if (look == Tile::Going) {
         std::snprintf(detail, sizeof detail, "On its way");
-    } else if (s_seen_mm[index] >= 0) {
-        tenths(detail, sizeof detail, s_seen_mm[index]);
+    } else if (desk_state().preset_mm[index] >= 0) {
+        tenths(detail, sizeof detail, desk_state().preset_mm[index]);
     }
     set_text(card.details[index], detail);
     if (card.shown[index] == look) {
@@ -135,7 +119,6 @@ void paint_tile(Card &card, int index)
 
 void paint()
 {
-    learn();
     if (s_card == nullptr) {
         return;
     }
@@ -263,8 +246,8 @@ void open_desk(lv_obj_t *source)
     std::int32_t notches[kPresetCount];
     int          notch_count = 0;
     for (const int index : PRESETS) {
-        if ((guests || !is_guest(index)) && s_seen_mm[index] >= 0) {
-            notches[notch_count++] = s_seen_mm[index];
+        if ((guests || !is_guest(index)) && desk_state().preset_mm[index] >= 0) {
+            notches[notch_count++] = desk_state().preset_mm[index];
         }
     }
     RailSpec rs;

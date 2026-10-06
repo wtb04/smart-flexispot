@@ -135,6 +135,9 @@ void move_desk(std::int64_t now)
 void start()
 {
     std::copy(std::begin(HEIGHTS_MM), std::end(HEIGHTS_MM), s_heights);
+    for (int i = 0; i < ui::kPresetCount; ++i) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_preset_height(i, s_heights[i]));
+    }
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_desk_available(s_linked));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_height(s_height_mm));
     show_presets();
@@ -185,6 +188,7 @@ void on_preset(int index, bool store)
     }
     if (store) {
         s_heights[index] = s_height_mm;
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_preset_height(index, s_height_mm));
         show_presets();
         desk_notice("Preset saved", true, SAVED_NOTICE_MS);
     } else if (s_heights[index] < 0) {

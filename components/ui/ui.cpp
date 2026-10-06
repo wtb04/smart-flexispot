@@ -223,6 +223,7 @@ struct PhotoArgs {
 Slot<bool>           p_preset_active[kPresetCount];
 Slot<int>            p_height;
 Slot<bool>           p_desk_available;
+Slot<int>            p_preset_mm[kPresetCount];
 Slot<MediaArgs>      p_media;
 Slot<ProgressArgs>   p_progress;
 Slot<int>            p_media_volume;
@@ -460,6 +461,11 @@ void apply_desk_updates()
     if (bool available = false; take(p_desk_available, available)) {
         apply_desk_available(available);
     }
+    for (int i = 0; i < kPresetCount; ++i) {
+        if (int mm = 0; take(p_preset_mm[i], mm)) {
+            desk_take_preset_height(i, mm);
+        }
+    }
     if (int height = 0; take(p_height, height)) {
         apply_height(height);
     }
@@ -690,6 +696,13 @@ esp_err_t set_height(int height_mm)
 esp_err_t set_desk_available(bool available)
 {
     put(p_desk_available, available);
+    return ESP_OK;
+}
+
+esp_err_t set_preset_height(int index, int height_mm)
+{
+    ESP_RETURN_ON_FALSE(index >= 0 && index < kPresetCount, ESP_ERR_INVALID_ARG, TAG, "preset");
+    put(p_preset_mm[index], height_mm);
     return ESP_OK;
 }
 

@@ -14,6 +14,7 @@ struct DeskState {
     bool preset_active[kPresetCount] = {};  // the one it stands at, if any
     int  travelling = -1;  // the preset tapped and not yet reached, or -1
     int  moving     = 0;   // 1 up, -1 down, 0 still: the height changing lately, by whichever keys
+    int  preset_mm[kPresetCount] = {-1, -1, -1, -1, -1, -1};  // where each takes it, -1 unset
 };
 
 struct LightState {
@@ -37,6 +38,7 @@ const LightsState &lights_state();
 void desk_take_active(int index, bool active);
 void desk_take_height(int height_mm);
 void desk_take_available(bool available);
+void desk_take_preset_height(int index, int height_mm);
 /** A preset tapped: the desk goes there, or, while it is on its way there,
  *  stops, as the control box's own buttons do. */
 void desk_go_to(int index);
