@@ -676,16 +676,21 @@ void build_glass(lv_obj_t *scr)
     lv_obj_add_event_cb(
         s_glass_rail->obj(), [](lv_event_t *) { set_glass(s_glass_rail->value()); show_state(); },
         LV_EVENT_VALUE_CHANGED, nullptr);
-    lv_obj_t *n = button(side, Button::Raised, ic::notifications, "Show a notice");
+    lv_obj_t *n = button(side, Button::Raised, ic::notifications, "A notice");
     lv_obj_add_event_cb(
         n, [](lv_event_t *) { notice("HOME ASSISTANT", ic::local_laundry_service, "Washing machine", "The wash is done", 6000); },
         LV_EVENT_CLICKED, nullptr);
-    lv_obj_t *p = button(side, Button::Raised, ic::lightbulb, "Open the lights");
+    lv_obj_t *p = button(side, Button::Raised, ic::lightbulb, "The lights");
     lv_obj_add_event_cb(p, open_lights, LV_EVENT_CLICKED, nullptr);
-    lv_obj_t *blur = button(side, Button::Raised, nullptr, "Blur behind popovers", false, true);
-    lv_obj_add_state(blur, LV_STATE_CHECKED);
+    text(side, Role::Label, "POPOVERS OPEN", Ink::Secondary);
+    lv_obj_t *motion = segmented(side, {"Growing", "Rising"}, pop_motion() == PopMotion::Grow ? 0 : 1, 286);
     lv_obj_add_event_cb(
-        blur, [](lv_event_t *e) { s_blur_scrim = lv_obj_has_state(lv_event_get_target_obj(e), LV_STATE_CHECKED); show_state(); },
+        motion, [](lv_event_t *e) { set_pop_motion(segmented_chosen(lv_event_get_target_obj(e)) == 0 ? PopMotion::Grow : PopMotion::Rise); show_state(); },
+        LV_EVENT_VALUE_CHANGED, nullptr);
+    text(side, Role::Label, "OVER", Ink::Secondary);
+    lv_obj_t *how = segmented(side, {"A still picture", "Live blur"}, pop_glass() == PopGlass::Frozen ? 0 : 1, 286);
+    lv_obj_add_event_cb(
+        how, [](lv_event_t *e) { set_pop_glass(segmented_chosen(lv_event_get_target_obj(e)) == 0 ? PopGlass::Frozen : PopGlass::Live); show_state(); },
         LV_EVENT_VALUE_CHANGED, nullptr);
 
     // a slab to drag over the tiles, to see the blur follow
