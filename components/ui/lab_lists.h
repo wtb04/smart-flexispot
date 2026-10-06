@@ -19,5 +19,7 @@ void sheet_close_tick(std::uint32_t at, std::uint32_t frame);
 /** The same long list built several ways, each scrolled and timed; prints a table when done. */
 void study();
 const char *report();
+/** Scrolls the open sheet, or else the calendar, a little further on. */
+void nudge();
 
 }  // namespace ui::lab::lists

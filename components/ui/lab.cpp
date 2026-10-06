@@ -1188,6 +1188,9 @@ void key(int code)
         choose_sheet(5);
         lists::study();
         break;
+    case 'j':
+        lists::nudge();
+        break;
     default:
         return;
     }
