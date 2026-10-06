@@ -297,7 +297,7 @@ void Dial::set_lit(int ticks)
         lv_scale_section_set_style(m_lit_section, LV_PART_INDICATOR, &m_lit_style);
         lv_scale_section_set_style(m_lit_section, LV_PART_ITEMS, &m_lit_style);
     }
-    const std::int32_t step = (m_spec.max - m_spec.min) / std::max(1, m_spec.ticks - 1);
+    const std::int32_t step = (m_spec.max - m_spec.min) / std::max<std::int32_t>(1, m_spec.ticks - 1);
     lv_scale_section_set_range(m_lit_section, m_spec.min, ticks <= 0 ? m_spec.min - 1 : m_spec.min + step * (ticks - 1));
     lv_obj_invalidate(m_scale);
 }
@@ -456,7 +456,7 @@ void Rail::on_press(lv_event_t *e)
     const bool v = rail->m_spec.vertical;
     const std::int32_t span = rail->m_spec.length - TRACK;
     const std::int32_t pos = v ? box.y2 - TRACK / 2 - p.y : p.x - box.x1 - TRACK / 2;
-    const std::int32_t value = rail->m_spec.min + std::clamp(pos, 0, span) * (rail->m_spec.max - rail->m_spec.min) / span;
+    const std::int32_t value = rail->m_spec.min + std::clamp<std::int32_t>(pos, 0, span) * (rail->m_spec.max - rail->m_spec.min) / span;
     rail->set_value(value, code == LV_EVENT_PRESSED);
     lv_obj_send_event(rail->m_root, LV_EVENT_VALUE_CHANGED, nullptr);
 }
