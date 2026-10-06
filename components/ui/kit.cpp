@@ -13,6 +13,8 @@
 #include <iterator>
 
 namespace ui::kit {
+void restyle_lists();  // kit_lists.cpp
+
 namespace {
 
 // The darks sit on RGB565's grid (red and blue in eights, green in fours): off
@@ -321,6 +323,7 @@ void apply()
     lv_style_set_radius(&s_seg_thumb, 13);
     set_shadow(&s_seg_thumb, 10, 2, -2, s_look == Look::Dark ? 140 : 50);
 
+    restyle_lists();
     lv_obj_report_style_change(nullptr);
     for (int i = 0; i < s_restyler_count; ++i) {
         s_restylers[i].cb(s_restylers[i].ctx);

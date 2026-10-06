@@ -56,6 +56,11 @@ right one with `kit::layer(Layer::...)`. Don't fake depth with a bigger shadow.
 | `Rail` | a straight scale, slider or progress, with notches for presets |
 | `popover`, `popover_source` | a glass card that grows out of what was tapped |
 | `notice` | a slab that drops from under the bar and leaves on its own |
+| `section`, `group`, `row` | a caption, and rows in one tile split by hairlines: a glyph, a time, a feed's mark, a title and a detail line, then a value, a chevron, a toggle or a badge |
+| `list` | a tile with a column that scrolls inside it, for a long list |
+| `badge`, `empty` | a small pill in an ink, and what shows where a feed is missing |
+| `Readout`, `Stepper` | a big figure, and minus, value, plus, both a size that never changes |
+| `sheet`, `sheet_row` | a big centred popover whose body scrolls, and a label with its value on it |
 | `set_usable` | faded to 40% and untappable, never LVGL's grey |
 
 A control the playing device can never act on is hidden, not faded. A feed
@@ -83,7 +88,7 @@ cd sim && cmake -S . -B build -G Ninja -DLVGL_DIR=<lvgl> && ninja -C build
 ```
 
 The lab shows every part of the kit in every state, on sheets picked with keys
-1 to 5:
+1 to 6:
 
 | Key | Does |
 |---|---|
@@ -93,6 +98,7 @@ The lab shows every part of the kit in every state, on sheets picked with keys
 | `o` | opens a popover |
 | `c` | closes it |
 | `p` | runs the bench |
+| `v` | runs the list study: one long list built several ways, each scrolled and timed |
 
 The bench drives each kind of change in turn and prints the milliseconds per
 frame, and on the panel it splits each frame into drawing, rotating onto the
@@ -144,7 +150,17 @@ the screen changes, so:
 8. **Fixed widths for live labels.** A badge or readout that changes keeps one
    width. That keeps it steady to look at, and saves a new layout of everything
    around it.
-9. **Big buffers once, in PSRAM.** They are made once and freed when done.
+9. **Scroll a list inside its tile, never the page.** `kit::list` scrolls its
+   column inside the tile's padding, clear of its rounded corners, so the
+   tile covers what scrolls and a frame of it is the tile's flat fill and the
+   rows in sight. Its rows draw no fill of their own until pressed, no shadow,
+   and draw their hairlines themselves. In the lab's list study, against that:
+   a rounded tile scrolling itself draws the ground under it as well, about 2
+   times the drawing; rows over glass about 3 times, over a flat area on
+   glass about 4; the whole page scrolling under the bar about 6 to 8, with 6
+   times the pixels. A sheet's body scrolls over a picture of the glass under
+   it, a fifth of what the same body on plain glass costs.
+10. **Big buffers once, in PSRAM.** They are made once and freed when done.
    Free PSRAM is tight while the old UI still runs alongside.
 
 What that buys, measured on the panel:

@@ -1079,14 +1079,17 @@ lv_obj_t *popover(lv_obj_t *source, std::int32_t w, std::int32_t h, From from, b
         if (y + h > size::screen_h - MARGIN) {
             y = size::screen_h - MARGIN - h;
         }
-    } else {
+    } else if (from == From::Beside) {
         x = src.x2 + GAP;
         y = std::clamp<std::int32_t>(src.y1, MARGIN, size::screen_h - MARGIN - h);
+    } else {
+        x = (size::screen_w - w) / 2;
+        y = (size::screen_h - h) / 2;
     }
     s_pop.to     = {x, y, x + w - 1, y + h - 1};
     s_pop.from   = src;
     s_pop.source = source;
-    s_pop.rows   = from == From::Below;
+    s_pop.rows   = from != From::Beside;
     lv_obj_add_state(source, LV_STATE_USER_1);
 
     static bool watching = false;
