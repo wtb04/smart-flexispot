@@ -110,6 +110,10 @@ bool build_next_part()
         case 2:
             build_views(lv_screen_active());
             follow_away();
+            subscribe(Topic::Settings, detail::kNoView, [] {
+                const bool light = detail::settings_state().on[static_cast<int>(Setting::Light)];
+                kit::set_look(light ? kit::Look::Light : kit::Look::Dark);
+            });
             detail::start_screen_schedule();
             detail::status_splash_gone();  // no start-up screen yet: what waits for it may show
             return true;
