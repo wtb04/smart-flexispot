@@ -328,4 +328,59 @@ std::uint64_t last_frame_us();
 std::uint64_t now_us();
 }  // namespace perf
 
+// --- pages ----------------------------------------------------------------
+
+/** Where a page's contents lie: under the bar, right of the dock, the screen's margin round the rest. */
+namespace inset {
+inline constexpr std::int32_t top    = 16 + size::bar + space::l;
+inline constexpr std::int32_t left   = 14 + size::dock + space::l;
+inline constexpr std::int32_t right  = space::l;
+inline constexpr std::int32_t bottom = space::l;
+inline constexpr std::int32_t width  = size::screen_w - left - right;
+inline constexpr std::int32_t height = size::screen_h - top - bottom;
+}  // namespace inset
+
+/**
+ * A page: the whole screen on the Content layer, what is on it inset, so it
+ * scrolls up under the bar. Up and down only, and never past its ends: a page
+ * pulled past them is drawn again whole on every frame. Hidden until shown.
+ */
+lv_obj_t *page();
+
+/**
+ * How one page gives way to the next. A whole screen drawn in one frame is the
+ * slowest frame the panel has: all but Slide and Fade draw the new page once,
+ * Wipe and Spread a band a frame, Wipe from the dock side and Spread from the
+ * chosen item out, Stagger the ground first and then a tile a frame. Slide and
+ * Fade draw all of it every frame, to compare.
+ */
+enum class Change : std::uint8_t { Instant, Wipe, Spread, Stagger, Slide, Fade };
+void   set_change(Change how);
+Change change();
+
+/** A page's item in the dock: a glyph the dock's mark slides behind when its page is chosen. */
+lv_obj_t *dock_item(lv_obj_t *dock, const char *glyph);
+/** A page and the dock item that chooses it; `build` fills it in a pause ahead of its first visit. */
+int       add_page(lv_obj_t *item, void (*build)(lv_obj_t *page));
+void      show_page(int index, bool animate = true);
+int       shown_page();
+lv_obj_t *page_at(int index);
+/** No page shows, for a screen with other content of its own; showing one brings them back. */
+void      hide_pages();
+/** Told of each page as it comes to show, before anything of it is drawn. */
+void      on_page_shown(void (*cb)(int index));
+/** The last page change: its frames, and how long it took to start. */
+const char *change_report();
+/** The edge under the bar follows how far `scroller` is scrolled, from now on and as it is now. */
+void      edge_follows(lv_obj_t *scroller);
+
+/** A widget's size in the grid's cells: one, two across, two down, two by two. */
+enum class Span : std::uint8_t { One, Wide, Tall, Big };
+/** Cells four across and three to the page's height; widgets take the first place they fit, in the order made. */
+lv_obj_t *widget_grid(lv_obj_t *page, int columns = 4);
+/** A widget: a tile with its caption, for showing only. Returns its body, to fill. */
+lv_obj_t *widget(lv_obj_t *grid, Span span, const char *caption);
+/** A tap on the widget whose body this is opens a page, as the radar's opens the radar. */
+void      widget_opens(lv_obj_t *body, int page);
+
 }  // namespace ui::kit

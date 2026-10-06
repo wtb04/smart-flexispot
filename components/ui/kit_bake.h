@@ -15,6 +15,8 @@ void begin(lv_obj_t *ground, lv_obj_t *content, lv_draw_buf_t *picture);
 void painted();
 /** The look changed: shadows go back to being live, to be painted again as they now look. */
 void restyle();
+/** Every shadow painted in that can be, as things stand, without waiting for them to stand still: for a page just shown. */
+void now();
 /** A tile whose shadow may be painted in. */
 void cast(lv_obj_t *tile);
 /** A pane of glass whose shadow, while its shape holds, is a picture drawn once. `base` is its kit style. */
