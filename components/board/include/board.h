@@ -103,6 +103,21 @@ esp_err_t shrink_shown(std::uint8_t *out, std::size_t out_bytes, std::uint32_t w
 esp_err_t zoom_frame(const ZoomFrame &frame);
 void      zoom_end();
 
+/** A page glided across past LVGL: glide_begin() keeps the frame on show,
+ *  the old page, and holds back the next frame LVGL draws, the new page at
+ *  rest; each glide_step() then lays the two side by side, the new one
+ *  `shift` pixels in from the right of `region`, by copying rather than
+ *  drawing; glide_end() shows the held frame. False where the panel cannot. */
+bool glide_begin(const lv_area_t &region);
+bool glide_held();
+void glide_step(std::int32_t shift);
+void glide_end();
+struct GlideTimes {
+    std::uint32_t frames  = 0;
+    std::int64_t  copy_us = 0;
+};
+GlideTimes glide_times();
+
 /** Below this the panel does not get any dimmer, so offering the range is just a
  *  control that appears broken. */
 inline constexpr int kMinBrightness = 20;

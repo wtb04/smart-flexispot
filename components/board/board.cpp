@@ -124,6 +124,7 @@ std::atomic<int>       s_showing{0};
 // may be drawn into.
 std::atomic<std::uint32_t> s_unsafe{1};
 int                    s_target = -1;  // the one this frame goes into, once it begins
+std::uint32_t          s_pinned = 0;   // kept as they are while a glide copies from them
 
 board::FlushTimes s_flush_times;
 
@@ -329,7 +330,7 @@ int free_buffer()
         const int           asked  = s_asked.load(std::memory_order_relaxed);
         const std::uint32_t unsafe = s_unsafe.load(std::memory_order_relaxed);
         for (int i = 0; i < FRAME_BUFFERS; ++i) {
-            if (i != asked && (unsafe & (1u << i)) == 0) {
+            if (i != asked && (unsafe & (1u << i)) == 0 && (s_pinned & (1u << i)) == 0) {
                 return i;
             }
         }
@@ -466,6 +467,27 @@ void show_back_buffer()
     s_target = -1;
 }
 
+// A page glided across by copying: the frame on show keeps the old page, the
+// next one LVGL draws, the new page at rest, is held back, and each step lays
+// the two side by side in a free buffer, where LVGL drawing the whole region
+// every frame went at eight a second.
+bool          s_holding     = false;
+int           s_glide_from  = -1, s_glide_held = -1;
+Rect          s_glide_at{};          // the region on the panel: a column of the screen is a row of it
+std::uint32_t s_glide_w     = 0;     // the region's width on the screen
+bool          s_glide_flip  = false; // the screen's left at the region's last row
+std::uint32_t s_glide_whole = 0;     // buffers brought up to the held frame outside the region
+std::int32_t  s_glide_shift = -1;
+board::GlideTimes s_glide_times;
+
+void hold_back_buffer()
+{
+    s_holding    = false;
+    s_glide_held = s_target;
+    s_pinned |= 1u << s_target;
+    s_target = -1;
+}
+
 // What this frame drew, which every other buffer is now behind by.
 void note_drawn(const Rect &r)
 {
@@ -494,7 +516,11 @@ void flush_rotated(lv_display_t *disp, const lv_area_t *area, std::uint8_t *pixe
 
     if (lv_display_flush_is_last(disp)) {
         s_flush_times.frames += 1;
-        show_back_buffer();
+        if (s_holding) {
+            hold_back_buffer();
+        } else {
+            show_back_buffer();
+        }
     }
     lv_display_flush_ready(disp);
 }
@@ -803,6 +829,100 @@ esp_err_t zoom_frame(const ZoomFrame &f)
     show_back_buffer();
     return err;
 }
+
+bool glide_begin(const lv_area_t &region)
+{
+    if (s_panel == nullptr || s_disp == nullptr) {
+        return false;
+    }
+    const lv_display_rotation_t rotation = lv_display_get_rotation(s_disp);
+    if (rotation != LV_DISPLAY_ROTATION_90 && rotation != LV_DISPLAY_ROTATION_270) {
+        return false;  // there a column of the screen is not a row of the panel
+    }
+    s_glide_from  = s_asked.load(std::memory_order_relaxed);
+    s_pinned      = 1u << s_glide_from;
+    s_glide_held  = -1;
+    s_glide_at    = place_on_panel(s_disp, &region).rect;
+    s_glide_w     = static_cast<std::uint32_t>(lv_area_get_width(&region));
+    s_glide_flip  = rotation == LV_DISPLAY_ROTATION_90;
+    s_glide_whole = 0;
+    s_glide_shift = -1;
+    s_glide_times = {};
+    s_holding     = true;
+    return true;
+}
+
+bool glide_held() { return s_glide_held >= 0; }
+
+void glide_step(std::int32_t shift)
+{
+    if (s_glide_held < 0) {
+        return;
+    }
+    const auto w = static_cast<std::int32_t>(s_glide_w);
+    shift        = std::clamp<std::int32_t>(shift, 0, w);
+    if (shift == s_glide_shift) {
+        return;
+    }
+    s_glide_shift          = shift;
+    const std::int64_t at  = esp_timer_get_time();
+    s_target               = free_buffer();
+    const int          t   = s_target;
+    std::uint8_t      *to  = s_fbs[t];
+    const std::uint8_t *old_page = s_fbs[s_glide_from], *new_page = s_fbs[s_glide_held];
+    constexpr std::size_t PIXEL = sizeof(std::uint16_t);
+    const std::size_t     row   = BSP_LCD_H_RES * PIXEL;
+    if ((s_glide_whole & (1u << t)) == 0) {
+        // once: around the region it is the new frame
+        const Rect &g = s_glide_at;
+        for (const Rect &r : {Rect{0, 0, BSP_LCD_H_RES, g.y},
+                              Rect{0, g.y + s_glide_w, BSP_LCD_H_RES, BSP_LCD_V_RES - g.y - s_glide_w},
+                              Rect{0, g.y, g.x, s_glide_w}, Rect{g.x + g.w, g.y, BSP_LCD_H_RES - g.x - g.w, s_glide_w}}) {
+            if (r.w > 0 && r.h > 0) {
+                catch_up(new_page, to, r);
+            }
+        }
+        s_glide_whole |= 1u << t;
+    }
+    // the old page moved off by `shift` columns, the new one's first `shift` after it
+    const auto        n     = static_cast<std::uint32_t>(shift);
+    const std::size_t bytes = s_glide_at.w * PIXEL;
+    const auto        line  = [&](std::uint32_t r) { return r * row + s_glide_at.x * PIXEL; };
+    const std::uint32_t top = s_glide_at.y, rows = s_glide_w;
+    if (s_glide_flip) {
+        copy_rows(old_page + line(top), row, to + line(top + n), row, rows - n, bytes);
+        copy_rows(new_page + line(top + rows - n), row, to + line(top), row, n, bytes);
+    } else {
+        copy_rows(old_page + line(top + n), row, to + line(top), row, rows - n, bytes);
+        copy_rows(new_page + line(top), row, to + line(top + rows - n), row, n, bytes);
+    }
+    esp_cache_msync(to + line(top), (rows - 1) * row + bytes, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+    s_glide_times.frames += 1;
+    s_glide_times.copy_us += esp_timer_get_time() - at;
+    show_back_buffer();
+}
+
+void glide_end()
+{
+    s_holding = false;
+    if (s_glide_held >= 0) {
+        s_target = s_glide_held;
+        show_back_buffer();
+        // the old frame is behind by what the held one drew, noted as it was
+        // drawn; those the glide went through, by the region alone
+        for (int i = 0; i < FRAME_BUFFERS; ++i) {
+            if ((s_glide_whole & (1u << i)) != 0) {
+                s_behind_count[i] = 0;
+                note(s_behind[i], s_behind_count[i], s_glide_at);
+            }
+        }
+    }
+    s_glide_from = s_glide_held = -1;
+    s_pinned     = 0;
+    s_glide_whole = 0;
+}
+
+GlideTimes glide_times() { return s_glide_times; }
 
 void zoom_end()
 {
