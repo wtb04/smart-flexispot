@@ -2,6 +2,7 @@
 
 #include "kit.h"
 #include "kit_fonts.h"
+#include "lab_lists.h"
 #include "lvgl_private.h"  // for the bench, the areas each frame redraws
 
 #if defined(ESP_PLATFORM)
@@ -39,7 +40,7 @@ constexpr std::int32_t SHEET_Y = 76, SHEET_H = CONTENT_H - SHEET_Y;
 constexpr std::uint32_t ACCENTS[] = {0, 0x5aa9ff, 0x7ccf6a, 0xb48cff, 0xff6f8e, 0x3fd0c0};
 constexpr int GLASS_STEPS[] = {0, 35, 50, 70, 100};
 
-constexpr int PAGES_SHEET = 6;  // the kit's own pages, in place of a sheet
+constexpr int PAGES_SHEET = 7;  // the kit's own pages, in place of a sheet
 lv_obj_t *s_sheets[PAGES_SHEET]{};
 lv_obj_t *s_header = nullptr;
 lv_obj_t *s_items[4]{};
@@ -956,8 +957,17 @@ const Phase PHASES[] = {
     {"page, stagger", 900, page_setup<Change::Stagger>, page_tick},
     {"page, slide", 900, page_setup<Change::Slide>, page_tick},
     {"page, fade", 900, page_setup<Change::Fade>, page_tick},
+    {"list scroll", 1600, [] { choose_sheet(6); }, lists::scroll_tick},
+    {"row press", 1400, nullptr, lists::press_tick},
+    {"readouts", 1600, nullptr, lists::readouts_tick},
+    {"sheet open", 900, nullptr, lists::sheet_open_tick},
+    {"sheet scroll", 1400, nullptr, lists::sheet_scroll_tick},
+    {"sheet close", 700, nullptr, lists::sheet_close_tick},
 };
 constexpr std::size_t PHASE_COUNT = std::size(PHASES);
+
+// a popover or a sheet: its backdrop wants longer to be made ahead
+bool pops(const char *name) { return std::strncmp(name, "popover", 7) == 0 || std::strncmp(name, "sheet", 5) == 0; }
 
 char s_report[10000] = "no bench run yet\n";
 char s_frames[14][480]{};
@@ -1016,7 +1026,7 @@ void bench_step(lv_timer_t *timer)
 {
     const std::uint32_t now = lv_tick_get();
     if (s_bench.settling) {
-        const bool popover_next = std::strncmp(PHASES[s_bench.phase].name, "popover", 7) == 0;
+        const bool popover_next = pops(PHASES[s_bench.phase].name);
         const bool page_next    = std::strncmp(PHASES[s_bench.phase].name, "page", 4) == 0;  // its shadows painted in
         if (now - s_bench.began < (popover_next ? 900u : page_next ? 700u : 300u)) {
             return;
@@ -1044,7 +1054,7 @@ void bench_step(lv_timer_t *timer)
     s_flush[s_bench.config][s_bench.phase] = board::take_flush_times();
 #endif
     const bool paged  = std::strncmp(PHASES[s_bench.phase].name, "page", 4) == 0;
-    const bool traced = std::strncmp(PHASES[s_bench.phase].name, "popover", 7) == 0 ||
+    const bool traced = pops(PHASES[s_bench.phase].name) ||
                         std::strcmp(PHASES[s_bench.phase].name, "notice") == 0 || paged;
     if (traced && s_bench.config == 0 && s_frame_lines < static_cast<int>(std::size(s_frames))) {
         const std::uint16_t *each = nullptr;
@@ -1171,7 +1181,7 @@ void build(perf::Clock clock)
     lv_obj_set_pos(header, CONTENT_X, CONTENT_Y);
     lv_obj_set_size(header, CONTENT_W, 60);
     lv_obj_set_flex_align(header, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    s_picker = segmented(header, {"Surfaces", "Controls", "Instruments", "Glass", "Layers", "Pictures", "Pages"}, 0, 800);
+    s_picker = segmented(header, {"Surfaces", "Controls", "Instruments", "Glass", "Layers", "Pictures", "Lists", "Pages"}, 0, 860);
     lv_obj_add_event_cb(
         s_picker, [](lv_event_t *e) { choose_sheet(segmented_chosen(lv_event_get_target_obj(e))); },
         LV_EVENT_VALUE_CHANGED, nullptr);
@@ -1180,7 +1190,7 @@ void build(perf::Clock clock)
     s_state = text(col, Role::Small, "", Ink::Secondary);
     s_perf = text(col, Role::Label, "", Ink::Tertiary);
     for (lv_obj_t *line : {s_state, s_perf}) {
-        lv_obj_set_width(line, LV_PCT(100));
+        lv_obj_set_size(line, LV_PCT(100), lv_font_get_line_height(lv_obj_get_style_text_font(line, LV_PART_MAIN)));
         lv_label_set_long_mode(line, LV_LABEL_LONG_MODE_DOTS);
     }
     lv_timer_create(show_perf, 500, nullptr);
@@ -1191,6 +1201,7 @@ void build(perf::Clock clock)
     build_glass(content);
     build_layers(content);
     build_pictures(s_sheets[5] = sheet(content));
+    lists::build(s_sheets[6] = sheet(content));
     choose_sheet(0);
     build_dock(chrome);
     build_bar(chrome);
@@ -1214,13 +1225,16 @@ int report(char *out, int size)
     if (n < size) {
         n += std::snprintf(out + n, static_cast<std::size_t>(size - n), "%s", kit::pictures_report());
     }
+    if (n < size) {
+        n += std::snprintf(out + n, static_cast<std::size_t>(size - n), "%s", lists::report());
+    }
     return std::min(n, size - 1);
 }
 
 void key(int code)
 {
     switch (code) {
-    case '1': case '2': case '3': case '4': case '5': case '6': case '7':
+    case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8':
         choose_sheet(code - '1');
         break;
     case 'f':
@@ -1260,6 +1274,16 @@ void key(int code)
         break;
     case 'k':
         pictures_measure_corners();
+        break;
+    case 'v':
+        choose_sheet(6);
+        lists::study();
+        break;
+    case 'j':
+        lists::nudge();
+        break;
+    case 'h':
+        lists::show_press();
         break;
     default:
         return;
