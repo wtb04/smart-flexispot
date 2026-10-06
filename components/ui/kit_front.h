@@ -48,4 +48,9 @@ void      build_radar(lv_obj_t *page);
 void      build_setup(lv_obj_t *page);
 void      build_views(lv_obj_t *screen);  // the fullscreen views, the favourites, the notices
 
+// Setup's own, in kit_front_setup*.cpp.
+/** What the panel reports of itself, filling `column`: the summary and its
+ *  glances, the parts with their readings and logs. kit_front_setup_diag.cpp */
+void build_setup_diagnostics(lv_obj_t *column, std::int32_t w);
+
 }  // namespace ui::kitfront

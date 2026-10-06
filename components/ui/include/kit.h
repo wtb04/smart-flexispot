@@ -731,4 +731,17 @@ class Reading : public InPsram {
 /** A button tinted as Button::Soft is, put on and taken off: something on its way. Call it on a change only. */
 void set_soft(lv_obj_t *btn, bool on);
 
+// --- rows told again, for Setup --------------------------------------------
+
+/** A row's title again, in `ink`: the accent for a thing to do. Only on change, as it redraws the row. */
+void set_row_title(lv_obj_t *row, const char *title, Ink ink = Ink::Primary);
+/** The glyph in a row's square, for a row that has one. */
+void set_row_glyph(lv_obj_t *row, const char *glyph);
+/**
+ * Flex lays a row that is as tall as its contents out from its top, so in one
+ * held up to its least height they sit high: this holds each such row under
+ * `parent` at that height, which puts them in its middle. Once its rows are made.
+ */
+void centre_rows(lv_obj_t *parent);
+
 }  // namespace ui::kit
