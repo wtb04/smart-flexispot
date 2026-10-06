@@ -126,7 +126,9 @@ enum class Lift : std::uint8_t { Low, High };
 lv_obj_t *tile(lv_obj_t *parent, Lift lift = Lift::Low);
 lv_obj_t *well(lv_obj_t *parent);
 
-enum class Glass : std::uint8_t { Small, Large, Clear };
+// Dock is large glass beside the content: its shadow ends in the gap, as one
+// across a tile's edge comes out a hard step in the panel's 16-bit colour.
+enum class Glass : std::uint8_t { Small, Large, Clear, Dock };
 lv_obj_t *glass(lv_obj_t *parent, Glass kind = Glass::Small);
 
 lv_obj_t *text(lv_obj_t *parent, Role role, const char *value, Ink ink = Ink::Primary);

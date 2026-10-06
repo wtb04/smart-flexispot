@@ -72,7 +72,7 @@ std::uint32_t s_accent = 0;  // 0: the look's own
 Palette       s_pal    = DARK;
 
 lv_style_t s_ground, s_tile, s_tile_hi, s_well;
-lv_style_t s_glass_sm, s_glass_lg, s_glass_clear;
+lv_style_t s_glass_sm, s_glass_lg, s_glass_clear, s_glass_dock;
 lv_style_t s_role[11];
 lv_style_t s_ink[8], s_dot[8], s_mark;
 lv_style_t s_btn_open;
@@ -206,6 +206,7 @@ void apply()
     style_glass(&s_glass_sm, 20, 44, 16, g);
     // big glass reads more opaque, so what is on it stays legible over anything
     style_glass(&s_glass_lg, 40, 80, 28, static_cast<lv_opa_t>(g + (s_pal.glass_solid_opa - g) * 45 / 100));
+    style_glass(&s_glass_dock, 40, 28, 10, static_cast<lv_opa_t>(g + (s_pal.glass_solid_opa - g) * 45 / 100));
     style_glass(&s_glass_clear, 10, 24, 8, static_cast<lv_opa_t>(g * 2 / 3));
     lv_style_set_bg_color(&s_glass_clear, hex(0x14100d));
     lv_style_set_bg_grad_color(&s_glass_clear, hex(0x14100d));
@@ -329,7 +330,7 @@ void apply()
 
 void init_styles()
 {
-    for (lv_style_t *st : {&s_ground, &s_tile, &s_tile_hi, &s_well, &s_glass_sm, &s_glass_lg, &s_glass_clear,
+    for (lv_style_t *st : {&s_ground, &s_tile, &s_tile_hi, &s_well, &s_glass_sm, &s_glass_lg, &s_glass_clear, &s_glass_dock,
                            &s_btn, &s_btn_open, &s_btn_pressed, &s_btn_accent, &s_btn_flat, &s_btn_soft, &s_btn_round,
                            &s_btn_flat_pressed, &s_btn_accent_pressed, &s_btn_checked_pressed, &s_lamp_on_pressed,
                            &s_btn_checked, &s_lamp, &s_lamp_on, &s_lamp_on_ink, &s_hair, &s_switch,
@@ -646,7 +647,10 @@ lv_obj_t *glass(lv_obj_t *parent, Glass kind)
 {
     lv_obj_t *obj = lv_obj_create(parent);
     lv_obj_remove_style_all(obj);
-    const lv_style_t *st = kind == Glass::Small ? &s_glass_sm : kind == Glass::Large ? &s_glass_lg : &s_glass_clear;
+    const lv_style_t *st = kind == Glass::Small   ? &s_glass_sm
+                           : kind == Glass::Large ? &s_glass_lg
+                           : kind == Glass::Dock  ? &s_glass_dock
+                                                  : &s_glass_clear;
     lv_obj_add_style(obj, st, 0);
     lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
     bake::glass(obj, st);

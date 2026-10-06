@@ -325,7 +325,7 @@ void open_media(lv_event_t *e)
 
 void build_dock(lv_obj_t *scr)
 {
-    lv_obj_t *dock = glass(scr, Glass::Large);
+    lv_obj_t *dock = glass(scr, Glass::Dock);
     lv_obj_set_style_radius(dock, radius::dock, 0);
     lv_obj_set_pos(dock, 14, 14);
     lv_obj_set_size(dock, size::dock, size::screen_h - 28);
