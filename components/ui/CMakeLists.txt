@@ -11,7 +11,7 @@ else()
     set(UI_FRONT_SOURCES ${UI_CLASSIC_SOURCES})
 endif()
 idf_component_register(
-    SRCS ${UI_CORE_SOURCES} ${UI_SHARED_SOURCES} ${UI_FRONT_SOURCES} ${UI_FONTS}
+    SRCS ${UI_CORE_SOURCES} ${UI_FRONT_SOURCES} ${UI_FONTS}
     INCLUDE_DIRS "include" "fonts"
     REQUIRES claude esp_app_format esp_driver_ppa lvgl__lvgl espressif__esp_lvgl_port board media radar ical travel deskproto units
 )
