@@ -17,6 +17,8 @@ sdkconfig.old
 
 # Natural Earth downloads for tools/make_map.py.
 .map-cache/
+# The fonts tools/make_fonts.py downloads, and the static instances it cuts from them.
+.font-cache/
 
 # Your own Home Assistant entities and preset names; room_config.example.h and the
 # defaults in ui_internal.h are what everyone else gets.
