@@ -725,4 +725,13 @@ class Reading : public InPsram {
     int         m_zone = -2;
 };
 
+// --- rows used again (Home and Calendar) -----------------------------------
+
+/** set_ink, unless the label has that ink already: setting it again redraws it. */
+void ink_if(lv_obj_t *label, Ink ink);
+/** A pooled row shown with another's words: its title, its lead and the lead's ink, its mark's colour. */
+void set_row_title(lv_obj_t *row, const char *title);
+void set_row_lead(lv_obj_t *row, const char *lead, Ink ink);
+void set_row_mark(lv_obj_t *row, std::uint32_t colour);
+
 }  // namespace ui::kit
