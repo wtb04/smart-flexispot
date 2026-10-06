@@ -19,6 +19,7 @@
 #include "net_stream.h"
 #include "ota.h"
 #include "power.h"
+#include "kit.h"
 #include "lab.h"
 #include "ui.h"
 #include "units.h"
@@ -497,6 +498,28 @@ esp_err_t desk_page(httpd_req_t *req)
 
 // How long the radar takes to open its map, draw, zoom and close. With
 // ?open it is only shown, so its feed can start before the bench.
+esp_err_t frozen_page(httpd_req_t *req)
+{
+    if (!ota::authorised(req)) {
+        return refuse(req);
+    }
+    const lv_draw_buf_t *pic = ui::kit::frozen_picture();
+    if (pic == nullptr) {
+        httpd_resp_set_status(req, "404 Not Found");
+        return httpd_resp_sendstr(req, "no frozen picture yet\n");
+    }
+    httpd_resp_set_type(req, "application/octet-stream");
+    char head[32];
+    const int n = std::snprintf(head, sizeof(head), "RGB565 %d %d\n", static_cast<int>(pic->header.w),
+                                static_cast<int>(pic->header.h));
+    esp_err_t err = httpd_resp_send_chunk(req, head, n);
+    for (std::uint32_t y = 0; err == ESP_OK && y < pic->header.h; ++y) {
+        err = httpd_resp_send_chunk(req, reinterpret_cast<const char *>(pic->data + y * pic->header.stride),
+                                    static_cast<ssize_t>(pic->header.w * 2));
+    }
+    return err == ESP_OK ? httpd_resp_send_chunk(req, nullptr, 0) : err;
+}
+
 esp_err_t bench_page(httpd_req_t *req)
 {
     if (!ota::authorised(req)) {
@@ -513,6 +536,9 @@ esp_err_t bench_page(httpd_req_t *req)
             }
             ui::lab::bench();
             n = std::snprintf(text, sizeof(text), "the lab is up and its bench running; /bench?report in a minute\n");
+        } else if (query[0] == 'k' && query[1] == '=' && query[2] != '\0' && ui::lab::built()) {
+            ui::lab::key(query[2]);  // a key as the simulator would pass it, to drive the lab from here
+            n = std::snprintf(text, sizeof(text), "pressed %c\n", query[2]);
         } else if (std::strcmp(query, "report") == 0) {
             n = ui::lab::report(text, sizeof(text));
         } else
@@ -543,6 +569,7 @@ esp_err_t start()
         {.uri = "/heap", .method = HTTP_GET, .handler = heap_page, .user_ctx = nullptr},
         {.uri = "/power", .method = HTTP_GET, .handler = power_page, .user_ctx = nullptr},
         {.uri = "/bench", .method = HTTP_GET, .handler = bench_page, .user_ctx = nullptr},
+        {.uri = "/frozen", .method = HTTP_GET, .handler = frozen_page, .user_ctx = nullptr},
         {.uri = "/desk", .method = HTTP_GET, .handler = desk_page, .user_ctx = nullptr},
         {.uri = "/restart", .method = HTTP_GET, .handler = restart_page, .user_ctx = nullptr},
         {.uri = "/streams", .method = HTTP_GET, .handler = streams_page, .user_ctx = nullptr},

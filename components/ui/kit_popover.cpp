@@ -1,14 +1,21 @@
 #include "kit.h"
 
 #include "kit_fonts.h"
+#include "kit_pixels.h"
 
 #include <algorithm>
 #include <cstdio>
+#include <atomic>
+#include <cstdlib>
 #include <cstring>
 
 #if defined(ESP_PLATFORM)
 #include "board.h"
 #include "driver/ppa.h"
+#include "esp_cache.h"
+#include "esp_heap_caps.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #endif
 
 namespace ui::kit {
@@ -17,6 +24,8 @@ namespace {
 PopGlass       s_how    = PopGlass::Frozen;
 PopMotion      s_motion = PopMotion::Grow;
 char           s_freeze_report[96] = "";
+char           s_up_report[96]     = "";
+char           s_ahead_report[96]  = "";
 lv_draw_buf_t *s_frozen = nullptr;
 
 // One picture of the screen, blurred: brought down to a quarter, smeared with
@@ -24,7 +33,12 @@ lv_draw_buf_t *s_frozen = nullptr;
 // as the popover opens. On the panel the PPA does both stretches; the CPU only
 // blurs the quarter-size picture, a sixteenth of the pixels.
 constexpr int FW = size::screen_w, FH = size::screen_h, F = 8, SW = FW / F, SH = FH / F;
-lv_draw_buf_t *s_shot = nullptr, *s_small = nullptr;
+lv_draw_buf_t *s_shot = nullptr, *s_half = nullptr, *s_quarter = nullptr, *s_small = nullptr;
+// the blurred picture in 24-bit, B, G, R as the PPA takes it: kept at 16-bit,
+// neighbours in a soft area come out the same and stretch into flat plateaus
+lv_draw_buf_t *s_blurred = nullptr;
+lv_draw_buf_t *s_strip   = nullptr;  // the 24-bit strip the PPA stretches into, made on LVGL's task
+std::atomic<bool> s_open{false};      // a popover is up: its picture is not to be touched
 
 #if defined(ESP_PLATFORM)
 ppa_client_handle_t s_ppa = nullptr;
@@ -56,8 +70,66 @@ bool stretch(const lv_draw_buf_t *from, lv_draw_buf_t *to, float scale)
     op.mode              = PPA_TRANS_MODE_BLOCKING;
     return ppa_do_scale_rotate_mirror(s_ppa, &op) == ESP_OK;
 }
+
+// Stretched up by the PPA into 24-bit colour a strip at a time, then dithered
+// down, so the soft picture does not break into the blobs a stretch straight
+// into RGB565 leaves. A row of the small picture either side of each strip
+// keeps the bilinear stretch seamless across them.
+bool stretch_up_dithered(lv_draw_buf_t *small, lv_draw_buf_t *to, int scale)
+{
+    constexpr int ROWS = 10;
+    const int sw = static_cast<int>(small->header.w), sh = static_cast<int>(small->header.h);
+    const int ow = static_cast<int>(to->header.w);
+    lv_draw_buf_t *strip = s_strip;
+    if (strip == nullptr) {
+        return false;
+    }
+    esp_cache_msync(small->data, small->data_size, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+    std::uint64_t in_ppa = 0, in_sync = 0, in_dither = 0;
+    for (int r0 = 0; r0 < sh; r0 += ROWS) {
+        const std::uint64_t a = perf::now_us();
+        const int from = std::max(0, r0 - 1), last = std::min(sh - 1, r0 + ROWS), rows = last - from + 1;
+        ppa_srm_oper_config_t op{};
+        op.in.buffer         = small->data;
+        op.in.pic_w          = sw;
+        op.in.pic_h          = sh;
+        op.in.block_w        = sw;
+        op.in.block_h        = rows;
+        op.in.block_offset_y = from;
+        op.in.srm_cm         = PPA_SRM_COLOR_MODE_RGB888;
+        op.out.buffer        = strip->data;
+        op.out.buffer_size   = strip->data_size;
+        op.out.pic_w         = strip->header.w;
+        op.out.pic_h         = strip->header.h;
+        op.out.srm_cm        = PPA_SRM_COLOR_MODE_RGB888;
+        op.rotation_angle    = PPA_SRM_ROTATION_ANGLE_0;
+        op.scale_x           = static_cast<float>(scale);
+        op.scale_y           = static_cast<float>(scale);
+        op.mode              = PPA_TRANS_MODE_BLOCKING;
+        if (ppa_do_scale_rotate_mirror(s_ppa, &op) != ESP_OK) {
+            return false;
+        }
+        const std::uint64_t b = perf::now_us();
+        esp_cache_msync(strip->data, strip->data_size, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+        const std::uint64_t c = perf::now_us();
+        static const pixels::Ditherer dither;  // 12 KB of tables, in internal RAM
+        const int skip = (r0 - from) * scale, keep = std::min(ROWS, sh - r0) * scale;
+        for (int y = 0; y < keep; ++y) {
+            const int oy = r0 * scale + y;
+            dither.row(strip->data + (skip + y) * strip->header.stride,
+                       reinterpret_cast<std::uint16_t *>(to->data + oy * to->header.stride), ow, oy);
+        }
+        in_ppa += b - a;
+        in_sync += c - b;
+        in_dither += perf::now_us() - c;
+    }
+    std::snprintf(s_up_report, sizeof s_up_report, "  stretching up: PPA %.1f ms, cache %.1f, dither %.1f\n",
+                  static_cast<double>(in_ppa) / 1000.0, static_cast<double>(in_sync) / 1000.0,
+                  static_cast<double>(in_dither) / 1000.0);
+    return true;
+}
 #else
-// The simulator's stand-in for the PPA: a pick down, a bilinear stretch up.
+// The simulator's stand-in for the PPA: an average down, a bilinear stretch up.
 bool stretch(const lv_draw_buf_t *from, lv_draw_buf_t *to, float scale)
 {
     const int ow = static_cast<int>(to->header.w), oh = static_cast<int>(to->header.h);
@@ -65,6 +137,25 @@ bool stretch(const lv_draw_buf_t *from, lv_draw_buf_t *to, float scale)
     const auto px = [&](int x, int y) {
         return reinterpret_cast<const std::uint16_t *>(from->data + std::min(y, ih - 1) * from->header.stride)[std::min(x, iw - 1)];
     };
+    if (scale < 1.0f) {
+        const int k = static_cast<int>(1.0f / scale + 0.5f);
+        for (int y = 0; y < oh; ++y) {
+            auto *out = reinterpret_cast<std::uint16_t *>(to->data + y * to->header.stride);
+            for (int x = 0; x < ow; ++x) {
+                int r = 0, g = 0, b = 0;
+                for (int dy = 0; dy < k; ++dy) {
+                    for (int dx = 0; dx < k; ++dx) {
+                        const std::uint16_t c = px(x * k + dx, y * k + dy);
+                        r += c >> 11;
+                        g += (c >> 5) & 0x3f;
+                        b += c & 0x1f;
+                    }
+                }
+                out[x] = static_cast<std::uint16_t>(((r / (k * k)) << 11) | ((g / (k * k)) << 5) | (b / (k * k)));
+            }
+        }
+        return true;
+    }
     for (int y = 0; y < oh; ++y) {
         auto *out = reinterpret_cast<std::uint16_t *>(to->data + y * to->header.stride);
         const float fy = std::max(0.0f, (y + 0.5f) / scale - 0.5f);
@@ -80,22 +171,74 @@ bool stretch(const lv_draw_buf_t *from, lv_draw_buf_t *to, float scale)
                 const int bot = ((c >> shift) & mask) * (256 - tx) + ((d >> shift) & mask) * tx;
                 return ((top * (256 - ty) + bot * ty) >> 16) & mask;
             };
-            out[x] = static_cast<std::uint16_t>((mix(11, 0x1f) << 11) | (mix(5, 0x3f) << 5) | mix(0, 0x1f));
+            const auto eight = [&](int shift, int mask) {  // the mix in 8-bit, its fraction kept for the dither
+                const int top = ((a >> shift) & mask) * (256 - tx) + ((b >> shift) & mask) * tx;
+                const int bot = ((c >> shift) & mask) * (256 - tx) + ((d >> shift) & mask) * tx;
+                return static_cast<int>((static_cast<std::int64_t>(top * (256 - ty) + bot * ty) * 255 / mask) >> 16);
+            };
+            out[x] = scale > 1.0f ? pixels::dither(eight(11, 0x1f), eight(5, 0x3f), eight(0, 0x1f), x, y)
+                                  : static_cast<std::uint16_t>((mix(11, 0x1f) << 11) | (mix(5, 0x3f) << 5) | mix(0, 0x1f));
         }
     }
     return true;
 }
 #endif
 
+#if !defined(ESP_PLATFORM)
+bool stretch_up_dithered(lv_draw_buf_t *small, lv_draw_buf_t *to, int scale)
+{
+    const int sw = static_cast<int>(small->header.w), sh = static_cast<int>(small->header.h);
+    const int ow = static_cast<int>(to->header.w), oh = static_cast<int>(to->header.h);
+    const auto at = [&](int x, int y, int k) {
+        return small->data[std::min(y, sh - 1) * small->header.stride + std::min(x, sw - 1) * 3 + k];
+    };
+    for (int y = 0; y < oh; ++y) {
+        auto *out = reinterpret_cast<std::uint16_t *>(to->data + y * to->header.stride);
+        const int fy = std::max(0, (2 * y + 1) * 128 / scale - 128), y0 = fy >> 8, ty = fy & 0xff;
+        for (int x = 0; x < ow; ++x) {
+            const int fx = std::max(0, (2 * x + 1) * 128 / scale - 128), x0 = fx >> 8, tx = fx & 0xff;
+            int v[3];
+            for (int k = 0; k < 3; ++k) {
+                const int top = at(x0, y0, k) * (256 - tx) + at(x0 + 1, y0, k) * tx;
+                const int bot = at(x0, y0 + 1, k) * (256 - tx) + at(x0 + 1, y0 + 1, k) * tx;
+                v[k] = (top * (256 - ty) + bot * ty) >> 16;
+            }
+            out[x] = pixels::dither(v[2], v[1], v[0], x, y);
+        }
+    }
+    return true;
+}
+#endif
+
+// Memory for the blur, from outside LVGL's allocator, which belongs to its own
+// task: on the panel the blur runs on the other core.
+void *scratch(std::size_t bytes)
+{
+#if defined(ESP_PLATFORM)
+    return heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM);
+#else
+    return std::malloc(bytes);
+#endif
+}
+
+void unscratch(void *p)
+{
+#if defined(ESP_PLATFORM)
+    heap_caps_free(p);
+#else
+    std::free(p);
+#endif
+}
+
 void blur_small()
 {
-    constexpr int R = 2, N = 2 * R + 1;
+    constexpr int R = 3, N = 2 * R + 1;
     using Plane = std::uint8_t[SH][SW];
-    auto *ch  = static_cast<Plane *>(lv_malloc(sizeof(Plane) * 3));  // PSRAM: too big for internal RAM
-    auto *buf = static_cast<Plane *>(lv_malloc(sizeof(Plane)));
+    auto *ch  = static_cast<Plane *>(scratch(sizeof(Plane) * 3));  // PSRAM: too big for internal RAM
+    auto *buf = static_cast<Plane *>(scratch(sizeof(Plane)));
     if (ch == nullptr || buf == nullptr) {
-        lv_free(ch);
-        lv_free(buf);
+        unscratch(ch);
+        unscratch(buf);
         return;
     }
     Plane &tmp = *buf;
@@ -109,7 +252,7 @@ void blur_small()
     }
     for (int plane = 0; plane < 3; ++plane) {
         Plane &c = ch[plane];
-        for (int pass = 0; pass < 2; ++pass) {
+        for (int pass = 0; pass < 3; ++pass) {
             for (int y = 0; y < SH; ++y) {  // a running sum along each row, then each column
                 int sum = c[y][0] * (R + 1);
                 for (int x = 1; x <= R; ++x) {
@@ -143,17 +286,15 @@ void blur_small()
     const int a = colours().scrim_opa, t[3] = {static_cast<int>((tint >> 16) & 0xff), static_cast<int>((tint >> 8) & 0xff),
                                                static_cast<int>(tint & 0xff)};
     for (int y = 0; y < SH; ++y) {
-        auto *row = reinterpret_cast<std::uint16_t *>(s_small->data + y * s_small->header.stride);
+        std::uint8_t *row = s_blurred->data + y * s_blurred->header.stride;
         for (int x = 0; x < SW; ++x) {
-            int o[3];
             for (int k = 0; k < 3; ++k) {
-                o[k] = (ch[k][y][x] * (255 - a) + t[k] * a) / 255;
+                row[x * 3 + 2 - k] = static_cast<std::uint8_t>((ch[k][y][x] * (255 - a) + t[k] * a) / 255);
             }
-            row[x] = static_cast<std::uint16_t>(((o[0] >> 3) << 11) | ((o[1] >> 2) << 5) | (o[2] >> 3));
         }
     }
-    lv_free(ch);
-    lv_free(buf);
+    unscratch(ch);
+    unscratch(buf);
 }
 
 // The card's shadow painted into the picture once, where the card comes to
@@ -180,41 +321,130 @@ void bake_shadow(const lv_area_t &at)
     lv_obj_delete(canvas);
 }
 
-void freeze()
+bool buffers()
 {
     if (s_frozen == nullptr) {
-        s_small  = lv_draw_buf_create(SW, SH, LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO);
-        s_frozen = lv_draw_buf_create(FW, FH, LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO);
-    }
-    if (s_small == nullptr || s_frozen == nullptr) {
-        return;
-    }
-    const std::uint64_t t0 = perf::now_us();
-    bool shrunk = false;
+        s_half    = lv_draw_buf_create(FW / 2, FH / 2, LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO);
+        s_quarter = lv_draw_buf_create(FW / 4, FH / 4, LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO);
+        s_small   = lv_draw_buf_create(SW, SH, LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO);
+        s_blurred = lv_draw_buf_create(SW, SH, LV_COLOR_FORMAT_RGB888, LV_STRIDE_AUTO);
+        s_frozen  = lv_draw_buf_create(FW, FH, LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO);
 #if defined(ESP_PLATFORM)
-    // the frame on show is the picture already: turned and shrunk in one go
-    shrunk = board::shrink_shown(s_small->data, s_small->data_size, SW, SH) == ESP_OK;
+        s_strip = lv_draw_buf_create(FW, 12 * F, LV_COLOR_FORMAT_RGB888, LV_STRIDE_AUTO);
 #endif
-    const std::uint64_t t1 = perf::now_us();
-    if (!shrunk) {
-        if (s_shot == nullptr) {  // only where there is no frame on show to shrink: the simulator
-            s_shot = lv_draw_buf_create(FW, FH, LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO);
-        }
-        if (s_shot == nullptr || lv_snapshot_take_to_draw_buf(lv_screen_active(), LV_COLOR_FORMAT_RGB565, s_shot) != LV_RESULT_OK) {
-            return;
-        }
-        stretch(s_shot, s_small, 1.0f / F);
     }
+    return s_half != nullptr && s_quarter != nullptr && s_small != nullptr && s_blurred != nullptr && s_frozen != nullptr;
+}
+
+// From the half-size picture on: no LVGL in it, so the panel's other core can do it.
+void finish_picture(std::uint64_t t0, std::uint64_t t1)
+{
+    // halvings rather than one eighth: a bilinear halving is an average of each
+    // two by two, where one big step would sample a few pixels of each block
+    // and alias into blobs
+    stretch(s_half, s_quarter, 0.5f);
+    stretch(s_quarter, s_small, 0.5f);
+#if defined(ESP_PLATFORM)
+    esp_cache_msync(s_small->data, s_small->data_size, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+#endif
     const std::uint64_t t2 = perf::now_us();
     blur_small();
     const std::uint64_t t3 = perf::now_us();
-    stretch(s_small, s_frozen, static_cast<float>(F));
+    stretch_up_dithered(s_blurred, s_frozen, F);
     const std::uint64_t t4 = perf::now_us();
     std::snprintf(s_freeze_report, sizeof s_freeze_report,
-                  "  freezing for a popover: shown frame %.1f ms, redraw and shrink %.1f, blur %.1f, up %.1f\n",
+                  "  freezing for a popover: picture %.1f ms, down %.1f, blur %.1f, up %.1f\n",
                   static_cast<double>(t1 - t0) / 1000.0, static_cast<double>(t2 - t1) / 1000.0,
                   static_cast<double>(t3 - t2) / 1000.0, static_cast<double>(t4 - t3) / 1000.0);
-    std::printf("kit:%s", s_freeze_report + 1);
+}
+
+#if defined(ESP_PLATFORM)
+// The panel's backdrop, made ahead on the core LVGL does not use: when a
+// finger lands on something that opens a popover, and whenever the screen has
+// been still for a while after changing. By the time the popover opens, its
+// picture is usually there already.
+TaskHandle_t               s_worker = nullptr;
+std::atomic<bool>          s_working{false};
+std::atomic<std::uint32_t> s_made_at_gen{0};
+std::atomic<std::uint64_t> s_made_from_us{0}, s_pressed_us{0};
+constexpr std::uint64_t    STILL_US = 250000, EVERY_US = 2000000;
+
+bool picture_from_shown()
+{
+    const std::uint64_t t0 = perf::now_us();
+    const std::uint32_t gen = perf::generation();
+    if (board::shrink_shown(s_half->data, s_half->data_size, FW / 2, FH / 2) != ESP_OK) {
+        return false;
+    }
+    finish_picture(t0, perf::now_us());
+    s_made_at_gen.store(gen, std::memory_order_relaxed);
+    s_made_from_us.store(t0, std::memory_order_relaxed);
+    return true;
+}
+
+void work(void *)
+{
+    for (;;) {
+        const bool kicked = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(250)) > 0;
+        const bool stale  = perf::generation() != s_made_at_gen.load(std::memory_order_relaxed);
+        // a pause in the drawing, and not more often than every couple of seconds:
+        // the screen rarely stays still for long, a clock or a plane moves
+        const bool still  = perf::now_us() - perf::last_frame_us() > STILL_US;
+        const bool due    = perf::now_us() - s_made_from_us.load(std::memory_order_relaxed) > EVERY_US;
+        if (s_open.load(std::memory_order_acquire) || !(kicked || (stale && still && due))) {
+            continue;
+        }
+        s_working.store(true, std::memory_order_release);
+        picture_from_shown();
+        s_working.store(false, std::memory_order_release);
+    }
+}
+
+void start_worker()
+{
+    if (s_worker == nullptr && buffers()) {
+        xTaskCreatePinnedToCore(work, "backdrop", 4096, nullptr, 2, &s_worker, 0);
+    }
+}
+#endif
+
+// On LVGL's task, as a popover opens: the picture made ahead if it is still
+// the screen, else one made now.
+void freeze()
+{
+    if (!buffers()) {
+        return;
+    }
+#if defined(ESP_PLATFORM)
+    start_worker();
+    const std::uint64_t waited = perf::now_us();
+    while (s_working.load(std::memory_order_acquire) && perf::now_us() - waited < 400000) {
+        vTaskDelay(1);
+    }
+    const bool same    = perf::generation() == s_made_at_gen.load(std::memory_order_relaxed);
+    const bool pressed = s_made_from_us.load(std::memory_order_relaxed) >= s_pressed_us.load(std::memory_order_relaxed) &&
+                         perf::now_us() - s_pressed_us.load(std::memory_order_relaxed) < 1000000;
+    if (same || pressed) {
+        std::snprintf(s_ahead_report, sizeof s_ahead_report, "  last popover: picture made ahead, waited %.1f ms\n",
+                      static_cast<double>(perf::now_us() - waited) / 1000.0);
+        return;
+    }
+    if (picture_from_shown()) {
+        std::snprintf(s_ahead_report, sizeof s_ahead_report, "  last popover: picture made as it opened, %.1f ms\n",
+                      static_cast<double>(perf::now_us() - waited) / 1000.0);
+        return;
+    }
+#endif
+    // no frame on show to shrink, as in the simulator: draw the screen again
+    const std::uint64_t t0 = perf::now_us();
+    if (s_shot == nullptr) {
+        s_shot = lv_draw_buf_create(FW, FH, LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO);
+    }
+    if (s_shot == nullptr || lv_snapshot_take_to_draw_buf(lv_screen_active(), LV_COLOR_FORMAT_RGB565, s_shot) != LV_RESULT_OK) {
+        return;
+    }
+    stretch(s_shot, s_half, 0.5f);
+    finish_picture(t0, perf::now_us());
 }
 
 constexpr std::int32_t MARGIN = space::l, GAP = space::m, PROGRESS = 1024;
@@ -283,6 +513,7 @@ void rise(int32_t p)
 
 void finish_close(lv_anim_t *)
 {
+    s_open.store(false, std::memory_order_release);
     if (s_pop.source != nullptr) {
         lv_obj_remove_state(s_pop.source, LV_STATE_USER_1);
     }
@@ -313,10 +544,33 @@ void run(std::int32_t from, std::int32_t to, std::uint32_t ms, lv_anim_path_cb_t
 }  // namespace
 
 bool popover_open() { return s_pop.card != nullptr && !s_pop.closing; }
+
+void prepare_popover()
+{
+#if defined(ESP_PLATFORM)
+    start_worker();
+    s_pressed_us.store(perf::now_us(), std::memory_order_relaxed);
+    if (s_worker != nullptr) {
+        xTaskNotifyGive(s_worker);
+    }
+#endif
+}
+
+void popover_source(lv_obj_t *obj)
+{
+    lv_obj_add_event_cb(obj, [](lv_event_t *) { prepare_popover(); }, LV_EVENT_PRESSED, nullptr);
+}
 void set_pop_glass(PopGlass how) { s_how = how; }
 void set_pop_motion(PopMotion how) { s_motion = how; }
 PopMotion pop_motion() { return s_motion; }
-const char *freeze_report() { return s_freeze_report; }
+const lv_draw_buf_t *frozen_picture() { return s_frozen; }
+
+const char *freeze_report()
+{
+    static char both[300];
+    std::snprintf(both, sizeof both, "%s%s%s", s_freeze_report, s_up_report, s_ahead_report);
+    return both;
+}
 PopGlass pop_glass() { return s_how; }
 
 lv_obj_t *popover(lv_obj_t *source, std::int32_t w, std::int32_t h, From from, bool blur_scrim)
@@ -346,6 +600,7 @@ lv_obj_t *popover(lv_obj_t *source, std::int32_t w, std::int32_t h, From from, b
     if (frozen) {
         freeze();
     }
+    s_open.store(true, std::memory_order_release);
     if (frozen && s_frozen != nullptr) {
         // the overlay plane itself takes the picture as its opaque background, so
         // LVGL starts drawing there and skips everything the picture hides
@@ -375,6 +630,10 @@ lv_obj_t *popover(lv_obj_t *source, std::int32_t w, std::int32_t h, From from, b
         lv_obj_set_style_blur_radius(s_pop.card, 40, 0);
     } else if (s_motion == PopMotion::Rise) {
         bake_shadow(s_pop.to);
+#if defined(ESP_PLATFORM)
+        s_made_at_gen.store(0, std::memory_order_relaxed);  // a shadow painted in: never this picture again
+        s_made_from_us.store(0, std::memory_order_relaxed);
+#endif
         lv_obj_set_style_shadow_width(s_pop.card, 0, 0);
     }
     lv_obj_set_style_pad_all(s_pop.card, 0, 0);

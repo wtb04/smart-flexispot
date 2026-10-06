@@ -270,6 +270,8 @@ PopGlass pop_glass();
 enum class PopMotion : std::uint8_t { Grow, Rise };
 void      set_pop_motion(PopMotion how);
 PopMotion pop_motion();
+/** The last frozen picture, for looking at from a development build. */
+const lv_draw_buf_t *frozen_picture();
 /** How long the last frozen popover took to take its picture and blur it. */
 const char *freeze_report();
 
@@ -280,6 +282,10 @@ const char *freeze_report();
 lv_obj_t *popover(lv_obj_t *source, std::int32_t w, std::int32_t h, From from = From::Below,
                   bool blur_scrim = true);
 void      close_popover(bool animate = true);
+/** Something that opens a popover: its backdrop starts being made as a finger lands on it. */
+void      popover_source(lv_obj_t *obj);
+/** What a finger landing on a popover source does: start on the backdrop. */
+void      prepare_popover();
 bool      popover_open();
 
 /** A slab that drops from under the bar with a notice, and leaves on its own. */
@@ -302,6 +308,9 @@ void  begin();
 Stats end();
 /** Each frame of the last measuring, in ms, up to 48 of them. */
 int   frames(const std::uint16_t **ms);
+/** Goes up with every frame drawn, so a picture of the screen can tell whether it is still current. */
+std::uint32_t generation();
+std::uint64_t last_frame_us();
 std::uint64_t now_us();
 }  // namespace perf
 
