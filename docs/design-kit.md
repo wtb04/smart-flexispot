@@ -61,6 +61,10 @@ right one with `kit::layer(Layer::...)`. Don't fake depth with a bigger shadow.
 | `badge`, `empty` | a small pill in an ink, and what shows where a feed is missing |
 | `Readout`, `Stepper` | a big figure, and minus, value, plus, both a size that never changes |
 | `sheet`, `sheet_row` | a big centred popover whose body scrolls, and a label with its value on it |
+| `dot`, `status` | a state at a glance, and the bar's clock with the panel's own Wi-Fi and phone marks |
+| `Cover`, `Backdrop` | a picture in a rounded rectangle or a circle, its corners cut once as it arrives, and the blurred backdrop the music and cinema views lay behind everything |
+| `page`, `widget_grid`, `widget` | a page on the Content plane, and Home's grid of widgets that only show |
+| `dock_item`, `show_page` | the dock's choices, its mark sliding to the chosen one, and the change from one page to the next |
 | `set_usable` | faded to 40% and untappable, never LVGL's grey |
 
 A control the playing device can never act on is hidden, not faded. A feed
@@ -131,7 +135,10 @@ the screen changes, so:
 2. **Shadows only from the kit.** Tiles have their shadow baked into the ground
    while they stand still, and glass keeps a picture of its own shadow. A big
    soft shadow on something that moves is worked out again every frame over
-   everything it passes (`motion::moving` swaps it for a small one).
+   everything it passes (`motion::moving` swaps it for a small one). A shadow
+   ends before it reaches a tile beside it: across a tile's edge its soft
+   fade comes out as one hard step in 16-bit colour, which is why the dock is
+   `Glass::Dock`.
 3. **Opaque where possible.** LVGL stops drawing what lies beneath an opaque
    object that covers the change. A transparent full-screen container makes it
    draw everything under it.
@@ -160,7 +167,11 @@ the screen changes, so:
    glass about 4; the whole page scrolling under the bar about 6 to 8, with 6
    times the pixels. A sheet's body scrolls over a picture of the glass under
    it, a fifth of what the same body on plain glass costs.
-10. **Big buffers once, in PSRAM.** They are made once and freed when done.
+10. **Change pages in bands.** A page change is a wipe from the dock side
+   in eight bands, one a frame, so each frame redraws an eighth of the page
+   and the change takes about as much drawing as one full frame. Pages are
+   made once and hidden, never rebuilt. The bar and the dock stay as they are.
+11. **Big buffers once, in PSRAM.** They are made once and freed when done.
    Free PSRAM is tight while the old UI still runs alongside.
 
 What that buys, measured on the panel:
