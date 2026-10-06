@@ -6,25 +6,38 @@ import ImageIO
 /// Playing a small cover, or none at all. The video is found by searching its
 /// title and channel and taking the result with both exactly; when Safari did
 /// give a cover, the thumbnail must look the same as it, or it is not used.
+/// The channel's own picture comes with it, square, for where a square is drawn.
 enum YouTubeCover {
+    struct Found {
+        let thumbnail: Data
+        let channel: Data?
+    }
+
     private static let agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15"
     private static let sameEnough = 12.0  // mean difference over 16 by 9 greys; another video is near 60
 
-    static func find(title: String, channel: String, small: Data?) async -> Data? {
-        guard let id = await videoID(title: title, channel: channel) else { return nil }
+    static func find(title: String, channel: String, small: Data?) async -> Found? {
+        guard let (id, avatar) = await video(title: title, channel: channel) else { return nil }
         for size in ["maxresdefault", "mqdefault"] {
-            guard let url = URL(string: "https://i.ytimg.com/vi/\(id)/\(size).jpg"),
-                  let (data, response) = try? await URLSession.shared.data(from: url),
-                  (response as? HTTPURLResponse)?.statusCode == 200 else { continue }
+            guard let data = await fetch("https://i.ytimg.com/vi/\(id)/\(size).jpg") else { continue }
             if let small, let difference = difference(small, data), difference > sameEnough {
                 return nil  // a video of the same name, but not this one
             }
-            return data
+            var picture: Data?
+            if let avatar { picture = await fetch(avatar) }
+            return Found(thumbnail: data, channel: picture)
         }
         return nil
     }
 
-    private static func videoID(title: String, channel: String) async -> String? {
+    private static func fetch(_ address: String) async -> Data? {
+        guard let url = URL(string: address), let (data, response) = try? await URLSession.shared.data(from: url),
+              (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+        return data
+    }
+
+    /// The video's id, and where its channel's picture is.
+    private static func video(title: String, channel: String) async -> (String, String?)? {
         var search = URLComponents(string: "https://www.youtube.com/results")!
         search.queryItems = [URLQueryItem(name: "search_query", value: "\(title) \(channel)")]
         var request = URLRequest(url: search.url!, timeoutInterval: 5)
@@ -44,21 +57,29 @@ enum YouTubeCover {
         }
     }
 
-    /// The first videoRenderer, depth first, that `matches`, as its id.
-    private static func first(in node: Any, where matches: ([String: Any]) -> Bool) -> String? {
+    /// The first videoRenderer, depth first, that `matches`: its id and its channel's picture.
+    private static func first(in node: Any, where matches: ([String: Any]) -> Bool) -> (String, String?)? {
         if let object = node as? [String: Any] {
             if let video = object["videoRenderer"] as? [String: Any], matches(video), let id = video["videoId"] as? String {
-                return id
+                return (id, avatar(of: video))
             }
             for value in object.values {
-                if let id = first(in: value, where: matches) { return id }
+                if let found = first(in: value, where: matches) { return found }
             }
         } else if let array = node as? [Any] {
             for value in array {
-                if let id = first(in: value, where: matches) { return id }
+                if let found = first(in: value, where: matches) { return found }
             }
         }
         return nil
+    }
+
+    /// The channel's picture as the search gives it, 68 square, asked for at the panel's largest.
+    private static func avatar(of video: [String: Any]) -> String? {
+        let renderer = (video["channelThumbnailSupportedRenderers"] as? [String: Any])?["channelThumbnailWithLinkRenderer"]
+        let thumbnails = (((renderer as? [String: Any])?["thumbnail"] as? [String: Any])?["thumbnails"] as? [[String: Any]])
+        guard let url = thumbnails?.last?["url"] as? String else { return nil }
+        return url.replacingOccurrences(of: #"=s\d+"#, with: "=s480", options: .regularExpression)
     }
 
     private static func difference(_ a: Data, _ b: Data) -> Double? {
