@@ -725,4 +725,23 @@ class Reading : public InPsram {
     int         m_zone = -2;
 };
 
+// --- notices, as the screen gives them ---------------------------------------
+
+struct NoticeSpec {
+    const char  *source  = nullptr;  // over the headline, in capitals
+    const char  *title   = nullptr;  // the headline, up to two lines
+    const char  *message = nullptr;  // up to three quieter lines under it; null or empty for none
+    const char  *aside   = nullptr;  // at the right of the source: when it came, how many wait
+    const char  *glyph   = nullptr;  // a mark in a well at its left; without one, a dot in `ink` before the source
+    Ink          ink     = Ink::Accent;
+    std::int32_t timeout_ms = 8000;  // 0 or less: until tapped, without the line that runs down
+    bool         solid   = false;    // over a picture rather than the ground: nothing blurs what shows through
+    void (*done)(lv_obj_t *notice) = nullptr;  // tapped, flicked up or its time up; without it, it leaves
+};
+/** As notice() above, with what it says of itself. Returns the slab; one dropping in sends the last away. */
+lv_obj_t *notice(const NoticeSpec &spec);
+void      set_notice_aside(lv_obj_t *notice, const char *aside);
+/** The notice on show leaves. */
+void      dismiss_notice();
+
 }  // namespace ui::kit
