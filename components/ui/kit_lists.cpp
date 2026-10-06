@@ -174,7 +174,7 @@ namespace {
 
 // --- rows -----------------------------------------------------------------
 
-struct Row {
+struct Row : InPsram {
     lv_obj_t   *title = nullptr, *detail = nullptr, *value = nullptr, *trail = nullptr, *dot = nullptr;
     lv_timer_t *timer = nullptr;
     std::int32_t inset = 0;   // where its hairline starts
@@ -838,7 +838,7 @@ void Stepper::on_repeat(lv_timer_t *t)
 // --- sheets ---------------------------------------------------------------
 
 namespace {
-struct Under {
+struct Under : InPsram {
     lv_draw_buf_t *picture = nullptr;
     bool           tried   = false;
 };

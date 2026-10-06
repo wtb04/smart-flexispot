@@ -19,6 +19,16 @@
 
 namespace ui::kit {
 
+/**
+ * What the kit makes for itself comes from PSRAM, as LVGL's own does: through
+ * the C library everything of 64 bytes or less lands in internal memory, and
+ * a lab's lists of rows took the last of what Wi-Fi and TLS share.
+ */
+struct InPsram {
+    static void *operator new(std::size_t bytes) { return lv_malloc(bytes); }
+    static void  operator delete(void *p) { lv_free(p); }
+};
+
 enum class Look : std::uint8_t { Dark, Light };
 
 struct Palette {
@@ -206,7 +216,7 @@ struct DialSpec {
     Role         read    = Role::ReadM;
 };
 
-class Dial {
+class Dial : public InPsram {
   public:
     Dial() = default;
     Dial(const Dial &) = delete;
@@ -272,7 +282,7 @@ struct RailSpec {
     int          notch_count = 0;
 };
 
-class Rail {
+class Rail : public InPsram {
   public:
     Rail() = default;
     Rail(const Rail &) = delete;
@@ -370,7 +380,7 @@ enum class Shape : std::uint8_t { Rounded, Round };
  * once, as it arrives, so drawing it is a plain copy; a new one fades in over
  * the old. Without one it is an empty well with a glyph.
  */
-class Cover {
+class Cover : public InPsram {
   public:
     Cover(const Cover &) = delete;
     Cover &operator=(const Cover &) = delete;
@@ -408,7 +418,7 @@ class Cover {
  * lightened in the light one so their text reads on it. Made off the LVGL task
  * and laid down a band of rows a frame; opaque, so nothing under it is drawn.
  */
-class Backdrop {
+class Backdrop : public InPsram {
   public:
     Backdrop(const Backdrop &) = delete;
     Backdrop &operator=(const Backdrop &) = delete;
@@ -576,7 +586,7 @@ struct ReadoutSpec {
 };
 
 /** A big figure in a box that never changes size, so nothing round it moves when it does. */
-class Readout {
+class Readout : public InPsram {
   public:
     Readout() = default;
     Readout(const Readout &) = delete;
@@ -606,7 +616,7 @@ struct StepperSpec {
 };
 
 /** Minus, the value, plus: holding one repeats, faster the longer it is held. Sends LV_EVENT_VALUE_CHANGED. */
-class Stepper {
+class Stepper : public InPsram {
   public:
     Stepper() = default;
     Stepper(const Stepper &) = delete;
@@ -643,7 +653,7 @@ lv_obj_t *sheet_row(lv_obj_t *body, const char *label, const char *value);
 // --- readings --------------------------------------------------------------
 
 /** A thin bar of zones with a dot at the reading: the zone it is in bright, the rest faint. */
-class Scale {
+class Scale : public InPsram {
   public:
     Scale() = default;
     Scale(const Scale &) = delete;
@@ -678,7 +688,7 @@ struct ReadingSpec {
 };
 
 /** What a reading is, at a glance: its name, a big figure, one word in its zone's ink, and the scale it sits on. */
-class Reading {
+class Reading : public InPsram {
   public:
     Reading(const Reading &) = delete;
     Reading &operator=(const Reading &) = delete;

@@ -460,7 +460,7 @@ void restyle_mark(void *)
 
 // --- widgets --------------------------------------------------------------
 
-struct Grid {
+struct Grid : InPsram {
     int           columns = 4;
     std::uint32_t taken[32]{};  // a bit for each cell, a word for each row
     int           rows = 0;

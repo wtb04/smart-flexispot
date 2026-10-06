@@ -937,7 +937,7 @@ lv_obj_t *toggle(lv_obj_t *parent, bool on)
 }
 
 namespace {
-struct Seg {
+struct Seg : InPsram {
     lv_obj_t *thumb;
     int       chosen;
 };

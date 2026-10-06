@@ -22,7 +22,7 @@
 
 namespace ui::kit {
 
-struct Backdrop::Job {
+struct Backdrop::Job : InPsram {
     std::uint16_t *tinted = nullptr;  // three planes, sw by sh, each value times 256
     std::int32_t  *cols   = nullptr;
     std::uint8_t  *bgr    = nullptr;
