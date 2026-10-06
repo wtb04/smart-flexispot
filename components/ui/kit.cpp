@@ -1,5 +1,6 @@
 #include "kit.h"
 
+#include "kit_bake.h"
 #include "kit_fonts.h"
 #include "kit_pixels.h"
 
@@ -313,6 +314,7 @@ void apply()
     for (int i = 0; i < s_restyler_count; ++i) {
         s_restylers[i].cb(s_restylers[i].ctx);
     }
+    bake::restyle();
 }
 
 void init_styles()
@@ -394,6 +396,8 @@ void paint_ground()
         }
     }
     lv_free(small);
+    lv_draw_buf_flush_cache(s_ground_buf, nullptr);
+    bake::painted();
     if (s_ground_img != nullptr) {
         lv_obj_invalidate(s_ground_img);
     }
@@ -550,6 +554,7 @@ void screen(lv_obj_t *scr)
     }
     ground(s_layers[static_cast<int>(Layer::Ground)]);
     lv_obj_t *content = s_layers[static_cast<int>(Layer::Content)];
+    bake::begin(s_layers[static_cast<int>(Layer::Ground)], content, s_ground_buf);
     lv_obj_add_flag(content, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(content, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_scroll_dir(content, LV_DIR_VER);
@@ -583,6 +588,7 @@ lv_obj_t *tile(lv_obj_t *parent, Lift lift)
     lv_obj_remove_style_all(obj);
     lv_obj_add_style(obj, lift == Lift::Low ? &s_tile : &s_tile_hi, 0);
     lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
+    bake::cast(obj);
     return obj;
 }
 
@@ -599,8 +605,10 @@ lv_obj_t *glass(lv_obj_t *parent, Glass kind)
 {
     lv_obj_t *obj = lv_obj_create(parent);
     lv_obj_remove_style_all(obj);
-    lv_obj_add_style(obj, kind == Glass::Small ? &s_glass_sm : kind == Glass::Large ? &s_glass_lg : &s_glass_clear, 0);
+    const lv_style_t *st = kind == Glass::Small ? &s_glass_sm : kind == Glass::Large ? &s_glass_lg : &s_glass_clear;
+    lv_obj_add_style(obj, st, 0);
     lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
+    bake::glass(obj, st);
     return obj;
 }
 
