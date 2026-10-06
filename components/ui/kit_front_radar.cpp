@@ -1,13 +1,14 @@
-// The Radar page.
+// The radar page: the old screen's map, planes and zoom, which it keeps, on a
+// page of the design kit's.
 
 #include "kit_front.h"
+
+#include "radar_page.h"
 
 namespace ui::kitfront {
 void build_radar(lv_obj_t *page)
 {
-    lv_obj_t *t = kit::tile(page, kit::Lift::Low);
-    lv_obj_set_size(t, kit::inset::width, 200);
-    kit::text(t, kit::Role::H2, "Radar");
-    lv_obj_align(kit::text(t, kit::Role::Body, "Being built", kit::Ink::Secondary), LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    build_radar_page(page, kit::inset::width, kit::inset::height);
+    subscribe(Topic::Page, detail::kNoView, [] { radar_page_opened(); });
 }
 }  // namespace ui::kitfront
