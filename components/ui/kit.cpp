@@ -1,11 +1,13 @@
 #include "kit.h"
 
+#include "kit_bake.h"
 #include "kit_fonts.h"
 #include "kit_pixels.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <iterator>
 
 namespace ui::kit {
@@ -322,6 +324,7 @@ void apply()
     for (int i = 0; i < s_restyler_count; ++i) {
         s_restylers[i].cb(s_restylers[i].ctx);
     }
+    bake::restyle();
 }
 
 void init_styles()
@@ -404,6 +407,8 @@ void paint_ground()
         }
     }
     lv_free(small);
+    lv_draw_buf_flush_cache(s_ground_buf, nullptr);
+    bake::painted();
     if (s_ground_img != nullptr) {
         lv_obj_invalidate(s_ground_img);
     }
@@ -444,8 +449,13 @@ void init(Look look)
     apply();
 }
 
+// Each of these restyles every screen and redraws all of it, so only when
+// something changes.
 void set_look(Look look)
 {
+    if (look == s_look) {
+        return;
+    }
     s_look = look;
     apply();
     if (s_ground_img != nullptr) {
@@ -455,12 +465,19 @@ void set_look(Look look)
 
 void set_glass(int percent)
 {
-    s_glass = std::clamp(percent, 0, 100);
+    percent = std::clamp(percent, 0, 100);
+    if (percent == s_glass) {
+        return;
+    }
+    s_glass = percent;
     apply();
 }
 
 void set_effects(bool blur, bool shadows)
 {
+    if (blur == s_blur && shadows == s_shadows) {
+        return;
+    }
     s_blur    = blur;
     s_shadows = shadows;
     apply();
@@ -468,6 +485,9 @@ void set_effects(bool blur, bool shadows)
 
 void set_accent(std::uint32_t colour)
 {
+    if (colour == s_accent) {
+        return;
+    }
     s_accent = colour;
     apply();
 }
@@ -560,6 +580,7 @@ void screen(lv_obj_t *scr)
     }
     ground(s_layers[static_cast<int>(Layer::Ground)]);
     lv_obj_t *content = s_layers[static_cast<int>(Layer::Content)];
+    bake::begin(s_layers[static_cast<int>(Layer::Ground)], content, s_ground_buf);
     lv_obj_add_flag(content, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(content, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_scroll_dir(content, LV_DIR_VER);
@@ -593,6 +614,7 @@ lv_obj_t *tile(lv_obj_t *parent, Lift lift)
     lv_obj_remove_style_all(obj);
     lv_obj_add_style(obj, lift == Lift::Low ? &s_tile : &s_tile_hi, 0);
     lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
+    bake::cast(obj);
     return obj;
 }
 
@@ -609,8 +631,10 @@ lv_obj_t *glass(lv_obj_t *parent, Glass kind)
 {
     lv_obj_t *obj = lv_obj_create(parent);
     lv_obj_remove_style_all(obj);
-    lv_obj_add_style(obj, kind == Glass::Small ? &s_glass_sm : kind == Glass::Large ? &s_glass_lg : &s_glass_clear, 0);
+    const lv_style_t *st = kind == Glass::Small ? &s_glass_sm : kind == Glass::Large ? &s_glass_lg : &s_glass_clear;
+    lv_obj_add_style(obj, st, 0);
     lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
+    bake::glass(obj, st);
     return obj;
 }
 
@@ -641,11 +665,18 @@ lv_obj_t *icon(lv_obj_t *parent, const char *glyph, std::int32_t px, bool filled
     return label;
 }
 
+// Setting a font or a text redraws the label even when nothing changes, and
+// pages set these on every update of what they show.
 void set_icon(lv_obj_t *label, const char *glyph, bool filled)
 {
-    const auto px = static_cast<std::int32_t>(reinterpret_cast<std::intptr_t>(lv_obj_get_user_data(label)));
-    lv_obj_set_style_text_font(label, fonts::icon(px > 0 ? px : 28, filled), 0);
-    lv_label_set_text(label, glyph);
+    const auto       px   = static_cast<std::int32_t>(reinterpret_cast<std::intptr_t>(lv_obj_get_user_data(label)));
+    const lv_font_t *font = fonts::icon(px > 0 ? px : 28, filled);
+    if (lv_obj_get_style_text_font(label, LV_PART_MAIN) != font) {
+        lv_obj_set_style_text_font(label, font, 0);
+    }
+    if (std::strcmp(lv_label_get_text(label), glyph) != 0) {
+        lv_label_set_text(label, glyph);
+    }
 }
 
 lv_obj_t *hairline(lv_obj_t *parent, bool vertical, std::int32_t length)
@@ -749,7 +780,9 @@ void set_lamp(lv_obj_t *t, bool on)
     lv_obj_t *ic    = lv_obj_get_child(t, 0);
     lv_obj_t *state = lv_obj_get_child(lv_obj_get_child(t, 1), 1);
     set_icon(ic, lv_label_get_text(ic), on);
-    lv_label_set_text(state, on ? "On" : "Off");
+    if (std::strcmp(lv_label_get_text(state), on ? "On" : "Off") != 0) {
+        lv_label_set_text(state, on ? "On" : "Off");
+    }
     if (on) {
         lv_obj_add_state(state, LV_STATE_CHECKED);
     } else {
@@ -762,8 +795,12 @@ void set_usable(lv_obj_t *obj, bool usable)
     if (obj == nullptr) {
         return;
     }
+    const lv_opa_t opa = usable ? LV_OPA_COVER : LV_OPA_40;
+    if (lv_obj_is_clickable(obj) == usable && lv_obj_get_style_opa(obj, LV_PART_MAIN) == opa) {
+        return;
+    }
     lv_obj_set_clickable(obj, usable);
-    lv_obj_set_style_opa(obj, usable ? LV_OPA_COVER : LV_OPA_40, 0);
+    lv_obj_set_style_opa(obj, opa, 0);
     if (!usable) {
         lv_obj_remove_state(obj, LV_STATE_PRESSED);
     }
@@ -815,8 +852,11 @@ void place_thumb(lv_obj_t *seg, int index, bool animate)
     const std::int32_t x = lv_obj_get_x(item), w = lv_obj_get_width(item);
     data->chosen = index;
     for (std::uint32_t i = 1; i < lv_obj_get_child_count(seg); ++i) {
-        lv_obj_set_style_text_opa(lv_obj_get_child(seg, static_cast<int32_t>(i)),
-                                  static_cast<int>(i) - 1 == index ? LV_OPA_COVER : s_pal.ink2_opa, 0);
+        lv_obj_t     *it  = lv_obj_get_child(seg, static_cast<int32_t>(i));
+        const lv_opa_t opa = static_cast<int>(i) - 1 == index ? static_cast<lv_opa_t>(LV_OPA_COVER) : s_pal.ink2_opa;
+        if (lv_obj_get_style_text_opa(it, LV_PART_MAIN) != opa) {
+            lv_obj_set_style_text_opa(it, opa, 0);
+        }
     }
     lv_anim_delete(data->thumb, nullptr);
     if (!animate) {
@@ -886,7 +926,15 @@ lv_obj_t *segmented(lv_obj_t *parent, std::initializer_list<const char *> labels
 }
 
 int segmented_chosen(lv_obj_t *seg) { return static_cast<Seg *>(lv_obj_get_user_data(seg))->chosen; }
-void segmented_choose(lv_obj_t *seg, int index, bool animate) { place_thumb(seg, index, animate); }
+
+void segmented_choose(lv_obj_t *seg, int index, bool animate)
+{
+    const auto *data = static_cast<Seg *>(lv_obj_get_user_data(seg));
+    if (index == data->chosen && lv_anim_get(data->thumb, nullptr) == nullptr) {
+        return;  // there already
+    }
+    place_thumb(seg, index, animate);
+}
 
 lv_obj_t *capsule(lv_obj_t *parent)
 {
