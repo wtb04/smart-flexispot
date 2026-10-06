@@ -1282,67 +1282,126 @@ void leave(lv_obj_t *slab)
 }
 }  // namespace
 
-lv_obj_t *notice(const char *source, const char *glyph, const char *title, const char *message,
-                 std::uint32_t timeout_ms)
+namespace {
+struct NoticeParts : InPsram {
+    lv_obj_t *aside = nullptr;
+    void (*done)(lv_obj_t *notice) = nullptr;
+};
+
+NoticeParts *parts_of(lv_obj_t *slab) { return static_cast<NoticeParts *>(lv_obj_get_user_data(slab)); }
+
+// Tapped, flicked away or its time up: what it was given to do then, or gone.
+void finish(lv_obj_t *slab)
+{
+    if (slab == nullptr || lv_obj_has_flag(slab, LV_OBJ_FLAG_USER_4)) {
+        return;
+    }
+    const NoticeParts *parts = parts_of(slab);
+    if (parts != nullptr && parts->done != nullptr) {
+        parts->done(slab);
+    } else {
+        leave(slab);
+    }
+}
+
+lv_obj_t *bare(lv_obj_t *parent)
+{
+    lv_obj_t *obj = lv_obj_create(parent);
+    lv_obj_remove_style_all(obj);
+    lv_obj_remove_flag(obj, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
+    return obj;
+}
+
+lv_obj_t *lines(lv_obj_t *parent, Role role, const char *value, Ink ink, int rows)
+{
+    lv_obj_t *label = text(parent, role, value, ink);
+    lv_obj_set_width(label, LV_PCT(100));
+    lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_DOTS);
+    lv_obj_set_style_max_height(label, rows * lv_font_get_line_height(lv_obj_get_style_text_font(label, LV_PART_MAIN)), 0);
+    return label;
+}
+}  // namespace
+
+lv_obj_t *notice(const NoticeSpec &spec)
 {
     if (s_notice != nullptr) {
         leave(s_notice);
     }
-    constexpr std::int32_t W = 620, H = 150, Y = 100;
+    constexpr std::int32_t W = 620, Y = 100;
     lv_obj_t *slab = glass(layer(Layer::Alert), Glass::Large);
     s_notice       = slab;
+    auto *parts    = new NoticeParts;
+    parts->done    = spec.done;
+    lv_obj_set_user_data(slab, parts);
+    lv_obj_add_event_cb(slab, [](lv_event_t *e) { delete parts_of(lv_event_get_target_obj(e)); }, LV_EVENT_DELETE,
+                        nullptr);
     lv_obj_set_style_radius(slab, radius::pop, 0);
-    lv_obj_set_size(slab, W, H);
-    lv_obj_set_pos(slab, (size::screen_w - W) / 2, -H);
+    if (spec.solid) {
+        lv_obj_set_style_bg_opa(slab, LV_OPA_COVER, 0);
+    }
+    lv_obj_set_size(slab, W, LV_SIZE_CONTENT);
+    lv_obj_set_pos(slab, (size::screen_w - W) / 2, -size::screen_h);
     lv_obj_set_style_pad_all(slab, space::xl, 0);
     lv_obj_set_flex_flow(slab, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(slab, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(slab, space::l, 0);
     lv_obj_add_flag(slab, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(slab, [](lv_event_t *e) { leave(lv_event_get_target_obj(e)); }, LV_EVENT_CLICKED, nullptr);
+    lv_obj_add_event_cb(slab, [](lv_event_t *e) { finish(lv_event_get_target_obj(e)); }, LV_EVENT_CLICKED, nullptr);
     lv_obj_add_event_cb(
         slab,
         [](lv_event_t *e) {
             if (lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_TOP) {
-                leave(lv_event_get_target_obj(e));  // flicked back up where it came from
+                finish(lv_event_get_target_obj(e));  // flicked back up where it came from
             }
         },
         LV_EVENT_GESTURE, nullptr);
+    lv_obj_set_gesture_bubble(slab, false);  // a flick on it is not one on the view under it
 
-    lv_obj_t *mark = well(slab);
-    lv_obj_set_size(mark, 76, 76);
-    lv_obj_set_style_pad_all(mark, 0, 0);
-    lv_obj_remove_flag(mark, LV_OBJ_FLAG_CLICKABLE);  // a tap on it is a tap on the notice
-    lv_obj_center(icon(mark, glyph, 34, true));
+    if (spec.glyph != nullptr) {
+        lv_obj_t *mark = well(slab);
+        lv_obj_set_size(mark, 76, 76);
+        lv_obj_set_style_pad_all(mark, 0, 0);
+        lv_obj_remove_flag(mark, LV_OBJ_FLAG_CLICKABLE);  // a tap on it is a tap on the notice
+        lv_obj_center(icon(mark, spec.glyph, 34, true));
+    }
 
-    lv_obj_t *col = lv_obj_create(slab);
-    lv_obj_remove_style_all(col);
+    lv_obj_t *col = bare(slab);
     lv_obj_set_flex_grow(col, 1);
-    lv_obj_set_height(col, LV_PCT(100));
+    lv_obj_set_height(col, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
-    lv_obj_remove_flag(col, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_t *head = lv_obj_create(col);
-    lv_obj_remove_style_all(head);
+    lv_obj_t *head = bare(col);
     lv_obj_set_size(head, LV_PCT(100), LV_SIZE_CONTENT);
-    lv_obj_remove_flag(head, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_align(text(head, Role::Label, source, Ink::Secondary), LV_ALIGN_LEFT_MID, 0, 0);
-    lv_obj_align(text(head, Role::Label, "09:41", Ink::Secondary), LV_ALIGN_RIGHT_MID, 0, 0);
-    lv_obj_set_style_pad_top(text(col, Role::H2, title), space::s, 0);
-    text(col, Role::Small, message, Ink::Secondary);
+    lv_obj_t *source = text(head, Role::Label, spec.source != nullptr ? spec.source : "", Ink::Secondary);
+    if (spec.glyph == nullptr) {
+        lv_obj_align(dot(head, spec.ink, 10), LV_ALIGN_LEFT_MID, 0, 0);
+        lv_obj_align(source, LV_ALIGN_LEFT_MID, 10 + space::s, 0);
+    } else {
+        lv_obj_align(source, LV_ALIGN_LEFT_MID, 0, 0);
+    }
+    parts->aside = text(head, Role::Label, spec.aside != nullptr ? spec.aside : "", Ink::Secondary);
+    lv_obj_align(parts->aside, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_set_style_pad_top(lines(col, Role::H2, spec.title != nullptr ? spec.title : "", Ink::Primary, 2), space::s, 0);
+    if (spec.message != nullptr && spec.message[0] != '\0') {
+        lv_obj_set_style_pad_top(lines(col, Role::Body, spec.message, Ink::Secondary, 3), space::xs, 0);
+    }
 
-    lv_obj_t *line = lv_obj_create(col);
-    lv_obj_remove_style_all(line);
+    lv_obj_t *line = bare(col);
     lv_obj_set_size(line, LV_PCT(100), 3);
     lv_obj_set_style_bg_color(line, colour(Ink::Primary), 0);
     lv_obj_set_style_bg_opa(line, colours().ink3_opa, 0);
     lv_obj_set_style_radius(line, 2, 0);
     lv_obj_set_style_margin_top(line, space::m, 0);
-    lv_obj_remove_flag(line, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_hidden(line, spec.timeout_ms <= 0);  // kept until tapped: no time to run down
 
+    lv_obj_update_layout(slab);
+    const std::int32_t h = lv_obj_get_height(slab);
+    lv_obj_set_y(slab, -h - 40);
     motion::moving(slab, true);
     lv_anim_t a;
     lv_anim_init(&a);
     lv_anim_set_var(&a, slab);
-    lv_anim_set_values(&a, -H, Y);
+    lv_anim_set_values(&a, -h - 40, Y);
     lv_anim_set_custom_exec_cb(&a, [](lv_anim_t *an, int32_t y) {
         auto *obj = static_cast<lv_obj_t *>(an->var);
         // the last pixels of the spring, where it has all but stopped, at
@@ -1360,17 +1419,16 @@ lv_obj_t *notice(const char *source, const char *glyph, const char *title, const
     lv_anim_set_path_cb(&a, motion::spring);
     lv_anim_start(&a);
 
-    if (timeout_ms > 0) {
+    if (spec.timeout_ms > 0) {
         lv_anim_t t;
         lv_anim_init(&t);
         lv_anim_set_var(&t, line);
         lv_anim_set_values(&t, 100, 0);
         lv_anim_set_exec_cb(&t, [](void *obj, int32_t v) { lv_obj_set_width(static_cast<lv_obj_t *>(obj), lv_pct(v)); });
-        lv_anim_set_duration(&t, timeout_ms);
+        lv_anim_set_duration(&t, static_cast<std::uint32_t>(spec.timeout_ms));
         lv_anim_set_path_cb(&t, lv_anim_path_linear);
         lv_anim_set_completed_cb(&t, [](lv_anim_t *an) {
-            lv_obj_t *slab_of = lv_obj_get_parent(lv_obj_get_parent(static_cast<lv_obj_t *>(an->var)));
-            leave(slab_of);
+            finish(lv_obj_get_parent(lv_obj_get_parent(static_cast<lv_obj_t *>(an->var))));
         });
         lv_anim_start(&t);
     }
@@ -1405,6 +1463,34 @@ void fit_popover()
     }
     if (shadowed) {
         shadow_on(s_pop.to);
+    }
+}
+
+lv_obj_t *notice(const char *source, const char *glyph, const char *title, const char *message,
+                 std::uint32_t timeout_ms)
+{
+    NoticeSpec spec;
+    spec.source     = source;
+    spec.glyph      = glyph;
+    spec.title      = title;
+    spec.message    = message;
+    spec.aside      = "09:41";
+    spec.timeout_ms = static_cast<std::int32_t>(timeout_ms);
+    return notice(spec);
+}
+
+void set_notice_aside(lv_obj_t *notice, const char *aside)
+{
+    const NoticeParts *parts = notice != nullptr ? parts_of(notice) : nullptr;
+    if (parts != nullptr && std::strcmp(lv_label_get_text(parts->aside), aside) != 0) {
+        lv_label_set_text(parts->aside, aside);
+    }
+}
+
+void dismiss_notice()
+{
+    if (s_notice != nullptr) {
+        leave(s_notice);
     }
 }
 
