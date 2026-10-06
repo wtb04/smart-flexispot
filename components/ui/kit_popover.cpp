@@ -1037,6 +1037,15 @@ void on_frame(lv_event_t *)
 
 bool popover_open() { return s_pop.card != nullptr && !s_pop.closing; }
 
+void reserve_popovers()
+{
+#if defined(ESP_PLATFORM)
+    start_worker();
+#else
+    buffers();
+#endif
+}
+
 void prepare_popover()
 {
 #if defined(ESP_PLATFORM)

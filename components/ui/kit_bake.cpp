@@ -1,5 +1,11 @@
 #include "kit_bake.h"
 
+#include "kit.h"
+
+#if defined(ESP_PLATFORM)
+#include "esp_heap_caps.h"
+#endif
+
 #include "kit_pixels.h"
 
 #include <algorithm>
@@ -53,7 +59,7 @@ struct Caster {
     bool          refused = false;  // as it stands now; asked again once it moves
 };
 
-Caster         s_casters[96];
+KIT_IN_PSRAM Caster s_casters[96];
 int            s_count   = 0;
 lv_obj_t      *s_ground  = nullptr, *s_content = nullptr, *s_canvas = nullptr;
 lv_draw_buf_t *s_picture = nullptr, *s_pristine = nullptr, *s_strip = nullptr;  // all in PSRAM on the panel
@@ -378,7 +384,7 @@ struct Pane {
     bool              trimmable = false;  // drawn untransformed and unblurred, so LVGL's box round it is plain
 };
 
-Pane s_panes[24];
+KIT_IN_PSRAM Pane s_panes[24];
 int  s_pane_count = 0;
 
 Pane *pane_of(lv_obj_t *o)
@@ -706,6 +712,13 @@ void painted()
         return;
     }
     if (s_pristine == nullptr) {
+#if defined(ESP_PLATFORM)
+        // a speed-up, not a need: it waits while the old pages still take most of the memory
+        constexpr std::size_t HEADROOM = 3 * 1024 * 1024;
+        if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < s_picture->data_size + HEADROOM) {
+            return;
+        }
+#endif
         s_pristine = lv_draw_buf_create(static_cast<std::uint32_t>(s_picture->header.w),
                                         static_cast<std::uint32_t>(s_picture->header.h), LV_COLOR_FORMAT_RGB565,
                                         LV_STRIDE_AUTO);
