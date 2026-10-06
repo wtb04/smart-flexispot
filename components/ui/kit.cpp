@@ -205,7 +205,7 @@ void apply()
     lv_style_set_pad_all(&s_well, space::m);
 
     const lv_opa_t g = glass_opa();
-    style_glass(&s_glass_sm, 20, 44, 16, g);
+    style_glass(&s_glass_sm, 20, 28, 6, g);  // the bar's: its shadow ends in the gap above the pages
     // big glass reads more opaque, so what is on it stays legible over anything
     style_glass(&s_glass_lg, 40, 80, 28, static_cast<lv_opa_t>(g + (s_pal.glass_solid_opa - g) * 45 / 100));
     style_glass(&s_glass_dock, 40, 28, 10, static_cast<lv_opa_t>(g + (s_pal.glass_solid_opa - g) * 45 / 100));
@@ -368,9 +368,15 @@ void paint_ground()
     const Glow *glows = s_look == Look::Dark ? DARK_GLOWS : LIGHT_GLOWS;
     const float base[3] = {static_cast<float>((s_pal.ground >> 16) & 0xff), static_cast<float>((s_pal.ground >> 8) & 0xff),
                            static_cast<float>(s_pal.ground & 0xff)};
+    // The glows light the chrome's side of the screen and are gone under the
+    // pages: a page slides by copying, ground and all, and a glow moving with
+    // it shows as a seam where it meets the ground that stays.
+    constexpr float PAGE_X = inset::left - space::l, PAGE_Y = inset::top - space::l, FADE = 40.0f;
     for (int y = 0; y < SH; ++y) {
         for (int x = 0; x < SW; ++x) {
             float px[3] = {base[0], base[1], base[2]};
+            const float outside = std::max(PAGE_X - x * 8.0f, PAGE_Y - y * 8.0f);
+            const float lit     = std::clamp(outside / FADE, 0.0f, 1.0f);
             for (int g = 0; g < 4; ++g) {
                 const Glow &glow = glows[g];
                 const float dx = (x * 8.0f / W - glow.x) / glow.rx, dy = (y * 8.0f / H - glow.y) / glow.ry;
@@ -378,7 +384,7 @@ void paint_ground()
                 if (f <= 0.0f) {
                     continue;
                 }
-                f = f * f * (3.0f - 2.0f * f) * glow.alpha;
+                f = f * f * (3.0f - 2.0f * f) * glow.alpha * lit;
                 const float c[3] = {static_cast<float>((glow.colour >> 16) & 0xff),
                                     static_cast<float>((glow.colour >> 8) & 0xff), static_cast<float>(glow.colour & 0xff)};
                 for (int k = 0; k < 3; ++k) {

@@ -521,6 +521,32 @@ esp_err_t frozen_page(httpd_req_t *req)
     return err == ESP_OK ? httpd_resp_send_chunk(req, nullptr, 0) : err;
 }
 
+// What the panel shows, straight from its frame buffer, unturned: a picture
+// taken by LVGL drawing the screen again misses whatever was drawn past it.
+esp_err_t panel_page(httpd_req_t *req)
+{
+    if (!ota::authorised(req)) {
+        return refuse(req);
+    }
+    int w = 0, h = 0;
+    const std::uint16_t *fb = board::shown_frame(&w, &h);
+    if (fb == nullptr) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        return httpd_resp_sendstr(req, "no panel\n");
+    }
+    httpd_resp_set_type(req, "application/octet-stream");
+    char head[32];
+    const int n = std::snprintf(head, sizeof(head), "RGB565 %d %d\n", w, h);
+    esp_err_t err = httpd_resp_send_chunk(req, head, n);
+    constexpr int ROWS = 8;
+    for (int y = 0; err == ESP_OK && y < h; y += ROWS) {
+        err = httpd_resp_send_chunk(req, reinterpret_cast<const char *>(fb + y * w),
+                                    static_cast<ssize_t>(std::min(ROWS, h - y) * w * 2));
+    }
+    board::let_go_of_frame();
+    return err == ESP_OK ? httpd_resp_send_chunk(req, nullptr, 0) : err;
+}
+
 esp_err_t bench_page(httpd_req_t *req)
 {
     if (!ota::authorised(req)) {
@@ -571,6 +597,7 @@ esp_err_t start()
         {.uri = "/power", .method = HTTP_GET, .handler = power_page, .user_ctx = nullptr},
         {.uri = "/bench", .method = HTTP_GET, .handler = bench_page, .user_ctx = nullptr},
         {.uri = "/frozen", .method = HTTP_GET, .handler = frozen_page, .user_ctx = nullptr},
+        {.uri = "/panel", .method = HTTP_GET, .handler = panel_page, .user_ctx = nullptr},
         {.uri = "/desk", .method = HTTP_GET, .handler = desk_page, .user_ctx = nullptr},
         {.uri = "/restart", .method = HTTP_GET, .handler = restart_page, .user_ctx = nullptr},
         {.uri = "/streams", .method = HTTP_GET, .handler = streams_page, .user_ctx = nullptr},

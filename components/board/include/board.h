@@ -105,19 +105,28 @@ void      zoom_end();
 
 /** A page glided across past LVGL: glide_begin() keeps the frame on show,
  *  the old page, and holds back the next frame LVGL draws, the new page at
- *  rest; each glide_step() then lays the two side by side, the new one
+ *  rest; each step then lays the two side by side, the new one
  *  `shift` pixels in from the right of `region`, or the left, by copying
  *  rather than drawing; glide_end() shows the held frame. False where the
  *  panel cannot. */
 bool glide_begin(const lv_area_t &region, bool from_left);
 bool glide_held();
-void glide_step(std::int32_t shift);
+/** A step's frame laid down, LVGL then to draw what changed round the region
+ *  into it, the dock's mark sliding, before glide_show() puts it on show. */
+bool glide_compose(std::int32_t shift);
+void glide_show();
 void glide_end();
 struct GlideTimes {
     std::uint32_t frames  = 0;
     std::int64_t  copy_us = 0;
 };
 GlideTimes glide_times();
+
+/** The frame the panel is showing, as the panel holds it: portrait, `w` by `h`
+ *  RGB565, for a development build to look at exactly what is on the glass. */
+const std::uint16_t *shown_frame(int *w, int *h);
+/** Done with it: the panel may draw into it again. */
+void let_go_of_frame();
 
 /** Below this the panel does not get any dimmer, so offering the range is just a
  *  control that appears broken. */

@@ -97,8 +97,54 @@ bool whole(Change how) { return how == Change::Slide || how == Change::Fade; }
 
 // LVGL cannot be told no: an area that is all in what is not open yet becomes
 // the screen's corner, which is the ground and is drawn the same again.
+// While a page slides on the panel only what is round it is drawn, into each
+// step's frame: inside, the copy is what shows, and what changed there is
+// drawn once the slide is over.
+bool      s_gliding = false;
+lv_area_t s_glide_region{}, s_glide_dropped = NOTHING;
+
+bool clip_to_glide(lv_event_t *e)
+{
+    auto           *a = static_cast<lv_area_t *>(lv_event_get_param(e));
+    const lv_area_t r = s_glide_region;
+    lv_area_t       in;
+    if (!meet(&in, *a, r)) {
+        return true;
+    }
+    s_glide_dropped = s_glide_dropped.x1 > s_glide_dropped.x2 ? in : span(s_glide_dropped, in);
+    lv_area_t pieces[4];
+    int       n = 0;
+    if (a->y1 < r.y1) {
+        pieces[n++] = {a->x1, a->y1, a->x2, r.y1 - 1};
+    }
+    if (a->y2 > r.y2) {
+        pieces[n++] = {a->x1, r.y2 + 1, a->x2, a->y2};
+    }
+    if (a->x1 < r.x1) {
+        pieces[n++] = {a->x1, in.y1, r.x1 - 1, in.y2};
+    }
+    if (a->x2 > r.x2) {
+        pieces[n++] = {r.x2 + 1, in.y1, a->x2, in.y2};
+    }
+    if (n == 0) {
+        *a = {0, 0, 0, 0};  // the screen's corner, under the dock, drawn the same again
+        return true;
+    }
+    s_run.nested = true;
+    for (int i = 1; i < n; ++i) {
+        lv_inv_area(static_cast<lv_display_t *>(lv_event_get_current_target(e)), &pieces[i]);
+    }
+    s_run.nested = false;
+    *a = pieces[0];
+    return true;
+}
+
 void on_invalidate(lv_event_t *e)
 {
+    if (s_gliding && !s_run.nested) {
+        clip_to_glide(e);
+        return;
+    }
     if (!s_run.filtering || s_run.nested) {
         return;
     }
@@ -298,6 +344,16 @@ void hold_drawing(bool hold)
     }
 }
 
+void end_glide()
+{
+    board::glide_end();
+    s_gliding = false;
+    hold_drawing(false);
+    if (s_glide_dropped.x1 <= s_glide_dropped.x2) {
+        lv_obj_invalidate_area(lv_screen_active(), &s_glide_dropped);  // what changed under the slide
+    }
+}
+
 #endif
 
 void finish()
@@ -312,8 +368,7 @@ void finish()
     lv_anim_delete(&s_run, nullptr);
 #if defined(ESP_PLATFORM)
     if (board::glide_held()) {  // cut short: the new page at rest, and LVGL drawing again
-        board::glide_end();
-        hold_drawing(false);
+        end_glide();
     }
 #endif
     for (int i = 0; i < s_run.unit_count; ++i) {
@@ -598,12 +653,46 @@ void hide_pages()
 }
 
 #if defined(ESP_PLATFORM)
+std::int32_t  s_glide_w  = 0;
+std::uint32_t s_glide_at = 0;
+
+void glide_tick(lv_timer_t *)
+{
+    lv_anim_t a;  // only to be read by the spring
+    lv_anim_init(&a);
+    a.start_value = 0;
+    a.end_value   = s_glide_w;
+    a.duration    = static_cast<std::int32_t>(motion::pop_ms);
+    a.act_time    = std::min<std::int32_t>(static_cast<std::int32_t>(lv_tick_elaps(s_glide_at)), a.duration);
+    const bool last = a.act_time >= a.duration;
+    if (board::glide_compose(last ? s_glide_w : motion::spring(&a))) {
+        lv_refr_now(lv_display_get_default());
+        board::glide_show();
+    }
+    if (!last) {
+        return;
+    }
+    lv_timer_delete(s_run.stepper);
+    s_run.stepper = nullptr;
+    end_glide();
+    const board::GlideTimes t = board::glide_times();
+    std::snprintf(s_report, sizeof s_report, "glide: %u frames in %.0f ms, the new page drawn in %.1f ms, %.1f ms a frame copying",
+                  static_cast<unsigned>(t.frames), static_cast<double>(perf::now_us() - s_run.began_us) / 1000.0,
+                  static_cast<double>(s_run.ready_us - s_run.began_us) / 1000.0,
+                  t.frames != 0 ? static_cast<double>(t.copy_us) / 1000.0 / t.frames : 0.0);
+    s_run = Run{};
+    ++s_run_id;
+}
+
 // On the panel a slide is copied, not drawn: the new page drawn once, at
 // rest, into a frame held back, then laid beside the old one a step a frame.
 // Between the bar and the bottom only, so the bar and the dock stay.
 bool glide(int from, int to)
 {
-    const lv_area_t region{PAGES.x1, inset::top - space::l, size::screen_w - 1, size::screen_h - 1};
+    // clear of the dock's and the bar's shadows, which would otherwise travel
+    // with the page that carries them in
+    const lv_area_t region{PAGES.x1 + 8, inset::top - 2, size::screen_w - 1, size::screen_h - 1};
+    hooks();
     if (!board::glide_begin(region, to < from)) {
         return false;
     }
@@ -615,36 +704,26 @@ bool glide(int from, int to)
     lv_obj_set_hidden(s_pages[to].obj, false);
     s_shown = to;
     quiet(false);
-    mark(to, false);
     edge_follows(s_pages[to].obj);
     lv_display_t *disp = lv_display_get_default();
     lv_obj_invalidate_area(lv_screen_active(), &region);
     lv_refr_now(disp);
     if (!board::glide_held()) {
         board::glide_end();
+        mark(to, true);
         return true;
     }
     hold_drawing(true);
+    s_gliding       = true;
+    s_glide_region  = region;
+    s_glide_dropped = NOTHING;
+    mark(to, true);  // round the region LVGL still draws, into each step's frame
     s_run.ready_us = perf::now_us();
-    lv_anim_t a;
-    lv_anim_init(&a);
-    lv_anim_set_var(&a, &s_run);
-    lv_anim_set_values(&a, 0, lv_area_get_width(&region));
-    lv_anim_set_custom_exec_cb(&a, [](lv_anim_t *, int32_t shift) { board::glide_step(shift); });
-    lv_anim_set_duration(&a, motion::pop_ms);
-    lv_anim_set_path_cb(&a, motion::spring);
-    lv_anim_set_completed_cb(&a, [](lv_anim_t *) {
-        board::glide_end();
-        hold_drawing(false);
-        const board::GlideTimes t = board::glide_times();
-        std::snprintf(s_report, sizeof s_report, "glide: %u frames in %.0f ms, the new page drawn in %.1f ms, %.1f ms a frame copying",
-                      static_cast<unsigned>(t.frames), static_cast<double>(perf::now_us() - s_run.began_us) / 1000.0,
-                      static_cast<double>(s_run.ready_us - s_run.began_us) / 1000.0,
-                      t.frames != 0 ? static_cast<double>(t.copy_us) / 1000.0 / t.frames : 0.0);
-        s_run = Run{};
-        ++s_run_id;
-    });
-    lv_anim_start(&a);
+    s_glide_w      = lv_area_get_width(&region);
+    s_glide_at     = lv_tick_get();
+    // a timer rather than an animation: each step draws, and drawing runs
+    // LVGL's animations, which must not happen inside one of theirs
+    s_run.stepper = lv_timer_create(glide_tick, 1, nullptr);
     return true;
 }
 #endif

@@ -1285,6 +1285,23 @@ void key(int code)
     case 'k':
         pictures_measure_corners();
         break;
+    case 't': {  // a finger on the next of the dock's items, lifted a tap's length later
+        static int next = 0;
+        next = (next + 1) % 4;
+        lv_obj_t *item = s_items[next];
+        lv_obj_add_state(item, LV_STATE_PRESSED);
+        lv_obj_send_event(item, LV_EVENT_PRESSED, nullptr);
+        lv_timer_t *lift = lv_timer_create(
+            [](lv_timer_t *t) {
+                auto *it = static_cast<lv_obj_t *>(lv_timer_get_user_data(t));
+                lv_obj_remove_state(it, LV_STATE_PRESSED);
+                lv_obj_send_event(it, LV_EVENT_RELEASED, nullptr);
+                lv_obj_send_event(it, LV_EVENT_CLICKED, nullptr);
+            },
+            120, item);
+        lv_timer_set_repeat_count(lift, 1);
+        break;
+    }
     case 'v':
         choose_sheet(6);
         lists::study();
