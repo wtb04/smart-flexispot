@@ -500,7 +500,11 @@ void freeze()
 
 constexpr std::int32_t MARGIN = space::l, GAP = space::m, PROGRESS = 1024;
 constexpr std::int32_t RISE  = 16;  // how far a rising card comes up
-constexpr int          WAVES = 4;   // the frames the live screen comes back in as a popover goes
+// The frames the live screen comes back in as a popover goes, and the frost
+// spreads in as one opens: thin bands at the panel's own pace read as one
+// sweep, where a few thick ones came as so many steps.
+constexpr int          WAVES = 12;
+constexpr int          FROST_WAVES = 10;
 
 struct Pop {
     lv_obj_t *scrim    = nullptr;
@@ -522,6 +526,11 @@ struct Pop {
     bool          rows   = true;        // the live screen comes back in bands of rows, or of columns
     std::int32_t  centre = 0, reach = 0, lo = 1, hi = 0;  // given back so far: lo to hi
     int           wave   = 0;
+    bool          frosting = false;        // opening: frozen so far only f_lo to f_hi
+    std::int32_t  f_lo = 1, f_hi = 0;
+    int           f_wave = 0;
+    std::uint32_t f_frame = 0, f_ms = 0;
+    lv_timer_t   *froster = nullptr;
     std::uint32_t wave_frame = 0, wave_ms = 0;
     lv_timer_t   *stepper = nullptr;
 } s_pop;
@@ -551,7 +560,13 @@ lv_area_t span(const lv_area_t &a, const lv_area_t &b)
 
 // The part of the screen the frozen picture still covers, along the bands:
 // everything but lo to hi.
-bool still_frozen(std::int32_t a, std::int32_t b) { return s_pop.lo > s_pop.hi || b < s_pop.lo || a > s_pop.hi; }
+bool still_frozen(std::int32_t a, std::int32_t b)
+{
+    if (s_pop.frosting) {
+        return s_pop.f_lo <= s_pop.f_hi && a >= s_pop.f_lo && b <= s_pop.f_hi;
+    }
+    return s_pop.lo > s_pop.hi || b < s_pop.lo || a > s_pop.hi;
+}
 
 // The frozen picture as an object of its own rather than the overlay's
 // background, so it can be taken away a band at a time. Opaque wherever it
@@ -578,8 +593,12 @@ void on_backdrop(lv_event_t *e)
     dsc.src = s_frozen;
     // the whole picture each time, cut to what is left: a plain copy the PPA takes
     lv_area_t parts[2] = {SCREEN, SCREEN};
-    const int n = s_pop.lo > s_pop.hi ? 1 : 2;
-    if (n == 2) {
+    int n = s_pop.lo > s_pop.hi ? 1 : 2;
+    if (s_pop.frosting) {
+        n = s_pop.f_lo <= s_pop.f_hi ? 1 : 0;
+        (s_pop.rows ? parts[0].y1 : parts[0].x1) = s_pop.f_lo;
+        (s_pop.rows ? parts[0].y2 : parts[0].x2) = s_pop.f_hi;
+    } else if (n == 2) {
         (s_pop.rows ? parts[0].y2 : parts[0].x2) = s_pop.lo - 1;
         (s_pop.rows ? parts[1].y1 : parts[1].x1) = s_pop.hi + 1;
     }
@@ -836,6 +855,10 @@ void finish_close()
         lv_display_enable_invalidation(disp, false);
     }
     s_open.store(false, std::memory_order_release);
+    if (s_pop.froster != nullptr) {
+        lv_timer_delete(s_pop.froster);
+        s_pop.froster = nullptr;
+    }
     if (s_pop.source != nullptr) {
         lv_obj_remove_state(s_pop.source, LV_STATE_USER_1);
     }
@@ -884,6 +907,59 @@ void give_back()
     }
     s_pop.wave_frame = s_frames;
     s_pop.wave_ms    = lv_tick_get();
+}
+
+// The frost spreading out from the source as the popover opens, a band a
+// frame: the frozen picture costs a copy where the live screen it covers
+// would cost drawing, so its bands are cheap, and nothing waits for a whole
+// screen of it in one frame.
+void frost_band(std::int32_t a, std::int32_t b)
+{
+    if (a > b) {
+        return;
+    }
+    lv_area_t area = s_pop.rows ? lv_area_t{0, a, size::screen_w - 1, b} : lv_area_t{a, 0, b, size::screen_h - 1};
+    lv_obj_invalidate_area(s_pop.backdrop, &area);
+}
+
+void stop_frost()
+{
+    if (s_pop.froster != nullptr) {
+        lv_timer_delete(s_pop.froster);
+        s_pop.froster = nullptr;
+    }
+    if (s_pop.frosting) {
+        const std::int32_t length = s_pop.rows ? size::screen_h : size::screen_w;
+        if (s_pop.f_lo > s_pop.f_hi) {
+            frost_band(0, length - 1);
+        } else {
+            frost_band(0, s_pop.f_lo - 1);
+            frost_band(s_pop.f_hi + 1, length - 1);
+        }
+        s_pop.frosting = false;
+        s_pop.lo = 1;
+        s_pop.hi = 0;
+    }
+}
+
+void frost()
+{
+    const std::int32_t length = s_pop.rows ? size::screen_h : size::screen_w;
+    const std::int32_t r  = s_pop.reach * ++s_pop.f_wave / FROST_WAVES;
+    const std::int32_t lo = std::max<std::int32_t>(0, s_pop.centre - r), hi = std::min<std::int32_t>(length - 1, s_pop.centre + r);
+    if (s_pop.f_lo > s_pop.f_hi) {
+        frost_band(lo, hi);
+    } else {
+        frost_band(lo, s_pop.f_lo - 1);
+        frost_band(s_pop.f_hi + 1, hi);
+    }
+    s_pop.f_lo    = lo;
+    s_pop.f_hi    = hi;
+    s_pop.f_frame = s_frames;
+    s_pop.f_ms    = lv_tick_get();
+    if (s_pop.f_wave >= FROST_WAVES) {
+        stop_frost();
+    }
 }
 
 void back_in_source(lv_anim_t *)
@@ -1009,6 +1085,13 @@ lv_obj_t *popover(lv_obj_t *source, std::int32_t w, std::int32_t h, From from, b
         freeze();
     }
     s_open.store(true, std::memory_order_release);
+    // the full-screen objects made without marking the screen for drawing:
+    // the frost brings them in a band at a time
+    lv_display_t *disp  = lv_obj_get_display(top);
+    const bool    quiet = frozen && s_frozen != nullptr && lv_display_is_invalidation_enabled(disp);
+    if (quiet) {
+        lv_display_enable_invalidation(disp, false);
+    }
     if (frozen && s_frozen != nullptr) {
         s_pop.backdrop = lv_obj_create(top);
         lv_obj_remove_style_all(s_pop.backdrop);
@@ -1030,6 +1113,26 @@ lv_obj_t *popover(lv_obj_t *source, std::int32_t w, std::int32_t h, From from, b
     }
     lv_obj_add_flag(s_pop.scrim, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(s_pop.scrim, [](lv_event_t *) { close_popover(true); }, LV_EVENT_CLICKED, nullptr);
+    if (quiet) {
+        lv_obj_update_layout(top);  // their size settles now, quietly, not at the next layout, loudly
+        lv_display_enable_invalidation(disp, true);
+        const lv_area_t &src = s_pop.from;
+        s_pop.centre   = s_pop.rows ? (src.y1 + src.y2) / 2 : (src.x1 + src.x2) / 2;
+        const std::int32_t length = s_pop.rows ? size::screen_h : size::screen_w;
+        s_pop.reach    = std::max(s_pop.centre, length - 1 - s_pop.centre) + 1;
+        s_pop.frosting = true;
+        s_pop.f_lo     = 1;
+        s_pop.f_hi     = 0;
+        frost();
+        s_pop.froster = lv_timer_create(
+            [](lv_timer_t *) {
+                if (s_frames == s_pop.f_frame && lv_tick_elaps(s_pop.f_ms) < 150) {
+                    return;  // a band a frame, or on regardless if no frame comes
+                }
+                frost();
+            },
+            1, nullptr);
+    }
 
     s_pop.card = glass(top, Glass::Large);
     lv_obj_set_style_radius(s_pop.card, radius::pop, 0);
@@ -1077,6 +1180,7 @@ void close_popover(bool animate)
     }
     s_pop.closing = true;
     s_pop.waiting = false;
+    stop_frost();
     if (s_pop.backdrop != nullptr) {
         shadow_off();  // the shadow goes with the card
         if (paint_picture(span(s_pop.from, s_pop.to))) {
