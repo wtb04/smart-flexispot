@@ -13,6 +13,7 @@
 #include "lvgl.h"
 
 #include <climits>
+#include <cstddef>
 #include <cstdint>
 #include <initializer_list>
 
@@ -347,5 +348,95 @@ std::uint32_t generation();
 std::uint64_t last_frame_us();
 std::uint64_t now_us();
 }  // namespace perf
+
+// --- pictures -------------------------------------------------------------
+
+/** A picture as it arrives: RGB565, `stride` bytes a row (0 for w * 2). Read only during the call it is given to. */
+struct Picture {
+    const void  *pixels = nullptr;
+    std::int32_t w = 0, h = 0, stride = 0;
+};
+
+enum class Shape : std::uint8_t { Rounded, Round };
+
+/**
+ * A picture in a rounded rectangle or a circle: album art, a video's still, a
+ * channel's or a plane's picture. It is scaled to its size and its corners cut
+ * once, as it arrives, so drawing it is a plain copy; a new one fades in over
+ * the old. Without one it is an empty well with a glyph.
+ */
+class Cover {
+  public:
+    Cover(const Cover &) = delete;
+    Cover &operator=(const Cover &) = delete;
+    /** `radius` below 0 picks one for the size; `glyph` is what the empty well shows, a note by default. */
+    Cover(lv_obj_t *parent, std::int32_t w, std::int32_t h, Shape shape = Shape::Rounded, std::int32_t radius = -1,
+          const char *glyph = nullptr);
+    lv_obj_t *obj() const { return m_root; }
+    /** False when there is no memory for it, and the cover is left as it was. */
+    bool show(const Picture &picture, bool animate = true);
+    /** Back to the empty well. */
+    void clear(bool animate = true);
+    bool        has_picture() const { return m_cur.main != nullptr; }
+    std::size_t bytes() const;
+
+    struct Made {
+        lv_draw_buf_t *main = nullptr;  // RGB565, or RGB565A8 when it is all corner
+        lv_draw_buf_t *corner[4]{};     // RGB565A8, radius square: top left, top right, bottom left, bottom right
+    };
+
+  private:
+    static void on_draw(lv_event_t *e);
+    static void on_mix(void *var, int32_t v);
+    void fade(bool animate);
+    void settle();
+
+    lv_obj_t    *m_root = nullptr, *m_well = nullptr, *m_pic = nullptr;
+    Made         m_cur{}, m_prev{};
+    std::int32_t m_w = 0, m_h = 0, m_r = 0;
+    std::int32_t m_mix = 255;
+};
+
+/**
+ * What the music and the cinema views lay behind everything: their picture
+ * enlarged to fill, blurred, dithered, and darkened in the dark look or
+ * lightened in the light one so their text reads on it. Made off the LVGL task
+ * and laid down a band of rows a frame; opaque, so nothing under it is drawn.
+ */
+class Backdrop {
+  public:
+    Backdrop(const Backdrop &) = delete;
+    Backdrop &operator=(const Backdrop &) = delete;
+    Backdrop(lv_obj_t *parent, std::int32_t w, std::int32_t h, std::int32_t radius = 0);
+    lv_obj_t *obj() const { return m_root; }
+    /** False when there is no memory for it, and the backdrop is left as it was. */
+    bool show(const Picture &picture);
+    /** The plain ground again, and its memory given back. */
+    void clear();
+    std::size_t bytes() const;
+
+    struct Job;
+
+  private:
+    static void on_draw(lv_event_t *e);
+    static void on_cover(lv_event_t *e);
+    static void on_tick(lv_timer_t *t);
+    bool start();
+    void stop();
+    void restyle();
+
+    lv_obj_t      *m_root = nullptr;
+    Cover::Made    m_made{};
+    std::uint16_t *m_small = nullptr;  // the blurred picture, untinted, at an eighth, three planes
+    std::int32_t   m_w = 0, m_h = 0, m_r = 0, m_sw = 0, m_sh = 0;
+    std::int32_t   m_shown = 0;  // rows that hold a picture, until it is whole
+    std::int32_t   m_pass  = 0;  // rows laid down by the picture being made
+    bool           m_whole = false;
+    Job           *m_job = nullptr;
+    lv_timer_t    *m_timer = nullptr;
+};
+
+/** What the last cover and backdrop held and took to make. */
+const char *pictures_report();
 
 }  // namespace ui::kit
