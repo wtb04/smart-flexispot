@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 namespace ui::kit {
 namespace {
@@ -41,8 +42,8 @@ void animate(void *var, void *owner, std::int32_t from, std::int32_t to, lv_anim
 Dial::Dial(lv_obj_t *parent, const DialSpec &spec) : m_spec(spec)
 {
     const std::int32_t S = spec.size, band = std::max<std::int32_t>(3, S * 18 / 1000);
-    m_major_len = std::max<std::int32_t>(7, S * 55 / 1000);
-    const std::int32_t minor_len = std::max<std::int32_t>(4, S * 28 / 1000);
+    m_major_len = std::max<std::int32_t>(7, S * (spec.bold ? 75 : 55) / 1000);
+    const std::int32_t minor_len = std::max<std::int32_t>(4, S * (spec.bold ? 50 : 28) / 1000);
     m_root = lv_obj_create(parent);
     lv_obj_remove_style_all(m_root);
     lv_obj_set_size(m_root, S, S);
@@ -66,9 +67,12 @@ Dial::Dial(lv_obj_t *parent, const DialSpec &spec) : m_spec(spec)
     lv_obj_set_style_radial_offset(m_scale, -S * 2 / 100, LV_PART_ITEMS);
     lv_obj_set_style_length(m_scale, m_major_len, LV_PART_INDICATOR);
     lv_obj_set_style_length(m_scale, minor_len, LV_PART_ITEMS);
-    lv_obj_set_style_line_width(m_scale, std::max<std::int32_t>(2, S / 110), LV_PART_INDICATOR);
-    lv_obj_set_style_line_width(m_scale, std::max<std::int32_t>(1, S / 220), LV_PART_ITEMS);
+    lv_obj_set_style_line_width(m_scale, spec.bold ? std::max<std::int32_t>(4, S / 50) : std::max<std::int32_t>(2, S / 110),
+                                LV_PART_INDICATOR);
+    lv_obj_set_style_line_width(m_scale, spec.bold ? std::max<std::int32_t>(3, S / 70) : std::max<std::int32_t>(1, S / 220),
+                                LV_PART_ITEMS);
     lv_obj_set_style_line_rounded(m_scale, true, LV_PART_INDICATOR);
+    lv_obj_set_style_line_rounded(m_scale, spec.bold, LV_PART_ITEMS);
     if (spec.ends) {
         format(m_ends[0], sizeof m_ends[0], spec.min, spec.decimals);
         format(m_ends[1], sizeof m_ends[1], spec.max, spec.decimals);
@@ -124,11 +128,17 @@ Dial::Dial(lv_obj_t *parent, const DialSpec &spec) : m_spec(spec)
         lv_obj_set_style_shadow_opa(m_knob, 110, 0);
         lv_obj_add_flag(m_knob, LV_OBJ_FLAG_IGNORE_LAYOUT);
     }
-    if (spec.needle) {
+    if (spec.needle || spec.span) {
         m_needle = lv_line_create(m_root);
         lv_obj_set_style_line_width(m_needle, std::max<std::int32_t>(3, S * 16 / 1000), 0);
         lv_obj_set_style_line_rounded(m_needle, true, 0);
         lv_obj_add_flag(m_needle, LV_OBJ_FLAG_IGNORE_LAYOUT);
+    }
+    if (spec.span) {
+        m_mark = lv_line_create(m_root);
+        lv_obj_set_style_line_width(m_mark, std::max<std::int32_t>(5, S * 24 / 1000), 0);
+        lv_obj_set_style_line_rounded(m_mark, true, 0);
+        lv_obj_add_flag(m_mark, LV_OBJ_FLAG_IGNORE_LAYOUT);
     }
 
     m_face = lv_image_create(m_root);
@@ -163,7 +173,7 @@ Dial::Dial(lv_obj_t *parent, const DialSpec &spec) : m_spec(spec)
     on_restyle(m_root, [](void *ctx) { static_cast<Dial *>(ctx)->restyle(); }, this);
     m_value = m_target = spec.min;
     set_value(spec.min, false);
-    if (spec.target) {
+    if (spec.target || spec.span) {
         set_target(spec.min, false);
     }
 }
@@ -184,11 +194,15 @@ void Dial::restyle()
         lv_style_set_line_color(&m_lit_style, colour(Ink::Accent));
     }
     if (m_arc != nullptr) {
-        lv_obj_set_style_arc_color(m_arc, lv_color_hex(colours().well), LV_PART_MAIN);
+        lv_obj_set_style_arc_color(m_arc, colour(Ink::Primary), LV_PART_MAIN);
+        lv_obj_set_style_arc_opa(m_arc, colours().fill_opa, LV_PART_MAIN);
         lv_obj_set_style_arc_color(m_arc, colour(Ink::Accent), LV_PART_INDICATOR);
     }
     if (m_needle != nullptr) {
         lv_obj_set_style_line_color(m_needle, ink, 0);
+    }
+    if (m_mark != nullptr) {
+        lv_obj_set_style_line_color(m_mark, colour(Ink::Accent), 0);
     }
     lv_obj_invalidate(m_root);
     stale_face();
@@ -244,11 +258,15 @@ float Dial::angle_of(std::int32_t value) const
 
 void Dial::place_needle(std::int32_t value)
 {
-    if (m_needle == nullptr) {
-        return;
+    if (m_needle != nullptr) {
+        place_line(m_needle, m_points, value, static_cast<float>(m_r_tick) + 2.0f,
+                   static_cast<float>(m_r_tick - m_major_len * 17 / 10));
     }
+}
+
+void Dial::place_line(lv_obj_t *line, lv_point_precise_t *points, std::int32_t value, float r0, float r1)
+{
     const float a = angle_of(value), c = m_spec.size / 2.0f;
-    const float r0 = static_cast<float>(m_r_tick) + 2.0f, r1 = static_cast<float>(m_r_tick - m_major_len * 17 / 10);
     const auto x0 = static_cast<std::int32_t>(c + r0 * std::cos(a)), y0 = static_cast<std::int32_t>(c + r0 * std::sin(a));
     const auto x1 = static_cast<std::int32_t>(c + r1 * std::cos(a)), y1 = static_cast<std::int32_t>(c + r1 * std::sin(a));
     // the line only as big as the needle: a move then redraws two small boxes
@@ -257,20 +275,24 @@ void Dial::place_needle(std::int32_t value)
     const lv_point_precise_t p0{static_cast<lv_value_precise_t>(x0 - left), static_cast<lv_value_precise_t>(y0 - top)};
     const lv_point_precise_t p1{static_cast<lv_value_precise_t>(x1 - left), static_cast<lv_value_precise_t>(y1 - top)};
     const std::int32_t w = std::abs(x1 - x0) + 1, h = std::abs(y1 - y0) + 1;
-    if (lv_obj_get_style_x(m_needle, LV_PART_MAIN) == left && lv_obj_get_style_y(m_needle, LV_PART_MAIN) == top &&
-        lv_obj_get_style_width(m_needle, LV_PART_MAIN) == w && lv_obj_get_style_height(m_needle, LV_PART_MAIN) == h &&
-        m_points[0].x == p0.x && m_points[0].y == p0.y && m_points[1].x == p1.x && m_points[1].y == p1.y) {
+    if (lv_obj_get_style_x(line, LV_PART_MAIN) == left && lv_obj_get_style_y(line, LV_PART_MAIN) == top &&
+        lv_obj_get_style_width(line, LV_PART_MAIN) == w && lv_obj_get_style_height(line, LV_PART_MAIN) == h &&
+        points[0].x == p0.x && points[0].y == p0.y && points[1].x == p1.x && points[1].y == p1.y) {
         return;  // a spring's tail often lands on the same pixel a few frames running
     }
-    m_points[0] = p0;
-    m_points[1] = p1;
-    lv_obj_set_pos(m_needle, left, top);
-    lv_obj_set_size(m_needle, w, h);
-    lv_line_set_points(m_needle, m_points, 2);
+    points[0] = p0;
+    points[1] = p1;
+    lv_obj_set_pos(line, left, top);
+    lv_obj_set_size(line, w, h);
+    lv_line_set_points(line, points, 2);
 }
 
 void Dial::place_target(std::int32_t value)
 {
+    if (m_mark != nullptr) {
+        place_line(m_mark, m_mark_points, value, static_cast<float>(m_r_tick) + 6.0f,
+                   static_cast<float>(m_r_tick - m_major_len * 22 / 10));
+    }
     if (m_arc != nullptr) {
         lv_arc_set_value(m_arc, value);
     }
@@ -319,14 +341,16 @@ void Dial::on_value(void *var, int32_t v)
 {
     auto *d = static_cast<Dial *>(static_cast<lv_anim_t *>(var)->user_data);
     d->place_needle(v);
-    d->show_value(v);
+    if (!d->m_spec.span) {
+        d->show_value(v);
+    }
 }
 
 void Dial::on_target(void *var, int32_t v)
 {
     auto *d = static_cast<Dial *>(static_cast<lv_anim_t *>(var)->user_data);
     d->place_target(v);
-    if (!d->m_spec.needle) {
+    if (!d->m_spec.needle || d->m_spec.span) {
         d->show_value(v);
     }
 }
@@ -336,10 +360,13 @@ void Dial::set_value(std::int32_t value, bool animate_it)
     const std::int32_t from = m_value;
     m_value = value;
     light_zone(value);
+    light_span();
     lv_anim_delete(&m_value, nullptr);
     if (!animate_it || from == value) {
         place_needle(value);
-        show_value(value);
+        if (!m_spec.span) {
+            show_value(value);
+        }
         return;
     }
     animate(&m_value, this, from, value, [](lv_anim_t *a, int32_t v) { on_value(a, v); });
@@ -349,15 +376,44 @@ void Dial::set_target(std::int32_t value, bool animate_it)
 {
     const std::int32_t from = m_target;
     m_target = value;
+    light_span();
     lv_anim_delete(&m_target, nullptr);
     if (!animate_it || from == value) {
         place_target(value);
-        if (!m_spec.needle) {
+        if (!m_spec.needle || m_spec.span) {
             show_value(value);
         }
         return;
     }
     animate(&m_target, this, from, value, [](lv_anim_t *a, int32_t v) { on_target(a, v); });
+}
+
+// Ticks from the reading up to the target, only while it is below it: the
+// span snaps to where the two are going, and the marks follow on the spring,
+// so the face is drawn again once a change rather than every frame of it.
+void Dial::light_span()
+{
+    if (!m_spec.span) {
+        return;
+    }
+    std::int32_t lo = 0, hi = -1;
+    if (m_target > m_value) {
+        lo = m_value, hi = m_target;
+    }
+    if (lo == m_span_lo && hi == m_span_hi) {
+        return;
+    }
+    m_span_lo = lo, m_span_hi = hi;
+    m_lit = -1;
+    set_lit(0);
+    lv_scale_section_set_range(m_lit_section, lo, hi < lo ? lo - 1 : hi);
+}
+
+void Dial::set_caption(const char *caption)
+{
+    if (m_unit != nullptr && std::strcmp(lv_label_get_text(m_unit), caption) != 0) {
+        lv_label_set_text(m_unit, caption);
+    }
 }
 
 void Dial::set_lit(int ticks)
@@ -384,6 +440,7 @@ void Dial::set_lit(int ticks)
 
 namespace {
 constexpr std::int32_t TRACK = 12, KNOB = 28;
+constexpr std::int32_t END = (KNOB - TRACK) / 2;  // the track stops short by this, so the knob at either end stays on the rail
 }
 
 Rail::Rail(lv_obj_t *parent, const RailSpec &spec) : m_spec(spec)
@@ -394,12 +451,14 @@ Rail::Rail(lv_obj_t *parent, const RailSpec &spec) : m_spec(spec)
     lv_obj_remove_style_all(m_root);
     lv_obj_set_size(m_root, v ? cross : spec.length, v ? spec.length : cross);
     lv_obj_remove_flag(m_root, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(m_root, LV_OBJ_FLAG_OVERFLOW_VISIBLE);  // the knob's shadow
+    const std::int32_t len = spec.length - 2 * END;
 
     m_track = well(m_root);
     lv_obj_set_style_radius(m_track, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_pad_all(m_track, 0, 0);
-    lv_obj_set_size(m_track, v ? TRACK : spec.length, v ? spec.length : TRACK);
-    lv_obj_set_pos(m_track, v ? (KNOB - TRACK) / 2 : 0, v ? 0 : (KNOB - TRACK) / 2);
+    lv_obj_set_size(m_track, v ? TRACK : len, v ? len : TRACK);
+    lv_obj_set_pos(m_track, END, END);
     lv_obj_remove_flag(m_track, LV_OBJ_FLAG_CLICKABLE);
 
     if (spec.fill) {
@@ -415,8 +474,8 @@ Rail::Rail(lv_obj_t *parent, const RailSpec &spec) : m_spec(spec)
         lv_obj_set_size(n, 6, 6);
         lv_obj_set_style_radius(n, LV_RADIUS_CIRCLE, 0);
         lv_obj_add_flag(n, LV_OBJ_FLAG_USER_1);
-        const std::int32_t at = (spec.notches[i] - spec.min) * (spec.length - TRACK) / (spec.max - spec.min);
-        lv_obj_set_pos(n, v ? 2 : at + 3, v ? spec.length - TRACK - at + 3 : 2);
+        const std::int32_t at = (spec.notches[i] - spec.min) * (len - TRACK) / (spec.max - spec.min);
+        lv_obj_set_pos(n, v ? 2 : at + 3, v ? len - TRACK - at + 3 : 2);
         lv_obj_remove_flag(n, LV_OBJ_FLAG_CLICKABLE);
     }
     if (spec.ticks > 0) {
@@ -426,8 +485,8 @@ Rail::Rail(lv_obj_t *parent, const RailSpec &spec) : m_spec(spec)
         lv_scale_set_total_tick_count(sc, static_cast<std::uint32_t>(spec.ticks));
         lv_scale_set_major_tick_every(sc, static_cast<std::uint32_t>(spec.major));
         lv_scale_set_label_show(sc, false);
-        lv_obj_set_size(sc, v ? 14 : spec.length - TRACK, v ? spec.length - TRACK : 14);
-        lv_obj_set_pos(sc, v ? KNOB + 2 : TRACK / 2, v ? TRACK / 2 : KNOB + 2);
+        lv_obj_set_size(sc, v ? 14 : len - TRACK, v ? len - TRACK : 14);
+        lv_obj_set_pos(sc, v ? KNOB + 2 : END + TRACK / 2, v ? END + TRACK / 2 : KNOB + 2);
         lv_obj_set_style_line_opa(sc, LV_OPA_TRANSP, LV_PART_MAIN);
         lv_obj_add_flag(sc, LV_OBJ_FLAG_USER_2);
         for (lv_part_t part : {LV_PART_INDICATOR, LV_PART_ITEMS}) {
@@ -493,7 +552,7 @@ void Rail::place(std::int32_t value)
 {
     m_shown = value;
     const bool v = m_spec.vertical;
-    const std::int32_t span = m_spec.length - TRACK;
+    const std::int32_t len = m_spec.length - 2 * END, span = len - TRACK;
     const std::int32_t at = (std::clamp(value, m_spec.min, m_spec.max) - m_spec.min) * span / (m_spec.max - m_spec.min);
     const auto put = [](lv_obj_t *obj, std::int32_t x, std::int32_t y) {
         if (lv_obj_get_style_x(obj, LV_PART_MAIN) != x || lv_obj_get_style_y(obj, LV_PART_MAIN) != y) {
@@ -505,10 +564,10 @@ void Rail::place(std::int32_t value)
         if (lv_obj_get_style_width(m_fill, LV_PART_MAIN) != w || lv_obj_get_style_height(m_fill, LV_PART_MAIN) != h) {
             lv_obj_set_size(m_fill, w, h);
         }
-        put(m_fill, 0, v ? m_spec.length - at - TRACK : 0);
+        put(m_fill, 0, v ? len - at - TRACK : 0);
     }
     const std::int32_t knob_at = at + TRACK / 2 - KNOB / 2;
-    put(m_knob, v ? 0 : knob_at, v ? m_spec.length - knob_at - KNOB : 0);
+    put(m_knob, v ? 0 : END + knob_at, v ? END + len - knob_at - KNOB : 0);
 }
 
 void Rail::on_value(void *var, int32_t v) { static_cast<Rail *>(static_cast<lv_anim_t *>(var)->user_data)->place(v); }
@@ -554,7 +613,7 @@ void Rail::on_press(lv_event_t *e)
     lv_area_t box;
     lv_obj_get_coords(rail->m_track, &box);
     const bool v = rail->m_spec.vertical;
-    const std::int32_t span = rail->m_spec.length - TRACK;
+    const std::int32_t span = rail->m_spec.length - 2 * END - TRACK;
     const std::int32_t pos = v ? box.y2 - TRACK / 2 - p.y : p.x - box.x1 - TRACK / 2;
     const std::int32_t value = rail->m_spec.min + std::clamp<std::int32_t>(pos, 0, span) * (rail->m_spec.max - rail->m_spec.min) / span;
     if (code == LV_EVENT_PRESSING && value == rail->m_value) {
