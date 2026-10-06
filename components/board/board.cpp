@@ -476,6 +476,7 @@ int           s_glide_from  = -1, s_glide_held = -1;
 Rect          s_glide_at{};          // the region on the panel: a column of the screen is a row of it
 std::uint32_t s_glide_w     = 0;     // the region's width on the screen
 bool          s_glide_flip  = false; // the screen's left at the region's last row
+bool          s_glide_back  = false; // the new page comes in from the left
 std::uint32_t s_glide_whole = 0;     // buffers brought up to the held frame outside the region
 std::int32_t  s_glide_shift = -1;
 board::GlideTimes s_glide_times;
@@ -830,7 +831,7 @@ esp_err_t zoom_frame(const ZoomFrame &f)
     return err;
 }
 
-bool glide_begin(const lv_area_t &region)
+bool glide_begin(const lv_area_t &region, bool from_left)
 {
     if (s_panel == nullptr || s_disp == nullptr) {
         return false;
@@ -845,6 +846,7 @@ bool glide_begin(const lv_area_t &region)
     s_glide_at    = place_on_panel(s_disp, &region).rect;
     s_glide_w     = static_cast<std::uint32_t>(lv_area_get_width(&region));
     s_glide_flip  = rotation == LV_DISPLAY_ROTATION_90;
+    s_glide_back  = from_left;
     s_glide_whole = 0;
     s_glide_shift = -1;
     s_glide_times = {};
@@ -870,8 +872,6 @@ void glide_step(std::int32_t shift)
     const int          t   = s_target;
     std::uint8_t      *to  = s_fbs[t];
     const std::uint8_t *old_page = s_fbs[s_glide_from], *new_page = s_fbs[s_glide_held];
-    constexpr std::size_t PIXEL = sizeof(std::uint16_t);
-    const std::size_t     row   = BSP_LCD_H_RES * PIXEL;
     if ((s_glide_whole & (1u << t)) == 0) {
         // once: around the region it is the new frame
         const Rect &g = s_glide_at;
@@ -884,19 +884,30 @@ void glide_step(std::int32_t shift)
         }
         s_glide_whole |= 1u << t;
     }
-    // the old page moved off by `shift` columns, the new one's first `shift` after it
-    const auto        n     = static_cast<std::uint32_t>(shift);
-    const std::size_t bytes = s_glide_at.w * PIXEL;
-    const auto        line  = [&](std::uint32_t r) { return r * row + s_glide_at.x * PIXEL; };
-    const std::uint32_t top = s_glide_at.y, rows = s_glide_w;
-    if (s_glide_flip) {
-        copy_rows(old_page + line(top), row, to + line(top + n), row, rows - n, bytes);
-        copy_rows(new_page + line(top + rows - n), row, to + line(top), row, n, bytes);
+    // the old page moved off by `shift` columns, the new one's first `shift` after
+    // it, by the PPA, which moves a block several times faster than the CPU
+    const auto          n   = static_cast<std::uint32_t>(shift);
+    const std::uint32_t top = s_glide_at.y, rows = s_glide_w, x = s_glide_at.x, bw = s_glide_at.w;
+    const auto block = [&](const std::uint8_t *from, std::uint32_t from_y, std::uint32_t to_y, std::uint32_t h) {
+        if (h > 0) {
+            copy_rect(from, to, {0, 0, bw, h}, PPA_SRM_ROTATION_ANGLE_0, BSP_LCD_H_RES, BSP_LCD_V_RES, x, from_y, x, to_y);
+        }
+    };
+    // columns of the screen, `from` onwards, laid at `at`; turned into rows of the panel
+    const auto columns = [&](const std::uint8_t *from, std::uint32_t from_col, std::uint32_t at, std::uint32_t count) {
+        if (s_glide_flip) {
+            block(from, top + rows - from_col - count, top + rows - at - count, count);
+        } else {
+            block(from, top + from_col, top + at, count);
+        }
+    };
+    if (s_glide_back) {  // the new page in from the left, as it comes before
+        columns(old_page, 0, n, rows - n);
+        columns(new_page, rows - n, 0, n);
     } else {
-        copy_rows(old_page + line(top + n), row, to + line(top), row, rows - n, bytes);
-        copy_rows(new_page + line(top), row, to + line(top + rows - n), row, n, bytes);
+        columns(old_page, n, 0, rows - n);
+        columns(new_page, 0, rows - n, n);
     }
-    esp_cache_msync(to + line(top), (rows - 1) * row + bytes, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
     s_glide_times.frames += 1;
     s_glide_times.copy_us += esp_timer_get_time() - at;
     show_back_buffer();
