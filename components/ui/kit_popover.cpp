@@ -36,7 +36,9 @@ lv_draw_buf_t *s_frozen = nullptr;
 // box passes there, laid under the scrim's tint and stretched back. Done once,
 // as the popover opens. On the panel the PPA does both stretches; the CPU only
 // blurs the quarter-size picture, a sixteenth of the pixels.
-constexpr int FW = size::screen_w, FH = size::screen_h, F = 8, SW = FW / F, SH = FH / F;
+// A quarter of the screen: a lighter blur, about 15 px, stays smooth at this
+// size, where at an eighth only a heavy one hid the grid of the small picture.
+constexpr int FW = size::screen_w, FH = size::screen_h, F = 4, SW = FW / F, SH = FH / F;
 lv_draw_buf_t *s_shot = nullptr, *s_half = nullptr, *s_quarter = nullptr, *s_small = nullptr;
 // the blurred picture in 24-bit, B, G, R as the PPA takes it: kept at 16-bit,
 // neighbours in a soft area come out the same and stretch into flat plateaus
@@ -392,7 +394,11 @@ void finish_picture(std::uint64_t t0, std::uint64_t t1)
     // two by two, where one big step would sample a few pixels of each block
     // and alias into blobs
     stretch(s_half, s_quarter, 0.5f);
-    stretch(s_quarter, s_small, 0.5f);
+    if (F == 8) {
+        stretch(s_quarter, s_small, 0.5f);
+    } else {
+        std::memcpy(s_small->data, s_quarter->data, s_small->data_size);
+    }
 #if defined(ESP_PLATFORM)
     esp_cache_msync(s_small->data, s_small->data_size, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
 #endif
