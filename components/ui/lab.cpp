@@ -15,6 +15,16 @@
 #include <iterator>
 
 namespace ui::lab {
+
+// lab_pictures.cpp
+void build_pictures(lv_obj_t *sheet);
+void pictures_shown(bool shown);
+void pictures_next_cover();
+void pictures_next_track();
+void pictures_redraw_mode(int mode);
+void pictures_redraw();
+void pictures_bench_done();
+
 namespace {
 
 using namespace ui::kit;
@@ -25,7 +35,7 @@ constexpr std::int32_t SHEET_Y = 76, SHEET_H = CONTENT_H - SHEET_Y;
 constexpr std::uint32_t ACCENTS[] = {0, 0x5aa9ff, 0x7ccf6a, 0xb48cff, 0xff6f8e, 0x3fd0c0};
 constexpr int GLASS_STEPS[] = {0, 35, 50, 70, 100};
 
-lv_obj_t *s_sheets[5]{};
+lv_obj_t *s_sheets[6]{};
 lv_obj_t *s_perf = nullptr;
 lv_obj_t *s_light_item = nullptr, *s_bench_btn = nullptr, *s_bench_seg = nullptr, *s_slab = nullptr;
 lv_obj_t *s_picker = nullptr;
@@ -73,7 +83,7 @@ void show_state()
 void choose_sheet(int index)
 {
     lv_obj_scroll_to_y(layer(Layer::Content), 0, LV_ANIM_OFF);
-    for (int i = 0; i < 5; ++i) {
+    for (int i = 0; i < 6; ++i) {
         if (s_sheets[i] != nullptr) {
             if (i == index) {
                 lv_obj_remove_flag(s_sheets[i], LV_OBJ_FLAG_HIDDEN);
@@ -82,6 +92,7 @@ void choose_sheet(int index)
             }
         }
     }
+    pictures_shown(index == 5);
     if (s_picker != nullptr && segmented_chosen(s_picker) != index) {
         segmented_choose(s_picker, index, true);
     }
@@ -893,9 +904,26 @@ const Phase PHASES[] = {
              notice("HOME ASSISTANT", glyph::local_laundry_service, "Washing machine", "The wash is done", 900);
          }
      }},
+    {"cover crossfade", 1600, [] { choose_sheet(5); pictures_redraw_mode(-1); },
+     [](std::uint32_t at, std::uint32_t) {
+         if (at % 400 < 16) {
+             pictures_next_cover();
+         }
+     }},
+    {"backdrop", 1600, nullptr,
+     [](std::uint32_t at, std::uint32_t) {
+         if (at % 800 < 16) {
+             pictures_next_track();
+         }
+     }},
+    {"corners, kit cover", 500, nullptr, [](std::uint32_t, std::uint32_t) { pictures_redraw(); }},
+    {"corners, baked", 500, [] { pictures_redraw_mode(1); }, [](std::uint32_t, std::uint32_t) { pictures_redraw(); }},
+    {"corners, all alpha", 500, [] { pictures_redraw_mode(2); }, [](std::uint32_t, std::uint32_t) { pictures_redraw(); }},
+    {"corners, image radius", 500, [] { pictures_redraw_mode(3); }, [](std::uint32_t, std::uint32_t) { pictures_redraw(); }},
+    {"corners, clip corner", 500, [] { pictures_redraw_mode(4); }, [](std::uint32_t, std::uint32_t) { pictures_redraw(); }},
 };
 
-char s_report[6000] = "no bench run yet\n";
+char s_report[9000] = "no bench run yet\n";
 char s_frames[6][420]{};
 int  s_frame_lines = 0;
 
@@ -905,7 +933,7 @@ struct Drawn {
     std::uint32_t frames = 0, worst = 0;
     std::uint64_t px = 0;
 };
-Drawn         s_drawn, s_drawn_of[2][16];
+Drawn         s_drawn, s_drawn_of[2][24];
 bool          s_drawing = false;
 std::uint32_t s_drawn_each[48]{};
 
@@ -929,7 +957,7 @@ void on_render(lv_event_t *e)
     s_drawn.worst = std::max(s_drawn.worst, px);
 }
 #if defined(ESP_PLATFORM)
-board::FlushTimes s_flush[2][16]{};
+board::FlushTimes s_flush[2][24]{};
 #endif
 
 struct Config {
@@ -1019,6 +1047,7 @@ void bench_step(lv_timer_t *timer)
                 std::printf("%s", s_frames[i]);
             }
             std::printf("%s", kit::freeze_report());
+            std::printf("%s", kit::pictures_report());
         }
         if (++s_bench.config < static_cast<int>(std::size(CONFIGS))) {
             set_effects(CONFIGS[s_bench.config].blur, CONFIGS[s_bench.config].shadows);
@@ -1031,6 +1060,7 @@ void bench_step(lv_timer_t *timer)
         lv_timer_delete(timer);
         set_effects(true, true);
         set_pop_glass(s_bench.was);
+        pictures_bench_done();
         s_bench.phase = -1;
         show_state();
         return;
@@ -1100,7 +1130,7 @@ void build(perf::Clock clock)
     lv_obj_set_pos(header, CONTENT_X, CONTENT_Y);
     lv_obj_set_size(header, CONTENT_W, 60);
     lv_obj_set_flex_align(header, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    s_picker = segmented(header, {"Surfaces", "Controls", "Instruments", "Glass", "Layers"}, 0, 640);
+    s_picker = segmented(header, {"Surfaces", "Controls", "Instruments", "Glass", "Layers", "Pictures"}, 0, 760);
     lv_obj_add_event_cb(
         s_picker, [](lv_event_t *e) { choose_sheet(segmented_chosen(lv_event_get_target_obj(e))); },
         LV_EVENT_VALUE_CHANGED, nullptr);
@@ -1114,6 +1144,7 @@ void build(perf::Clock clock)
     build_instruments(content);
     build_glass(content);
     build_layers(content);
+    build_pictures(s_sheets[5] = sheet(content));
     choose_sheet(0);
     build_dock(chrome);
     build_bar(chrome);
@@ -1126,15 +1157,16 @@ void bench() { run_bench(); }
 
 int report(char *out, int size)
 {
-    const int n = std::snprintf(out, static_cast<std::size_t>(size), "%s%s%s%s%s%s%s%s", s_report, s_frames[0],
-                                s_frames[1], s_frames[2], s_frames[3], s_frames[4], s_frames[5], kit::freeze_report());
+    const int n = std::snprintf(out, static_cast<std::size_t>(size), "%s%s%s%s%s%s%s%s%s", s_report, s_frames[0],
+                                s_frames[1], s_frames[2], s_frames[3], s_frames[4], s_frames[5], kit::freeze_report(),
+                                kit::pictures_report());
     return std::min(n, size - 1);
 }
 
 void key(int code)
 {
     switch (code) {
-    case '1': case '2': case '3': case '4': case '5':
+    case '1': case '2': case '3': case '4': case '5': case '6':
         choose_sheet(code - '1');
         break;
     case 'f':
