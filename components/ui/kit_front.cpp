@@ -1,13 +1,80 @@
 // The screen as the design kit draws it, on the shared core in ui.cpp: being
-// built page by page beside classic_front.cpp, which the panel still runs.
+// built beside classic_front.cpp, which the panel still runs, until it does
+// all that one does.
 
-#include "ui_core.h"
+#include "kit_front.h"
 
-#include "kit.h"
+#include "settings_model.h"
+#include "status_model.h"
+#include "topics.h"
 
 #include <cstdio>
+#include <utility>
+
+namespace ui::kitfront {
+namespace {
+// The core's numbering of the pages, HOME_PAGE to SETUP_PAGE, against the dock's.
+constexpr int KIT_OF[PAGE_COUNT]  = {HOME, RADAR, CALENDAR, SETUP};  // by detail::HOME_PAGE...
+constexpr int CORE_OF[PAGE_COUNT] = {detail::HOME_PAGE, detail::CALENDAR_PAGE, detail::RADAR_PAGE, detail::SETUP_PAGE};
+
+DockItems s_items;
+int       s_before_setup = detail::HOME_PAGE;
+bool      s_gate         = true;
+
+bool needs_presence(int core) { return core == detail::RADAR_PAGE || core == detail::CALENDAR_PAGE; }
+
+// What a page coming to show sets going, however it was chosen: the dock's
+// item, a widget, Setup from the bar.
+void shown(int kit)
+{
+    using namespace detail;
+    const int core = CORE_OF[kit];
+    if (core == SETUP_PAGE && s_page != SETUP_PAGE) {
+        s_before_setup = s_page;
+    }
+    s_page = core;
+    s_setup_visible.store(core == SETUP_PAGE, std::memory_order_relaxed);
+    if (core == SETUP_PAGE && s_handlers.diagnostics != nullptr) {
+        s_handlers.diagnostics();
+    }
+    if (s_handlers.radar != nullptr) {
+        s_handlers.radar(core == RADAR_PAGE || core == HOME_PAGE, !owner_away());
+    }
+    publish(Topic::Page);
+}
+
+void follow_away()
+{
+    const auto away = [] {
+        const bool gate = detail::settings_state().on[static_cast<int>(Setting::PresenceGate)];
+        static bool present = false;
+        const bool  moved   = std::exchange(present, detail::status_state().present) != detail::status_state().present;
+        if (std::exchange(s_gate, gate) == gate && !moved) {
+            return;
+        }
+        for (lv_obj_t *item : {s_items.calendar, s_items.radar}) {
+            if (item != nullptr) {
+                lv_obj_set_hidden(item, owner_away());
+            }
+        }
+        detail::select_page(detail::s_page);  // away from a page that went
+    };
+    subscribe(Topic::Status, detail::kNoView, away);
+    subscribe(Topic::Settings, detail::kNoView, away);
+}
+}  // namespace
+
+bool owner_away() { return s_gate && !detail::status_state().present; }
+
+void toggle_setup()
+{
+    detail::select_page(detail::s_page == detail::SETUP_PAGE ? s_before_setup : detail::SETUP_PAGE);
+}
+}  // namespace ui::kitfront
 
 namespace ui::front {
+using namespace kitfront;
+
 void init(std::uint32_t accent)
 {
     kit::init(kit::Look::Dark);
@@ -17,19 +84,45 @@ void init(std::uint32_t accent)
     kit::screen(lv_screen_active());
 }
 
-bool build_next_part() { return false; }
+// One part a call, so the pages are made between frames rather than in one long stall.
+bool build_next_part()
+{
+    static int next = 0;
+    switch (next++) {
+        case 0:
+            s_items = build_dock(kit::layer(kit::Layer::Chrome));
+            build_bar(kit::layer(kit::Layer::Chrome));
+            return true;
+        case 1:
+            kit::add_page(s_items.home, build_home);
+            kit::add_page(s_items.calendar, build_calendar);
+            kit::add_page(s_items.radar, build_radar);
+            kit::add_page(nullptr, build_setup);
+            kit::on_page_shown(shown);
+            kit::show_page(HOME, false);
+            return true;
+        case 2:
+            build_views(lv_screen_active());
+            follow_away();
+            detail::start_screen_schedule();
+            detail::status_splash_gone();  // no start-up screen yet: what waits for it may show
+            return true;
+        default:
+            return false;
+    }
+}
 
 void apply() {}
 }  // namespace ui::front
 
 namespace ui::detail {
-bool         notice_on_show() { return false; }
-std::int64_t cinema_dark_after() { return 0; }
-bool         cinema_offers_skip() { return false; }
-}  // namespace ui::detail
-
-namespace ui::detail {
-void select_page(int index) { s_page = index; }
+void select_page(int index)
+{
+    if (index < 0 || index >= PAGE_COUNT || (kitfront::needs_presence(index) && kitfront::owner_away())) {
+        index = HOME_PAGE;
+    }
+    kit::show_page(kitfront::KIT_OF[index], true);
+}
 }  // namespace ui::detail
 
 namespace ui {

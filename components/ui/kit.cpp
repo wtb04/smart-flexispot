@@ -718,6 +718,40 @@ lv_obj_t *hairline(lv_obj_t *parent, bool vertical, std::int32_t length)
     return obj;
 }
 
+lv_obj_t *flow(lv_obj_t *parent, lv_flex_flow_t direction, std::int32_t gap)
+{
+    lv_obj_t *obj = lv_obj_create(parent);
+    lv_obj_remove_style_all(obj);
+    lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(obj, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_flex_flow(obj, direction);
+    lv_obj_set_style_pad_row(obj, gap, 0);
+    lv_obj_set_style_pad_column(obj, gap, 0);
+    lv_obj_set_size(obj, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    return obj;
+}
+
+lv_obj_t *filler(lv_obj_t *parent)
+{
+    lv_obj_t *obj = flow(parent, LV_FLEX_FLOW_ROW, 0);
+    lv_obj_set_flex_grow(obj, 1);
+    return obj;
+}
+
+lv_obj_t *heading(lv_obj_t *body, const char *title, const char *sub)
+{
+    lv_obj_t *row = flow(body, LV_FLEX_FLOW_ROW, space::m);
+    lv_obj_set_width(row, LV_PCT(100));
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_t *col = flow(row, LV_FLEX_FLOW_COLUMN, 2);
+    text(col, Role::H2, title);
+    if (sub != nullptr) {
+        text(col, Role::Small, sub, Ink::Secondary);
+    }
+    filler(row);
+    return row;
+}
+
 lv_obj_t *dot(lv_obj_t *parent, Ink ink, std::int32_t px)
 {
     lv_obj_t *obj = lv_obj_create(parent);
