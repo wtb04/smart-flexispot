@@ -322,12 +322,12 @@ void build_music(lv_obj_t *sheet, std::int32_t height)
     lv_obj_t *words = lv_obj_create(panel);
     lv_obj_remove_style_all(words);
     lv_obj_remove_flag(words, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_pos(words, x, MUSIC_Y);
-    lv_obj_set_size(words, w, MUSIC_COVER);
+    lv_obj_set_size(words, w, LV_SIZE_CONTENT);
+    lv_obj_align(words, LV_ALIGN_LEFT_MID, x, 0);
     lv_obj_set_flex_flow(words, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(words, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_set_flex_align(words, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     lv_obj_set_style_pad_row(words, 4, 0);
-    text(words, Role::Label, "SPOTIFY, OFFICE SPEAKER", Ink::Secondary);
+    text(words, Role::Small, "Office speaker", Ink::Secondary);
     s_title = text(words, Role::H1, "");
     s_artist = text(words, Role::Body, "", Ink::Secondary);
     for (lv_obj_t *l : {s_title, s_artist}) {
@@ -338,7 +338,7 @@ void build_music(lv_obj_t *sheet, std::int32_t height)
     lv_obj_remove_style_all(gap);
     lv_obj_set_size(gap, 1, space::m);
     RailSpec rs;
-    rs.length = w, rs.min = 0, rs.max = 243, rs.draggable = true;
+    rs.length = w, rs.min = 0, rs.max = 243, rs.draggable = true, rs.quiet = true;
     auto *progress = new Rail(words, rs);
     own(progress->obj(), progress);
     progress->set_value(102, false);
@@ -349,17 +349,19 @@ void build_music(lv_obj_t *sheet, std::int32_t height)
     s_length = text(times, Role::Small, "", Ink::Secondary);
     lv_obj_align(s_length, LV_ALIGN_RIGHT_MID, 0, 0);
 
-    lv_obj_t *transport = row(panel, space::l);
-    lv_obj_set_flex_align(transport, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_align(transport, LV_ALIGN_BOTTOM_RIGHT, -32, -24);
+    // plain white marks, the middle one the largest, and nothing behind them until pressed
+    lv_obj_t *transport = row(words, space::xxl);
+    lv_obj_set_width(transport, w);
+    lv_obj_set_style_margin_top(transport, space::l, 0);
+    lv_obj_set_flex_align(transport, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_t *prev = button(transport, Button::Flat, ic::skip_previous, nullptr, true);
-    lv_obj_set_size(prev, 64, 64);
+    lv_obj_set_size(prev, 72, 72);
     lv_obj_add_event_cb(prev, [](lv_event_t *) {
         s_track = (s_track + static_cast<int>(std::size(TRACKS)) - 1) % static_cast<int>(std::size(TRACKS));
         play_track(true);
     }, LV_EVENT_CLICKED, nullptr);
-    lv_obj_t *play = button(transport, Button::Accent, ic::pause, nullptr, true);
-    lv_obj_set_size(play, 120, 64);
+    lv_obj_t *play = button(transport, Button::Flat, ic::pause, nullptr, true);
+    lv_obj_set_size(play, 88, 88);
     lv_obj_add_event_cb(
         play,
         [](lv_event_t *e) {
@@ -368,7 +370,10 @@ void build_music(lv_obj_t *sheet, std::int32_t height)
         },
         LV_EVENT_CLICKED, nullptr);
     lv_obj_t *next = button(transport, Button::Flat, ic::skip_next, nullptr, true);
-    lv_obj_set_size(next, 64, 64);
+    lv_obj_set_size(next, 72, 72);
+    for (lv_obj_t *b : {prev, play, next}) {
+        lv_obj_set_style_text_font(lv_obj_get_child(b, 0), fonts::icon(34, true), 0);
+    }
     lv_obj_add_event_cb(next, [](lv_event_t *) { next_track(); }, LV_EVENT_CLICKED, nullptr);
 
     lv_obj_t *note = text(col, Role::Small, "A backdrop made from the cover, blurred off the LVGL task and laid down in bands. "

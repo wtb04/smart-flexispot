@@ -460,6 +460,11 @@ Rail::Rail(lv_obj_t *parent, const RailSpec &spec) : m_spec(spec)
     lv_obj_set_size(m_track, v ? TRACK : len, v ? len : TRACK);
     lv_obj_set_pos(m_track, END, END);
     lv_obj_remove_flag(m_track, LV_OBJ_FLAG_CLICKABLE);
+    if (spec.quiet) {
+        constexpr std::int32_t LINE = 4;
+        lv_obj_set_size(m_track, v ? LINE : len, v ? len : LINE);
+        lv_obj_set_pos(m_track, v ? END + (TRACK - LINE) / 2 : END, v ? END : END + (TRACK - LINE) / 2);
+    }
 
     if (spec.fill) {
         m_fill = lv_obj_create(m_track);
@@ -510,6 +515,7 @@ Rail::Rail(lv_obj_t *parent, const RailSpec &spec) : m_spec(spec)
     lv_obj_set_style_transform_pivot_x(m_knob, lv_pct(50), 0);
     lv_obj_set_style_transform_pivot_y(m_knob, lv_pct(50), 0);
     lv_obj_remove_flag(m_knob, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_hidden(m_knob, spec.quiet);
 
     if (spec.draggable) {
         lv_obj_add_flag(m_root, LV_OBJ_FLAG_CLICKABLE);
@@ -527,7 +533,7 @@ Rail::Rail(lv_obj_t *parent, const RailSpec &spec) : m_spec(spec)
 void Rail::restyle()
 {
     if (m_fill != nullptr) {
-        lv_obj_set_style_bg_color(m_fill, colour(Ink::Accent), 0);
+        lv_obj_set_style_bg_color(m_fill, colour(m_spec.quiet ? Ink::Primary : Ink::Accent), 0);
     }
     lv_obj_set_style_bg_color(m_knob, m_spec.fill ? lv_color_hex(0xffffff) : colour(Ink::Accent), 0);
     for (std::uint32_t i = 0; i < lv_obj_get_child_count(m_track); ++i) {
@@ -593,6 +599,9 @@ void Rail::on_press(lv_event_t *e)
         lv_obj_set_style_transform_scale_y(static_cast<lv_obj_t *>(knob), v, 0);
     };
     // grabbed at once, let go on the spring
+    if (rail->m_spec.quiet) {
+        lv_obj_set_hidden(rail->m_knob, code == LV_EVENT_RELEASED);
+    }
     if (code == LV_EVENT_RELEASED) {
         lv_anim_t a;
         lv_anim_init(&a);
