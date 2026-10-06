@@ -281,3 +281,7 @@ CONFIG_LWIP_TCP_OOSEQ_MAX_PBUFS=4
 # MQTT's task on core 0 with the other network work, off the screen's.
 CONFIG_MQTT_TASK_CORE_SELECTION_ENABLED=y
 CONFIG_MQTT_USE_CORE_0=y
+
+# Power management, so the CPU slows down while nothing holds it at full
+# speed: the panel's stream does, and stops while the screen is dark.
+CONFIG_PM_ENABLE=y

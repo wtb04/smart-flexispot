@@ -6,8 +6,11 @@
 #include "esp_check.h"
 #include "esp_heap_caps.h"
 #include "esp_lcd_mipi_dsi.h"
+#include "esp_lcd_panel_commands.h"
+#include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_log.h"
+#include "esp_pm.h"
 #include "esp_rom_gpio.h"
 #include "esp_rom_sys.h"
 #include "esp_system.h"
@@ -109,6 +112,20 @@ struct Rect {
 };
 
 esp_lcd_panel_handle_t s_panel = nullptr;
+esp_lcd_panel_io_handle_t s_panel_io = nullptr;  // the panel's own commands
+bool                   s_streaming = true;
+
+// One speed at a time, set here and never changed by itself: below the
+// PSRAM's 200 MHz each change puts it in its slow mode with the other core
+// held, and IDF's own switching, round every idle, deadlocked doing so within
+// a minute. 40 MHz is the crystal's, while nothing needs more.
+constexpr int SLOW_CPU_MHZ = 40;
+
+void set_cpu_mhz(int mhz)
+{
+    const esp_pm_config_t pm{mhz, mhz, false};
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_pm_configure(&pm));
+}
 ppa_client_handle_t    s_ppa   = nullptr;
 std::uint8_t          *s_fbs[FRAME_BUFFERS] = {};
 SemaphoreHandle_t      s_swapped = nullptr;
@@ -370,6 +387,10 @@ Placement place_on_panel(lv_display_t *disp, const lv_area_t *area)
 void show_back_buffer()
 {
     const std::int64_t waiting = esp_timer_get_time();
+    // A frame LVGL had begun before the screen went dark: no swap comes.
+    if (!s_streaming) {
+        s_showing.store(s_asked.load(std::memory_order_relaxed), std::memory_order_relaxed);
+    }
     while (s_showing.load(std::memory_order_relaxed) != s_asked.load(std::memory_order_relaxed)) {
         if (xSemaphoreTake(s_swapped, SWAP_TIMEOUT) != pdTRUE) {
             ESP_LOGW(TAG, "panel did not swap buffers");
@@ -418,9 +439,7 @@ void flush_rotated(lv_display_t *disp, const lv_area_t *area, std::uint8_t *pixe
 
 bool s_drawing = true;
 
-// Dark, LVGL draws nothing, and lit it draws the whole screen again. The video
-// stream itself goes on: this panel's touch is timed off it, and stopping it
-// left the picture torn and the touch waking the screen by itself. Under the
+// Dark, LVGL draws nothing, and lit it draws the whole screen again. Under the
 // LVGL lock, which is recursive, so also from its own task.
 void set_drawing(bool on)
 {
@@ -448,7 +467,8 @@ esp_err_t flush_straight_to_panel(lv_display_t *disp)
 {
     const auto *port = static_cast<const PortDisplayHead *>(lv_display_get_driver_data(disp));
     ESP_RETURN_ON_FALSE(port != nullptr && port->panel != nullptr, ESP_ERR_INVALID_STATE, TAG, "no panel");
-    s_panel = port->panel;
+    s_panel    = port->panel;
+    s_panel_io = port->io;
     void *fb0 = nullptr;
     void *fb1 = nullptr;
     void *fb2 = nullptr;
@@ -799,6 +819,7 @@ esp_err_t init(bool flipped)
     set_flipped(flipped);
 
     ESP_RETURN_ON_ERROR(bsp_display_backlight_off(), TAG, "backlight");
+    set_cpu_mhz(CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ);
     return ESP_OK;
 }
 
@@ -827,11 +848,11 @@ void set_brightness_percent(int percent)
     ESP_ERROR_CHECK_WITHOUT_ABORT(set_brightness(percent));
 }
 
-// The first light waits for a frame LVGL drew to be on the panel, and a few
-// refreshes of it, so that what it lights is the splash and not whatever the
-// panel had before.
+// A light waits for a frame LVGL drew to be on the panel, and a few refreshes
+// of it, so that what it lights is the picture and not whatever the panel had
+// before: at the start, the splash; after the stream stood still, the page.
 namespace {
-void wait_for_first_frame()
+void wait_for_drawn_frame()
 {
     constexpr std::int64_t  FIRST_FRAME_US   = 1000 * 1000;
     constexpr std::uint32_t SETTLE_REFRESHES = 3;
@@ -849,29 +870,72 @@ void wait_for_first_frame()
         }
         vTaskDelay(1);
     }
-    ESP_LOGI(TAG, "first light after %d ms, %s", static_cast<int>((esp_timer_get_time() - from) / 1000),
+    ESP_LOGI(TAG, "light after %d ms, %s", static_cast<int>((esp_timer_get_time() - from) / 1000),
              shown ? "on a drawn frame" : "with no frame drawn");
+}
+}  // namespace
+
+namespace {
+// Asleep, the stream of frames stands still where a frame ends and the panel
+// is told its picture is off: nothing is read from the frame buffers. Its
+// touch is timed off the stream and stops with it. Stopped partway through a
+// frame instead, the picture came back torn and the touch woke the screen by
+// itself.
+void set_asleep(bool asleep)
+{
+    s_streaming = !asleep;
+    if (asleep) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_lcd_panel_io_tx_param(s_panel_io, LCD_CMD_DISPOFF, nullptr, 0));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_lcd_dpi_panel_set_streaming(s_panel, false));
+        set_cpu_mhz(SLOW_CPU_MHZ);
+    } else {
+        set_cpu_mhz(CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ);  // the stream needs the PSRAM at full speed first
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_lcd_dpi_panel_set_streaming(s_panel, true));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_lcd_panel_io_tx_param(s_panel_io, LCD_CMD_DISPON, nullptr, 0));
+    }
 }
 }  // namespace
 
 esp_err_t display_on(int percent)
 {
+    bool woke = false;
+    if (lvgl_port_lock(DRAWING_LOCK_MS)) {
+        woke = !s_streaming;
+        if (woke) {
+            set_asleep(false);
+        }
+        lvgl_port_unlock();
+    }
     set_drawing(true);
-    if (gpio_ll_is_digital_io_hold(&GPIO, BSP_LCD_BACKLIGHT)) {
-        wait_for_first_frame();
+    if (woke || gpio_ll_is_digital_io_hold(&GPIO, BSP_LCD_BACKLIGHT)) {
+        wait_for_drawn_frame();
     }
     return set_brightness(percent);
 }
 
-// The backlight and nothing else: bsp_display_enter_sleep() also sleeps the touch
-// controller, which this board's controller reports as unsupported after having
-// already blanked the panel -- and a sleeping controller cannot report the tap
-// that is meant to wake it.
+// Not bsp_display_enter_sleep(): it also sleeps the touch controller, which
+// this board's controller reports as unsupported after having already blanked
+// the panel -- and a sleeping controller cannot report the tap that is meant
+// to wake it.
 esp_err_t display_off()
 {
     const esp_err_t err = bsp_display_backlight_off();
     set_drawing(false);
     return err;
+}
+
+bool display_sleep()
+{
+    if (s_panel == nullptr || !lvgl_port_lock(DRAWING_LOCK_MS)) {
+        return false;
+    }
+    // Lit again meanwhile, it stays awake.
+    const bool dark = !s_drawing && s_streaming;
+    if (dark) {
+        set_asleep(true);
+    }
+    lvgl_port_unlock();
+    return dark;
 }
 
 }  // namespace board

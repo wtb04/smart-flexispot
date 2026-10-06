@@ -3,6 +3,7 @@
 #include "ble_desk.h"
 #include "board.h"
 #include "claude_feed.h"
+#include "dark.h"
 #include "laptop.h"
 #include "media.h"
 #include "desk.h"
@@ -373,6 +374,7 @@ void before_update_restart()
     settings::flush();
     ESP_ERROR_CHECK_WITHOUT_ABORT(board::display_off());
 }
+
 }  // namespace
 
 extern "C" void app_main(void)
@@ -485,6 +487,7 @@ extern "C" void app_main(void)
     ESP_ERROR_CHECK(wallclock::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("network"));
     ESP_ERROR_CHECK_WITHOUT_ABORT(network::start());
+    ESP_ERROR_CHECK_WITHOUT_ABORT(dark::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(diagnostics::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(ical::start(on_calendar));
     ESP_ERROR_CHECK_WITHOUT_ABORT(travel::start(on_travel));

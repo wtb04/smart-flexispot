@@ -33,14 +33,23 @@ esp_err_t set_brightness(int percent);
 /** Shaped for ui::BrightnessHandler, which cannot report errors. */
 void set_brightness_percent(int percent);
 
-/** Lights the backlight. Kept out of init() so the panel stays dark until
- *  there is something on it worth seeing. */
+/** Lights the backlight, and wakes the panel from display_sleep(). Kept out
+ *  of init() so the panel stays dark until there is something on it worth
+ *  seeing. */
 esp_err_t display_on(int percent);
 
-/** Backlight off and the panel asleep. The panel goes on scanning out whatever
- *  the MIPI link last left it, so anything that ends the program -- a restart,
- *  above all -- has to put it to sleep rather than only dim it. */
+/** Backlight off and the panel drawing nothing, its touch awake. The panel
+ *  goes on scanning out whatever the MIPI link last left it, so anything that
+ *  ends the program -- a restart, above all -- has to put it to sleep rather
+ *  than only dim it. */
 esp_err_t display_off();
+
+/** After display_off(), darker still: the panel's picture and its stream
+ *  stopped and the CPU at 40 MHz, a third less from the battery. Its touch
+ *  is timed off the stream and stops too, so whoever calls this wakes the
+ *  screen some other way; display_on() wakes it. False, and nothing done,
+ *  if the screen was lit again meanwhile. */
+bool display_sleep();
 
 /** How many frames the panel has been sent since it started, some 58 a
  *  second; fewer when something held its interrupt off. */

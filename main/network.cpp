@@ -58,14 +58,6 @@ std::atomic<int> s_brightness{0};  // told the real one at boot, before anything
 
 std::atomic<bool> s_screen_on{true};
 
-void on_screen(bool on)
-{
-    note_screen(on);
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_screen(on));
-    ESP_ERROR_CHECK_WITHOUT_ABORT(on ? board::display_on(settings::get(settings::Key::Brightness))
-                                     : board::display_off());
-}
-
 void on_preset(int preset)
 {
     ESP_LOGI(TAG, "preset %d requested", preset);
@@ -273,7 +265,7 @@ void warn_if_memory_low()
 
 void start_clients()
 {
-    const hass::Handlers handlers{on_preset, on_brightness, on_notify, on_move, on_screen};
+    const hass::Handlers handlers{on_preset, on_brightness, on_notify, on_move, set_screen};
     ESP_ERROR_CHECK_WITHOUT_ABORT(hass::start(handlers, board::kMinBrightness));
     hass::ws::on_refusal(on_refusal);
     ESP_ERROR_CHECK_WITHOUT_ABORT(
@@ -351,6 +343,14 @@ void note_screen(bool on)
 {
     s_screen_on.store(on, std::memory_order_relaxed);
     app::set(app::Fact::ScreenOn, on);
+}
+
+void set_screen(bool on)
+{
+    note_screen(on);
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_screen(on));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(on ? board::display_on(settings::get(settings::Key::Brightness))
+                                     : board::display_off());
 }
 
 void note_brightness(int percent)
