@@ -73,6 +73,14 @@ final class Link: ObservableObject {
     private var thumbnail: Data?   // and the one found
     private let machine = Host.current().localizedName ?? ProcessInfo.processInfo.hostName
 
+    // On the charger macOS may keep a sleeping Mac half awake for hours, its
+    // screens off, and the panel would show what was paused there all night.
+    private static let idleAway: TimeInterval = 120
+    private var sleeping = false
+    private var screensAsleep = false
+    private var stillSince = Date()  // nothing has played since
+    private var toldAway = false
+
     init() {
         defaults.register(defaults: ["sharing": true, "panel": "smart-flexispot", "claude": true])
         sharing = defaults.bool(forKey: "sharing")
@@ -98,6 +106,20 @@ final class Link: ObservableObject {
         }
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil,
                                                queue: .main) { [source] _ in source.stopNow() }
+        let workspace = NSWorkspace.shared.notificationCenter
+        workspace.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.sleeping = true; self?.report() }
+        }
+        workspace.addObserver(forName: NSWorkspace.screensDidSleepNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.screensAsleep = true; self?.report() }
+        }
+        workspace.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.sleeping = false
+                self?.screensAsleep = false
+                self?.report()
+            }
+        }
         source.clearLeftovers()
         if sharing { begin() }
     }
@@ -202,7 +224,19 @@ final class Link: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: soon)
     }
 
+    /// Nobody at this Mac: asleep, or its screens off and nothing played for a while.
+    private var away: Bool {
+        if track?.playing == true { stillSince = Date() }
+        return sleeping || (screensAsleep && track?.playing != true && Date().timeIntervalSince(stillSince) > Self.idleAway)
+    }
+
     private func report() {
+        // Told once that nothing plays, the panel lets go; then it hears
+        // nothing, so it also takes the Mac for gone.
+        let away = self.away
+        if away && toldAway { return }
+        toldAway = away
+        let track = away ? nil : self.track
         var state: [String: Any] = ["type": "state", "machine": machine, "port": Int(Self.port), "title": ""]
         if let track {
             var takes = ["pause"]
@@ -229,7 +263,7 @@ final class Link: ObservableObject {
             state["video"] = artwork.map(\.wide) ?? Self.browsers.contains(track.bundle)
             state["takes"] = takes
         }
-        log.info("state \(self.track?.title ?? "nothing", privacy: .public), art \(self.artwork?.version ?? "none", privacy: .public)")
+        log.info("state \(track?.title ?? (away ? "nothing, away" : "nothing"), privacy: .public), art \(self.artwork?.version ?? "none", privacy: .public)")
         send(state) { [weak self] reach, pong in
             guard let self, self.sharing else { return }
             self.reach = reach
