@@ -73,6 +73,8 @@ lv_style_t s_role[11];
 lv_style_t s_ink[8];
 lv_style_t s_btn_open;
 lv_style_t s_btn, s_btn_pressed, s_btn_accent, s_btn_flat, s_btn_soft, s_btn_round, s_btn_checked;
+// what each kind turns to under the finger: a darker fill of its own colour
+lv_style_t s_btn_flat_pressed, s_btn_accent_pressed, s_btn_checked_pressed, s_lamp_on_pressed;
 lv_style_t s_lamp, s_lamp_on, s_lamp_on_ink;
 lv_style_t s_hair;
 lv_style_t s_switch, s_switch_on, s_switch_knob;
@@ -80,7 +82,7 @@ lv_style_t s_seg, s_seg_item, s_seg_thumb;
 
 lv_style_transition_dsc_t s_press_tr, s_release_tr;
 constexpr lv_style_prop_t PRESS_PROPS[] = {LV_STYLE_TRANSFORM_SCALE_X, LV_STYLE_TRANSFORM_SCALE_Y,
-                                           LV_STYLE_BG_COLOR, LV_STYLE_SHADOW_OPA,
+                                           LV_STYLE_BG_COLOR, LV_STYLE_BG_OPA, LV_STYLE_SHADOW_OPA,
                                            LV_STYLE_PROP_INV};
 
 struct Restyler {
@@ -252,6 +254,13 @@ void apply()
 
     lv_style_set_bg_opa(&s_btn_flat, LV_OPA_TRANSP);
     lv_style_set_shadow_opa(&s_btn_flat, LV_OPA_TRANSP);
+    // a bare glyph has no fill to darken: a faint one comes up under the finger
+    lv_style_set_bg_color(&s_btn_flat_pressed, hex(s_pal.hair));
+    lv_style_set_bg_opa(&s_btn_flat_pressed, static_cast<lv_opa_t>(s_pal.hair_opa * 2));
+    lv_style_set_bg_color(&s_btn_accent_pressed, hex(mix(s_pal.accent, 0x000000, 16)));
+    lv_style_set_bg_color(&s_btn_checked_pressed, hex(mix(s_pal.accent, 0x000000, 16)));
+    lv_style_set_bg_opa(&s_btn_checked_pressed, LV_OPA_COVER);
+    lv_style_set_bg_color(&s_lamp_on_pressed, hex(mix(s_pal.lamp, 0x000000, 14)));
 
     lv_style_set_bg_color(&s_btn_soft, hex(s_pal.accent));
     lv_style_set_bg_opa(&s_btn_soft, 40);
@@ -319,6 +328,7 @@ void init_styles()
 {
     for (lv_style_t *st : {&s_ground, &s_tile, &s_tile_hi, &s_well, &s_glass_sm, &s_glass_lg, &s_glass_clear,
                            &s_btn, &s_btn_open, &s_btn_pressed, &s_btn_accent, &s_btn_flat, &s_btn_soft, &s_btn_round,
+                           &s_btn_flat_pressed, &s_btn_accent_pressed, &s_btn_checked_pressed, &s_lamp_on_pressed,
                            &s_btn_checked, &s_lamp, &s_lamp_on, &s_lamp_on_ink, &s_hair, &s_switch,
                            &s_switch_on, &s_switch_knob, &s_seg, &s_seg_item, &s_seg_thumb}) {
         lv_style_init(st);
@@ -329,7 +339,7 @@ void init_styles()
     for (lv_style_t &st : s_ink) {
         lv_style_init(&st);
     }
-    lv_style_transition_dsc_init(&s_press_tr, PRESS_PROPS, lv_anim_path_ease_out, motion::press_ms, 0, nullptr);
+    lv_style_transition_dsc_init(&s_press_tr, PRESS_PROPS, lv_anim_path_linear, motion::press_ms, 0, nullptr);
     lv_style_transition_dsc_init(&s_release_tr, PRESS_PROPS, motion::spring, motion::release_ms, 0, nullptr);
 }
 
@@ -414,7 +424,7 @@ int32_t run_spring(const lv_anim_t *a, float zeta)
         return a->end_value;
     }
     const float t = std::max(0.0f, static_cast<float>(a->act_time) / static_cast<float>(a->duration));
-    const float x = spring_at(t, zeta, 7.5f);
+    const float x = spring_at(t, zeta, 8.0f);
     return a->start_value + static_cast<int32_t>(std::lround(static_cast<float>(a->end_value - a->start_value) * x));
 }
 
@@ -423,7 +433,7 @@ void on_seg_click(lv_event_t *e);
 }  // namespace
 
 namespace motion {
-int32_t spring(const lv_anim_t *a) { return run_spring(a, 0.72f); }
+int32_t spring(const lv_anim_t *a) { return run_spring(a, 0.86f); }
 int32_t settle(const lv_anim_t *a) { return run_spring(a, 1.0f); }
 }  // namespace motion
 
@@ -657,8 +667,10 @@ lv_obj_t *button(lv_obj_t *parent, Button kind, const char *glyph, const char *l
     lv_obj_add_style(btn, &s_btn_pressed, LV_STATE_PRESSED);
     if (kind == Button::Accent) {
         lv_obj_add_style(btn, &s_btn_accent, 0);
+        lv_obj_add_style(btn, &s_btn_accent_pressed, LV_STATE_PRESSED);
     } else if (kind == Button::Flat) {
         lv_obj_add_style(btn, &s_btn_flat, 0);
+        lv_obj_add_style(btn, &s_btn_flat_pressed, LV_STATE_PRESSED);
     } else if (kind == Button::Soft) {
         lv_obj_add_style(btn, &s_btn_soft, 0);
     }
@@ -669,8 +681,13 @@ lv_obj_t *button(lv_obj_t *parent, Button kind, const char *glyph, const char *l
     if (checkable) {
         lv_obj_add_flag(btn, LV_OBJ_FLAG_CHECKABLE);
         lv_obj_add_style(btn, &s_btn_checked, LV_STATE_CHECKED);
+        lv_obj_add_style(btn, &s_btn_checked_pressed, LV_STATE_CHECKED | LV_STATE_PRESSED);
     }
     lv_obj_remove_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
+    // a transition, even one of no length, only takes its end on the next
+    // animation tick, which LVGL runs after it has drawn the frame: run it now,
+    // so the press is in the very frame the touch is read for
+    lv_obj_add_event_cb(btn, [](lv_event_t *) { lv_anim_refr_now(); }, LV_EVENT_PRESSED, nullptr);
     lv_obj_set_size(btn, LV_SIZE_CONTENT, size::button);
     lv_obj_set_flex_flow(btn, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(btn, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -693,6 +710,7 @@ lv_obj_t *lamp_tile(lv_obj_t *parent, const char *glyph, const char *name, bool 
     lv_obj_t *t = button(parent, Button::Raised, nullptr, nullptr, false, true);
     lv_obj_add_style(t, &s_lamp, 0);
     lv_obj_add_style(t, &s_lamp_on, LV_STATE_CHECKED);
+    lv_obj_add_style(t, &s_lamp_on_pressed, LV_STATE_CHECKED | LV_STATE_PRESSED);
     lv_obj_set_flex_flow(t, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(t, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     lv_obj_t *ic = icon(t, glyph, 28, on);
@@ -761,7 +779,22 @@ lv_obj_t *toggle(lv_obj_t *parent, bool on)
     lv_obj_set_style_radius(sw, radius::round, LV_PART_KNOB);
     lv_obj_add_style(sw, &s_switch_on, LV_PART_INDICATOR | LV_STATE_CHECKED);
     lv_obj_add_style(sw, &s_switch_knob, LV_PART_KNOB);
+    // under the finger the knob stretches towards where it would go
+    lv_obj_set_style_pad_right(sw, 6, LV_PART_KNOB | LV_STATE_PRESSED);
+    lv_obj_set_style_pad_left(sw, 6, LV_PART_KNOB | LV_STATE_PRESSED | LV_STATE_CHECKED);
+    lv_obj_set_style_pad_right(sw, -4, LV_PART_KNOB | LV_STATE_PRESSED | LV_STATE_CHECKED);
+    lv_obj_set_style_anim_duration(sw, motion::move_ms, 0);
+    lv_obj_add_event_cb(
+        sw,
+        [](lv_event_t *e) {
+            // the switch slides its knob in a straight line: on the kit's spring instead
+            if (lv_anim_t *a = lv_anim_get(lv_event_get_target_obj(e), nullptr)) {
+                lv_anim_set_path_cb(a, motion::spring);
+            }
+        },
+        LV_EVENT_STATE_CHANGED, nullptr);
     lv_obj_set_size(sw, 68, 38);
+    lv_obj_set_ext_click_area(sw, (size::touch - 38) / 2);
     if (on) {
         lv_obj_add_state(sw, LV_STATE_CHECKED);
     }
@@ -836,6 +869,8 @@ lv_obj_t *segmented(lv_obj_t *parent, std::initializer_list<const char *> labels
         lv_obj_add_style(item, &s_seg_item, 0);
         lv_obj_set_flex_grow(item, 1);
         lv_obj_set_height(item, 48);
+        lv_obj_set_ext_click_area(item, 6);  // over the gaps and the well's rim, so no tap on it falls through
+        lv_obj_set_style_text_opa(item, 110, LV_STATE_PRESSED);
         lv_obj_t *t = lv_label_create(item);
         lv_obj_add_style(t, &s_role[static_cast<int>(Role::H3)], 0);
         lv_obj_set_style_text_font(t, fonts::small(), 0);

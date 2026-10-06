@@ -63,18 +63,27 @@ inline constexpr std::int32_t screen_w  = 1280;
 inline constexpr std::int32_t screen_h  = 720;
 }  // namespace size
 
+// One spring for everything that moves, scaled to each duration: nine tenths
+// of the way in two fifths of it, past the end by half a percent, then still.
 namespace motion {
-inline constexpr std::uint32_t press_ms   = 70;
-inline constexpr std::uint32_t release_ms = 340;
-inline constexpr std::uint32_t pop_ms     = 520;   // to settle, the spring's tail included
-inline constexpr std::uint32_t close_ms   = 180;
-inline constexpr std::uint32_t move_ms    = 460;   // a needle, a knob, a segment's thumb
+inline constexpr std::uint32_t press_ms   = 0;     // the sink is on the first frame after the finger lands
+inline constexpr std::uint32_t release_ms = 300;
+inline constexpr std::uint32_t pop_ms     = 450;   // to settle, the spring's tail included
+inline constexpr std::uint32_t close_ms   = 240;
+inline constexpr std::uint32_t move_ms    = 420;   // a needle, a knob, a segment's thumb, a switch
+inline constexpr std::uint32_t leave_ms   = 200;   // a notice going, accelerating away
 inline constexpr std::uint32_t fade_ms    = 220;
 inline constexpr std::int32_t  press_scale = 248;  // of 256
-/** A damped spring with a little bounce, normalised to the animation's length. */
+inline constexpr std::int32_t  grab_scale  = 300;  // a knob under the finger
+/** A damped spring, barely past its end, normalised to the animation's length. */
 int32_t spring(const lv_anim_t *a);
-/** The same with no bounce, for things that should arrive without wobbling. */
+/** The same without passing the end, for going back into something. */
 int32_t settle(const lv_anim_t *a);
+/**
+ * A small shadow close under `obj` while it moves, its own once it stops: a
+ * big soft one is drawn again every frame over everything it passes.
+ */
+void moving(lv_obj_t *obj, bool moving);
 }  // namespace motion
 
 enum class Role : std::uint8_t { Label, Small, Body, H3, H2, H1, ReadS, ReadM, ReadL, ReadXL, ReadXXL };
