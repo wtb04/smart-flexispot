@@ -66,6 +66,7 @@ for an aircraft whose own is not on file.
 SIM_HOME=lat,lon   # the radar's centre, in place of zone.home
 SIM_ZOOM=0.75      # the window's scale, for a smaller screen
 SIM_DOCK=left      # the dock at the left, as Setup can put it
+SIM_LOOK=light     # the light look, as Setup can choose it
 SIM_CLOCK=9:41     # the top bar shows that rather than the time
 ```
 
