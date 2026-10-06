@@ -2,13 +2,16 @@
 
 #include "theme.h"
 
+#include <algorithm>
+
 namespace ui {
 namespace {
 constexpr lv_opa_t     SCRIM_OPA   = LV_OPA_70;
 constexpr std::int32_t CARD_RADIUS = 24;
 
-constexpr std::int32_t CLOSE_SIZE = 48;
-constexpr std::int32_t CLOSE_LIFT = 8;
+constexpr std::int32_t CLOSE_SIZE  = 48;
+constexpr std::int32_t CLOSE_LIFT  = 8;
+constexpr std::int32_t CLOSE_INSET = theme::space::l;  // from the card's edge, with room to grow as it is pressed
 
 }  // namespace
 
@@ -36,8 +39,13 @@ void ModalOverlay::add_close_button()
 {
     lv_obj_t *close = lv_button_create(card_);
     lv_obj_set_size(close, CLOSE_SIZE, CLOSE_SIZE);
+    // from the card's edge rather than its padding: the calendar's card has none,
+    // and cut off the button as it grew under the finger
+    const std::int32_t pad_right = lv_obj_get_style_pad_right(card_, LV_PART_MAIN);
+    const std::int32_t pad_top   = lv_obj_get_style_pad_top(card_, LV_PART_MAIN);
     lv_obj_set_align(close, LV_ALIGN_TOP_RIGHT);
-    lv_obj_set_pos(close, 0, -CLOSE_LIFT);
+    lv_obj_set_pos(close, pad_right - std::max(pad_right, CLOSE_INSET),
+                   std::max(pad_top, CLOSE_INSET + CLOSE_LIFT) - CLOSE_LIFT - pad_top);
     theme::style_button(close, theme::panel_light);
     lv_obj_center(theme::make_label(close, LV_SYMBOL_CLOSE, theme::text, fonts::size_22()));
     lv_obj_add_event_cb(close, close_clicked, LV_EVENT_CLICKED, this);
