@@ -2,6 +2,7 @@
 
 #include "kit.h"
 #include "kit_fonts.h"
+#include "lab_lists.h"
 #include "lvgl_private.h"  // for the bench, the areas each frame redraws
 
 #if defined(ESP_PLATFORM)
@@ -25,7 +26,7 @@ constexpr std::int32_t SHEET_Y = 76, SHEET_H = CONTENT_H - SHEET_Y;
 constexpr std::uint32_t ACCENTS[] = {0, 0x5aa9ff, 0x7ccf6a, 0xb48cff, 0xff6f8e, 0x3fd0c0};
 constexpr int GLASS_STEPS[] = {0, 35, 50, 70, 100};
 
-lv_obj_t *s_sheets[5]{};
+lv_obj_t *s_sheets[6]{};
 lv_obj_t *s_perf = nullptr;
 lv_obj_t *s_light_item = nullptr, *s_bench_btn = nullptr, *s_bench_seg = nullptr, *s_slab = nullptr;
 lv_obj_t *s_picker = nullptr;
@@ -73,7 +74,7 @@ void show_state()
 void choose_sheet(int index)
 {
     lv_obj_scroll_to_y(layer(Layer::Content), 0, LV_ANIM_OFF);
-    for (int i = 0; i < 5; ++i) {
+    for (int i = 0; i < 6; ++i) {
         if (s_sheets[i] != nullptr) {
             if (i == index) {
                 lv_obj_remove_flag(s_sheets[i], LV_OBJ_FLAG_HIDDEN);
@@ -893,7 +894,16 @@ const Phase PHASES[] = {
              notice("HOME ASSISTANT", glyph::local_laundry_service, "Washing machine", "The wash is done", 900);
          }
      }},
+    {"list scroll", 1600, [] { choose_sheet(5); }, lists::scroll_tick},
+    {"row press", 1400, nullptr, lists::press_tick},
+    {"readouts", 1600, nullptr, lists::readouts_tick},
+    {"sheet open", 900, nullptr, lists::sheet_open_tick},
+    {"sheet scroll", 1400, nullptr, lists::sheet_scroll_tick},
+    {"sheet close", 700, nullptr, lists::sheet_close_tick},
 };
+
+// a popover or a sheet: its backdrop wants longer to be made ahead
+bool pops(const char *name) { return std::strncmp(name, "popover", 7) == 0 || std::strncmp(name, "sheet", 5) == 0; }
 
 char s_report[6000] = "no bench run yet\n";
 char s_frames[6][420]{};
@@ -951,7 +961,7 @@ void bench_step(lv_timer_t *timer)
 {
     const std::uint32_t now = lv_tick_get();
     if (s_bench.settling) {
-        const bool popover_next = std::strncmp(PHASES[s_bench.phase].name, "popover", 7) == 0;
+        const bool popover_next = pops(PHASES[s_bench.phase].name);
         if (now - s_bench.began < (popover_next ? 900u : 300u)) {
             return;
         }
@@ -977,7 +987,7 @@ void bench_step(lv_timer_t *timer)
 #if defined(ESP_PLATFORM)
     s_flush[s_bench.config][s_bench.phase] = board::take_flush_times();
 #endif
-    const bool traced = std::strncmp(PHASES[s_bench.phase].name, "popover", 7) == 0 ||
+    const bool traced = pops(PHASES[s_bench.phase].name) ||
                         std::strcmp(PHASES[s_bench.phase].name, "notice") == 0;
     if (traced && s_bench.config == 0 && s_frame_lines < static_cast<int>(std::size(s_frames))) {
         const std::uint16_t *each = nullptr;
@@ -1100,7 +1110,7 @@ void build(perf::Clock clock)
     lv_obj_set_pos(header, CONTENT_X, CONTENT_Y);
     lv_obj_set_size(header, CONTENT_W, 60);
     lv_obj_set_flex_align(header, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    s_picker = segmented(header, {"Surfaces", "Controls", "Instruments", "Glass", "Layers"}, 0, 640);
+    s_picker = segmented(header, {"Surfaces", "Controls", "Instruments", "Glass", "Layers", "Lists"}, 0, 740);
     lv_obj_add_event_cb(
         s_picker, [](lv_event_t *e) { choose_sheet(segmented_chosen(lv_event_get_target_obj(e))); },
         LV_EVENT_VALUE_CHANGED, nullptr);
@@ -1114,6 +1124,7 @@ void build(perf::Clock clock)
     build_instruments(content);
     build_glass(content);
     build_layers(content);
+    lists::build(s_sheets[5] = sheet(content));
     choose_sheet(0);
     build_dock(chrome);
     build_bar(chrome);
@@ -1126,15 +1137,16 @@ void bench() { run_bench(); }
 
 int report(char *out, int size)
 {
-    const int n = std::snprintf(out, static_cast<std::size_t>(size), "%s%s%s%s%s%s%s%s", s_report, s_frames[0],
-                                s_frames[1], s_frames[2], s_frames[3], s_frames[4], s_frames[5], kit::freeze_report());
+    const int n = std::snprintf(out, static_cast<std::size_t>(size), "%s%s%s%s%s%s%s%s%s", s_report, s_frames[0],
+                                s_frames[1], s_frames[2], s_frames[3], s_frames[4], s_frames[5], kit::freeze_report(),
+                                lists::report());
     return std::min(n, size - 1);
 }
 
 void key(int code)
 {
     switch (code) {
-    case '1': case '2': case '3': case '4': case '5':
+    case '1': case '2': case '3': case '4': case '5': case '6':
         choose_sheet(code - '1');
         break;
     case 'f':
@@ -1171,6 +1183,10 @@ void key(int code)
         break;
     case 'b':
         s_blur_scrim = !s_blur_scrim;
+        break;
+    case 'v':
+        choose_sheet(5);
+        lists::study();
         break;
     default:
         return;

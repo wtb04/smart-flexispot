@@ -382,7 +382,8 @@ struct RowSpec {
     Trail         trail  = Trail::None;
     const char   *value  = nullptr;      // Value, a Chevron's text before it, a Badge's text
     std::int32_t  value_w = 0;           // for a value that changes, the widest it shows (0: as it is)
-    Ink           badge  = Ink::Accent;
+    Ink           ink    = Ink::Accent;  // a Badge's, or the state dot's
+    bool          dot    = false;        // a state dot before the value, or in the badge
     bool          on     = false;        // Toggle
     bool          action = false;        // the title in the accent: a thing to do
     bool          pressable = false;     // without a chevron, as an event that opens when tapped
@@ -397,6 +398,8 @@ struct RowSpec {
  */
 lv_obj_t *row(lv_obj_t *parent, const RowSpec &spec);
 void      set_row_value(lv_obj_t *row, const char *value);
+/** The value and its dot's ink, or the badge's text and ink. */
+void      set_row_state(lv_obj_t *row, const char *value, Ink ink);
 void      set_row_detail(lv_obj_t *row, const char *detail);
 /** Its value, toggle or badge. */
 lv_obj_t *row_trail(lv_obj_t *row);
@@ -404,10 +407,11 @@ lv_obj_t *row_trail(lv_obj_t *row);
 /**
  * A small pill: Accent, Green, Amber and Red tint it, Primary to Tertiary are
  * neutral, OnAccent fills it with the accent. `width` 0 is as wide as `text`;
- * one whose text changes is given the widest it shows.
+ * one whose text changes is given the widest it shows. `dot`: a state dot
+ * before the text, in its ink.
  */
 lv_obj_t *badge(lv_obj_t *parent, const char *text, Ink ink = Ink::Secondary, const char *glyph = nullptr,
-                std::int32_t width = 0);
+                std::int32_t width = 0, bool dot = false);
 void      set_badge(lv_obj_t *badge, const char *text, Ink ink);
 
 /** A glyph and a line in Tertiary, where a feed is missing or failing. */
