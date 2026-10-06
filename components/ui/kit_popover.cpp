@@ -1329,7 +1329,7 @@ lv_obj_t *notice(const NoticeSpec &spec)
         leave(s_notice);
     }
     constexpr std::int32_t W = 620, Y = 100;
-    lv_obj_t *slab = glass(layer(Layer::Alert), Glass::Large);
+    lv_obj_t *slab = glass(layer(Layer::Alert), Glass::Notice);
     s_notice       = slab;
     auto *parts    = new NoticeParts;
     parts->done    = spec.done;

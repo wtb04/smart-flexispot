@@ -526,6 +526,9 @@ int main(int argc, char **argv)
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_setting(ui::Setting::Charging, true));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_setting(ui::Setting::PresenceGate, true));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_setting(ui::Setting::DeskBluetooth, true));
+    // SIM_LOOK=light: the light look, as Setup can choose it.
+    const char *look = std::getenv("SIM_LOOK");
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_setting(ui::Setting::Light, look != nullptr && std::strcmp(look, "light") == 0));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_notification_volume(60));
     home_assistant::start();  // not answering yet: the page as the panel has it until it does
     hardware::start();
