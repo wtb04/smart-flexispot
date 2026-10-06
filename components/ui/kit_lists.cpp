@@ -147,7 +147,7 @@ void restyle_lists()
             lv_style_set_bg_color(&st, lv_color_hex(p.hair));
             lv_style_set_bg_opa(&st, static_cast<lv_opa_t>(p.hair_opa * 2));
             lv_style_set_text_color(&st, lv_color_hex(p.ink));
-            lv_style_set_text_opa(&st, ink == Ink::Primary ? LV_OPA_COVER : ink == Ink::Secondary ? p.ink2_opa : p.ink3_opa);
+            lv_style_set_text_opa(&st, ink == Ink::Primary ? static_cast<lv_opa_t>(LV_OPA_COVER) : ink == Ink::Secondary ? p.ink2_opa : p.ink3_opa);
         } else {
             lv_style_set_bg_color(&st, colour(ink));
             lv_style_set_bg_opa(&st, tinted);
@@ -618,6 +618,7 @@ lv_obj_t *empty(lv_obj_t *parent, const char *glyph, const char *value)
 {
     lv_obj_t *box = bare_box(parent);
     lv_obj_set_size(box, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_grow(box, 1);  // in a list's column, the middle of it
     lv_obj_set_style_pad_ver(box, space::xxl, 0);
     lv_obj_set_style_pad_hor(box, space::l, 0);
     lv_obj_set_style_pad_row(box, space::s, 0);
@@ -874,7 +875,7 @@ void picture_under(lv_obj_t *col, Under *under)
     if (canvas == nullptr) {
         idle   = lv_draw_buf_create(1, 1, LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO);
         canvas = lv_canvas_create(lv_layer_sys());
-        lv_obj_add_flag(canvas, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(canvas, true);
     }
     lv_canvas_set_draw_buf(canvas, under->picture);
     lv_layer_t paint;

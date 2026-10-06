@@ -21,5 +21,7 @@ void study();
 const char *report();
 /** Scrolls the open sheet, or else the calendar, a little further on. */
 void nudge();
+/** Lights the first and last rows of the panel's group, or puts them out, to look at their corners. */
+void show_press();
 
 }  // namespace ui::lab::lists

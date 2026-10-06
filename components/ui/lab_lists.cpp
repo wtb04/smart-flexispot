@@ -22,7 +22,7 @@ constexpr std::uint32_t ACCENTS[] = {0, 0x5aa9ff, 0x7ccf6a, 0xb48cff};
 const char *const ACCENT_NAMES[] = {"Orange", "Blue", "Green", "Violet"};
 
 lv_obj_t *s_root = nullptr, *s_cal = nullptr, *s_cal_tile = nullptr, *s_cal_empty = nullptr;
-lv_obj_t *s_about = nullptr, *s_log = nullptr, *s_accent_row = nullptr, *s_live = nullptr;
+lv_obj_t *s_desk = nullptr, *s_about = nullptr, *s_log = nullptr, *s_accent_row = nullptr, *s_live = nullptr;
 lv_obj_t *s_sheet = nullptr;  // the scrolling body of the open sheet
 Readout  *s_co2 = nullptr, *s_temp = nullptr;
 Stepper  *s_target = nullptr;
@@ -38,8 +38,8 @@ lv_obj_t *box(lv_obj_t *parent, lv_flex_flow_t flow, std::int32_t gap)
 {
     lv_obj_t *obj = lv_obj_create(parent);
     lv_obj_remove_style_all(obj);
-    lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_remove_flag(obj, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_scrollable(obj, false);
+    lv_obj_set_clickable(obj, false);
     lv_obj_set_flex_flow(obj, flow);
     lv_obj_set_style_pad_row(obj, gap, 0);
     lv_obj_set_style_pad_column(obj, gap, 0);
@@ -155,7 +155,7 @@ void open_event(lv_obj_t *source)
 {
     const auto  i  = static_cast<std::size_t>(reinterpret_cast<std::intptr_t>(lv_obj_get_user_data(source)));
     const Event &ev = EVENTS[i];
-    lv_obj_t *body = s_sheet = sheet(source, ev.title, 560, 400);
+    lv_obj_t *body = s_sheet = sheet(source, ev.title, 560, 330);
     const char *const names[] = {"Today", "Tomorrow", "Thursday", "Friday", "Monday"};
     char when[48];
     std::snprintf(when, sizeof when, "%s, %s, for 1 h 30 min", names[i / 8], ev.time);
@@ -172,7 +172,7 @@ void build_settings(lv_obj_t *parent)
     lv_obj_t *g = group(col, COL_A);
     RowSpec r;
     r.glyph = ic::desk, r.title = "Desk link", r.trail = Trail::Toggle, r.on = true;
-    row(g, r);
+    s_desk = row(g, r);
     r = {};
     r.glyph = ic::palette, r.tint = Ink::Amber, r.title = "Accent colour", r.trail = Trail::Chevron;
     r.value = ACCENT_NAMES[0], r.value_w = widest(Role::Body, {"Orange", "Blue", "Green", "Violet"});
@@ -197,15 +197,15 @@ void build_settings(lv_obj_t *parent)
                         nullptr);
     popover_source(s_log);
     r = {};
+    r.glyph = ic::restart_alt, r.tint = Ink::Red, r.title = "Restart";
+    r.action = true;
+    set_usable(row(g, r), false);
+    r = {};
     r.glyph = ic::info, r.tint = Ink::Secondary, r.title = "About this panel", r.trail = Trail::Chevron;
     s_about = row(g, r);
     lv_obj_add_event_cb(s_about, [](lv_event_t *e) { open_about(lv_event_get_current_target_obj(e)); },
                         LV_EVENT_CLICKED, nullptr);
     popover_source(s_about);
-    r = {};
-    r.glyph = ic::restart_alt, r.tint = Ink::Red, r.title = "Restart";
-    r.action = true;
-    set_usable(row(g, r), false);
 
     section(col, "FOCUS");
     lv_obj_t *f = group(col, COL_A);
@@ -222,7 +222,7 @@ void show_feed(bool working)
     const std::uint32_t n = lv_obj_get_child_count(s_cal);
     for (std::uint32_t i = 0; i < n; ++i) {
         lv_obj_t *c = lv_obj_get_child(s_cal, static_cast<std::int32_t>(i));
-        lv_obj_set_flag(c, LV_OBJ_FLAG_HIDDEN, c == s_cal_empty ? working : !working);
+        lv_obj_set_hidden(c, c == s_cal_empty ? working : !working);
     }
     lv_obj_scroll_to_y(s_cal, 0, LV_ANIM_OFF);
 }
@@ -250,13 +250,12 @@ void build_calendar(lv_obj_t *parent)
 {
     lv_obj_t *col = box(parent, LV_FLEX_FLOW_COLUMN, 0);
     lv_obj_set_width(col, COL_B);
-    lv_obj_t *head = section(col, "COMING UP", "40 EVENTS, 5 DAYS");
-    (void)head;
+    section(col, "COMING UP", "40 EVENTS, 5 DAYS");
     s_cal = list(col, COL_B, SHEET_H - SECTION_H - 60 - space::m);
     s_cal_tile = lv_obj_get_parent(s_cal);
     fill_calendar(s_cal);
     s_cal_empty = empty(s_cal, ic::event, "The calendar did not answer. Its events show again once it does.");
-    lv_obj_add_flag(s_cal_empty, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(s_cal_empty, true);
     lv_obj_t *feed = segmented(col, {"Feed working", "Feed failing"}, 0, COL_B);
     lv_obj_set_style_margin_top(feed, space::m, 0);
     lv_obj_add_event_cb(
@@ -326,7 +325,7 @@ void build_readings(lv_obj_t *parent)
 
     lv_timer_create(
         [](lv_timer_t *) {
-            if (s_root == nullptr || lv_obj_has_flag(s_root, LV_OBJ_FLAG_HIDDEN)) {
+            if (s_root == nullptr || lv_obj_is_hidden(s_root)) {
                 return;
             }
             static int tick = 0;
@@ -473,9 +472,9 @@ void build_variant(int v)
     lv_obj_get_coords(s_cal_tile, &at);
     const std::int32_t w = lv_area_get_width(&at), h = lv_area_get_height(&at);
     lv_obj_t *content = layer(Layer::Content);
-    lv_obj_add_flag(s_cal_tile, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(s_cal_tile, true);
     s_study.holder = box(content, LV_FLEX_FLOW_COLUMN, 0);
-    lv_obj_add_flag(s_study.holder, LV_OBJ_FLAG_IGNORE_LAYOUT);
+    lv_obj_set_ignore_layout(s_study.holder, true);
     lv_obj_set_pos(s_study.holder, at.x1, at.y1);
     lv_obj_set_size(s_study.holder, w, h);
 
@@ -484,7 +483,7 @@ void build_variant(int v)
         lv_obj_t *t = tile(s_study.holder, Lift::Low);
         lv_obj_set_size(t, w, h);
         lv_obj_set_style_pad_all(t, space::s, 0);
-        lv_obj_add_flag(t, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_scrollable(t, true);
         lv_obj_set_flex_flow(t, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_scrollbar_mode(t, LV_SCROLLBAR_MODE_OFF);
         s_study.scroller = t;
@@ -524,8 +523,8 @@ void build_variant(int v)
             lv_obj_t *t    = lv_obj_get_parent(col);
             lv_obj_t *fade = lv_obj_create(t);
             lv_obj_remove_style_all(fade);
-            lv_obj_add_flag(fade, LV_OBJ_FLAG_IGNORE_LAYOUT);
-            lv_obj_remove_flag(fade, LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_set_ignore_layout(fade, true);
+            lv_obj_set_clickable(fade, false);
             lv_obj_set_size(fade, w - 2 * space::s, 40);
             lv_obj_align(fade, LV_ALIGN_BOTTOM_MID, 0, 0);
             lv_obj_set_style_bg_color(fade, lv_color_hex(colours().surface), 0);
@@ -550,7 +549,7 @@ void drop_variant()
         s_study.holder = s_study.scroller = nullptr;
     }
     lv_obj_scroll_to_y(layer(Layer::Content), 0, LV_ANIM_OFF);
-    lv_obj_remove_flag(s_cal_tile, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(s_cal_tile, false);
 }
 
 constexpr std::uint32_t STUDY_SETTLE_MS = 500;  // for the tile's shadow to be baked in
@@ -709,6 +708,13 @@ void study()
     s_study.began   = lv_tick_get();
     build_variant(0);
     lv_timer_create(study_step, 16, nullptr);
+}
+
+void show_press()
+{
+    for (lv_obj_t *r : {s_desk, s_about}) {
+        lv_obj_set_state(r, LV_STATE_USER_1, !lv_obj_has_state(r, LV_STATE_USER_1));  // as while its sheet is open
+    }
 }
 
 void nudge()
