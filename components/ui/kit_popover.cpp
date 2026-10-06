@@ -47,7 +47,8 @@ bool stretch(const lv_draw_buf_t *from, lv_draw_buf_t *to, float scale)
 {
     if (s_ppa == nullptr) {
         ppa_client_config_t client{};
-        client.oper_type = PPA_OPERATION_SRM;
+        client.oper_type             = PPA_OPERATION_SRM;
+        client.max_pending_trans_num = 4;
         if (ppa_register_client(&client, &s_ppa) != ESP_OK) {
             return false;
         }
@@ -367,7 +368,9 @@ TaskHandle_t               s_worker = nullptr;
 std::atomic<bool>          s_working{false};
 std::atomic<std::uint32_t> s_made_at_gen{0};
 std::atomic<std::uint64_t> s_made_from_us{0}, s_pressed_us{0};
-constexpr std::uint64_t    STILL_US = 250000, EVERY_US = 2000000;
+// a refresh at rest competes with drawing for PSRAM, so only in a real pause
+// and seldom; the press is what makes it ready when it matters
+constexpr std::uint64_t    STILL_US = 1000000, EVERY_US = 5000000;
 
 bool picture_from_shown()
 {
@@ -418,7 +421,7 @@ void freeze()
 #if defined(ESP_PLATFORM)
     start_worker();
     const std::uint64_t waited = perf::now_us();
-    while (s_working.load(std::memory_order_acquire) && perf::now_us() - waited < 400000) {
+    while (s_working.load(std::memory_order_acquire)) {  // never two at once: they share the buffers
         vTaskDelay(1);
     }
     const bool same    = perf::generation() == s_made_at_gen.load(std::memory_order_relaxed);
