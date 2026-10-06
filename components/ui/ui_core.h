@@ -78,6 +78,10 @@ extern std::atomic<bool> s_setup_visible;
 /** A page on show, or Home in its place while it is away; each front's own. */
 void select_page(int index);
 
+/** The setting that takes the owner's pages away with their phone, and whether they are away now. */
+extern bool s_presence_gate;
+bool        owner_away();
+
 /** For updates kept outside ui.cpp's slots: asks the LVGL task to look. */
 void request_apply();
 
