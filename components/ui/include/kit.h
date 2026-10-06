@@ -270,7 +270,8 @@ class Rail {
 
 // --- popovers -------------------------------------------------------------
 
-enum class From : std::uint8_t { Below, Beside };
+/** Centre: in the middle of the screen whatever opened it, for a sheet. */
+enum class From : std::uint8_t { Below, Beside, Centre };
 
 /**
  * How a popover's glass is made. Live blurs what is behind it on every frame
@@ -327,5 +328,142 @@ std::uint32_t generation();
 std::uint64_t last_frame_us();
 std::uint64_t now_us();
 }  // namespace perf
+
+// --- lists and readings ----------------------------------------------------
+//
+// Rows draw no fill of their own until pressed and their hairlines are drawn
+// with them, not made as objects; whatever scrolls sits inside something
+// opaque that covers it, so a frame of scrolling is that one fill and the
+// rows in sight. See lab_lists.cpp for what makes a long list cheap.
+
+/** How wide the widest of `texts` is set in `role`: the width for a label that shows any of them. */
+std::int32_t widest(Role role, std::initializer_list<const char *> texts);
+
+/** A small caption over a group, or a day's name in a list, with `aside` at its right. */
+lv_obj_t *section(lv_obj_t *parent, const char *title, const char *aside = nullptr);
+
+/** Rows in one tile, split by hairlines; the first and last row's press reaches into its corners. */
+lv_obj_t *group(lv_obj_t *parent, std::int32_t width);
+
+/** A tile `w` by `h` with a column that scrolls inside it. Returns the column, for rows and sections. */
+lv_obj_t *list(lv_obj_t *parent, std::int32_t w, std::int32_t h);
+
+enum class Trail : std::uint8_t { None, Value, Chevron, Toggle, Badge };
+
+struct RowSpec {
+    const char   *glyph  = nullptr;
+    Ink           tint   = Ink::Accent;  // the glyph and the square it sits in
+    bool          bare   = false;        // the glyph without its square
+    const char   *lead   = nullptr;      // a time or a figure before the rest, `lead_w` wide (0: as it is)
+    std::int32_t  lead_w = 0;
+    std::uint32_t mark   = 0;            // a bar this colour before the title, as a calendar's; 0 for none
+    const char   *title  = "";
+    const char   *detail = nullptr;      // a second line under the title
+    Trail         trail  = Trail::None;
+    const char   *value  = nullptr;      // Value, a Chevron's text before it, a Badge's text
+    std::int32_t  value_w = 0;           // for a value that changes, the widest it shows (0: as it is)
+    Ink           badge  = Ink::Accent;
+    bool          on     = false;        // Toggle
+    bool          action = false;        // the title in the accent: a thing to do
+    bool          pressable = false;     // without a chevron, as an event that opens when tapped
+};
+
+/**
+ * A row in a group or a list. One with a chevron, a toggle or an action is
+ * pressable and sends LV_EVENT_CLICKED; a toggle row's tap flips the toggle,
+ * which sends LV_EVENT_VALUE_CHANGED. The rest are not pressable. Under
+ * something that scrolls the press shows a moment late, so a swipe through
+ * the rows does not light them all.
+ */
+lv_obj_t *row(lv_obj_t *parent, const RowSpec &spec);
+void      set_row_value(lv_obj_t *row, const char *value);
+void      set_row_detail(lv_obj_t *row, const char *detail);
+/** Its value, toggle or badge. */
+lv_obj_t *row_trail(lv_obj_t *row);
+
+/**
+ * A small pill: Accent, Green, Amber and Red tint it, Primary to Tertiary are
+ * neutral, OnAccent fills it with the accent. `width` 0 is as wide as `text`;
+ * one whose text changes is given the widest it shows.
+ */
+lv_obj_t *badge(lv_obj_t *parent, const char *text, Ink ink = Ink::Secondary, const char *glyph = nullptr,
+                std::int32_t width = 0);
+void      set_badge(lv_obj_t *badge, const char *text, Ink ink);
+
+/** A glyph and a line in Tertiary, where a feed is missing or failing. */
+lv_obj_t *empty(lv_obj_t *parent, const char *glyph, const char *text);
+
+struct ReadoutSpec {
+    Role         role     = Role::ReadL;
+    const char  *unit     = nullptr;
+    const char  *caption  = nullptr;
+    std::int32_t min      = 0, max = 999;  // its width is that of the widest of these
+    std::int32_t decimals = 0;             // values are in tenths when this is 1
+};
+
+/** A big figure in a box that never changes size, so nothing round it moves when it does. */
+class Readout {
+  public:
+    Readout() = default;
+    Readout(const Readout &) = delete;
+    Readout &operator=(const Readout &) = delete;
+    Readout(lv_obj_t *parent, const ReadoutSpec &spec);
+    ~Readout();
+    lv_obj_t *obj() const { return m_root; }
+    /** Counts there on the spring when `animate`. */
+    void set_value(std::int32_t value, bool animate = false);
+    /** No reading: a dash, never a made-up figure. */
+    void clear();
+    std::int32_t value() const { return m_value; }
+
+  private:
+    static void on_count(void *var, int32_t v);
+    void show(std::int32_t value);
+
+    ReadoutSpec  m_spec{};
+    lv_obj_t    *m_root = nullptr, *m_read = nullptr;
+    std::int32_t m_value = 0, m_shown = INT32_MIN;
+};
+
+struct StepperSpec {
+    std::int32_t min = 0, max = 100, step = 1, value = 0;
+    std::int32_t decimals = 0;
+    const char  *unit = nullptr;
+};
+
+/** Minus, the value, plus: holding one repeats, faster the longer it is held. Sends LV_EVENT_VALUE_CHANGED. */
+class Stepper {
+  public:
+    Stepper() = default;
+    Stepper(const Stepper &) = delete;
+    Stepper &operator=(const Stepper &) = delete;
+    Stepper(lv_obj_t *parent, const StepperSpec &spec);
+    ~Stepper();
+    lv_obj_t *obj() const { return m_root; }
+    void set_value(std::int32_t value);
+    std::int32_t value() const { return m_value; }
+
+  private:
+    static void on_press(lv_event_t *e);
+    static void on_repeat(lv_timer_t *t);
+    void step(int dir, int times);
+    void show();
+    void stop();
+
+    StepperSpec  m_spec{};
+    lv_obj_t    *m_root = nullptr, *m_less = nullptr, *m_more = nullptr, *m_read = nullptr;
+    lv_timer_t  *m_timer = nullptr;
+    std::int32_t m_value = 0;
+    int          m_dir = 0, m_repeats = 0;
+};
+
+/**
+ * A big glass card for long content, opened out of `source` as a popover and
+ * centred on the screen, with a title and a close button over a body that
+ * scrolls. Returns the body: fill it with rows, sheet_row or text.
+ */
+lv_obj_t *sheet(lv_obj_t *source, const char *title, std::int32_t w = 760, std::int32_t h = 600);
+/** A label and its value, a line of a sheet. Returns the value's label. */
+lv_obj_t *sheet_row(lv_obj_t *body, const char *label, const char *value);
 
 }  // namespace ui::kit
