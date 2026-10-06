@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <utility>
 
 #ifndef CONFIG_LOCTEK_MIN_HEIGHT_MM  // the simulator's desk
 #define CONFIG_LOCTEK_MIN_HEIGHT_MM 660
@@ -27,8 +28,8 @@ constexpr std::int32_t ITEM_W = 88, RULE_TOP = 14, RULE_LEN = 76, PAD = 20;
 constexpr int TRAVEL_MIN = CONFIG_LOCTEK_MIN_HEIGHT_MM, TRAVEL_MAX = CONFIG_LOCTEK_MAX_HEIGHT_MM;
 
 lv_obj_t *s_height = nullptr, *s_height_read = nullptr, *s_mark = nullptr;
-lv_obj_t *s_shortcut = nullptr, *s_shortcut_arrow = nullptr;
-lv_obj_t *s_focus = nullptr, *s_focus_glyph = nullptr, *s_focus_left = nullptr;
+lv_obj_t *s_shortcut = nullptr, *s_shortcut_arrow = nullptr, *s_shortcut_desk = nullptr;
+lv_obj_t *s_focus = nullptr, *s_focus_glyph = nullptr, *s_focus_left = nullptr, *s_focus_rule = nullptr;
 
 std::int32_t mark_y(int mm)
 {
@@ -36,10 +37,15 @@ std::int32_t mark_y(int mm)
     return RULE_TOP + RULE_LEN - 1 - at * (RULE_LEN - 1) / (TRAVEL_MAX - TRAVEL_MIN);
 }
 
-// The preset the shortcut goes to: sitting while standing, standing otherwise.
+// Where the shortcut goes: standing from Sit, sitting from anywhere else, and
+// on its way to either, that one, so a tap stops it as the box's keys do.
 int shortcut_target()
 {
-    return detail::desk_state().preset_active[detail::STAND_PRESET] ? detail::SIT_PRESET : detail::STAND_PRESET;
+    const detail::DeskState &desk = detail::desk_state();
+    if (desk.travelling == detail::STAND_PRESET || desk.travelling == detail::SIT_PRESET) {
+        return desk.travelling;
+    }
+    return desk.preset_active[detail::SIT_PRESET] ? detail::STAND_PRESET : detail::SIT_PRESET;
 }
 
 void paint_desk()
@@ -56,11 +62,18 @@ void paint_desk()
     if (desk.height_mm >= 0 && lv_obj_get_y(s_mark) != mark_y(desk.height_mm)) {
         lv_obj_set_y(s_mark, mark_y(desk.height_mm));
     }
-    const bool up = shortcut_target() == detail::STAND_PRESET;
-    set_icon(s_shortcut_arrow, desk.moving > 0 ? ic::arrow_upward : desk.moving < 0 ? ic::arrow_downward
-                                                                  : up              ? ic::arrow_upward
-                                                                                    : ic::arrow_downward,
-             false);
+    // which way it goes, or which way it moves by other keys; tinted while it is on its way there
+    const int  target = shortcut_target();
+    const bool going  = desk.travelling == target;
+    const bool up     = going || desk.moving == 0 ? target == detail::STAND_PRESET : desk.moving > 0;
+    set_icon(s_shortcut_arrow, up ? ic::arrow_upward : ic::arrow_downward, false);
+    static int s_shown = -1;
+    const int  look    = going ? 2 : desk.moving != 0 ? 1 : 0;
+    if (std::exchange(s_shown, look) != look) {
+        set_soft(s_shortcut, going);
+        set_ink(s_shortcut_arrow, look > 0 ? Ink::Accent : Ink::Secondary);
+        set_ink(s_shortcut_desk, going ? Ink::Accent : Ink::Primary);
+    }
     for (lv_obj_t *control : {s_height, s_shortcut}) {
         set_usable(control, desk.available);
     }
@@ -78,9 +91,21 @@ void paint_focus()
         if (std::strcmp(lv_label_get_text(s_focus_left), buf) != 0) {
             lv_label_set_text(s_focus_left, buf);
         }
-        set_ink(s_focus_left, detail::focus_resting(focus) ? Ink::Green : Ink::Accent);
+        static int s_ink = -1;
+        const int  ink   = detail::focus_resting(focus) ? 1 : 0;
+        if (std::exchange(s_ink, ink) != ink) {
+            set_ink(s_focus_left, ink == 1 ? Ink::Green : Ink::Accent);
+        }
+        const lv_opa_t opa = detail::focus_paused(focus) ? LV_OPA_40 : LV_OPA_COVER;
+        if (lv_obj_get_style_opa(s_focus_left, LV_PART_MAIN) != opa) {
+            lv_obj_set_style_opa(s_focus_left, opa, 0);
+        }
     }
-    lv_obj_set_hidden(s_focus, owner_away());
+    for (lv_obj_t *part : {s_focus, s_focus_rule}) {
+        if (lv_obj_is_hidden(part) != owner_away()) {
+            lv_obj_set_hidden(part, owner_away());
+        }
+    }
 }
 
 void build_height(lv_obj_t *dock)
@@ -145,7 +170,7 @@ void build_shortcut(lv_obj_t *dock)
     lv_obj_t *col = flow(s_shortcut, LV_FLEX_FLOW_COLUMN, 0);
     lv_obj_set_flex_align(col, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     s_shortcut_arrow = icon(col, ic::arrow_upward, 24, false);
-    icon(col, ic::desk, 34, false);
+    s_shortcut_desk  = icon(col, ic::desk, 34, false);
     lv_obj_add_event_cb(s_shortcut, [](lv_event_t *) { detail::desk_go_to(shortcut_target()); }, LV_EVENT_CLICKED,
                         nullptr);
 }
@@ -184,10 +209,11 @@ DockItems build_dock(lv_obj_t *chrome)
     filler(dock);
     items.calendar = dock_item(dock, ic::calendar_month);
     items.radar    = dock_item(dock, ic::flight);
-    hairline(dock, false, 40);
+    s_focus_rule = hairline(dock, false, 40);
     build_focus(dock);
 
     subscribe(Topic::Desk, detail::kNoView, paint_desk);
+    follow_desk();
     subscribe(Topic::Focus, detail::kNoView, paint_focus);
     subscribe(Topic::Second, detail::kNoView, paint_focus);
     subscribe(Topic::Status, detail::kNoView, paint_focus);

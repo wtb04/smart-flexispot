@@ -725,4 +725,9 @@ class Reading : public InPsram {
     int         m_zone = -2;
 };
 
+// --- the desk --------------------------------------------------------------
+
+/** A button tinted as Button::Soft is, put on and taken off: something on its way. Call it on a change only. */
+void set_soft(lv_obj_t *btn, bool on);
+
 }  // namespace ui::kit
