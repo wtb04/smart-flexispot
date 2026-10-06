@@ -286,6 +286,7 @@ void build_dock(lv_obj_t *scr)
     lv_obj_add_flag(read, LV_OBJ_FLAG_EVENT_BUBBLE);
     text(height, Role::Label, "CM", Ink::Tertiary);
     lv_obj_add_event_cb(height, open_desk, LV_EVENT_CLICKED, nullptr);
+    popover_source(height);
 
     lv_obj_t *stand = button(dock, Button::Raised, nullptr, nullptr);
     lv_obj_set_size(stand, 88, 80);
@@ -349,10 +350,12 @@ void build_bar(lv_obj_t *scr)
     lv_obj_set_style_text_font(lv_obj_get_child(light, 0), fonts::icon(28, true), 0);
     lv_obj_set_style_text_color(lv_obj_get_child(light, 0), lv_color_hex(colours().lamp), 0);
     lv_obj_add_event_cb(light, open_lights, LV_EVENT_CLICKED, nullptr);
+    popover_source(light);
     capsule_divider(room);
     lv_obj_t *heat = capsule_item(room, ic::local_fire_department, "20.5°", 150);
     lv_obj_set_style_text_color(lv_obj_get_child(heat, 0), colour(Ink::Accent), 0);
     lv_obj_add_event_cb(heat, open_heating, LV_EVENT_CLICKED, nullptr);
+    popover_source(heat);
 
     lv_obj_t *media = capsule(bar);
     lv_obj_set_width(media, 452);
@@ -373,6 +376,7 @@ void build_bar(lv_obj_t *scr)
     lv_obj_t *pp = button(media, Button::Raised, ic::pause, nullptr, true);
     lv_obj_set_size(pp, 56, 56);
     lv_obj_add_event_cb(media, open_media, LV_EVENT_CLICKED, nullptr);
+    popover_source(media);
 }
 
 // --- sheets ---------------------------------------------------------------
@@ -783,24 +787,30 @@ const Phase PHASES[] = {
     {"popover, live", 1300, [] { choose_sheet(0); set_pop_glass(PopGlass::Live); },
      [](std::uint32_t at, std::uint32_t frame) {
          if (frame == 0) {
-             open_lights_from(s_light_item);
-         } else if (at >= 800 && popover_open()) {
+             prepare_popover();  // the finger lands
+         } else if (at >= 120 && at < 136) {
+             open_lights_from(s_light_item);  // and lifts, a tap's length later
+         } else if (at >= 900 && popover_open()) {
              close_popover(true);
          }
      }},
     {"popover, frozen", 1300, [] { set_pop_glass(PopGlass::Frozen); set_pop_motion(PopMotion::Grow); },
      [](std::uint32_t at, std::uint32_t frame) {
          if (frame == 0) {
-             open_lights_from(s_light_item);
-         } else if (at >= 800 && popover_open()) {
+             prepare_popover();  // the finger lands
+         } else if (at >= 120 && at < 136) {
+             open_lights_from(s_light_item);  // and lifts, a tap's length later
+         } else if (at >= 900 && popover_open()) {
              close_popover(true);
          }
      }},
     {"popover, rise", 1300, [] { set_pop_glass(PopGlass::Frozen); set_pop_motion(PopMotion::Rise); },
      [](std::uint32_t at, std::uint32_t frame) {
          if (frame == 0) {
-             open_lights_from(s_light_item);
-         } else if (at >= 800 && popover_open()) {
+             prepare_popover();  // the finger lands
+         } else if (at >= 120 && at < 136) {
+             open_lights_from(s_light_item);  // and lifts, a tap's length later
+         } else if (at >= 900 && popover_open()) {
              close_popover(true);
          }
      }},
@@ -842,7 +852,8 @@ void bench_step(lv_timer_t *timer)
 {
     const std::uint32_t now = lv_tick_get();
     if (s_bench.settling) {
-        if (now - s_bench.began < 300) {
+        const bool popover_next = std::strncmp(PHASES[s_bench.phase].name, "popover", 7) == 0;
+        if (now - s_bench.began < (popover_next ? 900u : 300u)) {
             return;
         }
         s_bench.settling = false;
@@ -1010,6 +1021,12 @@ void key(int code)
     case 'a':
         s_accent = (s_accent + 1) % static_cast<int>(std::size(ACCENTS));
         set_accent(ACCENTS[s_accent]);
+        break;
+    case 'o':
+        open_lights_from(s_light_item);
+        break;
+    case 'c':
+        close_popover(true);
         break;
     case 'n':
         notice("HOME ASSISTANT", glyph::local_laundry_service, "Washing machine", "The wash is done", 6000);

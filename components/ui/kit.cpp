@@ -1,6 +1,7 @@
 #include "kit.h"
 
 #include "kit_fonts.h"
+#include "kit_pixels.h"
 
 #include <algorithm>
 #include <cmath>
@@ -10,18 +11,21 @@
 namespace ui::kit {
 namespace {
 
+// The darks sit on RGB565's grid (red and blue in eights, green in fours): off
+// it, the panel rounds a warm brown to olive, as it loses more of the red and
+// blue than of the green.
 constexpr Palette DARK{
-    .ground = 0x100e0c, .surface = 0x1c1916, .surface_hi = 0x221e1a, .well = 0x151210,
-    .raised = 0x2b2621, .raised_hi = 0x36302a,
+    .ground = 0x100c08, .surface = 0x201c18, .surface_hi = 0x282420, .well = 0x181410,
+    .raised = 0x302820, .raised_hi = 0x383028,
     .ink = 0xf6efe7, .ink2_opa = 158, .ink3_opa = 92, .hair_opa = 20, .tick_opa = 72,
     .hair = 0xffffff,
     .accent = 0xff8a3d, .on_accent = 0x1f0e03,
     .green = 0x86d27c, .amber = 0xffbe55, .red = 0xff6b5e, .lamp = 0xffd36b, .on_lamp = 0x2e1f00,
     .blue = 0x6fb6ff,
     .shadow = 0x000000, .shadow_opa = 110, .edge_opa = 120,
-    .glass = 0x48423d, .glass_clear_opa = 56, .glass_solid_opa = 214, .rim_opa = 38,
+    .glass = 0x484038, .glass_clear_opa = 56, .glass_solid_opa = 214, .rim_opa = 38,
     .glass_edge_opa = 115, .glass_shadow_opa = 170,
-    .scrim = 0x080605, .scrim_opa = 107,
+    .scrim = 0x080400, .scrim_opa = 107,
 };
 
 constexpr Palette LIGHT{
@@ -131,15 +135,10 @@ void set_shadow(lv_style_t *st, std::int32_t width, std::int32_t y, std::int32_t
 void style_glass(lv_style_t *st, std::int32_t blur, std::int32_t shadow_w, std::int32_t shadow_y,
                  lv_opa_t opa)
 {
-    const std::uint32_t sheen = mix(s_pal.glass, 0xffffff, s_look == Look::Dark ? 14 : 60);
-    lv_style_set_bg_color(st, hex(sheen));
-    lv_style_set_bg_grad_color(st, hex(s_pal.glass));
-    lv_style_set_bg_grad_dir(st, LV_GRAD_DIR_VER);
-    lv_style_set_bg_main_stop(st, 0);
-    lv_style_set_bg_grad_stop(st, 110);
-    lv_style_set_bg_opa(st, LV_OPA_COVER);
-    lv_style_set_bg_main_opa(st, opa);
-    lv_style_set_bg_grad_opa(st, opa);
+    // a flat tint: a sheen this soft and this tall bands on the panel, which LVGL does not dither
+    lv_style_set_bg_color(st, hex(s_pal.glass));
+    lv_style_set_bg_grad_dir(st, LV_GRAD_DIR_NONE);
+    lv_style_set_bg_opa(st, opa);
     // no live blur in the shared glass: the chrome sits over the ground, which is
     // soft already, and LVGL re-blurs a whole widget whenever anything near it
     // redraws, which the panel cannot afford; popovers bring their own
@@ -384,14 +383,14 @@ void paint_ground()
             const int   x0 = static_cast<int>(fx), x1 = std::min(x0 + 1, SW - 1);
             const float tx = fx - x0;
             seed = seed * 1664525u + 1013904223u;
-            const float noise = static_cast<float>((seed >> 24) & 0xff) / 255.0f * 6.0f - 3.0f;
+            const float noise = static_cast<float>((seed >> 24) & 0xff) / 255.0f * 4.0f - 2.0f;  // the grain
             int out[3];
             for (int k = 0; k < 3; ++k) {
                 const float top = small[y0][x0][k] + (small[y0][x1][k] - small[y0][x0][k]) * tx;
                 const float bot = small[y1][x0][k] + (small[y1][x1][k] - small[y1][x0][k]) * tx;
                 out[k] = std::clamp(static_cast<int>(top + (bot - top) * ty + noise), 0, 255);
             }
-            row[x] = static_cast<std::uint16_t>(((out[0] >> 3) << 11) | ((out[1] >> 2) << 5) | (out[2] >> 3));
+            row[x] = pixels::dither(out[0], out[1], out[2], x, y);
         }
     }
     lv_free(small);

@@ -1,6 +1,7 @@
 #include "kit.h"
 
 #include <algorithm>
+#include <atomic>
 
 namespace ui::kit::perf {
 namespace {
@@ -33,6 +34,8 @@ Stats         s_last;
 bool          s_phase_on = false;
 std::uint64_t s_render_at = 0;
 bool          s_rendering = false;
+std::atomic<std::uint32_t> s_generation{0};
+std::atomic<std::uint64_t> s_last_frame{0};
 std::uint16_t s_each[48];
 int           s_each_n = 0;
 
@@ -48,6 +51,8 @@ void on_display(lv_event_t *e)
         }
     } else if (code == LV_EVENT_REFR_READY && s_rendering) {
         s_rendering = false;
+        s_generation.fetch_add(1, std::memory_order_relaxed);
+        s_last_frame.store(now_us(), std::memory_order_relaxed);
         const std::uint64_t took = now_us() - s_render_at;
         s_second.add(took);
         if (s_phase_on) {
@@ -85,6 +90,8 @@ void start(Clock clock)
 }
 
 Stats last_second() { return s_last; }
+std::uint32_t generation() { return s_generation.load(std::memory_order_relaxed); }
+std::uint64_t last_frame_us() { return s_last_frame.load(std::memory_order_relaxed); }
 
 int frames(const std::uint16_t **ms)
 {
