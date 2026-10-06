@@ -20,7 +20,7 @@ TEST(LaptopProtocol, reads_a_video_playing)
 {
     const NowPlaying now = read(
         R"j({"machine":"wtb-mbp","port":47801,"app":"Safari","playing":true,"title":"Aart (86)",)j"
-        R"j("artist":"RTV Oost","position":167.4,"duration":540.06,"art":"3f2a","video":true,)j"
+        R"j("artist":"RTV Oost","position":167.4,"duration":540.06,"art":"3f2a","square":"9c1e","video":true,)j"
         R"j("volume":40,"muted":true,"takes":["pause","seek","next","volume"]})j");
     EXPECT_TRUE(now.active);
     EXPECT_TRUE(now.playing);
@@ -32,6 +32,7 @@ TEST(LaptopProtocol, reads_a_video_playing)
     EXPECT_EQ(now.position_s, 167);
     EXPECT_EQ(now.duration_s, 540);
     EXPECT_EQ(now.art, "3f2a");
+    EXPECT_EQ(now.square, "9c1e");
     EXPECT_TRUE(now.video);
     EXPECT_TRUE(now.takes_pause);
     EXPECT_TRUE(now.takes_seek);

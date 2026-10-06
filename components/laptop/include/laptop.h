@@ -28,8 +28,9 @@ void set_volume(int percent);
 void set_muted(bool muted);
 void step_volume(bool up);
 
-/** Where the cover is for media to ask fetch_cover() for, or empty. */
-std::string art_url(const NowPlaying &now);
+/** Where a picture the laptop named, art or square, is for media to ask
+ *  fetch_cover() for, or empty. */
+std::string art_url(const std::string &art);
 
 /** The cover at `url`, as art_url() gave it, opened into `into`; its length,
  *  or 0 when it could not be had. For media's fetcher, on its task. */
