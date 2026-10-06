@@ -15,6 +15,9 @@
 #include <iterator>
 
 namespace ui::lab {
+// lab_pages.cpp
+void build_pages(lv_obj_t *const items[4], void (*shown)(int page), void (*back)());
+
 namespace {
 
 using namespace ui::kit;
@@ -25,7 +28,12 @@ constexpr std::int32_t SHEET_Y = 76, SHEET_H = CONTENT_H - SHEET_Y;
 constexpr std::uint32_t ACCENTS[] = {0, 0x5aa9ff, 0x7ccf6a, 0xb48cff, 0xff6f8e, 0x3fd0c0};
 constexpr int GLASS_STEPS[] = {0, 35, 50, 70, 100};
 
-lv_obj_t *s_sheets[5]{};
+constexpr int PAGES_SHEET = 5;  // the kit's own pages, in place of a sheet
+lv_obj_t *s_sheets[PAGES_SHEET]{};
+lv_obj_t *s_header = nullptr;
+lv_obj_t *s_items[4]{};
+bool      s_in_pages   = false;
+int       s_last_sheet = 0;
 lv_obj_t *s_perf = nullptr;
 lv_obj_t *s_light_item = nullptr, *s_bench_btn = nullptr, *s_bench_seg = nullptr, *s_slab = nullptr;
 lv_obj_t *s_picker = nullptr;
@@ -70,10 +78,35 @@ void show_state()
     lv_label_set_text(s_state, buf);
 }
 
+// The sheets out of the way as a page comes to show, the dock's or the picker's.
+void pages_shown(int)
+{
+    if (s_in_pages) {
+        return;
+    }
+    s_in_pages = true;
+    lv_obj_set_hidden(s_header, true);
+    for (lv_obj_t *sheet : s_sheets) {
+        if (sheet != nullptr) {
+            lv_obj_set_hidden(sheet, true);
+        }
+    }
+}
+
 void choose_sheet(int index)
 {
     lv_obj_scroll_to_y(layer(Layer::Content), 0, LV_ANIM_OFF);
-    for (int i = 0; i < 5; ++i) {
+    if (index == PAGES_SHEET) {
+        show_page(std::max(shown_page(), 0), false);
+        return;
+    }
+    if (s_in_pages) {
+        s_in_pages = false;
+        hide_pages();
+        lv_obj_set_hidden(s_header, false);
+    }
+    s_last_sheet = index;
+    for (int i = 0; i < PAGES_SHEET; ++i) {
         if (s_sheets[i] != nullptr) {
             if (i == index) {
                 lv_obj_remove_flag(s_sheets[i], LV_OBJ_FLAG_HIDDEN);
@@ -349,7 +382,6 @@ void build_dock(lv_obj_t *scr)
     icon(col, ic::desk, 34, false);
 
     spacer(dock);
-    lv_obj_t *tabs[4];
     const char *glyphs[4] = {ic::home, ic::calendar_month, ic::flight, ic::timer};
     for (int i = 0; i < 4; ++i) {
         if (i == 1) {
@@ -358,28 +390,8 @@ void build_dock(lv_obj_t *scr)
         if (i == 3) {
             hairline(dock, false, 40);
         }
-        tabs[i] = button(dock, Button::Flat, glyphs[i], nullptr, false, true);
-        lv_obj_set_size(tabs[i], 88, 80);
-        lv_obj_set_style_radius(tabs[i], 24, 0);
-        lv_obj_set_style_text_opa(tabs[i], colours().ink2_opa, 0);
-        lv_obj_set_style_text_font(lv_obj_get_child(tabs[i], 0), fonts::icon(34, false), 0);
-        lv_obj_set_style_text_font(lv_obj_get_child(tabs[i], 0), fonts::icon(34, true), LV_STATE_CHECKED);
-        lv_obj_add_event_cb(
-            tabs[i],
-            [](lv_event_t *e) {
-                lv_obj_t *tab  = lv_event_get_current_target_obj(e);
-                lv_obj_t *dock_of = lv_obj_get_parent(tab);
-                for (std::uint32_t k = 0; k < lv_obj_get_child_count(dock_of); ++k) {
-                    lv_obj_t *other = lv_obj_get_child(dock_of, static_cast<int32_t>(k));
-                    if (other != tab && lv_obj_has_flag(other, LV_OBJ_FLAG_CHECKABLE)) {
-                        lv_obj_remove_state(other, LV_STATE_CHECKED);
-                    }
-                }
-                lv_obj_add_state(tab, LV_STATE_CHECKED);
-            },
-            LV_EVENT_CLICKED, nullptr);
+        s_items[i] = dock_item(dock, glyphs[i]);
     }
-    lv_obj_add_state(tabs[0], LV_STATE_CHECKED);
 }
 
 void build_bar(lv_obj_t *scr)
@@ -834,6 +846,21 @@ void close_tick(std::uint32_t, std::uint32_t frame)
     }
 }
 
+// From the agenda back to Home, its tiles and its dial the most a page change draws.
+template <Change How> void page_setup()
+{
+    choose_sheet(PAGES_SHEET);
+    set_change(How);
+    show_page(1, false);
+}
+
+void page_tick(std::uint32_t, std::uint32_t frame)
+{
+    if (frame == 0) {
+        show_page(0);
+    }
+}
+
 const Phase PHASES[] = {
     {"idle", 800, [] { choose_sheet(1); }, no_tick},
     {"button press", 1400, nullptr,
@@ -893,10 +920,17 @@ const Phase PHASES[] = {
              notice("HOME ASSISTANT", glyph::local_laundry_service, "Washing machine", "The wash is done", 900);
          }
      }},
+    {"page, instant", 900, page_setup<Change::Instant>, page_tick},
+    {"page, wipe", 900, page_setup<Change::Wipe>, page_tick},
+    {"page, spread", 900, page_setup<Change::Spread>, page_tick},
+    {"page, stagger", 900, page_setup<Change::Stagger>, page_tick},
+    {"page, slide", 900, page_setup<Change::Slide>, page_tick},
+    {"page, fade", 900, page_setup<Change::Fade>, page_tick},
 };
+constexpr std::size_t PHASE_COUNT = std::size(PHASES);
 
-char s_report[6000] = "no bench run yet\n";
-char s_frames[6][420]{};
+char s_report[10000] = "no bench run yet\n";
+char s_frames[14][480]{};
 int  s_frame_lines = 0;
 
 // What each frame redraws, as LVGL has it once it has joined the areas: the
@@ -905,7 +939,7 @@ struct Drawn {
     std::uint32_t frames = 0, worst = 0;
     std::uint64_t px = 0;
 };
-Drawn         s_drawn, s_drawn_of[2][16];
+Drawn         s_drawn, s_drawn_of[2][PHASE_COUNT];
 bool          s_drawing = false;
 std::uint32_t s_drawn_each[48]{};
 
@@ -929,7 +963,7 @@ void on_render(lv_event_t *e)
     s_drawn.worst = std::max(s_drawn.worst, px);
 }
 #if defined(ESP_PLATFORM)
-board::FlushTimes s_flush[2][16]{};
+board::FlushTimes s_flush[2][PHASE_COUNT]{};
 #endif
 
 struct Config {
@@ -943,8 +977,9 @@ struct Bench {
     int           phase = -1;
     std::uint32_t frame = 0, began = 0;
     bool          settling = false;
-    perf::Stats   results[std::size(PHASES)];
+    perf::Stats   results[PHASE_COUNT];
     PopGlass      was = PopGlass::Frozen;
+    Change        change = Change::Wipe;
 } s_bench;
 
 void bench_step(lv_timer_t *timer)
@@ -952,7 +987,8 @@ void bench_step(lv_timer_t *timer)
     const std::uint32_t now = lv_tick_get();
     if (s_bench.settling) {
         const bool popover_next = std::strncmp(PHASES[s_bench.phase].name, "popover", 7) == 0;
-        if (now - s_bench.began < (popover_next ? 900u : 300u)) {
+        const bool page_next    = std::strncmp(PHASES[s_bench.phase].name, "page", 4) == 0;  // its shadows painted in
+        if (now - s_bench.began < (popover_next ? 900u : page_next ? 700u : 300u)) {
             return;
         }
         s_bench.settling = false;
@@ -977,8 +1013,9 @@ void bench_step(lv_timer_t *timer)
 #if defined(ESP_PLATFORM)
     s_flush[s_bench.config][s_bench.phase] = board::take_flush_times();
 #endif
+    const bool paged  = std::strncmp(PHASES[s_bench.phase].name, "page", 4) == 0;
     const bool traced = std::strncmp(PHASES[s_bench.phase].name, "popover", 7) == 0 ||
-                        std::strcmp(PHASES[s_bench.phase].name, "notice") == 0;
+                        std::strcmp(PHASES[s_bench.phase].name, "notice") == 0 || paged;
     if (traced && s_bench.config == 0 && s_frame_lines < static_cast<int>(std::size(s_frames))) {
         const std::uint16_t *each = nullptr;
         const int count = std::min<int>(perf::frames(&each), static_cast<int>(std::min<std::uint32_t>(s_drawn.frames, 48)));
@@ -989,7 +1026,7 @@ void bench_step(lv_timer_t *timer)
             n += std::snprintf(line + n, size - n, " %u/%u", static_cast<unsigned>(each[i]),
                                static_cast<unsigned>((s_drawn_each[i] + 500) / 1000));
         }
-        std::snprintf(line + n, size - n, "\n");
+        std::snprintf(line + n, size - n, paged ? "\n    %s\n" : "\n", change_report());
     }
     if (++s_bench.phase == static_cast<int>(std::size(PHASES))) {
         int n = static_cast<int>(std::strlen(s_report));
@@ -1031,6 +1068,7 @@ void bench_step(lv_timer_t *timer)
         lv_timer_delete(timer);
         set_effects(true, true);
         set_pop_glass(s_bench.was);
+        set_change(s_bench.change);
         s_bench.phase = -1;
         show_state();
         return;
@@ -1048,6 +1086,7 @@ void run_bench()
         return;
     }
     s_bench.was    = pop_glass();
+    s_bench.change = change();
     s_bench.phase  = 0;
     s_bench.config = 0;
     set_effects(true, true);
@@ -1096,11 +1135,11 @@ void build(perf::Clock clock)
     screen(scr);
     lv_obj_t *content = layer(Layer::Content), *chrome = layer(Layer::Chrome);
 
-    lv_obj_t *header = box(content, LV_FLEX_FLOW_ROW, space::l);
+    lv_obj_t *header = s_header = box(content, LV_FLEX_FLOW_ROW, space::l);
     lv_obj_set_pos(header, CONTENT_X, CONTENT_Y);
     lv_obj_set_size(header, CONTENT_W, 60);
     lv_obj_set_flex_align(header, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    s_picker = segmented(header, {"Surfaces", "Controls", "Instruments", "Glass", "Layers"}, 0, 640);
+    s_picker = segmented(header, {"Surfaces", "Controls", "Instruments", "Glass", "Layers", "Pages"}, 0, 740);
     lv_obj_add_event_cb(
         s_picker, [](lv_event_t *e) { choose_sheet(segmented_chosen(lv_event_get_target_obj(e))); },
         LV_EVENT_VALUE_CHANGED, nullptr);
@@ -1117,6 +1156,7 @@ void build(perf::Clock clock)
     choose_sheet(0);
     build_dock(chrome);
     build_bar(chrome);
+    build_pages(s_items, pages_shown, [] { choose_sheet(s_last_sheet); });
     show_state();
 }
 
@@ -1126,15 +1166,20 @@ void bench() { run_bench(); }
 
 int report(char *out, int size)
 {
-    const int n = std::snprintf(out, static_cast<std::size_t>(size), "%s%s%s%s%s%s%s%s", s_report, s_frames[0],
-                                s_frames[1], s_frames[2], s_frames[3], s_frames[4], s_frames[5], kit::freeze_report());
+    int n = std::snprintf(out, static_cast<std::size_t>(size), "%s", s_report);
+    for (int i = 0; i < s_frame_lines && n < size; ++i) {
+        n += std::snprintf(out + n, static_cast<std::size_t>(size - n), "%s", s_frames[i]);
+    }
+    if (n < size) {
+        n += std::snprintf(out + n, static_cast<std::size_t>(size - n), "%s", kit::freeze_report());
+    }
     return std::min(n, size - 1);
 }
 
 void key(int code)
 {
     switch (code) {
-    case '1': case '2': case '3': case '4': case '5':
+    case '1': case '2': case '3': case '4': case '5': case '6':
         choose_sheet(code - '1');
         break;
     case 'f':

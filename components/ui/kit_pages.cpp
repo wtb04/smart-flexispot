@@ -2,17 +2,18 @@
 
 #include "kit_bake.h"
 #include "kit_fonts.h"
+#include "lvgl_private.h"  // invalidating an area of the display, and how far an object draws past itself
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdio>
-#include <cstdlib>
 #include <iterator>
 
 namespace ui::kit {
 namespace {
 
 constexpr int          MAX_PAGES = 8;
-constexpr int          BANDS     = 8;   // a band of about a ninth of the screen: a frame the panel draws in a sixth of a whole one
+constexpr int          BANDS     = 8;   // about a ninth of the screen a frame, and eight frames still read as one sweep
 constexpr int          MAX_UNITS = 24;
 constexpr std::int32_t REACH     = 32;  // further than any tile's shadow falls
 constexpr std::int32_t PROGRESS  = 1024;
@@ -35,7 +36,6 @@ lv_area_t span(const lv_area_t &a, const lv_area_t &b)
 }
 
 constexpr lv_area_t NOTHING{1, 1, 0, 0};
-constexpr lv_area_t SCREEN{0, 0, size::screen_w - 1, size::screen_h - 1};
 // Where anything of a page can be: all but the dock's side.
 constexpr lv_area_t PAGES{inset::left - space::l, 0, size::screen_w - 1, size::screen_h - 1};
 
@@ -261,7 +261,7 @@ void step()
         const std::int32_t d     = reach * k / s_run.steps;
         open_to({r.x1, std::max(r.y1, s_run.centre - d), r.x2, std::min(r.y2, s_run.centre + d)});
     } else if (s_run.how == Change::Stagger && k >= 2 && k - 2 < s_run.unit_count) {
-        lv_obj_set_hidden(s_run.units[k - 2], false);  // the first frame was the ground's
+        lv_obj_remove_local_style_prop(s_run.units[k - 2], LV_STYLE_OPA, 0);  // the first frame was the ground's
         bake::now();
     }
     s_run.frame_at = s_frames;
@@ -285,7 +285,7 @@ void finish()
     }
     lv_anim_delete(&s_run, nullptr);
     for (int i = 0; i < s_run.unit_count; ++i) {
-        lv_obj_set_hidden(s_run.units[i], false);
+        lv_obj_remove_local_style_prop(s_run.units[i], LV_STYLE_OPA, 0);
     }
     if (s_run.from >= 0 && whole(s_run.how)) {
         // the old page is off the screen or clear by now, the new one where it rests
@@ -377,32 +377,32 @@ void light(Page &p, bool on)
     lv_obj_set_style_text_font(g, fonts::icon(34, on), 0);
 }
 
+struct Slot {
+    std::int32_t x, y, w, h;
+};
+Slot s_mark_from{}, s_mark_to{}, s_mark_at{};
+
 // The item the mark is over is lit: it changes over as the mark passes its middle.
 void light_under_mark()
 {
-    lv_area_t m;
-    lv_obj_get_coords(s_mark, &m);
-    const std::int32_t cx = (m.x1 + m.x2) / 2, cy = (m.y1 + m.y2) / 2;
+    const std::int32_t cx = s_mark_at.x + s_mark_at.w / 2, cy = s_mark_at.y + s_mark_at.h / 2;
     for (Page &p : s_pages) {
         if (p.item == nullptr) {
             continue;
         }
-        lv_area_t a;
-        lv_obj_get_coords(p.item, &a);
-        light(p, !lv_obj_is_hidden(s_mark) && cx >= a.x1 && cx <= a.x2 && cy >= a.y1 && cy <= a.y2);
+        const std::int32_t x = lv_obj_get_x(p.item), y = lv_obj_get_y(p.item);
+        light(p, !lv_obj_is_hidden(s_mark) && cx >= x && cx < x + lv_obj_get_width(p.item) && cy >= y &&
+                     cy < y + lv_obj_get_height(p.item));
     }
 }
-
-struct Slot {
-    std::int32_t x, y, w, h;
-};
-Slot s_mark_from{}, s_mark_to{};
 
 void place_mark(lv_anim_t *, int32_t p)
 {
     const auto lerp = [p](std::int32_t a, std::int32_t b) { return a + (b - a) * p / PROGRESS; };
-    lv_obj_set_pos(s_mark, lerp(s_mark_from.x, s_mark_to.x), lerp(s_mark_from.y, s_mark_to.y));
-    lv_obj_set_size(s_mark, lerp(s_mark_from.w, s_mark_to.w), lerp(s_mark_from.h, s_mark_to.h));
+    s_mark_at = {lerp(s_mark_from.x, s_mark_to.x), lerp(s_mark_from.y, s_mark_to.y), lerp(s_mark_from.w, s_mark_to.w),
+                 lerp(s_mark_from.h, s_mark_to.h)};
+    lv_obj_set_pos(s_mark, s_mark_at.x, s_mark_at.y);
+    lv_obj_set_size(s_mark, s_mark_at.w, s_mark_at.h);
     light_under_mark();
 }
 
@@ -425,7 +425,7 @@ void mark(int index, bool animate)
         place_mark(nullptr, PROGRESS);
         return;
     }
-    s_mark_from = {lv_obj_get_x(s_mark), lv_obj_get_y(s_mark), lv_obj_get_width(s_mark), lv_obj_get_height(s_mark)};
+    s_mark_from = s_mark_at;
     lv_anim_t a;
     lv_anim_init(&a);
     lv_anim_set_var(&a, s_mark);
@@ -561,6 +561,7 @@ void hide_pages()
         lv_obj_set_hidden(s_pages[s_shown].obj, true);
     }
     mark(-1, false);
+    edge_follows(layer(Layer::Content));
 }
 
 void show_page(int index, bool animate)
@@ -601,7 +602,7 @@ void show_page(int index, bool animate)
     if (how == Change::Stagger) {
         gather(to.obj, s_run.centre);
         for (int i = 0; i < s_run.unit_count; ++i) {
-            lv_obj_set_hidden(s_run.units[i], true);
+            lv_obj_set_style_opa(s_run.units[i], LV_OPA_TRANSP, 0);  // not hidden: a page laid out by flex would close up
         }
     }
     if (whole(how)) {
@@ -613,6 +614,8 @@ void show_page(int index, bool animate)
 
     s_run.filtering = !whole(how);
     const std::uint64_t t = perf::now_us();
+    // the new page's shadows painted into the ground now, while it is not
+    // drawn yet: its bands then draw them as a copy of the ground
     if (!whole(how)) {
         bake::now();
     }
