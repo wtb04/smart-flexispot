@@ -31,12 +31,11 @@ constexpr std::int32_t PAGE_PAD = 20;
 
 }  // namespace
 
-int  s_page           = HOME_PAGE;
+
 namespace {
 int s_before_setup = HOME_PAGE;  // where Setup goes back to
 }  // namespace
 
-std::atomic<bool> s_setup_visible{false};
 
 bool s_presence_gate = true;
 

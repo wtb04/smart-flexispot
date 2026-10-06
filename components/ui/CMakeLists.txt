@@ -1,6 +1,17 @@
 file(GLOB UI_FONTS "fonts/lv_font_*.c")
+include(${CMAKE_CURRENT_LIST_DIR}/fronts.cmake)
+set(UI_CORE_SOURCES
+    ui.cpp lv_mem_psram.cpp screenshot.cpp topics.cpp focus_model.cpp media_model.cpp room_model.cpp home_model.cpp
+    settings_model.cpp diagnostics_model.cpp radar_model.cpp notices_model.cpp screen_schedule.cpp status_model.cpp views.cpp wall_clock.cpp
+    kit.cpp kit_bake.cpp kit_instruments.cpp kit_popover.cpp kit_perf.cpp kit_pages.cpp kit_pictures.cpp kit_lists.cpp
+    kit_readings.cpp lab.cpp lab_lists.cpp lab_pages.cpp lab_pictures.cpp fonts/units_font.cpp fonts/kit_fonts.cpp)
+if(CONFIG_UI_KIT)
+    set(UI_FRONT_SOURCES ${UI_KIT_SOURCES})
+else()
+    set(UI_FRONT_SOURCES ${UI_CLASSIC_SOURCES})
+endif()
 idf_component_register(
-    SRCS "ui.cpp" "dock.cpp" "notify.cpp" "home_page.cpp" "nav.cpp" "diagnostics_page.cpp" "settings_page.cpp" "splash.cpp" "lv_mem_psram.cpp" "radar_page.cpp" "calendar_page.cpp" "focus_view.cpp" "popout.cpp" "control_bar.cpp" "claude_pill.cpp" "thermostat.cpp" "favourites.cpp" "screenshot.cpp" "speaker_art.cpp" "cinema.cpp" "music.cpp" "volume_steps.cpp" "fullscreen_chrome.cpp" "topics.cpp" "focus_model.cpp" "media_model.cpp" "room_model.cpp" "home_model.cpp" "settings_model.cpp" "diagnostics_model.cpp" "radar_model.cpp" "notices_model.cpp" "screen_schedule.cpp" "status_model.cpp" "modal_overlay.cpp" "views.cpp" "kit.cpp" "kit_bake.cpp" "kit_instruments.cpp" "kit_popover.cpp" "kit_perf.cpp" "kit_pages.cpp" "kit_pictures.cpp" "kit_lists.cpp" "kit_readings.cpp" "lab.cpp" "lab_lists.cpp" "lab_pages.cpp" "lab_pictures.cpp" "fonts/units_font.cpp" "fonts/kit_fonts.cpp" ${UI_FONTS}
+    SRCS ${UI_CORE_SOURCES} ${UI_FRONT_SOURCES} ${UI_FONTS}
     INCLUDE_DIRS "include" "fonts"
     REQUIRES claude esp_app_format esp_driver_ppa lvgl__lvgl espressif__esp_lvgl_port board media radar ical travel deskproto units
 )

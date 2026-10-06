@@ -1,7 +1,7 @@
 #include "settings_model.h"
 
 #include "topics.h"
-#include "ui_internal.h"
+#include "ui_core.h"
 
 namespace ui::detail {
 namespace {

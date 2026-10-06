@@ -36,6 +36,17 @@ target_compile_definitions(lvgl PUBLIC LV_INV_BUF_SIZE=64)  # as the firmware's 
 
 file(GLOB UI_SOURCES ${ROOT}/components/ui/*.cpp ${ROOT}/components/ui/fonts/*.c
      ${ROOT}/components/ui/fonts/*.cpp)
+# One of the two screens, as the firmware's CONFIG_UI_KIT picks: -DSIM_UI_KIT=ON for the design kit's.
+option(SIM_UI_KIT "the screen the design kit draws, in place of the one the panel has had" OFF)
+include(${ROOT}/components/ui/fronts.cmake)
+if(SIM_UI_KIT)
+    set(UI_LEFT_OUT ${UI_CLASSIC_SOURCES})
+else()
+    set(UI_LEFT_OUT ${UI_KIT_SOURCES})
+endif()
+foreach(source ${UI_LEFT_OUT})
+    list(REMOVE_ITEM UI_SOURCES ${ROOT}/components/ui/${source})
+endforeach()
 file(GLOB SIM_SOURCES ${CMAKE_CURRENT_LIST_DIR}/*.cpp ${CMAKE_CURRENT_LIST_DIR}/stubs/*.cpp
      ${CMAKE_CURRENT_LIST_DIR}/live/*.cpp)
 # What the home page holds, from the room component that fills it on the panel.
@@ -64,6 +75,9 @@ set(PARSERS ${ROOT}/components/ical/ical_parse.cpp ${ROOT}/components/travel/tra
     ${ROOT}/components/claude/claude.cpp ${ROOT}/components/claude/claude_sessions.cpp)
 
 add_executable(sim ${SIM_SOURCES} ${UI_SOURCES} ${ROOM_LAYOUT} ${PARSERS} ${NET_CORE})
+if(SIM_UI_KIT)
+    target_compile_definitions(sim PRIVATE CONFIG_UI_KIT=1)
+endif()
 target_include_directories(sim PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/shim
     ${ROOT}/components/ui ${ROOT}/components/ui/include ${ROOT}/components/ui/fonts

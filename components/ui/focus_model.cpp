@@ -1,7 +1,7 @@
 #include "focus_model.h"
 
 #include "topics.h"
-#include "ui_internal.h"
+#include "ui_core.h"
 
 #include "esp_timer.h"
 
@@ -75,11 +75,6 @@ std::int32_t focus_left_ms(const Focus &focus)
         return focus.left_ms;
     }
     return static_cast<std::int32_t>(std::max<std::int64_t>(0, focus.ends_at_ms - focus_now_ms()));
-}
-
-std::uint32_t focus_ink(bool resting)
-{
-    return resting ? theme::green : theme::primary;
 }
 
 void focus_clock_text(const Focus &focus, char *out, std::size_t size)

@@ -1,0 +1,112 @@
+#pragma once
+
+// What the models and the plumbing under every screen share, whichever views
+// are built on them: nothing in here draws.
+
+#include "ui.h"
+
+#include "esp_log.h"
+
+#include <atomic>
+#include <cstdint>
+#include <ctime>
+
+namespace ui::detail {
+constexpr char TAG[] = "ui";
+
+constexpr std::uint32_t LOCK_TIMEOUT_MS = 500;
+
+extern Handlers    s_handlers;
+extern bool        s_dock_right;
+extern Orientation s_orientation;
+extern int         s_initial_brightness;
+
+constexpr int          NOTIFY_QUEUE_LEN  = 4;
+
+struct Notice {
+    char source[24];
+    char title[64];
+    char message[192];
+    Level level;
+    int   timeout_ms;
+};
+
+// What the screen calls each preset. Everything off the screen says Preset 1 to 6.
+// ui_presets.h, which git ignores, can name them otherwise.
+#if __has_include("ui_presets.h")
+#include "ui_presets.h"
+#else
+constexpr const char *PRESET_NAMES[kPresetCount] = {
+    "Preset 1", "Ultra low", "Stand", "Sit", "Sit 2", "Stand 2",
+};
+#endif
+
+constexpr std::uint32_t PAUSE_SETTLE_MS = 1500;
+
+// The pages, in the order the dock's tabs are made.
+constexpr int HOME_PAGE     = 0;
+constexpr int RADAR_PAGE    = 1;
+constexpr int CALENDAR_PAGE = 2;
+constexpr int SETUP_PAGE    = 3;  // opened from the control bar's status
+constexpr int PAGE_COUNT    = 4;
+
+
+constexpr int SETTING_COUNT = static_cast<int>(Setting::Count);
+
+// The focus plan the panel shows until the timer reports one, and the limits
+// the Setup steppers keep it to, which the fullscreen timer is sized for.
+constexpr int FOCUS_WORK_MIN_DEFAULT       = 25;
+constexpr int FOCUS_BREAK_MIN_DEFAULT      = 5;
+constexpr int FOCUS_LONG_BREAK_MIN_DEFAULT = 20;
+constexpr int FOCUS_ROUNDS_DEFAULT         = 4;
+constexpr int FOCUS_WORK_MIN_MAX           = 90;
+constexpr int FOCUS_ROUNDS_MAX             = 8;
+
+// The presets the dock's Stand and Sit send the desk to.
+constexpr int STAND_PRESET     = 2;
+constexpr int SIT_PRESET       = 3;
+constexpr int ULTRA_LOW_PRESET = 1;  // Preset 2, as the cinema view sends the desk down
+
+// The diagnostics cards set_cards() was given, before init.
+extern const Card *s_cards;
+extern int         s_card_count;
+
+/** The page on show: HOME_PAGE to SETUP_PAGE. */
+extern int               s_page;
+extern std::atomic<bool> s_setup_visible;
+/** A page on show, or Home in its place while it is away; each front's own. */
+void select_page(int index);
+
+/** For updates kept outside ui.cpp's slots: asks the LVGL task to look. */
+void request_apply();
+
+/** The screen lit or dark, as the schedule or a touch decides. */
+void set_screen_state(bool on);
+
+/** The time the screen shows: the real one, or running on from the clock
+ *  pinned by pin_clock(), so what it says agrees with the top bar. */
+std::time_t wall_now();
+
+/** The clock pin_clock() set, or null: what the screen shows in place of the time. */
+const char *pinned_clock();
+
+// What the screen schedule asks of the views on show (screen_rules.h).
+bool notice_on_show();
+/** How long the open film leaves the screen lit untouched: 0 with none open,
+ *  screen_rules::kNever while it keeps it lit. */
+std::int64_t cinema_dark_after();
+/** An intro or credits to skip on show: the screen lights for it. */
+bool cinema_offers_skip();
+
+}  // namespace ui::detail
+
+// What a screen built on this core provides: classic_front.cpp, the screen as it
+// has been, or kit_front.cpp, the design kit's.
+namespace ui::front {
+/** In init, with the lock held: the look, and what shows while the rest is made. */
+void init(std::uint32_t accent);
+/** One part of the screen a call, behind what init put up; false after the last. */
+bool build_next_part();
+/** Once a pass of the pending updates, before the models take theirs. */
+void apply();
+}  // namespace ui::front

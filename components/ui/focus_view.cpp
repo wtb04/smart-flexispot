@@ -16,6 +16,10 @@
 // round a flip clock's two leaves, with nothing else but how far it has got.
 // And a small card folding out of the dock, with the time, how far the part is,
 // and what to do.
+namespace ui::detail {
+std::uint32_t focus_ink(bool resting) { return resting ? theme::green : theme::primary; }
+}  // namespace ui::detail
+
 namespace ui {
 namespace {
 constexpr int TICKS_MAX  = detail::FOCUS_WORK_MIN_MAX;  // no part runs longer

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ui_internal.h"
+#include "ui_core.h"
 
 // The notices waiting to be shown, oldest first: the one on show has left the
 // queue. The updates add to it and the notice card takes from it, each telling
