@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <utility>
 
 namespace ui::kitfront {
 namespace {
@@ -175,32 +176,45 @@ void paint_air()
     lv_obj_set_hidden(s_air_none, shown > 0);
 }
 
-void build_air(lv_obj_t *grid)
+lv_obj_t *s_air_body = nullptr;
+
+void place_air()
 {
-    lv_obj_t *body = widget(grid, Span::Big, "Air");
-    lv_obj_update_layout(grid);
-    const std::int32_t w = lv_obj_get_content_width(body), h = lv_obj_get_content_height(body);
+    const std::int32_t w = lv_obj_get_content_width(s_air_body), h = lv_obj_get_content_height(s_air_body);
     const std::int32_t cell_w = (w - space::xl) / 2, cell_h = (h - space::l) / 2;
-    const std::int32_t cap_h  = fonts::small()->line_height;
-    const std::int32_t fig_h  = fonts::read_xl()->line_height;
     for (int i = 0; i < kPillCount; ++i) {
         Air &air = s_air[i];
-        air.cell = plain(body);
         lv_obj_set_size(air.cell, cell_w, cell_h);
         lv_obj_set_pos(air.cell, (i % 2) * (cell_w + space::xl), (i / 2) * (cell_h + space::l));
-        air.caption = line(air.cell, Role::Small, Ink::Secondary, cell_w);
+        for (lv_obj_t *wide : {air.caption, air.words, air.word}) {
+            lv_obj_set_width(wide, cell_w);
+        }
+    }
+    lv_obj_set_size(s_air_none, w, h);
+}
+
+void build_air(lv_obj_t *grid)
+{
+    s_air_body = widget(grid, Span::Big, "Air");
+    const std::int32_t cap_h = fonts::small()->line_height;
+    const std::int32_t fig_h = fonts::read_xl()->line_height;
+    for (int i = 0; i < kPillCount; ++i) {
+        Air &air = s_air[i];
+        air.cell    = plain(s_air_body);
+        air.caption = line(air.cell, Role::Small, Ink::Secondary, 1);
         air.figure  = line(air.cell, Role::ReadXL, Ink::Primary, widest(Role::ReadXL, {"-8888.8"}));
         lv_obj_set_y(air.figure, cap_h);
         air.unit = line(air.cell, Role::Body, Ink::Secondary, 1);
         lv_obj_set_y(air.unit, cap_h + baseline_y(Role::ReadXL, Role::Body));
-        air.words = line(air.cell, Role::H1, Ink::Primary, cell_w);
+        air.words = line(air.cell, Role::H1, Ink::Primary, 1);
         lv_obj_set_y(air.words, cap_h + (fig_h - fonts::h1()->line_height) / 2);
-        air.word = line(air.cell, Role::H3, Ink::Secondary, cell_w);
+        air.word = line(air.cell, Role::H3, Ink::Secondary, 1);
         lv_obj_set_y(air.word, cap_h + fig_h);
         lv_obj_set_hidden(air.cell, true);
     }
-    s_air_none = empty(body, ic::air, "No readings from Home Assistant");
-    lv_obj_set_size(s_air_none, w, h);
+    s_air_none = empty(s_air_body, ic::air, "No readings from Home Assistant");
+    lv_obj_update_layout(grid);
+    place_air();
     subscribe(Topic::Home, detail::kNoView, paint_air);
 }
 
@@ -484,15 +498,26 @@ lv_obj_t *figure_at_foot(lv_obj_t *body, std::int32_t w, std::int32_t h, lv_obj_
     return figure;
 }
 
+lv_obj_t *s_desk_body = nullptr;
+
+void place_desk()
+{
+    const std::int32_t w = lv_obj_get_content_width(s_desk_body), h = lv_obj_get_content_height(s_desk_body);
+    lv_obj_set_y(s_desk, figure_y(h));
+    lv_obj_set_y(s_desk_unit, figure_y(h) + baseline_y(Role::ReadL, Role::Body));
+    lv_obj_set_y(s_desk_at, h - fonts::small()->line_height);
+    lv_obj_set_width(s_desk_at, w);
+}
+
 void build_desk(lv_obj_t *grid)
 {
-    lv_obj_t *body = widget(grid, Span::One, "Desk");
+    s_desk_body = widget(grid, Span::One, "Desk");
     lv_obj_update_layout(grid);
-    const std::int32_t w = lv_obj_get_content_width(body), h = lv_obj_get_content_height(body);
-    s_desk      = figure_at_foot(body, w, h, s_desk_at);
-    s_desk_unit = line(body, Role::Body, Ink::Secondary, widest(Role::Body, {"cm"}));
+    const std::int32_t w = lv_obj_get_content_width(s_desk_body), h = lv_obj_get_content_height(s_desk_body);
+    s_desk      = figure_at_foot(s_desk_body, w, h, s_desk_at);
+    s_desk_unit = line(s_desk_body, Role::Body, Ink::Secondary, widest(Role::Body, {"cm"}));
     lv_label_set_text(s_desk_unit, "cm");
-    lv_obj_set_y(s_desk_unit, figure_y(h) + baseline_y(Role::ReadL, Role::Body));
+    place_desk();
     subscribe(Topic::Desk, detail::kNoView, paint_desk);
 }
 
@@ -554,6 +579,21 @@ void build_focus(lv_obj_t *grid)
     });
 }
 
+// Away, with the calendar's, the radar's and the timer's widgets gone, the
+// air and the desk widen to fill the rows rather than leave holes where those were.
+void lay_out()
+{
+    static int s_away = -1;
+    const bool away   = owner_away();
+    if (std::exchange(s_away, away ? 1 : 0) == (away ? 1 : 0)) {
+        return;
+    }
+    widget_place(s_air_body, 0, 0, away ? 4 : 2, 2);
+    widget_place(s_desk_body, away ? 0 : 2, 2, away ? 4 : 1, 1);
+    place_air();
+    place_desk();
+}
+
 void paint_all()
 {
     paint_air();
@@ -577,6 +617,7 @@ void build_home(lv_obj_t *page)
     subscribe(Topic::Radar, detail::kNoView, paint_overhead);
     for (Topic away : {Topic::Status, Topic::Settings}) {
         subscribe(away, detail::kNoView, [] {
+            lay_out();
             paint_next();
             paint_overhead();
             paint_focus();
