@@ -373,7 +373,7 @@ void light(Page &p, bool on)
     p.lit       = on;
     lv_obj_t *g = lv_obj_get_child(p.item, 0);
     lv_obj_set_style_text_color(p.item, on ? colour(Ink::OnAccent) : colour(Ink::Primary), 0);
-    lv_obj_set_style_text_opa(p.item, on ? LV_OPA_COVER : colours().ink2_opa, 0);
+    lv_obj_set_style_text_opa(p.item, on ? static_cast<lv_opa_t>(LV_OPA_COVER) : colours().ink2_opa, 0);
     lv_obj_set_style_text_font(g, fonts::icon(34, on), 0);
 }
 
