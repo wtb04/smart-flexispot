@@ -49,7 +49,7 @@ void paint_lights()
     for (bool lit : lights.light_on) {
         on += lit ? 1 : 0;
     }
-    char buf[4];
+    char buf[12];
     std::snprintf(buf, sizeof buf, "%d", on);
     set_text_if(s_lights_count, buf);
     lv_obj_t *bulb = lv_obj_get_child(s_lights, 0);
@@ -60,7 +60,7 @@ void paint_lights()
 void paint_heat()
 {
     const detail::ThermostatState &t = detail::home_state().thermostat;
-    char buf[12] = "--";
+    char buf[24] = "--";
     if (t.known && t.current_c >= 0.0f) {
         const int tenths = static_cast<int>(t.current_c * 10.0f + 0.5f);
         std::snprintf(buf, sizeof buf, "%d.%d°", tenths / 10, tenths % 10);

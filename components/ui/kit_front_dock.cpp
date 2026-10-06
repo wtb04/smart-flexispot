@@ -45,7 +45,7 @@ int shortcut_target()
 void paint_desk()
 {
     const detail::DeskState &desk = detail::desk_state();
-    char buf[12] = "--";
+    char buf[24] = "--";
     if (desk.height_mm >= 0) {
         std::snprintf(buf, sizeof buf, "%d.%d", desk.height_mm / 10, desk.height_mm % 10);
     }
@@ -73,7 +73,7 @@ void paint_focus()
     lv_obj_set_hidden(s_focus_glyph, !idle);
     lv_obj_set_hidden(s_focus_left, idle);
     if (!idle) {
-        char buf[8];
+        char buf[16];
         detail::focus_clock_text(focus, buf, sizeof buf);
         if (std::strcmp(lv_label_get_text(s_focus_left), buf) != 0) {
             lv_label_set_text(s_focus_left, buf);
