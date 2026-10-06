@@ -344,7 +344,8 @@ void build_readings(lv_obj_t *parent)
 // The same forty-event list built each way a page might, in the calendar's
 // place, then scrolled through and timed.
 enum Variant : std::uint8_t {
-    KIT, TILE_SCROLLS, ROWS_OPAQUE, ROW_SHADOWS, HAIR_OBJECTS, FADE, ON_GLASS, IN_WELL_ON_GLASS, WHOLE_PAGE, VARIANTS
+    KIT, TILE_SCROLLS, ROWS_OPAQUE, ROW_SHADOWS, HAIR_OBJECTS, FADE, ON_GLASS, IN_WELL_ON_GLASS, WHOLE_PAGE,
+    SHEET_FLAT, SHEET, VARIANTS
 };
 const char *const VARIANT_NAMES[] = {
     "kit list: bare rows, inset scroller",
@@ -356,19 +357,37 @@ const char *const VARIANT_NAMES[] = {
     "rows straight on glass",
     "rows on a flat area on glass",
     "the whole page scrolls instead",
+    "a sheet, its body on its glass",
+    "kit sheet: a picture of its glass under",
 };
 
+constexpr int ROUNDS = 3;  // each variant in turn, three times over
+constexpr int STUDY_STEPS = 60;
+
 struct Study {
-    int           variant = -1;
-    bool          settling = false;
+    int           variant = -1, round = 0;
     std::uint32_t began = 0;
     lv_obj_t     *holder = nullptr, *scroller = nullptr;
-    perf::Stats   results[VARIANTS]{};
+    float        *each = nullptr;  // [VARIANTS][ROUNDS * STUDY_STEPS], ms
     std::uint64_t px[VARIANTS]{};
     std::uint32_t frames[VARIANTS]{};
     bool          counting = false;
 } s_study;
 char s_report[1600] = "";
+std::uint64_t s_flush_from = 0, s_flushing_us = 0;
+
+// What a frame spends handing pixels over, flushing or waiting, is left out:
+// in the simulator it is mostly waiting for the screen's refresh.
+void on_flush(lv_event_t *e)
+{
+    const lv_event_code_t code = lv_event_get_code(e);
+    if (code == LV_EVENT_FLUSH_START || code == LV_EVENT_FLUSH_WAIT_START) {
+        s_flush_from = perf::now_us();
+    } else if (s_flush_from != 0) {
+        s_flushing_us += perf::now_us() - s_flush_from;
+        s_flush_from = 0;
+    }
+}
 
 void on_render(lv_event_t *e)
 {
@@ -432,6 +451,24 @@ lv_obj_t *scroller_in(lv_obj_t *parent)
 
 void build_variant(int v)
 {
+    if (v == SHEET) {
+        s_study.scroller = sheet(s_log, "Log", 840, 600);
+        fill_variant(s_study.scroller, v);
+        return;
+    }
+    if (v == SHEET_FLAT) {
+        lv_obj_t *body = popover(s_log, 840, 600, From::Centre);
+        lv_obj_set_flex_flow(body, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_style_pad_row(body, space::l, 0);
+        text(body, Role::H2, "Log");
+        lv_obj_t *flat = well(body);
+        lv_obj_set_width(flat, LV_PCT(100));
+        lv_obj_set_flex_grow(flat, 1);
+        lv_obj_set_style_pad_all(flat, space::s, 0);
+        s_study.scroller = scroller_in(flat);
+        fill_variant(s_study.scroller, v);
+        return;
+    }
     lv_area_t at;
     lv_obj_get_coords(s_cal_tile, &at);
     const std::int32_t w = lv_area_get_width(&at), h = lv_area_get_height(&at);
@@ -505,6 +542,9 @@ void build_variant(int v)
 
 void drop_variant()
 {
+    if (popover_open()) {
+        close_popover(false);
+    }
     if (s_study.holder != nullptr) {
         lv_obj_delete(s_study.holder);
         s_study.holder = s_study.scroller = nullptr;
@@ -513,51 +553,64 @@ void drop_variant()
     lv_obj_remove_flag(s_cal_tile, LV_OBJ_FLAG_HIDDEN);
 }
 
-constexpr std::uint32_t STUDY_MS = 1600, STUDY_SETTLE_MS = 500;
+constexpr std::uint32_t STUDY_SETTLE_MS = 500;  // for the tile's shadow to be baked in
+
+// Drawn here frame by frame, so nothing else the lab does lands between them,
+// each timed for its drawing alone.
+void scroll_through(lv_obj_t *sc, float *each)
+{
+    const std::int32_t span = std::min<std::int32_t>(lv_obj_get_scroll_bottom(sc) + lv_obj_get_scroll_y(sc), 900);
+    for (int k = 1; k <= STUDY_STEPS; ++k) {
+        const int t = k <= STUDY_STEPS / 2 ? k : STUDY_STEPS - k;
+        lv_obj_scroll_to_y(sc, span * t * 2 / STUDY_STEPS, LV_ANIM_OFF);
+        s_flushing_us = 0;
+        const std::uint64_t t0 = perf::now_us();
+        lv_refr_now(nullptr);
+        each[k - 1] = static_cast<float>(perf::now_us() - t0 - s_flushing_us) / 1000.0f;
+    }
+}
 
 void study_step(lv_timer_t *timer)
 {
-    const std::uint32_t at = lv_tick_elaps(s_study.began);
-    if (s_study.settling) {
-        if (at < STUDY_SETTLE_MS) {
-            return;
-        }
-        s_study.settling = false;
-        s_study.began    = lv_tick_get();
-        perf::begin();
-        s_study.counting = true;
+    if (lv_tick_elaps(s_study.began) < (s_study.variant >= SHEET_FLAT ? 1200u : STUDY_SETTLE_MS)) {
         return;
     }
-    if (at < STUDY_MS) {
-        lv_obj_t          *sc   = s_study.scroller;
-        const std::int32_t span = std::min<std::int32_t>(lv_obj_get_scroll_bottom(sc) + lv_obj_get_scroll_y(sc), 900);
-        const std::int32_t half = STUDY_MS / 2;
-        const auto         t    = static_cast<std::int32_t>(at);
-        lv_obj_scroll_to_y(sc, span * (t < half ? t : 2 * half - t) / half, LV_ANIM_OFF);
-        return;
-    }
+    s_study.counting = true;
+    scroll_through(s_study.scroller, s_study.each + (s_study.variant * ROUNDS + s_study.round) * STUDY_STEPS);
     s_study.counting = false;
-    s_study.results[s_study.variant] = perf::end();
     drop_variant();
+    if (s_study.variant + 1 == VARIANTS && ++s_study.round < ROUNDS) {
+        s_study.variant = -1;
+    }
     if (++s_study.variant < VARIANTS) {
         build_variant(s_study.variant);
-        s_study.settling = true;
-        s_study.began    = lv_tick_get();
+        s_study.began = lv_tick_get();
         return;
     }
     lv_timer_delete(timer);
-    int n = std::snprintf(s_report, sizeof s_report, "list study, %s, 40 events and 5 days, scrolled %u ms each\n",
-                          look() == Look::Dark ? "dark" : "light", static_cast<unsigned>(STUDY_MS));
-    const float base = s_study.results[KIT].avg_ms > 0 ? s_study.results[KIT].avg_ms : 1.0f;
+    int n = std::snprintf(s_report, sizeof s_report,
+                          "list study, %s, 40 events and 5 days, %d frames of scrolling each, %d times, drawing alone\n",
+                          look() == Look::Dark ? "dark" : "light", STUDY_STEPS, ROUNDS);
+    // the middle frame and the one nine tenths of the way up: what a frame
+    // costs, and what the slow ones do, without the odd stall
+    constexpr int N = ROUNDS * STUDY_STEPS;
+    float mid[VARIANTS], high[VARIANTS];
+    for (int i = 0; i < VARIANTS; ++i) {
+        float *f = s_study.each + i * N;
+        std::sort(f, f + N);
+        mid[i]  = f[N / 2];
+        high[i] = f[N * 9 / 10];
+    }
     for (int i = 0; i < VARIANTS && n < static_cast<int>(sizeof s_report); ++i) {
-        const perf::Stats &r = s_study.results[i];
         n += std::snprintf(s_report + n, sizeof s_report - n,
-                           "  %-38s avg %6.2f ms  worst %6.2f ms  x%.2f  %4u kpx a frame\n", VARIANT_NAMES[i],
-                           static_cast<double>(r.avg_ms), static_cast<double>(r.worst_ms),
-                           static_cast<double>(r.avg_ms / base),
+                           "  %-40s middle %6.2f ms  x%5.2f  p90 %6.2f ms  %4u kpx a frame\n", VARIANT_NAMES[i],
+                           static_cast<double>(mid[i]), static_cast<double>(mid[i] / std::max(mid[KIT], 0.001f)),
+                           static_cast<double>(high[i]),
                            static_cast<unsigned>(s_study.frames[i] ? s_study.px[i] / s_study.frames[i] / 1000 : 0));
     }
     std::printf("%s", s_report);
+    lv_free(s_study.each);
+    s_study.each    = nullptr;
     s_study.variant = -1;
 }
 
@@ -640,14 +693,28 @@ void study()
     static bool watching = false;
     if (!watching) {
         watching = true;
-        lv_display_add_event_cb(lv_display_get_default(), on_render, LV_EVENT_RENDER_START, nullptr);
+        lv_display_t *disp = lv_display_get_default();
+        lv_display_add_event_cb(disp, on_render, LV_EVENT_RENDER_START, nullptr);
+        for (lv_event_code_t code : {LV_EVENT_FLUSH_START, LV_EVENT_FLUSH_FINISH, LV_EVENT_FLUSH_WAIT_START,
+                                     LV_EVENT_FLUSH_WAIT_FINISH}) {
+            lv_display_add_event_cb(disp, on_flush, code, nullptr);
+        }
     }
     s_study = Study{};
-    s_study.variant  = 0;
-    s_study.settling = true;
-    s_study.began    = lv_tick_get();
+    s_study.each = static_cast<float *>(lv_malloc(sizeof(float) * VARIANTS * ROUNDS * STUDY_STEPS));
+    if (s_study.each == nullptr) {
+        return;
+    }
+    s_study.variant = 0;
+    s_study.began   = lv_tick_get();
     build_variant(0);
     lv_timer_create(study_step, 16, nullptr);
+}
+
+void nudge()
+{
+    lv_obj_t *sc = popover_open() && s_sheet != nullptr ? s_sheet : s_cal;
+    lv_obj_scroll_by(sc, 0, -240, LV_ANIM_ON);
 }
 
 const char *report() { return s_report; }

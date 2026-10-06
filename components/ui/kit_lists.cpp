@@ -1,6 +1,7 @@
 #include "kit.h"
 
 #include "kit_fonts.h"
+#include "lvgl_private.h"  // a layer's areas, and what a cover check asks
 
 #include <algorithm>
 #include <cstdio>
@@ -835,8 +836,114 @@ void Stepper::on_repeat(lv_timer_t *t)
 
 // --- sheets ---------------------------------------------------------------
 
-// The body scrolls inside a well, which covers it: on glass, every frame of
-// scrolling would be the backdrop, the glass over it and then the text.
+namespace {
+struct Under {
+    lv_draw_buf_t *picture = nullptr;
+    bool           tried   = false;
+};
+
+// What lies under the body, the frozen backdrop with the card's glass and the
+// flat area over it, as one picture, opaque: a frame of scrolling is then a
+// copy of it and the text, where on glass it was the backdrop, two blends
+// over it and the text, three to four times the drawing.
+void picture_under(lv_obj_t *col, Under *under)
+{
+    under->tried = true;
+    const lv_draw_buf_t *frozen = frozen_picture();
+    if (frozen == nullptr || pop_glass() != PopGlass::Frozen) {
+        return;
+    }
+    lv_area_t at;
+    lv_obj_get_coords(col, &at);
+    const std::int32_t w = lv_area_get_width(&at), h = lv_area_get_height(&at);
+    under->picture = lv_draw_buf_create(static_cast<std::uint32_t>(w), static_cast<std::uint32_t>(h),
+                                        LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO);
+    if (under->picture == nullptr) {
+        return;
+    }
+    lv_obj_t *holders[8];
+    int       n = 0;
+    for (lv_obj_t *o = lv_obj_get_parent(col); o != nullptr && o != layer(Layer::Overlay) && n < 8;
+         o = lv_obj_get_parent(o)) {
+        holders[n++] = o;
+    }
+    // one canvas kept, not one a sheet: LVGL 9.6's canvas drops the address
+    // of its buffer's pointer from the image cache as it goes, and logs an error
+    static lv_obj_t      *canvas = nullptr;
+    static lv_draw_buf_t *idle   = nullptr;  // what it holds between pictures, so it never holds a freed one
+    if (canvas == nullptr) {
+        idle   = lv_draw_buf_create(1, 1, LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO);
+        canvas = lv_canvas_create(lv_layer_sys());
+        lv_obj_add_flag(canvas, LV_OBJ_FLAG_HIDDEN);
+    }
+    lv_canvas_set_draw_buf(canvas, under->picture);
+    lv_layer_t paint;
+    lv_canvas_init_layer(canvas, &paint);
+    paint.buf_area = paint._clip_area = paint.phy_clip_area = at;
+    lv_draw_image_dsc_t img;
+    lv_draw_image_dsc_init(&img);
+    img.src = frozen;
+    const lv_area_t screen{0, 0, size::screen_w - 1, size::screen_h - 1};
+    lv_draw_image(&paint, &img, &screen);
+    for (int i = n - 1; i >= 0; --i) {  // the card first, inwards from there
+        const lv_opa_t opa = lv_obj_get_style_bg_opa(holders[i], LV_PART_MAIN);
+        if (opa <= LV_OPA_MIN) {
+            continue;
+        }
+        lv_draw_rect_dsc_t fill;
+        lv_draw_rect_dsc_init(&fill);
+        fill.bg_color = lv_obj_get_style_bg_color(holders[i], LV_PART_MAIN);
+        fill.bg_opa   = opa;
+        lv_draw_rect(&paint, &fill, &at);
+    }
+    lv_canvas_finish_layer(canvas, &paint);
+    lv_canvas_set_draw_buf(canvas, idle);
+    lv_image_cache_drop(under->picture);
+}
+
+void on_sheet_body(lv_event_t *e)
+{
+    lv_obj_t *col   = lv_event_get_current_target_obj(e);
+    auto     *under = static_cast<Under *>(lv_event_get_user_data(e));
+    switch (lv_event_get_code(e)) {
+    case LV_EVENT_SCROLL:
+        if (!under->tried) {
+            picture_under(col, under);  // by now the card is where it rests, and so is its backdrop
+        }
+        break;
+    case LV_EVENT_COVER_CHECK:
+        if (under->picture != nullptr) {
+            auto     *info = static_cast<lv_cover_check_info_t *>(lv_event_get_param(e));
+            lv_area_t c;
+            lv_obj_get_coords(col, &c);
+            if (info->res != LV_COVER_RES_MASKED && lv_area_is_in(info->area, &c, 0)) {
+                info->res = LV_COVER_RES_COVER;
+            }
+        }
+        break;
+    case LV_EVENT_DRAW_MAIN_BEGIN:
+        if (under->picture != nullptr) {
+            lv_area_t c;
+            lv_obj_get_coords(col, &c);
+            lv_draw_image_dsc_t img;
+            lv_draw_image_dsc_init(&img);
+            img.src = under->picture;
+            lv_draw_image(lv_event_get_layer(e), &img, &c);
+        }
+        break;
+    case LV_EVENT_DELETE:
+        if (under->picture != nullptr) {
+            lv_image_cache_drop(under->picture);
+            lv_draw_buf_destroy(under->picture);
+        }
+        delete under;
+        break;
+    default:
+        break;
+    }
+}
+}  // namespace
+
 lv_obj_t *sheet(lv_obj_t *source, const char *title, std::int32_t w, std::int32_t h)
 {
     lv_obj_t *body = popover(source, w, h, From::Centre);
@@ -864,6 +971,10 @@ lv_obj_t *sheet(lv_obj_t *source, const char *title, std::int32_t w, std::int32_
     lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_scroll_dir(col, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(col, LV_SCROLLBAR_MODE_ACTIVE);
+    auto *under = new Under{};
+    for (lv_event_code_t code : {LV_EVENT_SCROLL, LV_EVENT_COVER_CHECK, LV_EVENT_DRAW_MAIN_BEGIN, LV_EVENT_DELETE}) {
+        lv_obj_add_event_cb(col, on_sheet_body, code, under);
+    }
     return col;
 }
 
