@@ -5,6 +5,8 @@
 #include "kit_front.h"
 
 #include "settings_model.h"
+#include "theme.h"  // the radar keeps the old one's map and planes, and their styles
+#include "units_font.h"
 #include "status_model.h"
 #include "topics.h"
 
@@ -81,6 +83,11 @@ void init(std::uint32_t accent)
     if (accent != 0) {
         kit::set_accent(accent);
     }
+    fonts::init();
+    theme::init_accents();
+    if (accent != 0) {
+        theme::set_primary(accent);
+    }
     kit::screen(lv_screen_active());
 }
 
@@ -116,6 +123,8 @@ void apply() {}
 }  // namespace ui::front
 
 namespace ui::detail {
+bool owner_away() { return kitfront::owner_away(); }  // the radar's, which the old screen's nav.cpp has
+
 void select_page(int index)
 {
     if (index < 0 || index >= PAGE_COUNT || (kitfront::needs_presence(index) && kitfront::owner_away())) {
@@ -128,19 +137,14 @@ void select_page(int index)
 namespace ui {
 esp_err_t splash_step(const char *) { return ESP_OK; }  // the start-up screen comes later
 esp_err_t splash_done() { return ESP_OK; }
-bool      radar_choose(const char *) { return false; }
-void      set_radar_range(int) {}
 
-// The benches of the old screen's radar, dock and pages; the kit's own is the lab's.
+// The benches of the old screen's dock and pages; the kit's own is the lab's.
 namespace {
 int not_here(char *out, std::size_t size)
 {
     return std::snprintf(out, size, "not in the design kit's screen: its bench is /bench?lab\n");
 }
 }  // namespace
-int bench_radar(char *out, std::size_t size) { return not_here(out, size); }
-int bench_radar_open(char *out, std::size_t size) { return not_here(out, size); }
-int bench_radar_map(char *out, std::size_t size, bool) { return not_here(out, size); }
 int bench_desk_card(char *out, std::size_t size) { return not_here(out, size); }
 int bench_pages(char *out, std::size_t size) { return not_here(out, size); }
 }  // namespace ui
