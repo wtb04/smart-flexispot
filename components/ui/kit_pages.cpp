@@ -549,6 +549,21 @@ constexpr std::int32_t edge_of(int i, int n, std::int32_t length)
     return i * (length + space::l) / n;
 }
 
+constexpr int GRID_ROWS = 3;  // to a page's height
+
+void put(lv_obj_t *t, int columns, int col, int row, int w, int h)
+{
+    const std::int32_t x = edge_of(col, columns, inset::width), y = edge_of(row, GRID_ROWS, inset::height);
+    const std::int32_t tw = edge_of(col + w, columns, inset::width) - space::l - x;
+    const std::int32_t th = edge_of(row + h, GRID_ROWS, inset::height) - space::l - y;
+    if (lv_obj_get_x(t) != x || lv_obj_get_y(t) != y) {
+        lv_obj_set_pos(t, x, y);
+    }
+    if (lv_obj_get_width(t) != tw || lv_obj_get_height(t) != th) {
+        lv_obj_set_size(t, tw, th);
+    }
+}
+
 bool fits(const Grid &g, int col, int row, int w, int h)
 {
     if (col + w > g.columns || row + h > static_cast<int>(std::size(g.taken))) {
@@ -895,12 +910,8 @@ lv_obj_t *widget(lv_obj_t *grid, Span span_of, const char *caption)
     }
     g->rows = std::max(g->rows, row + h);
 
-    constexpr int ROWS = 3;  // to a page's height
-    const std::int32_t x = edge_of(col, g->columns, inset::width), y = edge_of(row, ROWS, inset::height);
     lv_obj_t *t = tile(grid, Lift::Low);
-    lv_obj_set_pos(t, x, y);
-    lv_obj_set_size(t, edge_of(col + w, g->columns, inset::width) - space::l - x,
-                    edge_of(row + h, ROWS, inset::height) - space::l - y);
+    put(t, g->columns, col, row, w, h);
     lv_obj_set_flex_flow(t, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(t, space::s, 0);
     lv_obj_set_clickable(t, false);
@@ -911,8 +922,16 @@ lv_obj_t *widget(lv_obj_t *grid, Span span_of, const char *caption)
     lv_obj_set_flex_grow(body, 1);
     lv_obj_set_scrollable(body, false);
     lv_obj_set_clickable(body, false);
-    lv_obj_set_height(grid, edge_of(g->rows, ROWS, inset::height) - space::l);
+    lv_obj_set_height(grid, edge_of(g->rows, GRID_ROWS, inset::height) - space::l);
     return body;
+}
+
+void widget_place(lv_obj_t *body, int col, int row, int w, int h)
+{
+    lv_obj_t  *t = lv_obj_get_parent(body);
+    const auto *g = static_cast<const Grid *>(lv_obj_get_user_data(lv_obj_get_parent(t)));
+    put(t, g->columns, col, row, w, h);
+    lv_obj_update_layout(t);
 }
 
 namespace {

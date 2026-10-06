@@ -526,6 +526,8 @@ lv_obj_t *widget_grid(lv_obj_t *page, int columns = 4);
 lv_obj_t *widget(lv_obj_t *grid, Span span, const char *caption);
 /** A tap on the widget whose body this is opens a page, as the radar's opens the radar. */
 void      widget_opens(lv_obj_t *body, int page);
+/** The widget whose body this is, moved to w by h cells from col, row, as a page lays out again. */
+void      widget_place(lv_obj_t *body, int col, int row, int w, int h);
 
 // --- lists and readings ----------------------------------------------------
 //
