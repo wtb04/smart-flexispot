@@ -106,9 +106,10 @@ void      zoom_end();
 /** A page glided across past LVGL: glide_begin() keeps the frame on show,
  *  the old page, and holds back the next frame LVGL draws, the new page at
  *  rest; each glide_step() then lays the two side by side, the new one
- *  `shift` pixels in from the right of `region`, by copying rather than
- *  drawing; glide_end() shows the held frame. False where the panel cannot. */
-bool glide_begin(const lv_area_t &region);
+ *  `shift` pixels in from the right of `region`, or the left, by copying
+ *  rather than drawing; glide_end() shows the held frame. False where the
+ *  panel cannot. */
+bool glide_begin(const lv_area_t &region, bool from_left);
 bool glide_held();
 void glide_step(std::int32_t shift);
 void glide_end();

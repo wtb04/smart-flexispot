@@ -338,7 +338,8 @@ void on_step(lv_timer_t *)
 
 void slide(lv_anim_t *, int32_t p)
 {
-    const std::int32_t d = size::screen_w - PAGES.x1;
+    // a carousel: the new page in from the side its item lies on in the dock
+    const std::int32_t d = (size::screen_w - PAGES.x1) * (s_run.to < s_run.from ? -1 : 1);
     if (s_run.how == Change::Slide) {
         lv_obj_set_style_translate_x(s_pages[s_run.from].obj, -d * p / PROGRESS, 0);
         lv_obj_set_style_translate_x(s_pages[s_run.to].obj, d - d * p / PROGRESS, 0);
@@ -581,7 +582,7 @@ void hide_pages()
 bool glide(int from, int to)
 {
     const lv_area_t region{PAGES.x1, inset::top - space::l, size::screen_w - 1, size::screen_h - 1};
-    if (!board::glide_begin(region)) {
+    if (!board::glide_begin(region, to < from)) {
         return false;
     }
     quiet(true);
@@ -592,7 +593,6 @@ bool glide(int from, int to)
     lv_obj_set_hidden(s_pages[to].obj, false);
     s_shown = to;
     quiet(false);
-    bake::now();
     mark(to, false);
     edge_follows(s_pages[to].obj);
     lv_display_t *disp = lv_display_get_default();

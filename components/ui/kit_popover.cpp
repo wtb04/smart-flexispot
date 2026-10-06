@@ -393,11 +393,11 @@ void finish_picture(std::uint64_t t0, std::uint64_t t1)
     // halvings rather than one eighth: a bilinear halving is an average of each
     // two by two, where one big step would sample a few pixels of each block
     // and alias into blobs
-    stretch(s_half, s_quarter, 0.5f);
     if (F == 8) {
+        stretch(s_half, s_quarter, 0.5f);
         stretch(s_quarter, s_small, 0.5f);
     } else {
-        std::memcpy(s_small->data, s_quarter->data, s_small->data_size);
+        stretch(s_half, s_small, 0.5f);
     }
 #if defined(ESP_PLATFORM)
     esp_cache_msync(s_small->data, s_small->data_size, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
