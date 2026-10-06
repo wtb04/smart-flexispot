@@ -27,6 +27,8 @@ struct DockItems {
 
 /** The desk folded out of the dock's height: every preset, up and down. kit_front_desk.cpp */
 void open_desk(lv_obj_t *source);
+/** The desk's card following the desk from the start, so it knows where each preset was seen. kit_front_desk.cpp */
+void follow_desk();
 /** The focus timer's card, from the dock's button. kit_front_views.cpp */
 void open_focus(lv_obj_t *source);
 
