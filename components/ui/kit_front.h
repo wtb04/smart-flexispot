@@ -7,6 +7,13 @@
 #include "topics.h"
 #include "ui_core.h"
 
+#include <cstddef>
+#include <cstdint>
+
+namespace ical {
+struct Event;
+}
+
 namespace ui::kitfront {
 
 using detail::publish;
@@ -52,5 +59,15 @@ void      build_views(lv_obj_t *screen);  // the fullscreen views, the favourite
 /** What the panel reports of itself, filling `column`: the summary and its
  *  glances, the parts with their readings and logs. kit_front_setup_diag.cpp */
 void build_setup_diagnostics(lv_obj_t *column, std::int32_t w);
+
+// What Home's next event takes from the calendar's, in kit_front_calendar.cpp.
+std::uint32_t event_ink(std::uint8_t feed);
+/** "Lecture, in 2h 05m", "Exam, ends in 20 min", "Practical, Monday". */
+void event_kind(const ical::Event &event, std::int64_t now, char *out, std::size_t size);
+/** The course of "Course - Session", or the whole title. */
+void event_course(const ical::Event &event, char *out, std::size_t size);
+/** Where, as street and town. */
+void event_place(const ical::Event &event, char *out, std::size_t size);
+void event_clock(std::int64_t at, char *out, std::size_t size);
 
 }  // namespace ui::kitfront
