@@ -4,6 +4,9 @@
 
 #include "radar_page.h"
 
+#include "kit.h"
+#include "kit_fonts.h"
+
 #include "ui_internal.h"
 #include "radar_model.h"
 #include "topics.h"
@@ -1520,10 +1523,16 @@ void range_clicked(lv_event_t *event)
 // Round chips in the card's corners, the same as the heating card's: a dot of
 // the darker surface on the lighter card is what makes it read as something to
 // press. The hit area reaches past the dot, so a finger does not have to find it.
-lv_obj_t *zoom_chip(lv_obj_t *bezel, const lv_image_dsc_t *mark, int step)
+lv_obj_t *round_chip(lv_obj_t *bezel, const char *glyph)
 {
-    lv_obj_t *chip = theme::make_chip(bezel, "");
-    theme::make_mark(chip, mark);
+    lv_obj_t *chip = kit::button(bezel, kit::Button::Raised, glyph, nullptr, true);
+    lv_obj_set_size(chip, ZOOM_D, ZOOM_D);
+    return chip;
+}
+
+lv_obj_t *zoom_chip(lv_obj_t *bezel, const char *glyph, int step)
+{
+    lv_obj_t *chip = round_chip(bezel, glyph);
     lv_obj_set_ext_click_area(chip, (CORNER - ZOOM_D) / 2);
     lv_obj_add_event_cb(chip, range_clicked, LV_EVENT_PRESSED,
                         reinterpret_cast<void *>(static_cast<std::intptr_t>(step)));
@@ -1555,14 +1564,13 @@ void paint_track()
         return;
     }
     lv_obj_set_hidden(s_track_ring, s_held || (s_following && !s_turns));
-    const lv_color_t ink = lv_color_hex(s_following ? theme::primary : theme::secondary);
+    const lv_color_t ink = kit::colour(s_following ? kit::Ink::Accent : kit::Ink::Secondary);
     if (!lv_color_eq(lv_obj_get_style_arc_color(s_track_ring, LV_PART_INDICATOR), ink)) {
         lv_obj_set_style_arc_color(s_track_ring, ink, LV_PART_INDICATOR);
     }
     lv_obj_set_hidden(s_track_mark, s_held);
     lv_obj_set_hidden(s_track_hold, !s_held);
-    lv_obj_set_style_image_recolor(s_track_mark, lv_color_hex(s_following ? theme::primary : theme::secondary), 0);
-    lv_obj_set_style_image_opa(s_track_mark, s_following ? static_cast<lv_opa_t>(LV_OPA_COVER) : theme::mark_opa, 0);
+    kit::set_ink(s_track_mark, s_following ? kit::Ink::Accent : kit::Ink::Secondary);
     if (!s_held) {
         const std::uint32_t whole = s_following ? ROTATE_MS : REFOLLOW_MS;
         const std::uint32_t gone  = std::min(s_following ? lv_tick_elaps(s_turn_began)
@@ -1585,7 +1593,9 @@ void track_tick(lv_timer_t *)
 
 lv_obj_t *build_track(lv_obj_t *bezel)
 {
-    lv_obj_t *chip = theme::make_chip(bezel, "");
+    lv_obj_t *chip = round_chip(bezel, nullptr);
+    lv_obj_set_layout(chip, LV_LAYOUT_NONE);  // its mark and ring laid one over the other
+    lv_obj_set_style_pad_all(chip, 0, 0);
     lv_obj_set_ext_click_area(chip, (CORNER - ZOOM_D) / 2);
     // A tap follows again; held, it keeps what is on show until tapped.
     lv_obj_add_event_cb(chip, [](lv_event_t *) {
@@ -1601,8 +1611,9 @@ lv_obj_t *build_track(lv_obj_t *bezel)
         }
         paint_track();
     }, LV_EVENT_LONG_PRESSED, nullptr);
-    s_track_mark = theme::make_mark(chip, &icons::track_icon, LV_OPA_COVER);
-    s_track_hold = theme::make_label(chip, LV_SYMBOL_PAUSE, theme::secondary, fonts::size_16());
+    s_track_mark = kit::icon(chip, kit::glyph::my_location, 28, false, kit::Ink::Accent);
+    lv_obj_center(s_track_mark);
+    s_track_hold = kit::icon(chip, kit::glyph::pause, 24, true, kit::Ink::Secondary);
     lv_obj_center(s_track_hold);
     lv_obj_set_hidden(s_track_hold, true);
     quiet(s_track_hold);
@@ -1613,7 +1624,7 @@ lv_obj_t *build_track(lv_obj_t *bezel)
     lv_obj_set_style_pad_all(s_track_ring, 0, 0);
     lv_obj_set_style_arc_opa(s_track_ring, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_arc_width(s_track_ring, TRACK_RING_W, LV_PART_INDICATOR);
-    lv_obj_set_style_arc_color(s_track_ring, lv_color_hex(theme::secondary), LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(s_track_ring, kit::colour(kit::Ink::Secondary), LV_PART_INDICATOR);
     lv_arc_set_rotation(s_track_ring, 270);  // from the top, as a clock's hand
     lv_arc_set_bg_angles(s_track_ring, 0, FULL_TURN_DEG);
     lv_arc_set_range(s_track_ring, 0, TRACK_STEPS);
@@ -1628,23 +1639,17 @@ lv_obj_t *build_track(lv_obj_t *bezel)
 // follows on its own in the last corner.
 void build_corners(lv_obj_t *bezel)
 {
-    s_zoom_out  = zoom_chip(bezel, &icons::minus_icon, 1);
-    s_zoom_in   = zoom_chip(bezel, &icons::plus_icon, -1);
+    s_zoom_out  = zoom_chip(bezel, kit::glyph::remove, 1);
+    s_zoom_in   = zoom_chip(bezel, kit::glyph::add, -1);
     s_track     = build_track(bezel);
-    s_map_chip = theme::make_chip(bezel, "");
-    theme::make_mark(s_map_chip, &icons::expand_icon);
+    s_map_chip  = round_chip(bezel, kit::glyph::open_in_full);
     lv_obj_set_ext_click_area(s_map_chip, (CORNER - ZOOM_D) / 2);
     lv_obj_add_event_cb(s_map_chip, map_clicked, LV_EVENT_CLICKED, nullptr);
 }
 
 // On Home the chips are the darker surface on the lighter card; on the radar
 // page the map is that surface, so they take the black of the margin.
-void paint_chips(bool mapped)
-{
-    for (lv_obj_t *chip : {s_zoom_out, s_zoom_in, s_map_chip, s_track}) {
-        lv_obj_set_style_bg_color(chip, lv_color_hex(mapped ? theme::background : theme::panel), 0);
-    }
-}
+void paint_chips(bool) {}
 
 void place_corners(std::int32_t w, std::int32_t h)
 {
@@ -3232,7 +3237,7 @@ void build_radar_page(lv_obj_t *page, std::int32_t width, std::int32_t height)
         s_home_h = height;
     }
     s_shown_range = static_cast<float>(RANGES[s_range_step]);
-    s_bezel       = theme::make_card(page);
+    s_bezel       = kit::tile(page, kit::Lift::Low);
     lv_obj_set_style_pad_all(s_bezel, 0, 0);
     quiet(s_bezel);
     build_corners(s_bezel);
