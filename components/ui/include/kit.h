@@ -267,6 +267,7 @@ struct RailSpec {
     std::int32_t major    = 5;
     bool         draggable = false;
     bool         fill     = true;
+    bool         quiet    = false;  // a thin line, its knob only under the finger: a track's progress
     const std::int32_t *notches = nullptr;  // marks for presets
     int          notch_count = 0;
 };
