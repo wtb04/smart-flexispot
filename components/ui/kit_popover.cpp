@@ -1377,4 +1377,35 @@ lv_obj_t *notice(const char *source, const char *glyph, const char *title, const
     return slab;
 }
 
+// --- the bar's cards ------------------------------------------------------
+
+void fit_popover()
+{
+    if (s_pop.card == nullptr || s_pop.closing) {
+        return;
+    }
+    lv_obj_set_height(s_pop.body, LV_SIZE_CONTENT);
+    lv_obj_update_layout(s_pop.body);
+    const std::int32_t h = lv_obj_get_height(s_pop.body);
+    lv_obj_set_height(s_pop.body, h);
+    if (h == lv_area_get_height(&s_pop.to)) {
+        return;
+    }
+    const bool shadowed = s_pop.shadowed;
+    shadow_off();
+    s_pop.to.y2 = s_pop.to.y1 + h - 1;
+    if (s_pop.to.y2 > size::screen_h - MARGIN - 1) {
+        lv_area_move(&s_pop.to, 0, size::screen_h - MARGIN - 1 - s_pop.to.y2);
+    }
+    if (s_pop.pictured) {
+        s_pop.pictured = false;  // painted again at the new size
+        picture_card(nullptr);
+    } else {
+        place(s_pop.p);
+    }
+    if (shadowed) {
+        shadow_on(s_pop.to);
+    }
+}
+
 }  // namespace ui::kit
