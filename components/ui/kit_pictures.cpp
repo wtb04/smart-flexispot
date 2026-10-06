@@ -411,7 +411,7 @@ void box_line(std::uint16_t *p, std::int32_t n, std::int32_t step, std::uint16_t
     }
     for (std::int32_t i = 0; i < n; ++i) {
         p[i * step] = static_cast<std::uint16_t>(sum / span);
-        sum += line[std::min(i + BLUR_R + 1, n - 1)] - line[std::max(i - BLUR_R, 0)];
+        sum += line[std::min<std::int32_t>(i + BLUR_R + 1, n - 1)] - line[std::max<std::int32_t>(i - BLUR_R, 0)];
     }
 }
 
@@ -619,7 +619,7 @@ void Cover::on_draw(lv_event_t *e)
     lv_area_t at;
     lv_obj_get_coords(c->m_pic, &at);
     lv_layer_t *layer = lv_event_get_layer(e);
-    draw(c->m_prev, layer, at, c->m_r, c->m_cur.main != nullptr ? LV_OPA_COVER : static_cast<lv_opa_t>(255 - c->m_mix), c->m_h);
+    draw(c->m_prev, layer, at, c->m_r, static_cast<lv_opa_t>(c->m_cur.main != nullptr ? 255 : 255 - c->m_mix), c->m_h);
     draw(c->m_cur, layer, at, c->m_r, static_cast<lv_opa_t>(c->m_mix), c->m_h);
 }
 

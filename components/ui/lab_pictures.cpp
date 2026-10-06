@@ -497,4 +497,33 @@ void pictures_redraw()
 
 void pictures_bench_done() { drop_variant(); }
 
+// Each way of rounding the music cover's corners, redrawn a hundred times over
+// its backdrop: steadier than a bench phase on a desktop, where one frame of so
+// small a redraw is too quick to time.
+void pictures_measure_corners()
+{
+    if (!s_shown) {
+        return;
+    }
+    const char *names[] = {"kit cover", "baked", "all alpha", "image radius", "clip corner"};
+    for (int mode = 0; mode < 5; ++mode) {
+        pictures_redraw_mode(mode);
+        for (int i = 0; i < 5; ++i) {
+            pictures_redraw();
+            lv_refr_now(nullptr);
+        }
+        std::uint64_t took = 0;
+        for (int i = 0; i < 100; ++i) {
+            lv_delay_ms(12);  // the last frame handed over, so only this one's drawing is timed
+            pictures_redraw();
+            const std::uint64_t t0 = perf::now_us();
+            lv_refr_now(nullptr);
+            took += perf::now_us() - t0;
+        }
+        std::printf("corners, %-13s %6.3f ms a redraw of the %d px cover\n", names[mode],
+                    static_cast<double>(took) / 100000.0, static_cast<int>(MUSIC_COVER));
+    }
+    pictures_redraw_mode(-1);
+}
+
 }  // namespace ui::lab
