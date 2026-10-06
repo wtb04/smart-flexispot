@@ -573,13 +573,8 @@ void on_invalidate(lv_event_t *e)
     }
 }
 
-void on_refresh(lv_event_t *)
+void follow(std::uint32_t now)
 {
-    if (s_count == 0 && s_pane_count == 0) {
-        return;
-    }
-    lv_obj_update_layout(lv_screen_active());
-    const std::uint32_t now = lv_tick_get();
     for (int i = 0; i < s_count; ++i) {
         Caster    &c    = s_casters[i];
         const Pose pose = pose_of(c.tile);
@@ -593,6 +588,16 @@ void on_refresh(lv_event_t *)
             c.refused     = false;
         }
     }
+}
+
+void on_refresh(lv_event_t *)
+{
+    if (s_count == 0 && s_pane_count == 0) {
+        return;
+    }
+    lv_obj_update_layout(lv_screen_active());
+    const std::uint32_t now = lv_tick_get();
+    follow(now);
     for (int i = 0; i < s_pane_count; ++i) {
         Pane       &p     = s_panes[i];
         const Shape shape = shape_of(p);
@@ -737,6 +742,21 @@ void restyle()
     ++s_look;
     for (int i = 0; i < s_count; ++i) {
         unbake(s_casters[i]);
+    }
+}
+
+void now()
+{
+    if (s_pristine == nullptr) {
+        return;
+    }
+    lv_obj_update_layout(lv_screen_active());
+    follow(lv_tick_get());
+    for (int i = 0; i < s_count; ++i) {
+        Caster &c = s_casters[i];
+        if (!c.baked && !c.refused && c.seen.shown) {
+            c.refused = !bake(c, c.seen);
+        }
     }
 }
 
