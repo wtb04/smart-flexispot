@@ -101,12 +101,12 @@ Every one of them ends up as plain text in the firmware, in `build/` and on the 
 
 A few things are mine in the code rather than secrets, and are worth a look before the first build:
 
-- **Your Home Assistant entities.** Copy `components/room/room_config.example.h` to `room_config.h` beside it, which git ignores, and put in your readings, lights, the main light that says someone is in, thermostat and speaker. Without it the panel is built with the example's.
-- **Your favourite playlists**, in the same file, for the music card's popup.
-- **Your desk's height range**, in `idf.py menuconfig`, *Loctek desk control*: 660 to 1310 mm is mine.
-- **Your time zone**, in `idf.py menuconfig`, *Panel time*. Central European Time is the default.
-- **What the presets are called** on the screen: copy the list in `components/ui/ui_internal.h` to `components/ui/ui_presets.h`, which git ignores, and rename them there.
-- **The radar's map** covers the Channel to Berlin, 48.5 to 56 N and 0.5 to 13 E. For your own part of the world, `tools/make_map.py --out components/radar/map_data.h --box <south> <west> <north> <east>` draws a new one from Natural Earth; keep the box modest, as every line on it costs memory to draw.
+- Your Home Assistant entities: copy `components/room/room_config.example.h` to `room_config.h` beside it, which git ignores, and put in your readings, lights, the main light that says someone is in, thermostat and speaker. Without it the panel is built with the example's.
+- Your favourite playlists, in the same file, for the music card's popup.
+- Your desk's height range, in `idf.py menuconfig`, *Loctek desk control*: 660 to 1310 mm is mine.
+- Your time zone, in `idf.py menuconfig`, *Panel time*. Central European Time is the default.
+- What the presets are called on the screen: copy the list in `components/ui/ui_internal.h` to `components/ui/ui_presets.h`, which git ignores, and rename them there.
+- The radar's map covers the Channel to Berlin, 48.5 to 56 N and 0.5 to 13 E. For your own part of the world, `tools/make_map.py --out components/radar/map_data.h --box <south> <west> <north> <east>` draws a new one from Natural Earth; keep the box modest, as every line on it costs memory to draw.
 
 ## 5. Flash it
 
