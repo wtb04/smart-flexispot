@@ -97,10 +97,13 @@ esp_err_t power_up_panel()
 
 
 constexpr int        MAX_DIRTY     = 64;  // as LV_INV_BUF_SIZE, in the project's CMakeLists.txt
-// Three: a frame is drawn into one while the panel is still taking up the
-// last, which it does a frame or two after it is asked to (see
-// components/esp_lcd), rather than waiting for it as with two.
-constexpr int        FRAME_BUFFERS = 3;
+// Four: the panel takes up a buffer a frame or two after it is asked to (see
+// components/esp_lcd), and a frame drawn meanwhile replaces the one asked for
+// rather than waiting for it, so drawing goes at its own pace and the panel
+// shows the newest at each refresh. With three, the frame after waited for
+// the panel every time, and that wait, not drawing, held small changes to 30
+// frames a second.
+constexpr int        FRAME_BUFFERS = 4;
 constexpr std::uint32_t DRAWING_LOCK_MS = 1000;
 constexpr TickType_t SWAP_TIMEOUT  = pdMS_TO_TICKS(100);
 
@@ -116,6 +119,10 @@ SemaphoreHandle_t      s_swapped = nullptr;
 // until they are the same, the one shown before may still be read.
 std::atomic<int>       s_asked{0};
 std::atomic<int>       s_showing{0};
+// Buffers the panel may be reading: the one asked for, and any asked for
+// before it that the panel has not been seen past. Only buffers outside this
+// may be drawn into.
+std::atomic<std::uint32_t> s_unsafe{1};
 int                    s_target = -1;  // the one this frame goes into, once it begins
 
 board::FlushTimes s_flush_times;
@@ -171,11 +178,16 @@ IRAM_ATTR bool frame_sent(esp_lcd_panel_handle_t, esp_lcd_dpi_panel_event_data_t
 
 std::atomic<std::uint32_t> s_swaps{0};
 
-// The buffer last handed over is the one on show, so the one before is free.
+// The buffer last handed over is the one on show, so every other is free. The
+// driver calls this only while the panel reads the buffer it was last asked
+// for, which is s_asked once the handover has returned: show_back_buffer()
+// asks first and notes it after.
 IRAM_ATTR bool frame_done(esp_lcd_panel_handle_t, esp_lcd_dpi_panel_event_data_t *, void *)
 {
     s_swaps.fetch_add(1, std::memory_order_relaxed);
-    s_showing.store(s_asked.load(std::memory_order_relaxed), std::memory_order_relaxed);
+    const int asked = s_asked.load(std::memory_order_relaxed);
+    s_showing.store(asked, std::memory_order_relaxed);
+    s_unsafe.store(1u << asked, std::memory_order_relaxed);
     BaseType_t woken = pdFALSE;
     xSemaphoreGiveFromISR(s_swapped, &woken);
     return woken == pdTRUE;
@@ -208,13 +220,35 @@ esp_err_t copy_rect(const std::uint8_t *from, std::uint8_t *to, const Rect &r,
     return ppa_do_scale_rotate_mirror(s_ppa, &op);
 }
 
+std::uint64_t area_of(const Rect &r) { return static_cast<std::uint64_t>(r.w) * r.h; }
+
+Rect joined(const Rect &a, const Rect &b)
+{
+    const std::uint32_t x = std::min(a.x, b.x), y = std::min(a.y, b.y);
+    return {x, y, std::max(a.x + a.w, b.x + b.w) - x, std::max(a.y + a.h, b.y + b.h) - y};
+}
+
+// A buffer's list of where it is behind, each part copied once: a part that
+// overlaps one already there becomes the two together when that copies no
+// more than both would, as a moving card's frames mostly cover each other.
 void note(Rect *list, int &count, const Rect &r)
 {
     if (count == 1 && list[0].w == BSP_LCD_H_RES && list[0].h == BSP_LCD_V_RES) {
         return;  // behind by the whole of it already
     }
+    Rect add = r;
+    for (int i = 0; i < count;) {
+        const Rect both = joined(list[i], add);
+        if (area_of(both) <= area_of(list[i]) + area_of(add)) {
+            add            = both;
+            list[i]        = list[--count];
+            i              = 0;
+        } else {
+            ++i;
+        }
+    }
     if (count < MAX_DIRTY) {
-        list[count++] = r;
+        list[count++] = add;
     } else {
         list[0] = {0, 0, BSP_LCD_H_RES, BSP_LCD_V_RES};
         count   = 1;
@@ -288,17 +322,24 @@ void catch_up_around(const std::uint8_t *from, std::uint8_t *to, const Rect &r, 
     }
 }
 
-// A buffer neither on show nor asked for, which nothing reads.
+// A buffer the panel cannot be reading, waited for if all of them might be.
 int free_buffer()
 {
-    const int asked   = s_asked.load(std::memory_order_relaxed);
-    const int showing = s_showing.load(std::memory_order_relaxed);
-    for (int i = 0; i < FRAME_BUFFERS; ++i) {
-        if (i != asked && i != showing) {
-            return i;
+    for (;;) {
+        const int           asked  = s_asked.load(std::memory_order_relaxed);
+        const std::uint32_t unsafe = s_unsafe.load(std::memory_order_relaxed);
+        for (int i = 0; i < FRAME_BUFFERS; ++i) {
+            if (i != asked && (unsafe & (1u << i)) == 0) {
+                return i;
+            }
         }
+        const std::int64_t waiting = esp_timer_get_time();
+        if (xSemaphoreTake(s_swapped, SWAP_TIMEOUT) != pdTRUE) {
+            ESP_LOGW(TAG, "panel did not swap buffers");
+            s_unsafe.store(1u << asked, std::memory_order_relaxed);
+        }
+        s_flush_times.wait_us += esp_timer_get_time() - waiting;
     }
-    return -1;
 }
 
 // The first area of a frame picks the buffer to draw into and brings it up to
@@ -363,21 +404,14 @@ Placement place_on_panel(lv_display_t *disp, const lv_area_t *area)
 }
 
 // Handing the driver one of its own buffers makes it the one shown from a
-// frame or two on; the one-line area keeps its cache flush to a line. Only
-// one is asked for at a time, so a frame done before the panel has taken the
-// last waits for it here: the one shown before is then free, and the third
-// is the next drawn into.
+// frame or two on; the one-line area keeps its cache flush to a line. One
+// asked for and not yet taken up is simply replaced: it stays unsafe until
+// the panel is seen on the newer one. The order matters: unsafe first, so
+// it is never free while it may be read; asked after, so frame_done only
+// ever names the buffer the driver now has.
 void show_back_buffer()
 {
-    const std::int64_t waiting = esp_timer_get_time();
-    while (s_showing.load(std::memory_order_relaxed) != s_asked.load(std::memory_order_relaxed)) {
-        if (xSemaphoreTake(s_swapped, SWAP_TIMEOUT) != pdTRUE) {
-            ESP_LOGW(TAG, "panel did not swap buffers");
-            s_showing.store(s_asked.load(std::memory_order_relaxed), std::memory_order_relaxed);
-        }
-    }
-    s_flush_times.wait_us += esp_timer_get_time() - waiting;
-    xSemaphoreTake(s_swapped, 0);
+    s_unsafe.fetch_or(1u << s_target, std::memory_order_relaxed);
     esp_lcd_panel_draw_bitmap(s_panel, 0, 0, 1, 1, s_fbs[s_target]);
     s_asked.store(s_target, std::memory_order_relaxed);
     s_target = -1;
@@ -452,11 +486,16 @@ esp_err_t flush_straight_to_panel(lv_display_t *disp)
     void *fb0 = nullptr;
     void *fb1 = nullptr;
     void *fb2 = nullptr;
-    ESP_RETURN_ON_ERROR(esp_lcd_dpi_panel_get_frame_buffer(s_panel, FRAME_BUFFERS, &fb0, &fb1, &fb2), TAG,
-                        "frame buffers");
+    ESP_RETURN_ON_ERROR(esp_lcd_dpi_panel_get_frame_buffer(s_panel, 3, &fb0, &fb1, &fb2), TAG, "frame buffers");
     s_fbs[0] = static_cast<std::uint8_t *>(fb0);
     s_fbs[1] = static_cast<std::uint8_t *>(fb1);
     s_fbs[2] = static_cast<std::uint8_t *>(fb2);
+    // the BSP makes three at most; the fourth as the driver makes its own
+    auto *fb3 = static_cast<std::uint8_t *>(heap_caps_calloc(1, FRAME_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT | MALLOC_CAP_DMA));
+    ESP_RETURN_ON_FALSE(fb3 != nullptr, ESP_ERR_NO_MEM, TAG, "fourth frame buffer");
+    esp_cache_msync(fb3, FRAME_BYTES, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+    ESP_RETURN_ON_ERROR(esp_lcd_dpi_panel_add_frame_buffer(s_panel, fb3), TAG, "fourth frame buffer");
+    s_fbs[3] = fb3;
     // The panel starts out on the first; the others hold nothing yet.
     for (int i = 1; i < FRAME_BUFFERS; ++i) {
         note(s_behind[i], s_behind_count[i], {0, 0, BSP_LCD_H_RES, BSP_LCD_V_RES});
@@ -466,7 +505,8 @@ esp_err_t flush_straight_to_panel(lv_display_t *disp)
     s_swapped = xSemaphoreCreateBinaryStatic(&swapped);
 
     ppa_client_config_t client{};
-    client.oper_type = PPA_OPERATION_SRM;
+    client.oper_type             = PPA_OPERATION_SRM;
+    client.max_pending_trans_num = 4;
     ESP_RETURN_ON_ERROR(ppa_register_client(&client, &s_ppa), TAG, "ppa");
 
     esp_lcd_dpi_panel_event_callbacks_t callbacks{};
@@ -721,7 +761,16 @@ void zoom_end()
 
 esp_err_t shrink_shown(std::uint8_t *out, std::size_t out_bytes, std::uint32_t w, std::uint32_t h)
 {
-    ESP_RETURN_ON_FALSE(s_panel != nullptr && s_ppa != nullptr && s_disp != nullptr, ESP_ERR_INVALID_STATE, TAG, "no panel");
+    ESP_RETURN_ON_FALSE(s_panel != nullptr && s_disp != nullptr, ESP_ERR_INVALID_STATE, TAG, "no panel");
+    // a client of its own: this runs off LVGL's task, and a client takes one job
+    // at a time, so sharing the flush's refused one of them now and then
+    static ppa_client_handle_t side = nullptr;
+    if (side == nullptr) {
+        ppa_client_config_t client{};
+        client.oper_type             = PPA_OPERATION_SRM;
+        client.max_pending_trans_num = 4;
+        ESP_RETURN_ON_ERROR(ppa_register_client(&client, &side), TAG, "ppa");
+    }
     while (s_showing.load(std::memory_order_relaxed) != s_asked.load(std::memory_order_relaxed)) {
         if (xSemaphoreTake(s_swapped, SWAP_TIMEOUT) != pdTRUE) {
             break;
@@ -750,7 +799,7 @@ esp_err_t shrink_shown(std::uint8_t *out, std::size_t out_bytes, std::uint32_t w
     op.scale_x = scale;
     op.scale_y = scale;
     op.mode    = PPA_TRANS_MODE_BLOCKING;
-    return ppa_do_scale_rotate_mirror(s_ppa, &op);
+    return ppa_do_scale_rotate_mirror(side, &op);
 }
 
 FlushTimes take_flush_times()
