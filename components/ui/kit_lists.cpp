@@ -83,7 +83,7 @@ void init_styles()
     lv_style_transition_dsc_init(&s_unlit_tr, FILL_PROPS, motion::spring, motion::release_ms, 0, nullptr);
 
     lv_style_set_min_height(&s_row, ROW_H);
-    lv_style_set_pad_ver(&s_row, space::s);
+    lv_style_set_pad_ver(&s_row, 6);
     lv_style_set_pad_column(&s_row, 14);
     lv_style_set_pad_hor(&s_row_group, GROUP_PAD);
     lv_style_set_pad_hor(&s_row_list, LIST_PAD);
@@ -126,10 +126,9 @@ void restyle_lists()
     }
     const Palette &p    = colours();
     const bool     dark = look() == Look::Dark;
-    // the kit's press: the surface sinks to the colour of a well
-    const lv_color_t sunk = lv_color_hex(dark ? p.well : p.raised_hi);
+    // as a pressed button: raised_hi, never darker and sunk in
     for (lv_style_t *st : {&s_fill, &s_fill_lit, &s_fill_open}) {
-        lv_style_set_bg_color(st, sunk);
+        lv_style_set_bg_color(st, lv_color_hex(p.raised_hi));
     }
     lv_style_set_bg_color(&s_scrollbar, lv_color_hex(p.ink));
     lv_style_set_bg_opa(&s_scrollbar, p.ink3_opa);
@@ -175,7 +174,7 @@ namespace {
 // --- rows -----------------------------------------------------------------
 
 struct Row {
-    lv_obj_t   *title = nullptr, *detail = nullptr, *value = nullptr, *trail = nullptr;
+    lv_obj_t   *title = nullptr, *detail = nullptr, *value = nullptr, *trail = nullptr, *dot = nullptr;
     lv_timer_t *timer = nullptr;
     std::int32_t inset = 0;   // where its hairline starts
     bool grouped  = false;    // edge to edge in a group's tile, so its ends are the tile's corners
@@ -198,7 +197,7 @@ Row *row_of(lv_obj_t *obj)
 lv_obj_t *neighbour(lv_obj_t *obj, int dir)
 {
     lv_obj_t *o = lv_obj_get_sibling(obj, dir);
-    while (o != nullptr && lv_obj_has_flag(o, LV_OBJ_FLAG_HIDDEN)) {
+    while (o != nullptr && lv_obj_is_hidden(o)) {
         o = lv_obj_get_sibling(o, dir);
     }
     return o;
@@ -249,7 +248,8 @@ void on_row_draw(lv_event_t *e)
         fill.radius = radius::inner;
     }
     const lv_area_t clip = layer->_clip_area;
-    if (lv_area_intersect(&layer->_clip_area, &clip, &c)) {
+    layer->_clip_area = {std::max(clip.x1, c.x1), std::max(clip.y1, c.y1), std::min(clip.x2, c.x2), std::min(clip.y2, c.y2)};
+    if (layer->_clip_area.x1 <= layer->_clip_area.x2 && layer->_clip_area.y1 <= layer->_clip_area.y2) {
         lv_draw_rect(layer, &fill, &at);
     }
     layer->_clip_area = clip;
@@ -274,7 +274,7 @@ void light(lv_obj_t *obj, bool on)
 bool under_scroll(lv_obj_t *obj)
 {
     for (lv_obj_t *o = lv_obj_get_parent(obj); o != nullptr; o = lv_obj_get_parent(o)) {
-        if (lv_obj_has_flag(o, LV_OBJ_FLAG_SCROLLABLE) &&
+        if (lv_obj_is_scrollable(o) &&
             (lv_obj_get_scroll_top(o) > 0 || lv_obj_get_scroll_bottom(o) > 0)) {
             return true;
         }
@@ -359,8 +359,8 @@ lv_obj_t *bare_box(lv_obj_t *parent)
 {
     lv_obj_t *obj = lv_obj_create(parent);
     lv_obj_remove_style_all(obj);
-    lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_remove_flag(obj, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_scrollable(obj, false);
+    lv_obj_set_clickable(obj, false);
     return obj;
 }
 
@@ -386,7 +386,7 @@ lv_obj_t *section(lv_obj_t *parent, const char *title, const char *aside)
 {
     lv_obj_t *sec = bare_box(parent);
     lv_obj_add_style(sec, &s_section, 0);
-    const std::int32_t pad = lv_obj_has_flag(parent, LV_OBJ_FLAG_SCROLLABLE) ? LIST_PAD : GROUP_PAD;
+    const std::int32_t pad = lv_obj_is_scrollable(parent) ? LIST_PAD : GROUP_PAD;
     lv_obj_set_style_pad_hor(sec, pad, 0);
     lv_obj_set_size(sec, LV_PCT(100), LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(sec, LV_FLEX_FLOW_ROW);
@@ -429,7 +429,7 @@ lv_obj_t *list(lv_obj_t *parent, std::int32_t w, std::int32_t h)
 lv_obj_t *row(lv_obj_t *parent, const RowSpec &spec)
 {
     auto *data     = new Row{};
-    data->grouped  = !lv_obj_has_flag(parent, LV_OBJ_FLAG_SCROLLABLE);
+    data->grouped  = !lv_obj_is_scrollable(parent);
     data->toggles  = spec.trail == Trail::Toggle;
     data->pressable = spec.trail == Trail::Chevron || data->toggles || spec.action || spec.pressable;
 
@@ -438,19 +438,19 @@ lv_obj_t *row(lv_obj_t *parent, const RowSpec &spec)
     lv_obj_add_event_cb(obj, on_row_draw, LV_EVENT_DRAW_MAIN, data);  // first: row_of knows a row by it
     lv_obj_add_style(obj, &s_row, 0);
     lv_obj_add_style(obj, data->grouped ? &s_row_group : &s_row_list, 0);
-    lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollable(obj, false);
     lv_obj_set_size(obj, LV_PCT(100), LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(obj, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(obj, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     if (data->pressable) {
         lv_obj_add_style(obj, &s_fill, LV_PART_SELECTED);
-        lv_obj_add_style(obj, &s_fill_lit, LV_PART_SELECTED | LV_STATE_USER_2);
-        lv_obj_add_style(obj, &s_fill_open, LV_PART_SELECTED | LV_STATE_USER_1);  // its popover is open
+        lv_obj_add_style(obj, &s_fill_lit, static_cast<lv_style_selector_t>(LV_PART_SELECTED) | LV_STATE_USER_2);
+        lv_obj_add_style(obj, &s_fill_open, static_cast<lv_style_selector_t>(LV_PART_SELECTED) | LV_STATE_USER_1);  // its popover is open
         for (lv_event_code_t code : {LV_EVENT_PRESSED, LV_EVENT_STATE_CHANGED, LV_EVENT_CLICKED}) {
             lv_obj_add_event_cb(obj, on_row_event, code, nullptr);
         }
     } else {
-        lv_obj_remove_flag(obj, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_clickable(obj, false);
     }
     lv_obj_add_event_cb(obj, on_row_event, LV_EVENT_DELETE, nullptr);
 
@@ -489,11 +489,22 @@ lv_obj_t *row(lv_obj_t *parent, const RowSpec &spec)
     lv_obj_set_size(col, 0, LV_SIZE_CONTENT);
     lv_obj_set_flex_grow(col, 1);
     lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
-    data->title = one_line(col, Role::Body, spec.title, spec.action ? Ink::Accent : Ink::Primary, LV_PCT(100));
+    if (data->toggles) {
+        // beside a switch the title wraps rather than shortening, so all of it is read before it is set
+        data->title = text(col, Role::Body, spec.title);
+        lv_obj_set_width(data->title, LV_PCT(100));
+        lv_label_set_long_mode(data->title, LV_LABEL_LONG_MODE_WRAP);
+    } else {
+        data->title = one_line(col, Role::Body, spec.title, spec.action ? Ink::Accent : Ink::Primary, LV_PCT(100));
+    }
     if (spec.detail != nullptr) {
         data->detail = one_line(col, Role::Small, spec.detail, Ink::Secondary, LV_PCT(100));
     }
 
+    if (spec.dot && spec.trail != Trail::Badge) {
+        data->dot = dot(obj, spec.ink, 10);
+        lv_obj_set_style_margin_right(data->dot, -6, 0);
+    }
     if (spec.value != nullptr && spec.trail != Trail::Badge) {
         const std::int32_t w = spec.value_w > 0 ? spec.value_w : widest(Role::Body, {spec.value});
         data->value = one_line(obj, Role::Body, spec.value, Ink::Secondary, w);
@@ -509,7 +520,7 @@ lv_obj_t *row(lv_obj_t *parent, const RowSpec &spec)
         data->trail = toggle(obj, spec.on);
         break;
     case Trail::Badge:
-        data->trail = badge(obj, spec.value != nullptr ? spec.value : "", spec.badge, nullptr, spec.value_w);
+        data->trail = badge(obj, spec.value != nullptr ? spec.value : "", spec.ink, nullptr, spec.value_w, spec.dot);
         break;
     default:
         break;
@@ -522,6 +533,21 @@ void set_row_value(lv_obj_t *obj, const char *value)
     if (Row *row = row_of(obj)) {
         set_text_if(row->value, value);
     }
+}
+
+void set_row_state(lv_obj_t *obj, const char *value, Ink ink)
+{
+    Row *row = row_of(obj);
+    if (row == nullptr) {
+        return;
+    }
+    if (row->dot != nullptr) {
+        set_dot(row->dot, ink);
+    } else if (row->trail != nullptr && row->value == nullptr) {
+        set_badge(row->trail, value, ink);
+        return;
+    }
+    set_text_if(row->value, value);
 }
 
 void set_row_detail(lv_obj_t *obj, const char *detail)
@@ -539,7 +565,7 @@ lv_obj_t *row_trail(lv_obj_t *obj)
 
 // --- badges ---------------------------------------------------------------
 
-lv_obj_t *badge(lv_obj_t *parent, const char *value, Ink ink, const char *glyph, std::int32_t width)
+lv_obj_t *badge(lv_obj_t *parent, const char *value, Ink ink, const char *glyph, std::int32_t width, bool state)
 {
     lv_obj_t *b = bare_box(parent);
     lv_obj_add_style(b, &s_badge, 0);
@@ -554,6 +580,10 @@ lv_obj_t *badge(lv_obj_t *parent, const char *value, Ink ink, const char *glyph,
         lv_obj_set_style_margin_left(g, -4, 0);
         lv_label_set_text(g, glyph);
         inner += 24 - 4 + lv_obj_get_style_pad_column(b, LV_PART_MAIN);
+    } else if (state) {
+        lv_obj_t *d = dot(b, ink, 8);
+        lv_obj_set_style_margin_right(d, 2, 0);
+        inner += 8 + 2 + lv_obj_get_style_pad_column(b, LV_PART_MAIN);
     }
     lv_obj_t *t = lv_label_create(b);
     lv_obj_add_style(t, &s_badge_text, 0);
@@ -573,6 +603,10 @@ void set_badge(lv_obj_t *b, const char *value, Ink ink)
         lv_obj_remove_style(b, &tint(was), 0);
         lv_obj_add_style(b, &tint(ink), 0);
         lv_obj_set_user_data(b, reinterpret_cast<void *>(static_cast<std::intptr_t>(ink)));
+        lv_obj_t *first = lv_obj_get_child(b, 0);
+        if (lv_obj_get_child_count(b) > 1 && !lv_obj_check_type(first, &lv_label_class)) {
+            set_dot(first, ink);
+        }
     }
     set_text_if(lv_obj_get_child(b, -1), value);
 }
@@ -619,7 +653,7 @@ Readout::Readout(lv_obj_t *parent, const ReadoutSpec &spec) : m_spec(spec)
     const lv_font_t   *font   = font_of(spec.role);
     const std::int32_t read_w = widest(spec.role, {lo, hi, "--"});
     const std::int32_t gap    = font->line_height / 8;
-    const Role         unit_role = spec.role >= Role::ReadL ? Role::H3 : Role::Small;
+    const Role         unit_role = spec.role >= Role::ReadXL ? Role::H3 : Role::Small;
     const lv_font_t   *unit_font = font_of(unit_role);
     const std::int32_t unit_w = spec.unit != nullptr ? widest(unit_role, {spec.unit}) : 0;
 

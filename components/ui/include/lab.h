@@ -11,9 +11,10 @@ namespace ui::lab {
 void build(kit::perf::Clock clock = nullptr);
 
 /**
- * A key, as the simulator passes them on: 1 to 5 the sheets, L the look,
+ * A key, as the simulator passes them on: 1 to 6 the sheets, L the look,
  * G the glass, A the accent, N a notice, B the scrim's blur, F how popovers
- * make their glass, P the bench, which prints how long its frames took.
+ * make their glass, P the bench, which prints how long its frames took, V
+ * the list study, which times one long list built several ways.
  */
 void key(int code);
 
