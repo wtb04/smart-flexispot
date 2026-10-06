@@ -372,7 +372,7 @@ struct Study {
     std::uint32_t frames[VARIANTS]{};
     bool          counting = false;
 } s_study;
-char s_report[1600] = "";
+KIT_IN_PSRAM char s_report[1600];
 std::uint64_t s_flush_from = 0, s_flushing_us = 0;
 
 // What a frame spends handing pixels over, flushing or waiting, is left out:

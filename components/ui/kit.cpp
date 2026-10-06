@@ -589,6 +589,7 @@ void screen(lv_obj_t *scr)
 {
     lv_obj_remove_style_all(scr);
     lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
+    reserve_popovers();
     for (int i = 0; i < 5; ++i) {
         lv_obj_t *l = lv_obj_create(scr);
         lv_obj_remove_style_all(l);

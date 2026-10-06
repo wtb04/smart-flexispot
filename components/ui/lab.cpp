@@ -979,8 +979,8 @@ constexpr std::size_t PHASE_COUNT = std::size(PHASES);
 // a popover or a sheet: its backdrop wants longer to be made ahead
 bool pops(const char *name) { return std::strncmp(name, "popover", 7) == 0 || std::strncmp(name, "sheet", 5) == 0; }
 
-char s_report[10000] = "no bench run yet\n";
-char s_frames[14][480]{};
+KIT_IN_PSRAM char s_report[10000];
+KIT_IN_PSRAM char s_frames[14][480];
 int  s_frame_lines = 0;
 
 // What each frame redraws, as LVGL has it once it has joined the areas: the
@@ -1013,7 +1013,7 @@ void on_render(lv_event_t *e)
     s_drawn.worst = std::max(s_drawn.worst, px);
 }
 #if defined(ESP_PLATFORM)
-board::FlushTimes s_flush[2][PHASE_COUNT]{};
+KIT_IN_PSRAM board::FlushTimes s_flush[2][PHASE_COUNT];
 #endif
 
 struct Config {
@@ -1225,7 +1225,7 @@ void bench() { run_bench(); }
 
 int report(char *out, int size)
 {
-    int n = std::snprintf(out, static_cast<std::size_t>(size), "%s", s_report);
+    int n = std::snprintf(out, static_cast<std::size_t>(size), "%s", s_report[0] != 0 ? s_report : "no bench run yet\n");
     for (int i = 0; i < s_frame_lines && n < size; ++i) {
         n += std::snprintf(out + n, static_cast<std::size_t>(size - n), "%s", s_frames[i]);
     }

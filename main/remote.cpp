@@ -1,5 +1,6 @@
 #include "remote.h"
 
+#include "esp_attr.h"
 #include "esp_check.h"
 #include "esp_core_dump.h"
 #include "esp_flash.h"
@@ -525,7 +526,7 @@ esp_err_t bench_page(httpd_req_t *req)
     if (!ota::authorised(req)) {
         return refuse(req);
     }
-    static char text[7000];
+    EXT_RAM_BSS_ATTR static char text[7000];
     int         n = 0;
     if (lvgl_port_lock(STATS_LOCK_MS)) {
         char query[8] = "";

@@ -12,6 +12,15 @@
 
 #include "lvgl.h"
 
+#if defined(ESP_PLATFORM)
+#include "esp_attr.h"
+// For big zeroed statics: the internal RAM they would take is what Wi-Fi's
+// driver has to have, and it panics without it.
+#define KIT_IN_PSRAM EXT_RAM_BSS_ATTR
+#else
+#define KIT_IN_PSRAM
+#endif
+
 #include <climits>
 #include <cstddef>
 #include <cstdint>
@@ -334,6 +343,8 @@ lv_obj_t *popover(lv_obj_t *source, std::int32_t w, std::int32_t h, From from = 
 void      close_popover(bool animate = true);
 /** Something that opens a popover: its backdrop starts being made as a finger lands on it. */
 void      popover_source(lv_obj_t *obj);
+/** Room for the popovers' pictures, taken before anything else large: without it a popover blurs live, at a third of a second a frame. */
+void      reserve_popovers();
 /** What a finger landing on a popover source does: start on the backdrop. */
 void      prepare_popover();
 bool      popover_open();
