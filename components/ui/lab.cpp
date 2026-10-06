@@ -3,6 +3,10 @@
 #include "kit.h"
 #include "kit_fonts.h"
 
+#if defined(ESP_PLATFORM)
+#include "board.h"
+#endif
+
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -830,8 +834,11 @@ const Phase PHASES[] = {
      }},
 };
 
-char s_report[4000] = "no bench run yet\n";
+char s_report[6000] = "no bench run yet\n";
 char s_frames[3][200]{};
+#if defined(ESP_PLATFORM)
+board::FlushTimes s_flush[2][16]{};
+#endif
 
 struct Config {
     const char *name;
@@ -859,6 +866,9 @@ void bench_step(lv_timer_t *timer)
         s_bench.settling = false;
         s_bench.began    = now;
         s_bench.frame    = 0;
+#if defined(ESP_PLATFORM)
+        board::take_flush_times();
+#endif
         perf::begin();
     }
     const Phase &ph = PHASES[s_bench.phase];
@@ -868,6 +878,9 @@ void bench_step(lv_timer_t *timer)
         return;
     }
     s_bench.results[s_bench.phase] = perf::end();
+#if defined(ESP_PLATFORM)
+    s_flush[s_bench.config][s_bench.phase] = board::take_flush_times();
+#endif
     if (std::strncmp(PHASES[s_bench.phase].name, "popover", 7) == 0 && s_bench.config == 0) {
         const std::uint16_t *each = nullptr;
         const int count = perf::frames(&each);
@@ -883,9 +896,17 @@ void bench_step(lv_timer_t *timer)
         for (std::size_t i = 0; i < std::size(PHASES) && n < static_cast<int>(sizeof s_report); ++i) {
             const perf::Stats &r = s_bench.results[i];
             n += std::snprintf(s_report + n, sizeof s_report - n,
-                               "  %-18s %4u frames  %5.1f fps  avg %6.2f ms  worst %6.2f ms\n", PHASES[i].name,
+                               "  %-18s %4u frames  %5.1f fps  avg %6.2f ms  worst %6.2f ms", PHASES[i].name,
                                static_cast<unsigned>(r.frames), r.span_ms ? r.frames * 1000.0 / r.span_ms : 0.0,
                                static_cast<double>(r.avg_ms), static_cast<double>(r.worst_ms));
+#if defined(ESP_PLATFORM)
+            const board::FlushTimes &f = s_flush[s_bench.config][i];
+            const double per = f.frames ? 1000.0 * f.frames : 1.0;
+            n += std::snprintf(s_report + n, sizeof s_report - n, "  | a frame: turn %.1f, wait %.1f, catch up %.1f ms, %llu px",
+                               f.rotate_us / per, f.wait_us / per, f.catch_up_us / per,
+                               static_cast<unsigned long long>(f.frames ? f.pixels / f.frames : 0));
+#endif
+            n += std::snprintf(s_report + n, sizeof s_report - n, "\n");
         }
         std::printf("%s", s_report);
         if (++s_bench.config < static_cast<int>(std::size(CONFIGS))) {
