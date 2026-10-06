@@ -342,25 +342,74 @@ int free_buffer()
     }
 }
 
-// The first area of a frame picks the buffer to draw into and brings it up to
-// the last frame, only where this frame does not draw anew, since a whole
-// screen took 43 ms.
-void prepare_back(lv_display_t *disp)
+// The catching up, done on the other core while LVGL draws: as drawing starts
+// it already knows what it will redraw, so which parts of the buffer it goes
+// into need bringing up to date, and by the first area it flushes those are
+// mostly done. Without the helper, done there and then.
+TaskHandle_t      s_catcher     = nullptr;
+SemaphoreHandle_t s_caught      = nullptr;
+bool              s_catching    = false;
+Rect              s_to_catch[MAX_DIRTY];
+int               s_to_catch_n  = 0;
+
+void catch_all()
 {
-    if (s_target >= 0) {
-        return;
+    const std::uint8_t *latest = s_fbs[s_asked.load(std::memory_order_relaxed)];
+    for (int i = 0; i < s_to_catch_n; ++i) {
+        catch_up(latest, s_fbs[s_target], s_to_catch[i]);
     }
-    s_target = free_buffer();
-    const std::int64_t  catching = esp_timer_get_time();
-    const std::uint8_t *latest   = s_fbs[s_asked.load(std::memory_order_relaxed)];
+}
+
+void catcher(void *)
+{
+    for (;;) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        catch_all();
+        xSemaphoreGive(s_caught);
+    }
+}
+
+void begin_back(lv_display_t *disp, bool helped)
+{
+    s_target     = free_buffer();
+    s_to_catch_n = 0;
     for (int i = 0; i < s_behind_count[s_target]; ++i) {
-        const Rect &r = s_behind[s_target][i];
-        if (!redrawn(disp, r)) {
-            catch_up(latest, s_fbs[s_target], r);
+        if (!redrawn(disp, s_behind[s_target][i])) {
+            s_to_catch[s_to_catch_n++] = s_behind[s_target][i];
         }
     }
     s_behind_count[s_target] = 0;
-    s_flush_times.catch_up_us += esp_timer_get_time() - catching;
+    if (helped && s_catcher != nullptr && s_to_catch_n > 0) {
+        s_catching = true;
+        xTaskNotifyGive(s_catcher);
+    } else {
+        const std::int64_t catching = esp_timer_get_time();
+        catch_all();
+        s_flush_times.catch_up_us += esp_timer_get_time() - catching;
+    }
+}
+
+void render_starts(lv_event_t *e)
+{
+    if (s_target < 0) {
+        begin_back(static_cast<lv_display_t *>(lv_event_get_target(e)), true);
+    }
+}
+
+// The first area of a frame: the buffer it goes into, brought up to the last
+// frame only where this frame does not draw anew, since a whole screen took
+// 43 ms.
+void prepare_back(lv_display_t *disp)
+{
+    if (s_target < 0) {
+        begin_back(disp, false);
+    }
+    if (s_catching) {
+        const std::int64_t catching = esp_timer_get_time();
+        xSemaphoreTake(s_caught, portMAX_DELAY);
+        s_catching = false;
+        s_flush_times.catch_up_us += esp_timer_get_time() - catching;
+    }
 }
 
 // Where the area lands on the panel, which is portrait. The PPA turns
@@ -518,6 +567,11 @@ esp_err_t flush_straight_to_panel(lv_display_t *disp)
                         "panel callbacks");
 
     lv_display_set_flush_cb(disp, flush_rotated);
+    static StaticSemaphore_t caught;
+    s_caught = xSemaphoreCreateBinaryStatic(&caught);
+    if (xTaskCreatePinnedToCore(catcher, "catch up", 3072, nullptr, LVGL_TASK_PRIORITY, &s_catcher, 1 - LVGL_TASK_CORE) == pdPASS) {
+        lv_display_add_event_cb(disp, render_starts, LV_EVENT_RENDER_START, nullptr);
+    }
     return ESP_OK;
 }
 
