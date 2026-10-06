@@ -34,6 +34,124 @@
 #endif
 
 namespace ui {
+// The old theme's names over the kit's look, so the radar's own code reads as
+// it did and draws in the kit's colours and type.
+namespace look {
+namespace space {
+inline constexpr std::int32_t xs = 4, s = 8, m = 16, l = 24;
+}  // namespace space
+namespace radius {
+inline constexpr std::int32_t card = kit::radius::tile, row = 12, pill = LV_RADIUS_CIRCLE;
+}  // namespace radius
+namespace chip {
+inline constexpr std::int32_t size = 60, inset = space::m;
+}  // namespace chip
+
+std::uint32_t hex_of(lv_color_t c) { return lv_color_to_u32(c) & 0xffffff; }
+std::uint32_t blend(std::uint32_t over, std::uint32_t under, lv_opa_t opa)
+{
+    return hex_of(lv_color_mix(lv_color_hex(over), lv_color_hex(under), opa));
+}
+std::uint32_t background() { return kit::colours().ground; }
+std::uint32_t panel() { return kit::colours().surface; }
+std::uint32_t panel_light() { return kit::colours().surface_hi; }
+std::uint32_t text() { return kit::colours().ink; }
+std::uint32_t secondary() { return blend(kit::colours().ink, kit::colours().surface, kit::colours().ink2_opa); }
+std::uint32_t green() { return kit::colours().green; }
+std::uint32_t amber() { return kit::colours().amber; }
+std::uint32_t red() { return kit::colours().red; }
+std::uint32_t primary() { return kit::colours().accent; }
+std::uint32_t primary_dim() { return blend(kit::colours().accent, 0x000000, 200); }
+std::uint32_t dim_of(std::uint32_t colour) { return blend(colour, 0x000000, 200); }
+
+const lv_font_t *type_title() { return kit::fonts::h2(); }
+const lv_font_t *type_value() { return kit::fonts::h3(); }
+const lv_font_t *type_body() { return kit::fonts::body(); }
+const lv_font_t *type_label() { return kit::fonts::small(); }
+
+std::int32_t text_width(const char *value, const lv_font_t *font)
+{
+    lv_point_t size{};
+    lv_text_get_size(&size, value, font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    return size.x;
+}
+
+void set_text(lv_obj_t *label, const char *value)
+{
+    if (label != nullptr && value != nullptr && std::strcmp(lv_label_get_text(label), value) != 0) {
+        lv_label_set_text(label, value);
+    }
+}
+
+bool has_local_color(lv_obj_t *obj, lv_style_prop_t prop, lv_style_selector_t selector, lv_color_t next)
+{
+    lv_style_value_t current;
+    return lv_obj_get_local_style_prop(obj, prop, &current, selector) == LV_STYLE_RES_FOUND &&
+           lv_color_eq(current.color, next);
+}
+
+void set_text_color(lv_obj_t *obj, std::uint32_t colour)
+{
+    if (obj != nullptr && !has_local_color(obj, LV_STYLE_TEXT_COLOR, 0, lv_color_hex(colour))) {
+        lv_obj_set_style_text_color(obj, lv_color_hex(colour), 0);
+    }
+}
+
+void set_bg_color(lv_obj_t *obj, std::uint32_t colour)
+{
+    if (obj != nullptr && !has_local_color(obj, LV_STYLE_BG_COLOR, 0, lv_color_hex(colour))) {
+        lv_obj_set_style_bg_color(obj, lv_color_hex(colour), 0);
+    }
+}
+
+lv_obj_t *make_label(lv_obj_t *parent, const char *value, std::uint32_t colour, const lv_font_t *font)
+{
+    lv_obj_t *label = lv_label_create(parent);
+    lv_label_set_text(label, value);
+    lv_obj_set_style_text_color(label, lv_color_hex(colour), 0);
+    lv_obj_set_style_text_font(label, font, 0);
+    return label;
+}
+
+lv_obj_t *make_box(lv_obj_t *parent)
+{
+    lv_obj_t *box = lv_obj_create(parent);
+    lv_obj_remove_style_all(box);
+    lv_obj_remove_flag(box, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(box, LV_OBJ_FLAG_SCROLLABLE);
+    return box;
+}
+
+void style_panel(lv_obj_t *obj, std::uint32_t colour, int r)
+{
+    lv_obj_set_style_bg_color(obj, lv_color_hex(colour), 0);
+    lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(obj, 0, 0);
+    lv_obj_set_style_radius(obj, r, 0);
+    lv_obj_set_style_pad_all(obj, 0, 0);
+    lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
+}
+
+lv_obj_t *make_card(lv_obj_t *parent)
+{
+    lv_obj_t *card = kit::tile(parent, kit::Lift::Low);
+    lv_obj_set_style_pad_all(card, space::l, 0);
+    return card;
+}
+
+void fill_accent(lv_obj_t *obj)
+{
+    lv_obj_set_style_bg_color(obj, kit::colour(kit::Ink::Accent), 0);
+    lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
+}
+
+void ink_accent(lv_obj_t *obj) { lv_obj_set_style_text_color(obj, kit::colour(kit::Ink::Accent), 0); }
+
+void set_usable(lv_obj_t *obj, bool usable) { kit::set_usable(obj, usable); }
+}  // namespace look
+}  // namespace ui
+
+namespace ui {
 namespace {
 // A development build logs how long the scope's heavier work takes.
 // Adds how long it lived to `into`, for the bench.
@@ -79,7 +197,7 @@ constexpr int          SPOKES            = 8;
 constexpr int          RINGS             = 4;
 constexpr lv_opa_t     RING_OPA[RINGS]   = {LV_OPA_10, LV_OPA_20, LV_OPA_30, LV_OPA_40};
 constexpr std::int32_t RING_STROKE       = 2;
-constexpr std::int32_t RING_LABEL_PAD    = theme::space::xs;
+constexpr std::int32_t RING_LABEL_PAD    = look::space::xs;
 constexpr float        RING_LABEL_ANGLE  = 45.0f * DEG;
 constexpr std::size_t  RING_TEXT_LEN     = 12;
 constexpr std::int32_t COMPASS_GAP       = 10;
@@ -128,8 +246,8 @@ constexpr int INITIAL_RANGE_STEP = 3;  // 80 km
 // controls and scale, set into the bezel like the distances are set on the rings.
 constexpr std::int32_t BEZEL     = 20;
 constexpr std::int32_t CORNER    = 88;
-constexpr std::int32_t ZOOM_D    = theme::chip::size;
-constexpr std::int32_t EDGE      = theme::chip::inset;  // as in every other card
+constexpr std::int32_t ZOOM_D    = look::chip::size;
+constexpr std::int32_t EDGE      = look::chip::inset;  // as in every other card
 constexpr float        KEY_FROM  = 120.0f;
 constexpr float        KEY_TO    = 150.0f;
 constexpr std::int32_t KEY_WIDTH = 5;
@@ -160,7 +278,7 @@ constexpr float         UPPER_INK_TO_TEXT = 0.45f;
 constexpr int           LEVEL_FLIGHT_FPM  = 245;
 
 constexpr std::int32_t COLUMN_W   = 294;
-constexpr std::int32_t COLUMN_GAP = theme::space::m;
+constexpr std::int32_t COLUMN_GAP = look::space::m;
 
 // Both cards in the column are inset by the same amount, so the callsign, the
 // readings and the photograph all start on one edge.
@@ -184,7 +302,7 @@ constexpr int HEADING_FACT  = 2;
 constexpr int AWAY_FACT     = 3;
 constexpr int FACTS         = 4;
 
-constexpr std::int32_t FACT_GAP     = theme::space::m;
+constexpr std::int32_t FACT_GAP     = look::space::m;
 constexpr std::int32_t FACT_WIDE    = 150;  // the altitude's column, with where it is going, and the heading's
 constexpr std::int32_t ROUTE_END_W  = 78;   // a code and its town at either end of the route
 constexpr std::int32_t TRACK_H      = 4;
@@ -388,7 +506,7 @@ void ask_details(const char *hex, const char *callsign)
 
 const lv_font_t *marking_font()
 {
-    return fonts::size_16();
+    return kit::fonts::small();
 }
 
 template <typename T>
@@ -453,10 +571,10 @@ std::uint32_t altitude_ink(int feet)
         return INK_UNKNOWN;
     }
     const std::uint32_t ink[] = {
-        theme::dim_of(theme::primary_dim),          // low traffic sits back
-        theme::primary,
-        mix(theme::primary, theme::text, UPPER_INK_TO_TEXT),
-        theme::text,                                // near white at cruise
+        look::dim_of(look::primary_dim()),          // low traffic sits back
+        look::primary(),
+        mix(look::primary(), look::text(), UPPER_INK_TO_TEXT),
+        look::text(),                                // near white at cruise
     };
     const int count = static_cast<int>(std::size(ALTITUDE_STOPS));
     for (int i = 1; i < count; ++i) {
@@ -513,9 +631,9 @@ lv_obj_t *s_compass[4] = {};  // N, S, E, W
 
 void compass(lv_obj_t *parent, const char *text, char side)
 {
-    lv_obj_t          *label = theme::make_label(parent, text, theme::secondary, marking_font());
+    lv_obj_t          *label = look::make_label(parent, text, look::secondary(), marking_font());
     s_compass[side == 'N' ? 0 : side == 'S' ? 1 : side == 'E' ? 2 : 3] = label;
-    const std::int32_t w     = theme::text_width(text, marking_font());
+    const std::int32_t w     = look::text_width(text, marking_font());
     const std::int32_t h     = marking_font()->line_height;
     const std::int32_t edge  = s_radius + COMPASS_GAP;
 
@@ -532,7 +650,7 @@ void compass(lv_obj_t *parent, const char *text, char side)
 void place_ring_label(lv_obj_t *label, std::int32_t radius)
 {
     const std::int32_t w =
-        theme::text_width(lv_label_get_text(label), marking_font()) + 2 * RING_LABEL_PAD;
+        look::text_width(lv_label_get_text(label), marking_font()) + 2 * RING_LABEL_PAD;
     const std::int32_t h  = marking_font()->line_height;
     const lv_point_t   at = on_circle(RING_LABEL_ANGLE, static_cast<float>(radius));
     lv_obj_set_pos(label, at.x - w / 2, at.y - h / 2);
@@ -542,7 +660,7 @@ void show_ring_distance(lv_obj_t *label, int nth, int range_km)
 {
     char text[RING_TEXT_LEN];
     std::snprintf(text, sizeof(text), "%d", range_km * nth / RINGS);
-    theme::set_text(label, text);
+    look::set_text(label, text);
     place_ring_label(label, s_radius * nth / RINGS);
 }
 
@@ -550,9 +668,9 @@ void build_rings(lv_obj_t *scope, int range_km)
 {
     for (int i = 1; i <= RINGS; ++i) {
 
-        lv_obj_t *label = theme::make_label(scope, "", theme::secondary, marking_font());
+        lv_obj_t *label = look::make_label(scope, "", look::secondary(), marking_font());
         lv_obj_set_style_text_opa(label, LV_OPA_40, 0);
-        lv_obj_set_style_bg_color(label, lv_color_hex(theme::panel), 0);  // the map's own colour
+        lv_obj_set_style_bg_color(label, lv_color_hex(look::panel()), 0);  // the map's own colour
         lv_obj_set_style_bg_opa(label, LV_OPA_COVER, 0);
         lv_obj_set_style_pad_hor(label, RING_LABEL_PAD, 0);
         show_ring_distance(label, i, range_km);
@@ -666,12 +784,12 @@ void build_key_scale(lv_obj_t *scope, std::int32_t mid)
 void build_key_end(lv_obj_t *scope, const char *text, float end_deg, float direction,
                    std::int32_t mid)
 {
-    const std::int32_t w     = theme::text_width(text, marking_font());
+    const std::int32_t w     = look::text_width(text, marking_font());
     const std::int32_t h     = marking_font()->line_height;
     const float        half  = static_cast<float>(w) / 2.0f / static_cast<float>(mid) / DEG;
     const float        angle = end_deg + direction * (half + KEY_LABEL_GAP_DEG);
     const float        rad   = angle * DEG;
-    lv_obj_t *label = theme::make_label(scope, text, theme::secondary, marking_font());
+    lv_obj_t *label = look::make_label(scope, text, look::secondary(), marking_font());
     lv_obj_set_style_text_opa(label, LV_OPA_60, 0);
     lv_obj_set_pos(label, s_cx + static_cast<std::int32_t>(std::cos(rad) * mid) - w / 2,
                    s_cy + static_cast<std::int32_t>(std::sin(rad) * mid) - h / 2);
@@ -1029,13 +1147,13 @@ bool is_water_body(radar::MapLayer layer)
 // disc in the card, and as the map a panel rounded as the cards are.
 std::uint16_t land_colour()
 {
-    return rgb565(theme::panel);
+    return rgb565(look::panel());
 }
 
 void paint_base()
 {
     const std::uint16_t land   = land_colour();
-    const std::uint16_t around = rgb565(s_to_edges ? theme::background : theme::panel_light);
+    const std::uint16_t around = rgb565(s_to_edges ? look::background() : look::panel_light());
     const std::uint16_t disc   = land;
     // Each pixel written once: the whole picture twice over took 30 ms.
     for (std::int32_t y = 0; y < s_ground_h; ++y) {
@@ -1146,7 +1264,7 @@ void work_out_rings()
 
 void draw_rings_and_spokes()
 {
-    const std::uint16_t ink = rgb565(theme::secondary);
+    const std::uint16_t ink = rgb565(look::secondary());
     for (std::size_t i = 0; i < s_ring_count; ++i) {
         std::uint16_t &pixel = s_ground[s_ring_at[i]];
         s_ring_under[i]      = pixel;
@@ -1211,7 +1329,7 @@ void draw_map(float home_lat, float home_lon, float range_km)
     }
 
     const int drawn = lap();
-    const std::uint16_t ink = rgb565(theme::secondary);
+    const std::uint16_t ink = rgb565(look::secondary());
     lay_mask(ink);
     const int laid = lap();
     draw_rings_and_spokes();
@@ -1227,8 +1345,8 @@ bool map_located()
 
 void paint_range_buttons()
 {
-    theme::set_usable(s_zoom_in, s_range_step > 0);
-    theme::set_usable(s_zoom_out, s_range_step < RANGE_COUNT - 1);
+    look::set_usable(s_zoom_in, s_range_step > 0);
+    look::set_usable(s_zoom_out, s_range_step < RANGE_COUNT - 1);
 }
 
 float shown_range_km()
@@ -1370,7 +1488,7 @@ void show_magnified(std::int32_t steps)
     frame.ring_at    = s_ring_under != nullptr ? s_ring_at : nullptr;
     frame.ring_opa   = s_ring_opa;
     frame.ring_count = s_ring_count;
-    frame.ring_ink   = rgb565(theme::secondary);
+    frame.ring_ink   = rgb565(look::secondary());
     board::zoom_frame(frame);
     ++s_fast_frames;
 }
@@ -1708,8 +1826,8 @@ void build_home(lv_obj_t *scope)
     lv_obj_t *home = lv_obj_create(scope);
     lv_obj_set_size(home, HOME_SIZE, HOME_SIZE);
     lv_obj_set_pos(home, s_cx - HOME_SIZE / 2, s_cy - HOME_SIZE / 2);
-    theme::style_panel(home, theme::panel, HOME_SIZE / 2);
-    theme::fill_accent(home);
+    look::style_panel(home, look::panel(), HOME_SIZE / 2);
+    look::fill_accent(home);
     quiet(home);
 }
 
@@ -1719,7 +1837,7 @@ void build_marker(lv_obj_t *scope)
     lv_obj_set_size(s_marker, MARKER_SIZE, MARKER_SIZE);
     lv_obj_set_style_radius(s_marker, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_opa(s_marker, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_color(s_marker, lv_color_hex(theme::primary), 0);
+    lv_obj_set_style_border_color(s_marker, lv_color_hex(look::primary()), 0);
     lv_obj_set_style_border_width(s_marker, MARKER_STROKE, 0);
     lv_obj_set_style_pad_all(s_marker, 0, 0);
     lv_obj_set_hidden(s_marker, true);
@@ -1743,7 +1861,7 @@ void build_rim(lv_obj_t *scope)
 void build_blip_labels(lv_obj_t *scope)
 {
     for (int i = 0; i < LABEL_MAX; ++i) {
-        s_blips[i].label = theme::make_label(scope, "", theme::secondary, marking_font());
+        s_blips[i].label = look::make_label(scope, "", look::secondary(), marking_font());
         lv_obj_set_hidden(s_blips[i].label, true);
         quiet(s_blips[i].label);
     }
@@ -1769,7 +1887,7 @@ void build_scope(lv_obj_t *parent, const Frame &frame, int range_km)
     lv_obj_t *scope = lv_obj_create(parent);
     lv_obj_set_pos(scope, 0, 0);
     lv_obj_set_size(scope, frame.w, frame.h);
-    theme::style_panel(scope, theme::background, frame.to_edges ? 0 : side / 2);
+    look::style_panel(scope, look::background(), frame.to_edges ? 0 : side / 2);
     lv_obj_set_style_bg_opa(scope, LV_OPA_TRANSP, 0);  // the picture covers it, corners and all
     lv_obj_set_scrollable(scope, false);
     lv_obj_add_event_cb(scope, scope_clicked, LV_EVENT_CLICKED, nullptr);
@@ -1794,7 +1912,7 @@ void build_photo(lv_obj_t *card)
     s_photo_frame = lv_obj_create(card);
     lv_obj_set_pos(s_photo_frame, 0, 0);
     lv_obj_set_size(s_photo_frame, INNER_W, PHOTO_H);
-    theme::style_panel(s_photo_frame, theme::panel, theme::radius::row);
+    look::style_panel(s_photo_frame, look::panel(), look::radius::row);
     lv_obj_set_style_pad_all(s_photo_frame, 0, 0);
     lv_obj_set_style_clip_corner(s_photo_frame, true, 0);
     lv_obj_set_hidden(s_photo_frame, true);
@@ -1806,8 +1924,8 @@ void build_photo(lv_obj_t *card)
     quiet(s_photo);
 
     // Who took it, on a dark patch in its corner, as Planespotters asks.
-    s_credit = theme::make_label(s_photo_frame, "", theme::text, theme::type_label());
-    theme::style_panel(s_credit, theme::background, theme::radius::row);
+    s_credit = look::make_label(s_photo_frame, "", look::text(), look::type_label());
+    look::style_panel(s_credit, look::background(), look::radius::row);
     lv_obj_set_style_bg_opa(s_credit, LV_OPA_60, 0);
     lv_obj_set_style_pad_hor(s_credit, CREDIT_PAD * 2, 0);
     lv_obj_set_style_pad_ver(s_credit, CREDIT_PAD / 2, 0);
@@ -1829,14 +1947,14 @@ void build_spinner(lv_obj_t *card)
     lv_obj_set_style_pad_all(s_photo_wait, 0, 0);
     lv_obj_set_style_arc_width(s_photo_wait, SPINNER_STROKE, LV_PART_MAIN);
     lv_obj_set_style_arc_width(s_photo_wait, SPINNER_STROKE, LV_PART_INDICATOR);
-    lv_obj_set_style_arc_color(s_photo_wait, lv_color_hex(theme::panel_light), LV_PART_MAIN);
-    lv_obj_set_style_arc_color(s_photo_wait, lv_color_hex(theme::secondary), LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(s_photo_wait, lv_color_hex(look::panel_light()), LV_PART_MAIN);
+    lv_obj_set_style_arc_color(s_photo_wait, lv_color_hex(look::secondary()), LV_PART_INDICATOR);
     lv_obj_set_hidden(s_photo_wait, true);
     quiet(s_photo_wait);
 
     s_photo_plane = lv_image_create(card);
     lv_image_set_src(s_photo_plane, &icons::plane_large_icon);
-    lv_obj_set_style_image_recolor(s_photo_plane, lv_color_hex(theme::secondary), 0);
+    lv_obj_set_style_image_recolor(s_photo_plane, lv_color_hex(look::secondary()), 0);
     lv_obj_set_style_image_recolor_opa(s_photo_plane, LV_OPA_COVER, 0);
     lv_obj_set_style_image_opa(s_photo_plane, WAITING_PLANE_OPA, 0);
     lv_obj_set_pos(s_photo_plane, (INNER_W - icons::plane_large_icon.header.w) / 2,
@@ -1849,7 +1967,7 @@ void build_no_photo()
 {
     s_photo_none = lv_image_create(s_photo_frame);
     lv_image_set_src(s_photo_none, &icons::no_photo_icon);
-    lv_obj_set_style_image_recolor(s_photo_none, lv_color_hex(theme::secondary), 0);
+    lv_obj_set_style_image_recolor(s_photo_none, lv_color_hex(look::secondary()), 0);
     lv_obj_set_style_image_recolor_opa(s_photo_none, LV_OPA_COVER, 0);
     lv_obj_set_style_image_opa(s_photo_none, LV_OPA_60, 0);
     lv_obj_center(s_photo_none);
@@ -1858,7 +1976,7 @@ void build_no_photo()
 
 lv_obj_t *identity_line(std::uint32_t colour, const lv_font_t *font)
 {
-    lv_obj_t *label = theme::make_label(s_identity, "", colour, font);
+    lv_obj_t *label = look::make_label(s_identity, "", colour, font);
     lv_obj_set_width(label, INNER_W);
     lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_DOTS);
     lv_obj_set_height(label, font->line_height);
@@ -1868,7 +1986,7 @@ lv_obj_t *identity_line(std::uint32_t colour, const lv_font_t *font)
 
 lv_obj_t *box_in(lv_obj_t *parent, lv_flex_flow_t flow)
 {
-    lv_obj_t *box = theme::make_box(parent);
+    lv_obj_t *box = look::make_box(parent);
     lv_obj_set_size(box, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(box, flow);
     return box;
@@ -1876,10 +1994,10 @@ lv_obj_t *box_in(lv_obj_t *parent, lv_flex_flow_t flow)
 
 lv_obj_t *make_chip_label(lv_obj_t *parent, std::uint32_t ink)
 {
-    lv_obj_t *chip = theme::make_label(parent, "", ink, theme::type_label());
-    theme::style_panel(chip, theme::panel, theme::radius::pill);
+    lv_obj_t *chip = look::make_label(parent, "", ink, look::type_label());
+    look::style_panel(chip, look::panel(), look::radius::pill);
     lv_obj_set_style_bg_opa(chip, LV_OPA_COVER, 0);
-    lv_obj_set_style_pad_hor(chip, theme::space::s, 0);
+    lv_obj_set_style_pad_hor(chip, look::space::s, 0);
     lv_obj_set_style_pad_ver(chip, 2, 0);
     quiet(chip);
     return chip;
@@ -1889,16 +2007,16 @@ lv_obj_t *make_chip_label(lv_obj_t *parent, std::uint32_t ink)
 // between them a track filled as far as the flight has come.
 void build_route()
 {
-    s_route = theme::make_box(s_identity);
-    const std::int32_t code_h = theme::type_value()->line_height;
-    lv_obj_set_size(s_route, INNER_W, code_h + theme::type_label()->line_height);
-    lv_obj_set_style_margin_top(s_route, theme::space::s, 0);
+    s_route = look::make_box(s_identity);
+    const std::int32_t code_h = look::type_value()->line_height;
+    lv_obj_set_size(s_route, INNER_W, code_h + look::type_label()->line_height);
+    lv_obj_set_style_margin_top(s_route, look::space::s, 0);
     for (int end = 0; end < 2; ++end) {
-        lv_obj_t *code = theme::make_label(s_route, "", theme::text, theme::type_value());
-        lv_obj_t *town = theme::make_label(s_route, "", theme::secondary, theme::type_label());
-        lv_obj_set_width(town, INNER_W / 2 - theme::space::xs);  // under the track, which keeps to the codes' line
+        lv_obj_t *code = look::make_label(s_route, "", look::text(), look::type_value());
+        lv_obj_t *town = look::make_label(s_route, "", look::secondary(), look::type_label());
+        lv_obj_set_width(town, INNER_W / 2 - look::space::xs);  // under the track, which keeps to the codes' line
         lv_label_set_long_mode(town, LV_LABEL_LONG_MODE_DOTS);
-        lv_obj_set_height(town, theme::type_label()->line_height);
+        lv_obj_set_height(town, look::type_label()->line_height);
         const lv_align_t side = end == 0 ? LV_ALIGN_TOP_LEFT : LV_ALIGN_TOP_RIGHT;
         lv_obj_align(code, side, 0, 0);
         lv_obj_align(town, side, 0, code_h);
@@ -1909,20 +2027,20 @@ void build_route()
         s_ends[end][1] = town;
     }
     lv_obj_t *track = lv_obj_create(s_route);
-    theme::style_panel(track, theme::panel, TRACK_H / 2);
+    look::style_panel(track, look::panel(), TRACK_H / 2);
     lv_obj_set_size(track, INNER_W - 2 * ROUTE_END_W, TRACK_H);
     lv_obj_set_pos(track, ROUTE_END_W, code_h / 2);
     quiet(track);
     s_track_fill = lv_obj_create(track);
-    theme::style_panel(s_track_fill, theme::panel, TRACK_H / 2);
-    theme::fill_accent(s_track_fill);
+    look::style_panel(s_track_fill, look::panel(), TRACK_H / 2);
+    look::fill_accent(s_track_fill);
     lv_obj_set_size(s_track_fill, 0, TRACK_H);
     quiet(s_track_fill);
     s_track_plane = lv_image_create(s_route);
     lv_image_set_src(s_track_plane, &icons::plane_icon);
     lv_image_set_scale(s_track_plane, LV_SCALE_NONE * TRACK_PLANE / icons::plane_icon.header.w);
     lv_image_set_rotation(s_track_plane, 900);  // along the track, to the right
-    lv_obj_set_style_image_recolor(s_track_plane, lv_color_hex(theme::text), 0);
+    lv_obj_set_style_image_recolor(s_track_plane, lv_color_hex(look::text()), 0);
     lv_obj_set_style_image_recolor_opa(s_track_plane, LV_OPA_COVER, 0);
     quiet(s_track_plane);
 }
@@ -1935,40 +2053,40 @@ void build_identity(lv_obj_t *card)
     lv_obj_set_style_border_width(s_identity, 0, 0);
     lv_obj_set_style_pad_all(s_identity, 0, 0);
     lv_obj_set_flex_flow(s_identity, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(s_identity, theme::space::xs, 0);
+    lv_obj_set_style_pad_row(s_identity, look::space::xs, 0);
     quiet(s_identity);
 
     // The flight number, and the airline beside it on its baseline.
     lv_obj_t *head = box_in(s_identity, LV_FLEX_FLOW_ROW);
     lv_obj_set_width(head, INNER_W);
     lv_obj_set_flex_align(head, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
-    lv_obj_set_style_pad_column(head, theme::space::s, 0);
-    s_title = theme::make_label(head, "", theme::text, theme::type_title());
-    theme::ink_accent(s_title);
+    lv_obj_set_style_pad_column(head, look::space::s, 0);
+    s_title = look::make_label(head, "", look::text(), look::type_title());
+    look::ink_accent(s_title);
     quiet(s_title);
-    s_title_side = theme::make_label(head, "", theme::secondary, theme::type_label());
+    s_title_side = look::make_label(head, "", look::secondary(), look::type_label());
     lv_obj_set_flex_grow(s_title_side, 1);
     lv_label_set_long_mode(s_title_side, LV_LABEL_LONG_MODE_DOTS);
-    lv_obj_set_height(s_title_side, theme::type_label()->line_height);
+    lv_obj_set_height(s_title_side, look::type_label()->line_height);
     lv_obj_set_style_margin_bottom(s_title_side, 4, 0);  // on the title's baseline
     quiet(s_title_side);
-    s_operator = identity_line(theme::text, theme::type_body());
+    s_operator = identity_line(look::text(), look::type_body());
 
     build_route();
-    s_progress = identity_line(theme::secondary, theme::type_label());
+    s_progress = identity_line(look::secondary(), look::type_label());
     lv_obj_set_style_text_align(s_progress, LV_TEXT_ALIGN_CENTER, 0);
 
     s_chips = box_in(s_identity, LV_FLEX_FLOW_ROW);
-    lv_obj_set_style_pad_column(s_chips, theme::space::s, 0);
-    lv_obj_set_style_margin_top(s_chips, theme::space::s, 0);
-    s_chip_military = make_chip_label(s_chips, theme::green);
-    theme::set_text(s_chip_military, "MILITARY");
-    s_chip_country = make_chip_label(s_chips, theme::secondary);
+    lv_obj_set_style_pad_column(s_chips, look::space::s, 0);
+    lv_obj_set_style_margin_top(s_chips, look::space::s, 0);
+    s_chip_military = make_chip_label(s_chips, look::green());
+    look::set_text(s_chip_military, "MILITARY");
+    s_chip_country = make_chip_label(s_chips, look::secondary());
 
-    s_nearby = theme::make_label(s_identity, "", theme::secondary, theme::type_body());
+    s_nearby = look::make_label(s_identity, "", look::secondary(), look::type_body());
     lv_obj_set_width(s_nearby, INNER_W);
-    lv_obj_set_style_margin_top(s_nearby, theme::space::m, 0);
-    lv_obj_set_style_text_line_space(s_nearby, theme::space::s, 0);
+    lv_obj_set_style_margin_top(s_nearby, look::space::m, 0);
+    lv_obj_set_style_text_line_space(s_nearby, look::space::s, 0);
     lv_obj_set_hidden(s_nearby, true);
     quiet(s_nearby);
 }
@@ -1978,14 +2096,14 @@ void build_identity(lv_obj_t *card)
 void place_readings_at(std::int32_t height)
 {
     const std::int32_t foot   = height - 2 * INSET;
-    const std::int32_t line_y = foot - theme::type_label()->line_height;
+    const std::int32_t line_y = foot - look::type_label()->line_height;
     lv_obj_set_y(s_airframe, line_y);
     lv_obj_update_layout(s_facts[0].box);
     const std::int32_t cell_h = lv_obj_get_height(s_facts[0].box);
     for (int i = 0; i < FACTS; ++i) {
         const std::int32_t row = i / 2;
         lv_obj_set_pos(s_facts[i].box, (i % 2) * (FACT_WIDE + FACT_GAP),
-                       line_y - FACT_GAP - (2 - row) * cell_h - (1 - row) * theme::space::s);
+                       line_y - FACT_GAP - (2 - row) * cell_h - (1 - row) * look::space::s);
     }
 }
 
@@ -1993,37 +2111,37 @@ void build_readings(lv_obj_t *card, std::int32_t height)
 {
     for (Fact &fact : s_facts) {
         fact.box = box_in(card, LV_FLEX_FLOW_COLUMN);
-        fact.name = theme::make_label(fact.box, "", theme::secondary, theme::type_label());
+        fact.name = look::make_label(fact.box, "", look::secondary(), look::type_label());
         quiet(fact.name);
         lv_obj_t *line = box_in(fact.box, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(line, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER);
-        lv_obj_set_style_pad_column(line, theme::space::xs, 0);
+        lv_obj_set_style_pad_column(line, look::space::xs, 0);
         fact.mark = lv_image_create(line);
         lv_image_set_src(fact.mark, &icons::plane_icon);
         lv_image_set_scale(fact.mark, LV_SCALE_NONE * HEADING_PLANE / icons::plane_icon.header.w);
         lv_obj_set_size(fact.mark, HEADING_PLANE, HEADING_PLANE);
         lv_image_set_inner_align(fact.mark, LV_IMAGE_ALIGN_CENTER);
-        lv_obj_set_style_image_recolor(fact.mark, lv_color_hex(theme::text), 0);
+        lv_obj_set_style_image_recolor(fact.mark, lv_color_hex(look::text()), 0);
         lv_obj_set_style_image_recolor_opa(fact.mark, LV_OPA_COVER, 0);
         lv_obj_set_hidden(fact.mark, true);
         quiet(fact.mark);
-        fact.value = theme::make_label(line, NO_READING, theme::text, theme::type_value());
+        fact.value = look::make_label(line, NO_READING, look::text(), look::type_value());
         quiet(fact.value);
-        fact.unit = theme::make_label(line, "", theme::secondary, theme::type_label());
+        fact.unit = look::make_label(line, "", look::secondary(), look::type_label());
         lv_obj_set_style_margin_bottom(fact.unit, 2, 0);
         quiet(fact.unit);
     }
-    s_airframe = theme::make_label(card, "", theme::secondary, theme::type_label());
+    s_airframe = look::make_label(card, "", look::secondary(), look::type_label());
     lv_obj_set_width(s_airframe, INNER_W);
     lv_label_set_long_mode(s_airframe, LV_LABEL_LONG_MODE_DOTS);
-    lv_obj_set_height(s_airframe, theme::type_label()->line_height);
+    lv_obj_set_height(s_airframe, look::type_label()->line_height);
     quiet(s_airframe);
     place_readings_at(height);
 }
 
 void build_column(lv_obj_t *parent, std::int32_t x, std::int32_t height)
 {
-    lv_obj_t *card = theme::make_card(parent);
+    lv_obj_t *card = look::make_card(parent);
     lv_obj_set_pos(card, x, 0);
     lv_obj_set_size(card, COLUMN_W, height);
     lv_obj_set_style_pad_all(card, INSET, 0);
@@ -2077,7 +2195,7 @@ void show_picture()
     }
     show_waiting(s_picture == Picture::Looking || s_picture == Picture::Loading);
     lv_obj_set_hidden(s_photo_none, s_picture != Picture::Missing);
-    lv_obj_set_y(s_identity, s_picture == Picture::Idle ? 0 : PHOTO_H + theme::space::m);
+    lv_obj_set_y(s_identity, s_picture == Picture::Idle ? 0 : PHOTO_H + look::space::m);
 }
 
 void place_blip(Plot &plot, float range_km)
@@ -2086,7 +2204,7 @@ void place_blip(Plot &plot, float range_km)
     plot.x = static_cast<std::int32_t>(std::lround(s_cx + plot.east_km * scale));
     plot.y = static_cast<std::int32_t>(std::lround(s_cy - plot.north_km * scale));
 
-    const std::int32_t span = theme::text_width(blip_name(*plot.aircraft), marking_font());
+    const std::int32_t span = look::text_width(blip_name(*plot.aircraft), marking_font());
     plot.label_x = plot.x > s_cx ? plot.x - LABEL_SIDE_GAP - span : plot.x + LABEL_SIDE_GAP;
     plot.label_w = span;
 }
@@ -2194,7 +2312,7 @@ void raster_blip(const Plot &plot)
 
     const bool          shout = emergency(plot.aircraft->squawk) != nullptr;
     const std::uint16_t ink   = lv_color_to_u16(
-        lv_color_hex(shout ? theme::red : altitude_ink(plot.aircraft->altitude_ft)));
+        lv_color_hex(shout ? look::red() : altitude_ink(plot.aircraft->altitude_ft)));
 
     if (outline.closed) {
         fill_blip(shape, outline.count, ink);
@@ -2207,8 +2325,8 @@ void raster_blip(const Plot &plot)
 void draw_label(Blip &blip, const Plot &plot)
 {
     const bool shout = emergency(plot.aircraft->squawk) != nullptr;
-    theme::set_text(blip.label, blip_name(*plot.aircraft));
-    theme::set_text_color(blip.label, shout ? theme::red : theme::secondary);
+    look::set_text(blip.label, blip_name(*plot.aircraft));
+    look::set_text_color(blip.label, shout ? look::red() : look::secondary());
     lv_obj_set_pos(blip.label, plot.label_x, plot.y - LABEL_RISE);
     lv_obj_set_hidden(blip.label, false);
 }
@@ -2221,20 +2339,20 @@ void draw_rim(lv_obj_t *dot, const radar::Aircraft &aircraft)
     const auto  y = static_cast<std::int32_t>(std::lround(s_cy - std::cos(radians) * reach));
 
     lv_obj_set_pos(dot, x - RIM_SIZE / 2, y - RIM_SIZE / 2);
-    theme::set_bg_color(dot, altitude_ink(aircraft.altitude_ft));
+    look::set_bg_color(dot, altitude_ink(aircraft.altitude_ft));
     lv_obj_set_hidden(dot, false);
 }
 
 // Each reading as wide as its value or its name, the three spread across the
 // column: the quiet sky's names are longer than an aircraft's, and fixed
 // columns ran them into each other.
-void set_fact(int index, const char *name, const char *value, const char *unit, std::uint32_t colour = theme::text)
+void set_fact(int index, const char *name, const char *value, const char *unit, std::uint32_t colour = look::text())
 {
     Fact &fact = s_facts[index];
-    theme::set_text(fact.name, name);
-    theme::set_text(fact.value, value);
-    theme::set_text(fact.unit, unit);
-    theme::set_text_color(fact.value, colour);
+    look::set_text(fact.name, name);
+    look::set_text(fact.value, value);
+    look::set_text(fact.unit, unit);
+    look::set_text_color(fact.value, colour);
 }
 
 // 12,345, as the eye reads altitudes.
@@ -2260,9 +2378,9 @@ void show_summary_heading()
 {
     char text[SUMMARY_TEXT_LEN];
     std::snprintf(text, sizeof(text), "%d aircraft", s_shown);
-    theme::set_text(s_title, s_shown > 0 ? text : "Quiet sky");
-    theme::set_text(s_title_side, "");
-    theme::set_text(s_operator, s_shown > 0 ? "Tap one for its details" : "Nothing within range");
+    look::set_text(s_title, s_shown > 0 ? text : "Quiet sky");
+    look::set_text(s_title_side, "");
+    look::set_text(s_operator, s_shown > 0 ? "Tap one for its details" : "Nothing within range");
     lv_obj_set_hidden(s_operator, false);
     for (lv_obj_t *part : {s_route, s_progress, s_chips, s_airframe}) {
         lv_obj_set_hidden(part, true);
@@ -2311,7 +2429,7 @@ void show_nearby()
                                 i > 0 ? "\n" : "", blip_name(*a),
                                 static_cast<double>(distance_km(*a)));
     }
-    theme::set_text(s_nearby, text);
+    look::set_text(s_nearby, text);
     lv_obj_set_hidden(s_nearby, s_shown == 0);
 }
 
@@ -2324,10 +2442,10 @@ void show_summary(const radar::Snapshot &snapshot)
     s_picture = Picture::Idle;
     show_picture();
 
-    theme::set_text(s_summary, snapshot.age_s < 0 ? "waiting for a fix"
+    look::set_text(s_summary, snapshot.age_s < 0 ? "waiting for a fix"
                                : !snapshot.ok    ? "feed unreachable"
                                                  : "");
-    theme::set_text_color(s_summary, theme::amber);
+    look::set_text_color(s_summary, look::amber());
 }
 
 const char *operator_name(bool mine)
@@ -2365,7 +2483,7 @@ void show_airframe(const radar::Aircraft &aircraft, bool mine)
     } else {
         std::snprintf(text, sizeof(text), "%s", shape[0] != '\0' ? shape : aircraft.reg);
     }
-    theme::set_text(s_airframe, text);
+    look::set_text(s_airframe, text);
     lv_obj_set_hidden(s_airframe, text[0] == '\0');
 }
 
@@ -2377,14 +2495,14 @@ void show_title(const radar::Aircraft &aircraft, bool mine)
     if (std::strlen(number) > 2) {
         char text[radar::kFlightLen + 2];
         std::snprintf(text, sizeof(text), "%.2s %.*s", number, radar::kFlightLen - 3, number + 2);
-        theme::set_text(s_title, text);
-        theme::set_text(s_title_side, operator_name(mine));
+        look::set_text(s_title, text);
+        look::set_text(s_title_side, operator_name(mine));
         lv_obj_set_hidden(s_operator, true);
         return;
     }
-    theme::set_text(s_title, blip_name(aircraft));
-    theme::set_text(s_title_side, "");
-    theme::set_text(s_operator, operator_name(mine));
+    look::set_text(s_title, blip_name(aircraft));
+    look::set_text(s_title_side, "");
+    look::set_text(s_operator, operator_name(mine));
     lv_obj_set_hidden(s_operator, operator_name(mine)[0] == '\0');
 }
 
@@ -2396,24 +2514,24 @@ void show_route(const radar::Aircraft &aircraft, bool mine)
     const bool along = known && radar::route_progress(s_details, aircraft.lat, aircraft.lon, share, left_km);
     char text[SELECTED_TEXT_LEN] = "";
     if (known) {
-        theme::set_text(s_ends[0][0], s_details.origin_code[0] != '\0' ? s_details.origin_code : "?");
-        theme::set_text(s_ends[0][1], s_details.origin_city);
-        theme::set_text(s_ends[1][0], s_details.dest_code[0] != '\0' ? s_details.dest_code : "?");
-        theme::set_text(s_ends[1][1], s_details.dest_city);
+        look::set_text(s_ends[0][0], s_details.origin_code[0] != '\0' ? s_details.origin_code : "?");
+        look::set_text(s_ends[0][1], s_details.origin_city);
+        look::set_text(s_ends[1][0], s_details.dest_code[0] != '\0' ? s_details.dest_code : "?");
+        look::set_text(s_ends[1][1], s_details.dest_city);
         const std::int32_t span = INNER_W - 2 * ROUTE_END_W;
         const std::int32_t at   = static_cast<std::int32_t>(std::lround(share * span));
         lv_obj_set_width(s_track_fill, at);
         lv_obj_set_hidden(s_track_plane, !along);
         lv_obj_set_pos(s_track_plane, ROUTE_END_W + at - icons::plane_icon.header.w / 2,
-                       theme::type_value()->line_height / 2 + TRACK_H / 2 - icons::plane_icon.header.h / 2);
+                       look::type_value()->line_height / 2 + TRACK_H / 2 - icons::plane_icon.header.h / 2);
         if (along) {
             char km[16];
             thousands(km, sizeof(km), static_cast<int>(std::lround(left_km)));
             std::snprintf(text, sizeof(text), "%d%%, %s km to go", static_cast<int>(std::lround(share * 100.0f)), km);
         }
     }
-    theme::set_text(s_progress, aircraft.approach ? "On approach" : text);
-    theme::set_text_color(s_progress, aircraft.approach ? theme::amber : theme::secondary);
+    look::set_text(s_progress, aircraft.approach ? "On approach" : text);
+    look::set_text_color(s_progress, aircraft.approach ? look::amber() : look::secondary());
     lv_obj_set_hidden(s_progress, lv_label_get_text(s_progress)[0] == '\0');
 }
 
@@ -2422,7 +2540,7 @@ void show_chips(const radar::Aircraft &aircraft, bool mine)
 {
     lv_obj_set_hidden(s_chip_military, !aircraft.military);
     const bool country = mine && !s_details.has_route && s_details.owner_country[0] != '\0';
-    theme::set_text(s_chip_country, country ? s_details.owner_country : "");
+    look::set_text(s_chip_country, country ? s_details.owner_country : "");
     lv_obj_set_hidden(s_chip_country, !country);
     lv_obj_set_hidden(s_chips, !aircraft.military && !country);
 }
@@ -2491,8 +2609,8 @@ void show_selected(const radar::Aircraft &aircraft)
     const char *shout = emergency(aircraft.squawk);
     show_picture();
 
-    theme::set_text(s_summary, shout != nullptr ? shout : (s_last->ok ? "" : "feed unreachable"));
-    theme::set_text_color(s_summary, shout != nullptr ? theme::red : theme::amber);
+    look::set_text(s_summary, shout != nullptr ? shout : (s_last->ok ? "" : "feed unreachable"));
+    look::set_text_color(s_summary, shout != nullptr ? look::red() : look::amber());
 }
 
 void redraw_map_if_moved(float range_km)
@@ -2665,8 +2783,8 @@ void find_clear_labels(bool *named)
 
 void ink_marker()
 {
-    const lv_color_t accent = lv_color_hex(theme::primary);
-    if (!theme::has_local_color(s_marker, LV_STYLE_BORDER_COLOR, 0, accent)) {
+    const lv_color_t accent = lv_color_hex(look::primary());
+    if (!look::has_local_color(s_marker, LV_STYLE_BORDER_COLOR, 0, accent)) {
         lv_obj_set_style_border_color(s_marker, accent, 0);
     }
 }
@@ -2823,7 +2941,7 @@ void draw_way(const Plot &plot)
     }
     const float         range_km = shown_range_km();
     const std::uint16_t ink      = lv_color_to_u16(lv_color_hex(altitude_ink(plot.aircraft->altitude_ft)));
-    const std::uint16_t faint    = lv_color_to_u16(lv_color_hex(theme::secondary));
+    const std::uint16_t faint    = lv_color_to_u16(lv_color_hex(look::secondary()));
     const lv_point_t    here{plot.x, plot.y};
 
     // Oldest first, and last the blip itself, which is placed a little
@@ -3148,7 +3266,7 @@ constexpr lv_opa_t FLOATING_COLUMN_OPA = LV_OPA_80;
 void place_summary(std::int32_t area_w, std::int32_t height)
 {
     const std::int32_t line = marking_font()->line_height;
-    lv_obj_set_pos(s_summary, area_w - EDGE - ZOOM_D - theme::space::s - SUMMARY_W,
+    lv_obj_set_pos(s_summary, area_w - EDGE - ZOOM_D - look::space::s - SUMMARY_W,
                    height - EDGE - (ZOOM_D - line) / 2 - line);
 }
 
@@ -3170,7 +3288,7 @@ void lay_out_cards()
     lv_obj_set_parent(s_column, s_home_area);
     lv_obj_set_pos(s_column, area_w + COLUMN_GAP, 0);
     lv_obj_set_size(s_column, COLUMN_W, s_home_h);
-    lv_obj_set_style_bg_color(s_column, lv_color_hex(theme::panel_light), 0);
+    lv_obj_set_style_bg_color(s_column, lv_color_hex(look::panel_light()), 0);
     lv_obj_set_style_bg_opa(s_column, LV_OPA_COVER, 0);
     place_readings_at(s_home_h);
     lv_obj_set_hidden(s_map_chip, false);
@@ -3190,7 +3308,7 @@ void lay_out_map()
     lv_obj_set_style_bg_opa(s_bezel, LV_OPA_TRANSP, 0);
     lv_obj_set_pos(s_bezel, 0, 0);
     lv_obj_set_size(s_bezel, w, h);
-    build_scope_in({w, h, area_w / 2, h / 2, h / 2 - RIM_BAND, true, theme::radius::card}, 0, 0);
+    build_scope_in({w, h, area_w / 2, h / 2, h / 2 - RIM_BAND, true, look::radius::card}, 0, 0);
     place_corners(area_w, h);
     paint_chips(true);
     lv_obj_set_hidden(s_map_chip, true);  // the dock's tabs go back
@@ -3199,7 +3317,7 @@ void lay_out_map()
     lv_obj_set_parent(s_column, s_map_page);
     lv_obj_set_pos(s_column, area_w, detail::GAP);
     lv_obj_set_size(s_column, COLUMN_W, h - 2 * detail::GAP);
-    lv_obj_set_style_bg_color(s_column, lv_color_hex(theme::background), 0);
+    lv_obj_set_style_bg_color(s_column, lv_color_hex(look::background()), 0);
     lv_obj_set_style_bg_opa(s_column, FLOATING_COLUMN_OPA, 0);
     place_readings_at(h - 2 * detail::GAP);
     s_mapped = true;
@@ -3242,7 +3360,7 @@ void build_radar_page(lv_obj_t *page, std::int32_t width, std::int32_t height)
     quiet(s_bezel);
     build_corners(s_bezel);
 
-    s_summary = theme::make_label(s_bezel, "", theme::amber, marking_font());
+    s_summary = look::make_label(s_bezel, "", look::amber(), marking_font());
     lv_obj_set_width(s_summary, SUMMARY_W);
     lv_obj_set_style_text_align(s_summary, LV_TEXT_ALIGN_RIGHT, 0);
     lv_label_set_long_mode(s_summary, LV_LABEL_LONG_MODE_DOTS);
@@ -3388,7 +3506,7 @@ void show_radar_photo(const char *hex, const void *pixels, int width, int height
             std::snprintf(by, sizeof(by), "\u00a9 %.*s", static_cast<int>(name), credit);
         }
     }
-    theme::set_text(s_credit, by);
+    look::set_text(s_credit, by);
     lv_obj_set_hidden(s_credit, by[0] == '\0');
     lv_obj_move_foreground(s_credit);
     s_picture = Picture::Shown;
