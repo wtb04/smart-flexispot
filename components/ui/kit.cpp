@@ -1,5 +1,7 @@
 #include "kit.h"
 
+#include "icons.h"
+
 #include "kit_bake.h"
 #include "kit_fonts.h"
 #include "kit_pixels.h"
@@ -19,8 +21,8 @@ namespace {
 // it, the panel rounds a warm brown to olive, as it loses more of the red and
 // blue than of the green.
 constexpr Palette DARK{
-    .ground = 0x100c08, .surface = 0x201c18, .surface_hi = 0x282420, .well = 0x181410,
-    .raised = 0x302820, .raised_hi = 0x383028,
+    .ground = 0x100c08, .surface = 0x201c18, .surface_hi = 0x282420,
+    .raised = 0x302820, .raised_hi = 0x383028, .fill_opa = 20,
     .ink = 0xf6efe7, .ink2_opa = 158, .ink3_opa = 92, .hair_opa = 20, .tick_opa = 72,
     .hair = 0xffffff,
     .accent = 0xff8a3d, .on_accent = 0x1f0e03,
@@ -33,8 +35,8 @@ constexpr Palette DARK{
 };
 
 constexpr Palette LIGHT{
-    .ground = 0xe9e3db, .surface = 0xfbf8f4, .surface_hi = 0xfffbf5, .well = 0xefe9e2,
-    .raised = 0xf1ebe4, .raised_hi = 0xe8e0d7,
+    .ground = 0xe9e3db, .surface = 0xfbf8f4, .surface_hi = 0xfffbf5,
+    .raised = 0xf1ebe4, .raised_hi = 0xe8e0d7, .fill_opa = 18,
     .ink = 0x1d1813, .ink2_opa = 158, .ink3_opa = 97, .hair_opa = 20, .tick_opa = 77,
     .hair = 0x1d1813,
     .accent = 0xf2711c, .on_accent = 0xffffff,
@@ -74,7 +76,7 @@ Palette       s_pal    = DARK;
 lv_style_t s_ground, s_tile, s_tile_hi, s_well;
 lv_style_t s_glass_sm, s_glass_lg, s_glass_clear;
 lv_style_t s_role[11];
-lv_style_t s_ink[8];
+lv_style_t s_ink[8], s_dot[8], s_mark;
 lv_style_t s_btn_open;
 lv_style_t s_btn, s_btn_pressed, s_btn_accent, s_btn_flat, s_btn_soft, s_btn_round, s_btn_checked;
 // what each kind turns to under the finger: a darker fill of its own colour
@@ -195,12 +197,11 @@ void apply()
     set_shadow(&s_tile, 26, 10, -10, s_pal.shadow_opa);
     set_shadow(&s_tile_hi, 40, 16, -12, s_pal.shadow_opa);
 
-    lv_style_set_bg_color(&s_well, hex(s_pal.well));
-    lv_style_set_bg_opa(&s_well, LV_OPA_COVER);
+    // flat, neither sunk in nor lifted
+    lv_style_set_bg_color(&s_well, hex(s_pal.ink));
+    lv_style_set_bg_opa(&s_well, s_pal.fill_opa);
     lv_style_set_radius(&s_well, radius::inner);
-    lv_style_set_border_width(&s_well, 1);
-    lv_style_set_border_color(&s_well, hex(s_pal.shadow));
-    lv_style_set_border_opa(&s_well, s_look == Look::Dark ? 90 : 18);
+    lv_style_set_border_width(&s_well, 0);
     lv_style_set_pad_all(&s_well, space::m);
 
     const lv_opa_t g = glass_opa();
@@ -224,6 +225,8 @@ void apply()
     for (int i = 0; i < 8; ++i) {
         lv_style_set_text_color(&s_ink[i], hex(inks[i]));
         lv_style_set_text_opa(&s_ink[i], ink_opa[i]);
+        lv_style_set_bg_color(&s_dot[i], hex(inks[i]));
+        lv_style_set_bg_opa(&s_dot[i], ink_opa[i]);
     }
 
     lv_style_set_bg_color(&s_btn, hex(s_pal.raised));
@@ -242,8 +245,7 @@ void apply()
 
     lv_style_set_transform_scale_x(&s_btn_pressed, motion::press_scale);
     lv_style_set_transform_scale_y(&s_btn_pressed, motion::press_scale);
-    lv_style_set_bg_color(&s_btn_pressed, hex(s_look == Look::Dark ? s_pal.well : s_pal.raised_hi));
-    lv_style_set_shadow_opa(&s_btn_pressed, LV_OPA_TRANSP);
+    lv_style_set_bg_color(&s_btn_pressed, hex(s_pal.raised_hi));
     lv_style_set_transition(&s_btn_pressed, &s_press_tr);
 
     lv_style_set_bg_color(&s_btn_accent, hex(s_pal.accent));
@@ -253,7 +255,7 @@ void apply()
     lv_style_set_shadow_width(&s_btn_accent, s_shadows ? 22 : 0);
     lv_style_set_shadow_offset_y(&s_btn_accent, 6);
 
-    lv_style_set_bg_color(&s_btn_open, hex(s_look == Look::Dark ? s_pal.raised_hi : s_pal.raised_hi));
+    lv_style_set_bg_color(&s_btn_open, hex(s_pal.raised_hi));
     lv_style_set_bg_opa(&s_btn_open, LV_OPA_COVER);
 
     lv_style_set_bg_opa(&s_btn_flat, LV_OPA_TRANSP);
@@ -290,16 +292,16 @@ void apply()
     lv_style_set_text_color(&s_lamp_on_ink, hex(s_pal.on_lamp));
     lv_style_set_text_opa(&s_lamp_on_ink, 200);
 
+    lv_style_set_image_recolor(&s_mark, hex(s_pal.ink));
+    lv_style_set_image_recolor_opa(&s_mark, LV_OPA_COVER);
+
     lv_style_set_bg_color(&s_hair, hex(s_pal.hair));
     lv_style_set_bg_opa(&s_hair, s_pal.hair_opa);
     lv_style_set_radius(&s_hair, 0);
     lv_style_set_border_width(&s_hair, 0);
 
-    lv_style_set_bg_color(&s_switch, hex(s_pal.well));
-    lv_style_set_bg_opa(&s_switch, LV_OPA_COVER);
-    lv_style_set_border_width(&s_switch, 1);
-    lv_style_set_border_color(&s_switch, hex(s_pal.shadow));
-    lv_style_set_border_opa(&s_switch, s_look == Look::Dark ? 90 : 18);
+    lv_style_set_bg_color(&s_switch, hex(s_pal.ink));
+    lv_style_set_bg_opa(&s_switch, static_cast<lv_opa_t>(s_pal.fill_opa * 2));
     lv_style_set_bg_color(&s_switch_on, hex(s_pal.accent));
     lv_style_set_bg_opa(&s_switch_on, LV_OPA_COVER);
     lv_style_set_bg_color(&s_switch_knob, hex(0xffffff));
@@ -307,12 +309,10 @@ void apply()
     lv_style_set_pad_all(&s_switch_knob, -4);
     set_shadow(&s_switch_knob, 8, 2, 0, 90);
 
-    lv_style_set_bg_color(&s_seg, hex(s_pal.well));
-    lv_style_set_bg_opa(&s_seg, LV_OPA_COVER);
+    lv_style_set_bg_color(&s_seg, hex(s_pal.ink));
+    lv_style_set_bg_opa(&s_seg, s_pal.fill_opa);
     lv_style_set_radius(&s_seg, 18);
-    lv_style_set_border_width(&s_seg, 1);
-    lv_style_set_border_color(&s_seg, hex(s_pal.shadow));
-    lv_style_set_border_opa(&s_seg, s_look == Look::Dark ? 90 : 18);
+    lv_style_set_border_width(&s_seg, 0);
     lv_style_set_pad_all(&s_seg, 5);
     lv_style_set_bg_opa(&s_seg_item, LV_OPA_TRANSP);
     lv_style_set_text_color(&s_seg_item, hex(s_pal.ink));
@@ -345,6 +345,10 @@ void init_styles()
     for (lv_style_t &st : s_ink) {
         lv_style_init(&st);
     }
+    for (lv_style_t &st : s_dot) {
+        lv_style_init(&st);
+    }
+    lv_style_init(&s_mark);
     lv_style_transition_dsc_init(&s_press_tr, PRESS_PROPS, lv_anim_path_linear, motion::press_ms, 0, nullptr);
     lv_style_transition_dsc_init(&s_release_tr, PRESS_PROPS, motion::spring, motion::release_ms, 0, nullptr);
 }
@@ -692,6 +696,82 @@ lv_obj_t *hairline(lv_obj_t *parent, bool vertical, std::int32_t length)
     return obj;
 }
 
+lv_obj_t *dot(lv_obj_t *parent, Ink ink, std::int32_t px)
+{
+    lv_obj_t *obj = lv_obj_create(parent);
+    lv_obj_remove_style_all(obj);
+    lv_obj_set_size(obj, px, px);
+    lv_obj_set_style_radius(obj, LV_RADIUS_CIRCLE, 0);
+    lv_obj_remove_flag(obj, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_style(obj, &s_dot[static_cast<int>(ink)], 0);
+    lv_obj_set_user_data(obj, reinterpret_cast<void *>(static_cast<std::intptr_t>(ink)));
+    return obj;
+}
+
+void set_dot(lv_obj_t *obj, Ink ink)
+{
+    const auto was = static_cast<Ink>(reinterpret_cast<std::intptr_t>(lv_obj_get_user_data(obj)));
+    if (was == ink) {
+        return;
+    }
+    lv_obj_remove_style(obj, &s_dot[static_cast<int>(was)], 0);
+    lv_obj_add_style(obj, &s_dot[static_cast<int>(ink)], 0);
+    lv_obj_set_user_data(obj, reinterpret_cast<void *>(static_cast<std::intptr_t>(ink)));
+}
+
+Status status(lv_obj_t *parent)
+{
+    Status s;
+    s.root = lv_obj_create(parent);
+    lv_obj_remove_style_all(s.root);
+    lv_obj_set_size(s.root, LV_SIZE_CONTENT, size::bar);
+    lv_obj_set_flex_flow(s.root, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(s.root, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(s.root, space::m, 0);
+    lv_obj_set_style_pad_hor(s.root, space::m, 0);
+    lv_obj_remove_flag(s.root, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(s.root, LV_OBJ_FLAG_CLICKABLE);
+    // Montserrat, as the clock always was; its figures differ in width, so the
+    // clock is as wide as its widest time and the marks beside it stay put
+    const lv_font_t *font = &lv_font_montserrat_28;
+    s.clock = lv_label_create(s.root);
+    lv_obj_set_style_text_font(s.clock, font, 0);
+    lv_obj_add_style(s.clock, &s_ink[static_cast<int>(Ink::Primary)], 0);
+    std::int32_t widest = 0;
+    for (char d = '0'; d <= '9'; ++d) {
+        const char t[] = {d, d, ':', d, d, '\0'};
+        lv_point_t size{};
+        lv_text_get_size(&size, t, font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+        widest = std::max(widest, size.x);
+    }
+    lv_obj_set_width(s.clock, widest);
+    lv_obj_set_style_text_align(s.clock, LV_TEXT_ALIGN_RIGHT, 0);  // close to the marks, as the minutes go by
+    lv_label_set_text(s.clock, "");
+    for (lv_obj_t **mark : {&s.wifi, &s.phone}) {
+        *mark = lv_image_create(s.root);
+        lv_obj_add_style(*mark, &s_mark, 0);
+        lv_obj_remove_flag(*mark, LV_OBJ_FLAG_CLICKABLE);
+    }
+    lv_image_set_src(s.wifi, &icons::wifi_off_icon);
+    lv_image_set_src(s.phone, &icons::phone_off_icon);
+    return s;
+}
+
+void set_status(const Status &s, const char *time, bool wifi, bool phone)
+{
+    if (std::strcmp(lv_label_get_text(s.clock), time) != 0) {
+        lv_label_set_text(s.clock, time);
+    }
+    const void *w = wifi ? &icons::wifi_icon : &icons::wifi_off_icon;
+    const void *p = phone ? &icons::phone_icon : &icons::phone_off_icon;
+    if (lv_image_get_src(s.wifi) != w) {
+        lv_image_set_src(s.wifi, w);
+    }
+    if (lv_image_get_src(s.phone) != p) {
+        lv_image_set_src(s.phone, p);
+    }
+}
+
 lv_obj_t *button(lv_obj_t *parent, Button kind, const char *glyph, const char *label, bool round,
                  bool checkable)
 {
@@ -820,8 +900,8 @@ lv_obj_t *toggle(lv_obj_t *parent, bool on)
     lv_obj_add_style(sw, &s_switch_on, LV_PART_INDICATOR | LV_STATE_CHECKED);
     lv_obj_add_style(sw, &s_switch_knob, LV_PART_KNOB);
     // under the finger the knob stretches towards where it would go
-    lv_obj_set_style_pad_right(sw, 6, LV_PART_KNOB | LV_STATE_PRESSED);
-    lv_obj_set_style_pad_left(sw, 6, LV_PART_KNOB | LV_STATE_PRESSED | LV_STATE_CHECKED);
+    lv_obj_set_style_pad_right(sw, 8, LV_PART_KNOB | LV_STATE_PRESSED);
+    lv_obj_set_style_pad_left(sw, 8, LV_PART_KNOB | LV_STATE_PRESSED | LV_STATE_CHECKED);
     lv_obj_set_style_pad_right(sw, -4, LV_PART_KNOB | LV_STATE_PRESSED | LV_STATE_CHECKED);
     lv_obj_set_style_anim_duration(sw, motion::move_ms, 0);
     lv_obj_add_event_cb(
@@ -833,8 +913,8 @@ lv_obj_t *toggle(lv_obj_t *parent, bool on)
             }
         },
         LV_EVENT_STATE_CHANGED, nullptr);
-    lv_obj_set_size(sw, 68, 38);
-    lv_obj_set_ext_click_area(sw, (size::touch - 38) / 2);
+    lv_obj_set_size(sw, size::toggle_w, size::toggle_h);
+    lv_obj_set_ext_click_area(sw, space::s);
     if (on) {
         lv_obj_add_state(sw, LV_STATE_CHECKED);
     }

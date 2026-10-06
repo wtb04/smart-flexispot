@@ -143,15 +143,15 @@ void open_lights(lv_event_t *e) { open_lights_from(lv_event_get_current_target_o
 
 void open_heating(lv_event_t *e)
 {
-    lv_obj_t *body = popover(lv_event_get_current_target_obj(e), 440, 540, From::Below, s_blur_scrim);
+    lv_obj_t *body = popover(lv_event_get_current_target_obj(e), 440, 590, From::Below, s_blur_scrim);
     lv_obj_set_flex_flow(body, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(body, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_row(body, space::l, 0);
     head(body, "Heating", "Now 20.5 °C");
     DialSpec spec;
     spec.size = 290, spec.min = 150, spec.max = 250, spec.start = 135, spec.sweep = 270;
-    spec.ticks = 21, spec.major = 2, spec.decimals = 1, spec.needle = true, spec.fill = true, spec.target = true;
-    spec.unit = "°C NOW", spec.read = Role::ReadL;
+    spec.ticks = 41, spec.major = 5, spec.decimals = 1, spec.needle = false, spec.span = true;
+    spec.unit = "HEATING", spec.read = Role::ReadXL;
     auto *dial = new Dial(body, spec);
     own(dial->obj(), dial);
     dial->set_value(205, false);
@@ -294,11 +294,46 @@ void build_dock(lv_obj_t *scr)
     lv_obj_set_style_pad_row(height, 2, 0);
     lv_obj_set_flex_flow(height, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(height, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    constexpr std::int32_t PAD = 20;  // what is placed by hand counts from inside the padding
+    lv_obj_set_style_pad_left(height, PAD, 0);
     lv_obj_t *w = well(height);
     lv_obj_add_flag(w, LV_OBJ_FLAG_IGNORE_LAYOUT);
     lv_obj_add_flag(w, LV_OBJ_FLAG_EVENT_BUBBLE);
     lv_obj_set_size(w, 88, 104);
+    lv_obj_set_pos(w, -PAD, 0);
     lv_obj_set_style_radius(w, 24, 0);
+    // the desk's travel as a ruler down the side, its mark where the desk stands
+    constexpr std::int32_t RULE_TOP = 14, RULE_LEN = 76;
+    lv_obj_t *rule = lv_scale_create(height);
+    lv_obj_add_flag(rule, LV_OBJ_FLAG_IGNORE_LAYOUT);
+    lv_obj_remove_flag(rule, LV_OBJ_FLAG_CLICKABLE);
+    lv_scale_set_mode(rule, LV_SCALE_MODE_VERTICAL_RIGHT);
+    lv_scale_set_total_tick_count(rule, 14);
+    lv_scale_set_major_tick_every(rule, 0);
+    lv_scale_set_label_show(rule, false);
+    lv_obj_set_size(rule, 1, RULE_LEN);
+    lv_obj_set_pos(rule, 9 - PAD, RULE_TOP);
+    lv_obj_set_style_line_opa(rule, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_length(rule, 6, LV_PART_ITEMS);
+    lv_obj_set_style_line_width(rule, 1, LV_PART_ITEMS);
+    lv_obj_t *mark = lv_obj_create(height);
+    lv_obj_remove_style_all(mark);
+    lv_obj_add_flag(mark, LV_OBJ_FLAG_IGNORE_LAYOUT);
+    lv_obj_remove_flag(mark, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_size(mark, 12, 3);
+    lv_obj_set_style_radius(mark, 2, 0);
+    lv_obj_set_style_bg_opa(mark, LV_OPA_COVER, 0);
+    lv_obj_set_pos(mark, 6 - PAD, RULE_TOP + RULE_LEN - 1 - (740 - 660) * (RULE_LEN - 1) / (1310 - 660));
+    static lv_obj_t *s_rule[2];
+    s_rule[0] = rule, s_rule[1] = mark;
+    const auto paint_rule = [](void *ctx) {
+        auto **r = static_cast<lv_obj_t **>(ctx);
+        lv_obj_set_style_line_color(r[0], colour(Ink::Primary), LV_PART_ITEMS);
+        lv_obj_set_style_line_opa(r[0], colours().tick_opa, LV_PART_ITEMS);
+        lv_obj_set_style_bg_color(r[1], colour(Ink::Accent), 0);
+    };
+    paint_rule(s_rule);
+    on_restyle(rule, paint_rule, s_rule);
     lv_obj_t *read = text(height, Role::ReadS, "74.0");
     lv_obj_add_flag(read, LV_OBJ_FLAG_EVENT_BUBBLE);
     text(height, Role::Label, "CM", Ink::Tertiary);
@@ -354,12 +389,7 @@ void build_bar(lv_obj_t *scr)
     lv_obj_set_size(bar, CONTENT_W, size::bar);
     lv_obj_set_flex_align(bar, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    lv_obj_t *status = box(bar, LV_FLEX_FLOW_ROW, space::m);
-    lv_obj_set_flex_align(status, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_hor(status, space::m, 0);
-    text(status, Role::H1, "9:41");
-    icon(status, ic::wifi, 28, false, Ink::Secondary);
-    icon(status, ic::smartphone, 28, false, Ink::Secondary);
+    set_status(status(bar), "9:41", true, true);
     spacer(bar);
 
     lv_obj_t *room  = capsule(bar);
@@ -369,8 +399,8 @@ void build_bar(lv_obj_t *scr)
     lv_obj_add_event_cb(light, open_lights, LV_EVENT_CLICKED, nullptr);
     popover_source(light);
     capsule_divider(room);
-    lv_obj_t *heat = capsule_item(room, ic::local_fire_department, "20.5°", 150);
-    lv_obj_set_style_text_color(lv_obj_get_child(heat, 0), colour(Ink::Accent), 0);
+    lv_obj_t *heat = capsule_item(room, nullptr, "20.5°", 150);
+    lv_obj_move_to_index(dot(heat, Ink::Accent), 0);  // heating; warm enough is amber, off is grey
     lv_obj_add_event_cb(heat, open_heating, LV_EVENT_CLICKED, nullptr);
     popover_source(heat);
 
@@ -455,11 +485,11 @@ void build_surfaces(lv_obj_t *scr)
     lv_obj_set_size(holder, LV_PCT(100), 192);
     lv_obj_set_flex_flow(holder, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(holder, space::m, 0);
-    text(holder, Role::Label, "WELL", Ink::Secondary);
+    text(holder, Role::Label, "INSIDE A TILE", Ink::Secondary);
     lv_obj_t *w = well(holder);
     lv_obj_set_size(w, LV_PCT(100), 100);
     lv_obj_align(text(w, Role::ReadS, "74.0"), LV_ALIGN_LEFT_MID, space::s, 0);
-    lv_obj_align(text(w, Role::Small, "Sunk in", Ink::Secondary), LV_ALIGN_RIGHT_MID, -space::s, 0);
+    lv_obj_align(text(w, Role::Small, "Flat, a shade of the ink", Ink::Secondary), LV_ALIGN_RIGHT_MID, -space::s, 0);
 
     lv_obj_t *right = box(s, LV_FLEX_FLOW_COLUMN, space::l);
     lv_obj_set_size(right, 370, SHEET_H);
@@ -518,7 +548,7 @@ void build_controls(lv_obj_t *scr)
     button(wrap, Button::Raised, ic::bedtime, "Tap to turn on", false, true);
     lv_obj_t *no = button(wrap, Button::Raised, nullptr, "Unusable");
     set_usable(no, false);
-    lv_obj_t *hint = text(buttons, Role::Small, "Press and hold any of them: they sink in and spring back.", Ink::Tertiary);
+    lv_obj_t *hint = text(buttons, Role::Small, "Press and hold any of them: they give a little and spring back.", Ink::Tertiary);
     lv_obj_set_width(hint, LV_PCT(100));
     lv_label_set_long_mode(hint, LV_LABEL_LONG_MODE_WRAP);
 
@@ -530,9 +560,11 @@ void build_controls(lv_obj_t *scr)
     s_bench_seg = segmented(choices, {"Normal", "Flipped", "Auto"}, 0, 320);
     for (const char *name : {"While I'm away, use Room", "Dimmer on battery"}) {
         lv_obj_t *row = box(choices, LV_FLEX_FLOW_ROW, space::m);
-        lv_obj_set_size(row, LV_PCT(100), 56);
+        lv_obj_set_size(row, LV_PCT(100), 60);
         lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        text(row, Role::Body, name);
+        lv_obj_t *label = text(row, Role::Body, name);
+        lv_obj_set_flex_grow(label, 1);
+        lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_WRAP);
         toggle(row, name[0] == 'W');
     }
     lv_obj_t *lamps = box(choices, LV_FLEX_FLOW_ROW, space::m);
@@ -611,11 +643,11 @@ void build_instruments(lv_obj_t *scr)
     own(s_hum->obj(), s_hum);
     s_hum->set_value(48, false);
 
-    lv_obj_t *t3 = dial_tile(s, "HEATING", "A setting: the accent arc and the knob are the target, the needle is the room.");
+    lv_obj_t *t3 = dial_tile(s, "HEATING", "The target in the middle and marked in the accent; the ticks up to it from the room light while it heats.");
     DialSpec heat;
-    heat.size = 224, heat.min = 150, heat.max = 250, heat.start = 135, heat.sweep = 270, heat.ticks = 21;
-    heat.major = 2, heat.decimals = 1, heat.fill = true, heat.target = true, heat.unit = "°C NOW";
-    heat.read = Role::ReadM;
+    heat.size = 224, heat.min = 150, heat.max = 250, heat.start = 135, heat.sweep = 270, heat.ticks = 41;
+    heat.major = 5, heat.decimals = 1, heat.span = true, heat.needle = false, heat.unit = "ROOM 20.5°";
+    heat.read = Role::ReadL;
     s_heat = new Dial(t3, heat);
     own(s_heat->obj(), s_heat);
     s_heat->set_value(205, false);
@@ -638,7 +670,7 @@ void build_instruments(lv_obj_t *scr)
     lv_obj_t *t4 = dial_tile(s, "FOCUS", "A tick a minute, lit as the round goes. No needle: the time is the reading.");
     DialSpec focus;
     focus.size = 224, focus.min = 0, focus.max = 24, focus.start = 270, focus.sweep = 346, focus.ticks = 25;
-    focus.major = 5, focus.needle = false, focus.read = Role::ReadM, focus.unit = "UNTIL 10:06";
+    focus.major = 5, focus.needle = false, focus.bold = true, focus.read = Role::ReadM, focus.unit = "UNTIL 10:06";
     s_focus = new Dial(t4, focus);
     own(s_focus->obj(), s_focus);
     lv_label_set_text(lv_obj_get_child(lv_obj_get_child(s_focus->obj(), -1), 0), "24:51");
@@ -653,7 +685,11 @@ void build_instruments(lv_obj_t *scr)
                 s_hum->set_value(25 + std::rand() % 55, true);
             }
             if (s_heat != nullptr) {
-                s_heat->set_value(195 + std::rand() % 25, true);
+                const int room = 195 + std::rand() % 25;
+                char caption[24];
+                std::snprintf(caption, sizeof caption, "ROOM %d.%d°", room / 10, room % 10);
+                s_heat->set_value(room, true);
+                s_heat->set_caption(caption);
             }
             if (s_focus != nullptr) {
                 s_focus_lit = s_focus_lit % 25 + 1;
