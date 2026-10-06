@@ -1191,6 +1191,9 @@ void key(int code)
     case 'j':
         lists::nudge();
         break;
+    case 'h':
+        lists::show_press();
+        break;
     default:
         return;
     }
