@@ -890,6 +890,7 @@ void set_asleep(bool asleep)
         set_cpu_mhz(SLOW_CPU_MHZ);
     } else {
         set_cpu_mhz(CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ);  // the stream needs the PSRAM at full speed first
+        s_frame_at_us = 0;                             // the time asleep was no late frame
         ESP_ERROR_CHECK_WITHOUT_ABORT(esp_lcd_dpi_panel_set_streaming(s_panel, true));
         ESP_ERROR_CHECK_WITHOUT_ABORT(esp_lcd_panel_io_tx_param(s_panel_io, LCD_CMD_DISPON, nullptr, 0));
     }
