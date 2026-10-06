@@ -52,7 +52,7 @@ struct Page {
 Page   s_pages[MAX_PAGES];
 int    s_page_count = 0;
 int    s_shown      = -1;
-Change s_how        = Change::Instant;
+Change s_how        = Change::Slide;
 void (*s_told)(int) = nullptr;
 lv_obj_t *s_mark    = nullptr;
 lv_obj_t *s_grids[MAX_PAGES]{};
@@ -278,6 +278,28 @@ void reset_motion(lv_obj_t *page)
     lv_obj_remove_local_style_prop(page, LV_STYLE_OPA, 0);
 }
 
+#if defined(ESP_PLATFORM)
+// LVGL drawing nothing meanwhile: pausing its timer is not enough, as anything
+// marked for drawing, a button springing back under the lifting finger, wakes
+// it, and its frames then came between the slide's. Put off rather than paused.
+std::uint32_t s_refr_period = 0;
+
+void hold_drawing(bool hold)
+{
+    lv_timer_t *t = lv_display_get_refr_timer(lv_display_get_default());
+    if (hold) {
+        s_refr_period = t->period;
+        lv_timer_set_period(t, 60000);
+        lv_timer_reset(t);
+    } else if (s_refr_period != 0) {
+        lv_timer_set_period(t, s_refr_period);
+        s_refr_period = 0;
+        lv_timer_ready(t);
+    }
+}
+
+#endif
+
 void finish()
 {
     if (!s_run.active) {
@@ -291,7 +313,7 @@ void finish()
 #if defined(ESP_PLATFORM)
     if (board::glide_held()) {  // cut short: the new page at rest, and LVGL drawing again
         board::glide_end();
-        lv_timer_resume(lv_display_get_refr_timer(lv_display_get_default()));
+        hold_drawing(false);
     }
 #endif
     for (int i = 0; i < s_run.unit_count; ++i) {
@@ -602,7 +624,7 @@ bool glide(int from, int to)
         board::glide_end();
         return true;
     }
-    lv_timer_pause(lv_display_get_refr_timer(disp));
+    hold_drawing(true);
     s_run.ready_us = perf::now_us();
     lv_anim_t a;
     lv_anim_init(&a);
@@ -613,8 +635,7 @@ bool glide(int from, int to)
     lv_anim_set_path_cb(&a, motion::spring);
     lv_anim_set_completed_cb(&a, [](lv_anim_t *) {
         board::glide_end();
-        lv_display_t *d = lv_display_get_default();
-        lv_timer_resume(lv_display_get_refr_timer(d));
+        hold_drawing(false);
         const board::GlideTimes t = board::glide_times();
         std::snprintf(s_report, sizeof s_report, "glide: %u frames in %.0f ms, the new page drawn in %.1f ms, %.1f ms a frame copying",
                       static_cast<unsigned>(t.frames), static_cast<double>(perf::now_us() - s_run.began_us) / 1000.0,

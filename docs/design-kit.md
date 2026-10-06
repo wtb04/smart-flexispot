@@ -167,11 +167,14 @@ the screen changes, so:
    glass about 4; the whole page scrolling under the bar about 6 to 8, with 6
    times the pixels. A sheet's body scrolls over a picture of the glass under
    it, a fifth of what the same body on plain glass costs.
-10. **Pages change at once.** The new page is there in the next frame and
-   only the dock's mark slides over to the chosen item. A whole-page wipe in
-   bands was tried and dropped: it looked worse than no animation. Pages are
-   made once and hidden, never rebuilt, and the bar and the dock stay as they
-   are.
+10. **Pages slide as a carousel, by copying.** The new page comes in from
+   the side its item lies on in the dock. On the panel it is drawn once, at
+   rest, into a frame held back from the panel. Each step then copies the two
+   pages side by side with the PPA, and LVGL draws nothing meanwhile: its
+   refresh is put off rather than paused, since anything marked for drawing
+   wakes a paused one. Sliding by drawing the whole page every frame ran at 8
+   frames a second. A wipe in bands was tried and dropped. Pages are made once
+   and hidden, never rebuilt, and the bar and the dock stay as they are.
 11. **Big buffers once, in PSRAM.** They are made once and freed when done.
    Free PSRAM is tight while the old UI still runs alongside.
 
