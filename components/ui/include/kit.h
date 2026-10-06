@@ -199,6 +199,8 @@ class Dial {
     void show_value(std::int32_t value);
     void light_zone(std::int32_t value);
     void restyle();
+    void stale_face();
+    void make_face();
     float angle_of(std::int32_t value) const;
 
     DialSpec  m_spec{};
@@ -209,6 +211,9 @@ class Dial {
     lv_obj_t *m_knob   = nullptr;
     lv_obj_t *m_read   = nullptr;
     lv_obj_t *m_unit   = nullptr;
+    lv_obj_t *m_face   = nullptr;  // the scale as a picture, shown in its place
+    lv_draw_buf_t *m_face_buf   = nullptr;
+    lv_timer_t    *m_face_timer = nullptr;
     lv_point_precise_t m_points[2]{};
     lv_scale_section_t *m_zones[6]{};
     lv_style_t          m_zone_styles[6]{};
