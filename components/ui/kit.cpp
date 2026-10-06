@@ -1101,4 +1101,14 @@ lv_obj_t *capsule_item(lv_obj_t *cap, const char *glyph, const char *label, std:
 
 void capsule_divider(lv_obj_t *cap) { hairline(cap, true, 30); }
 
+// --- the desk --------------------------------------------------------------
+
+void set_soft(lv_obj_t *btn, bool on)
+{
+    lv_obj_remove_style(btn, &s_btn_soft, 0);
+    if (on) {
+        lv_obj_add_style(btn, &s_btn_soft, 0);
+    }
+}
+
 }  // namespace ui::kit
