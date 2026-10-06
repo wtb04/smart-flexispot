@@ -93,9 +93,6 @@ extern lv_obj_t *s_content;
 extern lv_obj_t *s_notice_scrim;
 extern lv_obj_t *s_notice_card;
 extern lv_obj_t *s_preset_buttons[kPresetCount];
-extern bool s_presence_gate;
-/** The phone away with the gate on: the owner's pages, and what shows of them elsewhere, are away. */
-bool owner_away();
 extern lv_obj_t *s_settings_view;
 extern lv_obj_t *s_appearance_view;
 extern lv_obj_t *s_diag_view;

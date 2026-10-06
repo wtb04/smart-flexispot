@@ -21,7 +21,6 @@ constexpr int CORE_OF[PAGE_COUNT] = {detail::HOME_PAGE, detail::CALENDAR_PAGE, d
 
 DockItems s_items;
 int       s_before_setup = detail::HOME_PAGE;
-bool      s_gate         = true;
 
 bool needs_presence(int core) { return core == detail::RADAR_PAGE || core == detail::CALENDAR_PAGE; }
 
@@ -51,7 +50,7 @@ void follow_away()
         const bool gate = detail::settings_state().on[static_cast<int>(Setting::PresenceGate)];
         static bool present = false;
         const bool  moved   = std::exchange(present, detail::status_state().present) != detail::status_state().present;
-        if (std::exchange(s_gate, gate) == gate && !moved) {
+        if (std::exchange(detail::s_presence_gate, gate) == gate && !moved) {
             return;
         }
         for (lv_obj_t *item : {s_items.calendar, s_items.radar}) {
@@ -66,7 +65,7 @@ void follow_away()
 }
 }  // namespace
 
-bool owner_away() { return s_gate && !detail::status_state().present; }
+bool owner_away() { return detail::s_presence_gate && !detail::status_state().present; }
 
 void toggle_setup()
 {
@@ -123,6 +122,7 @@ void apply() {}
 }  // namespace ui::front
 
 namespace ui::detail {
+bool s_presence_gate = true;  // the gate, as the radar's bench lifts it
 bool owner_away() { return kitfront::owner_away(); }  // the radar's, which the old screen's nav.cpp has
 
 void select_page(int index)
