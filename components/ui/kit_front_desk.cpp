@@ -57,7 +57,10 @@ bool guests_shown()
 
 bool is_guest(int index) { return index == GUESTS[0] || index == GUESTS[1]; }
 
-void tenths(char *out, std::size_t size, int mm) { std::snprintf(out, size, "%d.%d cm", mm / 10, mm % 10); }
+void tenths(char *out, std::size_t size, int mm)
+{
+    std::snprintf(out, size, "%d.%d cm", (mm / 10) % 10000, mm % 10);  // the desk is never 10 m tall: the bound is for the compiler
+}
 
 void set_text(lv_obj_t *label, const char *value)
 {
@@ -81,7 +84,7 @@ void say_where(char *out, std::size_t size)
         }
         return;
     }
-    char height[16];
+    char height[24];
     tenths(height, sizeof height, desk.height_mm);
     if (desk.travelling >= 0) {
         std::snprintf(out, size, "Going to %s, %s", preset_name(desk.travelling), height);
@@ -100,7 +103,7 @@ void paint_tile(Card &card, int index)
 {
     const DeskState &desk = desk_state();
     const Tile look = desk.travelling == index ? Tile::Going : desk.preset_active[index] ? Tile::At : Tile::Plain;
-    char detail[16] = "";
+    char detail[24] = "";
     if (look == Tile::Going) {
         std::snprintf(detail, sizeof detail, "On its way");
     } else if (desk_state().preset_mm[index] >= 0) {
