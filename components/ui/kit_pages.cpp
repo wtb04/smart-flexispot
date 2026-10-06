@@ -606,6 +606,15 @@ lv_obj_t *dock_item(lv_obj_t *dock, const char *glyph)
         lv_obj_move_to_index(s_mark, 0);
         restyle_mark(nullptr);
         on_restyle(s_mark, restyle_mark, nullptr);
+        // the dock laid out again, as a button of it comes or goes: the mark to where its item now is
+        lv_obj_add_event_cb(
+            dock,
+            [](lv_event_t *) {
+                if (s_shown >= 0 && !lv_anim_get(s_mark, nullptr)) {
+                    mark(s_shown, false);
+                }
+            },
+            LV_EVENT_LAYOUT_CHANGED, nullptr);
     }
     lv_obj_t *item = button(dock, Button::Flat, glyph, nullptr);
     lv_obj_set_size(item, 88, 80);

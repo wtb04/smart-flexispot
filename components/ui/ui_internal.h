@@ -129,8 +129,6 @@ void show_desk_travel(lv_obj_t *obj, bool travelling);  // after the preset the 
 void show_next_notice();
 void paint_notice_corner();  // when the notice on show came, and how many wait
 void create_notice_card();
-/** The screen going dark by itself, and lighting again: see screen_rules.h. */
-void start_screen_schedule();
 /** The notice over the pages or a fullscreen view, the dock left clear. */
 void place_notice();
 /** The dock: the tabs, Stand and Sit, the height that folds the desk out. */

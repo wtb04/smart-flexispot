@@ -1,4 +1,4 @@
-#include "ui_internal.h"
+#include "ui_core.h"
 
 #include "room_model.h"
 #include "screen_rules.h"

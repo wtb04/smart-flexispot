@@ -156,6 +156,12 @@ lv_obj_t *icon(lv_obj_t *parent, const char *glyph, std::int32_t px = 28, bool f
 void      set_ink(lv_obj_t *label, Ink ink);
 void      set_icon(lv_obj_t *label, const char *glyph, bool filled);
 lv_obj_t *hairline(lv_obj_t *parent, bool vertical, std::int32_t length);
+/** Nothing to see or tap: what lays others out, in `flow` with `gap` between, as big as they are. */
+lv_obj_t *flow(lv_obj_t *parent, lv_flex_flow_t direction, std::int32_t gap);
+/** What takes the room left in a flow. */
+lv_obj_t *filler(lv_obj_t *parent);
+/** A popover's or a sheet's head: its title, a line under it, and a row to put a button at the right of. */
+lv_obj_t *heading(lv_obj_t *body, const char *title, const char *sub);
 /** A state at a glance: heating, warm enough, off; good, fair, poor. */
 lv_obj_t *dot(lv_obj_t *parent, Ink ink, std::int32_t px = 12);
 void      set_dot(lv_obj_t *dot, Ink ink);

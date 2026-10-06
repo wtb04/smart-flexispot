@@ -6,6 +6,7 @@
 #include "ui.h"
 
 #include "esp_log.h"
+#include "lvgl.h"
 
 #include <atomic>
 #include <cstdint>
@@ -89,6 +90,9 @@ std::time_t wall_now();
 
 /** The clock pin_clock() set, or null: what the screen shows in place of the time. */
 const char *pinned_clock();
+
+/** The screen going dark by itself, and lighting again: see screen_rules.h. */
+void start_screen_schedule();
 
 // What the screen schedule asks of the views on show (screen_rules.h).
 bool notice_on_show();
