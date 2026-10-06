@@ -443,11 +443,25 @@ void Rail::on_press(lv_event_t *e)
 {
     auto *rail = static_cast<Rail *>(lv_event_get_user_data(e));
     const lv_event_code_t code = lv_event_get_code(e);
-    const std::int32_t grow = code == LV_EVENT_RELEASED ? 256 : 300;
-    lv_obj_set_style_transform_scale_x(rail->m_knob, grow, 0);
-    lv_obj_set_style_transform_scale_y(rail->m_knob, grow, 0);
+    const auto scale = [](void *knob, int32_t v) {
+        lv_obj_set_style_transform_scale_x(static_cast<lv_obj_t *>(knob), v, 0);
+        lv_obj_set_style_transform_scale_y(static_cast<lv_obj_t *>(knob), v, 0);
+    };
+    // grabbed at once, let go on the spring
     if (code == LV_EVENT_RELEASED) {
+        lv_anim_t a;
+        lv_anim_init(&a);
+        lv_anim_set_var(&a, rail->m_knob);
+        lv_anim_set_values(&a, motion::grab_scale, 256);
+        lv_anim_set_exec_cb(&a, scale);
+        lv_anim_set_duration(&a, motion::release_ms);
+        lv_anim_set_path_cb(&a, motion::spring);
+        lv_anim_start(&a);
         return;
+    }
+    if (code == LV_EVENT_PRESSED) {
+        lv_anim_delete(rail->m_knob, scale);
+        scale(rail->m_knob, motion::grab_scale);
     }
     lv_point_t p;
     lv_indev_get_point(lv_indev_active(), &p);

@@ -2,6 +2,7 @@
 
 #include "kit.h"
 #include "kit_fonts.h"
+#include "lvgl_private.h"  // for the bench, the areas each frame redraws
 
 #if defined(ESP_PLATFORM)
 #include "board.h"
@@ -94,6 +95,19 @@ template <typename T> void own(lv_obj_t *owner, T *thing)
 
 // --- popovers -------------------------------------------------------------
 
+// A play button that plays and pauses, so a tap on it is never a dead one.
+void toggles_play(lv_obj_t *btn)
+{
+    lv_obj_add_event_cb(
+        btn,
+        [](lv_event_t *e) {
+            lv_obj_t *glyph = lv_obj_get_child(lv_event_get_current_target_obj(e), 0);
+            const bool playing = std::strcmp(lv_label_get_text(glyph), ic::pause) == 0;
+            set_icon(glyph, playing ? ic::play_arrow : ic::pause, false);
+        },
+        LV_EVENT_CLICKED, nullptr);
+}
+
 lv_obj_t *head(lv_obj_t *body, const char *title, const char *sub)
 {
     lv_obj_t *row = box(body, LV_FLEX_FLOW_ROW, space::m);
@@ -114,8 +128,7 @@ void open_lights_from(lv_obj_t *source)
     lv_obj_set_flex_flow(body, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(body, space::l, 0);
     lv_obj_t *row = head(body, "Lights", "2 of 4 on");
-    lv_obj_t *off = button(row, Button::Raised, ic::power_settings_new, "All off");
-    lv_obj_set_height(off, 48);
+    button(row, Button::Raised, ic::power_settings_new, "All off");
     lv_obj_t *grid = box(body, LV_FLEX_FLOW_ROW_WRAP, space::m);
     lv_obj_set_width(grid, LV_PCT(100));
     struct L { const char *glyph, *name; bool on; };
@@ -142,8 +155,7 @@ void open_heating(lv_event_t *e)
     auto *dial = new Dial(body, spec);
     own(dial->obj(), dial);
     dial->set_value(205, false);
-    dial->set_target(205, false);
-    dial->set_target(210, true);
+    dial->set_target(210, false);  // still while it opens: it opens from a picture of itself
     // the readout shows the target here: what a tap changes
     lv_obj_t *row = box(body, LV_FLEX_FLOW_ROW, space::m);
     lv_obj_set_width(row, LV_PCT(100));
@@ -258,6 +270,7 @@ void open_media(lv_event_t *e)
     lv_obj_set_size(prev, 72, 72);
     lv_obj_t *pause = button(row, Button::Accent, ic::pause, nullptr, true);
     lv_obj_set_size(pause, 200, 72);
+    toggles_play(pause);
     lv_obj_t *next = button(row, Button::Raised, ic::skip_next, nullptr, true);
     lv_obj_set_size(next, 72, 72);
 }
@@ -365,6 +378,7 @@ void build_bar(lv_obj_t *scr)
     lv_obj_set_width(media, 452);
     lv_obj_set_style_pad_column(media, space::m, 0);
     lv_obj_add_flag(media, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_bg_opa(media, colours().glass_solid_opa, LV_STATE_PRESSED);  // the glass firms up under the finger
     lv_obj_t *art = tile(media, Lift::Low);
     lv_obj_set_size(art, 52, 52);
     lv_obj_set_style_radius(art, 12, 0);
@@ -379,6 +393,7 @@ void build_bar(lv_obj_t *scr)
     text(col, Role::Small, "M83", Ink::Secondary);
     lv_obj_t *pp = button(media, Button::Raised, ic::pause, nullptr, true);
     lv_obj_set_size(pp, 56, 56);
+    toggles_play(pp);
     lv_obj_add_event_cb(media, open_media, LV_EVENT_CLICKED, nullptr);
     popover_source(media);
 }
@@ -497,6 +512,7 @@ void build_controls(lv_obj_t *scr)
     lv_obj_set_width(r1, 56);
     lv_obj_t *r2 = button(wrap, Button::Accent, ic::play_arrow, nullptr, true);
     lv_obj_set_width(r2, 56);
+    toggles_play(r2);
     lv_obj_t *r3 = button(wrap, Button::Raised, ic::restart_alt, nullptr, true);
     lv_obj_set_width(r3, 56);
     button(wrap, Button::Raised, ic::bedtime, "Tap to turn on", false, true);
@@ -720,6 +736,10 @@ void build_glass(lv_obj_t *scr)
             lv_obj_set_pos(obj, lv_obj_get_x(obj) + v.x, lv_obj_get_y(obj) + v.y);
         },
         LV_EVENT_PRESSING, nullptr);
+    lv_obj_add_event_cb(slab, [](lv_event_t *e) { motion::moving(lv_event_get_target_obj(e), true); }, LV_EVENT_PRESSED, nullptr);
+    for (lv_event_code_t up : {LV_EVENT_RELEASED, LV_EVENT_PRESS_LOST}) {
+        lv_obj_add_event_cb(slab, [](lv_event_t *e) { motion::moving(lv_event_get_target_obj(e), false); }, up, nullptr);
+    }
 }
 
 void build_layers(lv_obj_t *parent)
@@ -762,6 +782,22 @@ struct Phase {
 
 void no_tick(std::uint32_t, std::uint32_t) {}
 
+void open_tick(std::uint32_t at, std::uint32_t frame)
+{
+    if (frame == 0) {
+        prepare_popover();  // the finger lands
+    } else if (at >= 120 && at < 136 && !popover_open()) {
+        open_lights_from(s_light_item);  // and lifts, a tap's length later; left open for the next phase
+    }
+}
+
+void close_tick(std::uint32_t, std::uint32_t frame)
+{
+    if (frame == 0) {
+        close_popover(true);
+    }
+}
+
 const Phase PHASES[] = {
     {"idle", 800, [] { choose_sheet(1); }, no_tick},
     {"button press", 1400, nullptr,
@@ -798,28 +834,17 @@ const Phase PHASES[] = {
              close_popover(true);
          }
      }},
-    {"popover, frozen", 1300, [] { set_pop_glass(PopGlass::Frozen); set_pop_motion(PopMotion::Grow); },
-     [](std::uint32_t at, std::uint32_t frame) {
-         if (frame == 0) {
-             prepare_popover();  // the finger lands
-         } else if (at >= 120 && at < 136) {
-             open_lights_from(s_light_item);  // and lifts, a tap's length later
-         } else if (at >= 900 && popover_open()) {
-             close_popover(true);
-         }
-     }},
-    {"popover, rise", 1300, [] { set_pop_glass(PopGlass::Frozen); set_pop_motion(PopMotion::Rise); },
-     [](std::uint32_t at, std::uint32_t frame) {
-         if (frame == 0) {
-             prepare_popover();  // the finger lands
-         } else if (at >= 120 && at < 136) {
-             open_lights_from(s_light_item);  // and lifts, a tap's length later
-         } else if (at >= 900 && popover_open()) {
-             close_popover(true);
-         }
-     }},
+    {"popover grow, open", 900, [] { set_pop_glass(PopGlass::Frozen); set_pop_motion(PopMotion::Grow); }, open_tick},
+    {"popover grow, close", 700, nullptr, close_tick},
+    {"popover rise, open", 900, [] { set_pop_motion(PopMotion::Rise); }, open_tick},
+    {"popover rise, close", 700, nullptr, close_tick},
     {"drag glass", 1000, [] { set_pop_motion(PopMotion::Grow); choose_sheet(3); },
-     [](std::uint32_t at, std::uint32_t) {
+     [](std::uint32_t at, std::uint32_t frame) {
+         static bool held = false;  // as a finger would hold it
+         if (frame == 0 || (held && at >= 960)) {
+             held = frame == 0;
+             motion::moving(s_slab, held);
+         }
          lv_obj_set_x(s_slab, 60 + static_cast<std::int32_t>(at < 500 ? at : 1000 - at) * 3 / 5);
      }},
     {"scroll under bar", 1600, [] { choose_sheet(4); },
@@ -835,7 +860,38 @@ const Phase PHASES[] = {
 };
 
 char s_report[6000] = "no bench run yet\n";
-char s_frames[3][200]{};
+char s_frames[6][420]{};
+int  s_frame_lines = 0;
+
+// What each frame redraws, as LVGL has it once it has joined the areas: the
+// panel's cost goes with it, drawing and turning both.
+struct Drawn {
+    std::uint32_t frames = 0, worst = 0;
+    std::uint64_t px = 0;
+};
+Drawn         s_drawn, s_drawn_of[2][16];
+bool          s_drawing = false;
+std::uint32_t s_drawn_each[48]{};
+
+void on_render(lv_event_t *e)
+{
+    if (!s_drawing) {
+        return;
+    }
+    const auto *disp = static_cast<const lv_display_t *>(lv_event_get_current_target(e));
+    std::uint32_t px = 0;
+    for (std::uint32_t i = 0; i < disp->inv_p; ++i) {
+        if (!disp->inv_area_joined[i]) {
+            px += lv_area_get_size(&disp->inv_areas[i]);
+        }
+    }
+    if (s_drawn.frames < std::size(s_drawn_each)) {
+        s_drawn_each[s_drawn.frames] = px;
+    }
+    ++s_drawn.frames;
+    s_drawn.px += px;
+    s_drawn.worst = std::max(s_drawn.worst, px);
+}
 #if defined(ESP_PLATFORM)
 board::FlushTimes s_flush[2][16]{};
 #endif
@@ -870,6 +926,8 @@ void bench_step(lv_timer_t *timer)
         board::take_flush_times();
 #endif
         perf::begin();
+        s_drawn   = Drawn{};
+        s_drawing = true;
     }
     const Phase &ph = PHASES[s_bench.phase];
     const std::uint32_t at = now - s_bench.began;
@@ -878,17 +936,24 @@ void bench_step(lv_timer_t *timer)
         return;
     }
     s_bench.results[s_bench.phase] = perf::end();
+    s_drawing = false;
+    s_drawn_of[s_bench.config][s_bench.phase] = s_drawn;
 #if defined(ESP_PLATFORM)
     s_flush[s_bench.config][s_bench.phase] = board::take_flush_times();
 #endif
-    if (std::strncmp(PHASES[s_bench.phase].name, "popover", 7) == 0 && s_bench.config == 0) {
+    const bool traced = std::strncmp(PHASES[s_bench.phase].name, "popover", 7) == 0 ||
+                        std::strcmp(PHASES[s_bench.phase].name, "notice") == 0;
+    if (traced && s_bench.config == 0 && s_frame_lines < static_cast<int>(std::size(s_frames))) {
         const std::uint16_t *each = nullptr;
-        const int count = perf::frames(&each);
-        int n = std::snprintf(s_frames[s_bench.phase % 3], sizeof s_frames[0], "  %s, each frame:", PHASES[s_bench.phase].name);
-        for (int i = 0; i < count && n < static_cast<int>(sizeof s_frames[0]) - 6; ++i) {
-            n += std::snprintf(s_frames[s_bench.phase % 3] + n, sizeof s_frames[0] - n, " %u", static_cast<unsigned>(each[i]));
+        const int count = std::min<int>(perf::frames(&each), static_cast<int>(std::min<std::uint32_t>(s_drawn.frames, 48)));
+        char *line = s_frames[s_frame_lines++];
+        const int size = static_cast<int>(sizeof s_frames[0]);
+        int n = std::snprintf(line, size, "  %s, each frame in ms/kpx:", PHASES[s_bench.phase].name);
+        for (int i = 0; i < count && n < size - 12; ++i) {
+            n += std::snprintf(line + n, size - n, " %u/%u", static_cast<unsigned>(each[i]),
+                               static_cast<unsigned>((s_drawn_each[i] + 500) / 1000));
         }
-        std::snprintf(s_frames[s_bench.phase % 3] + n, sizeof s_frames[0] - n, "\n");
+        std::snprintf(line + n, size - n, "\n");
     }
     if (++s_bench.phase == static_cast<int>(std::size(PHASES))) {
         int n = static_cast<int>(std::strlen(s_report));
@@ -896,9 +961,13 @@ void bench_step(lv_timer_t *timer)
         for (std::size_t i = 0; i < std::size(PHASES) && n < static_cast<int>(sizeof s_report); ++i) {
             const perf::Stats &r = s_bench.results[i];
             n += std::snprintf(s_report + n, sizeof s_report - n,
-                               "  %-18s %4u frames  %5.1f fps  avg %6.2f ms  worst %6.2f ms", PHASES[i].name,
+                               "  %-20s %4u frames  %5.1f fps  avg %6.2f ms  worst %6.2f ms", PHASES[i].name,
                                static_cast<unsigned>(r.frames), r.span_ms ? r.frames * 1000.0 / r.span_ms : 0.0,
                                static_cast<double>(r.avg_ms), static_cast<double>(r.worst_ms));
+            const Drawn &d = s_drawn_of[s_bench.config][i];
+            n += std::snprintf(s_report + n, sizeof s_report - n, "  redrawn avg %4u kpx  worst %4u kpx  all %6u kpx",
+                               static_cast<unsigned>(d.frames ? d.px / d.frames / 1000 : 0),
+                               static_cast<unsigned>(d.worst / 1000), static_cast<unsigned>(d.px / 1000));
 #if defined(ESP_PLATFORM)
             const board::FlushTimes &f = s_flush[s_bench.config][i];
             const double per = f.frames ? 1000.0 * f.frames : 1.0;
@@ -909,6 +978,12 @@ void bench_step(lv_timer_t *timer)
             n += std::snprintf(s_report + n, sizeof s_report - n, "\n");
         }
         std::printf("%s", s_report);
+        if (s_bench.config == 0) {
+            for (int i = 0; i < s_frame_lines; ++i) {
+                std::printf("%s", s_frames[i]);
+            }
+            std::printf("%s", kit::freeze_report());
+        }
         if (++s_bench.config < static_cast<int>(std::size(CONFIGS))) {
             set_effects(CONFIGS[s_bench.config].blur, CONFIGS[s_bench.config].shadows);
             s_bench.phase = 0;
@@ -941,6 +1016,12 @@ void run_bench()
     s_bench.config = 0;
     set_effects(true, true);
     std::snprintf(s_report, sizeof s_report, "kit bench, %s, glass %d%%\n", look() == Look::Dark ? "dark" : "light", glass());
+    s_frame_lines = 0;
+    static bool watching = false;
+    if (!watching) {
+        watching = true;
+        lv_display_add_event_cb(lv_display_get_default(), on_render, LV_EVENT_RENDER_START, nullptr);
+    }
     if (PHASES[0].setup != nullptr) {
         PHASES[0].setup();
     }
@@ -1009,8 +1090,8 @@ void bench() { run_bench(); }
 
 int report(char *out, int size)
 {
-    const int n = std::snprintf(out, static_cast<std::size_t>(size), "%s%s%s%s%s", s_report, s_frames[0], s_frames[1],
-                                s_frames[2], kit::freeze_report());
+    const int n = std::snprintf(out, static_cast<std::size_t>(size), "%s%s%s%s%s%s%s%s", s_report, s_frames[0],
+                                s_frames[1], s_frames[2], s_frames[3], s_frames[4], s_frames[5], kit::freeze_report());
     return std::min(n, size - 1);
 }
 
