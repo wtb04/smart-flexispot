@@ -25,6 +25,7 @@ Status     s_status;
 lv_obj_t  *s_lights = nullptr, *s_lights_count = nullptr;
 lv_obj_t  *s_heat = nullptr, *s_heat_dot = nullptr, *s_heat_read = nullptr;
 lv_obj_t  *s_media = nullptr, *s_title = nullptr, *s_artist = nullptr, *s_play = nullptr;
+lv_obj_t  *s_skip = nullptr;  // Skip intro, or Next episode, over the title while it is offered
 Cover     *s_cover = nullptr;
 std::uint32_t s_covers = 0;
 
@@ -79,8 +80,9 @@ void paint_media()
         *nl = 0;  // a video's series: its season and episode are for the card
     }
     set_text_if(s_artist, artist);
-    lv_obj_set_hidden(s_play, !m.controllable || !m.remote);
-    set_icon(lv_obj_get_child(s_play, 0), m.playing ? ic::pause : ic::play_arrow, true);
+    // With nothing playing, play offers the favourites; a player only followed has none.
+    lv_obj_set_hidden(s_play, m.has_track && !m.remote);
+    set_icon(lv_obj_get_child(s_play, 0), m.has_track && m.playing ? ic::pause : ic::play_arrow, true);
     if (m.covers != s_covers) {
         s_covers = m.covers;
         if (m.art != nullptr && !m.placeholder) {
@@ -91,13 +93,54 @@ void paint_media()
     }
 }
 
+void check_skip(lv_timer_t *)
+{
+    const detail::MediaSkip offer = detail::media_skip_offer();
+    const bool offered = offer.text != nullptr;
+    if (lv_obj_is_hidden(s_skip) == offered) {
+        lv_obj_set_hidden(s_skip, !offered);
+        lv_obj_set_hidden(s_title, offered);
+        lv_obj_set_hidden(s_artist, offered);
+    }
+    if (offered) {
+        set_text_if(lv_obj_get_child(s_skip, 0), offer.text);
+    }
+}
+
+// A tap on the media: its card. Held: the favourites while nothing plays, or
+// the desk to the preset set for what plays, as the cinema's low desk, or
+// else what plays fullscreen.
+void media_touched(lv_event_t *e)
+{
+    const detail::MediaState &m = detail::media_state();
+    if (lv_event_get_code(e) != LV_EVENT_LONG_PRESSED) {
+        open_media(lv_event_get_current_target_obj(e));
+    } else if (!m.has_track) {
+        open_favourites();
+    } else if (m.hold_preset >= 0) {
+        detail::desk_go_to(m.hold_preset);
+    } else {
+        open_now_playing();
+    }
+}
+
+// All the lights on a tap, as the old bar had them; held, each of them.
+void lights_touched(lv_event_t *e)
+{
+    if (lv_event_get_code(e) == LV_EVENT_LONG_PRESSED) {
+        open_lights(lv_event_get_current_target_obj(e));
+    } else if (detail::s_handlers.lights != nullptr) {
+        detail::s_handlers.lights();
+    }
+}
+
 void build_room(lv_obj_t *bar)
 {
     lv_obj_t *room = capsule(bar);
     s_lights = capsule_item(room, ic::lightbulb, "0", 118);
     s_lights_count = lv_obj_get_child(s_lights, 1);
-    lv_obj_add_event_cb(s_lights, [](lv_event_t *e) { open_lights(lv_event_get_current_target_obj(e)); },
-                        LV_EVENT_CLICKED, nullptr);
+    lv_obj_add_event_cb(s_lights, lights_touched, LV_EVENT_SHORT_CLICKED, nullptr);
+    lv_obj_add_event_cb(s_lights, lights_touched, LV_EVENT_LONG_PRESSED, nullptr);
     popover_source(s_lights);
     capsule_divider(room);
     s_heat = capsule_item(room, nullptr, "--", 150);
@@ -122,15 +165,33 @@ void build_media(lv_obj_t *bar)
     lv_obj_set_flex_grow(col, 1);
     s_title  = text(col, Role::H3, "");
     s_artist = text(col, Role::Small, "", Ink::Secondary);
+    const std::int32_t text_w = MEDIA_W - ART - 56 - 4 * space::m;
     for (lv_obj_t *line : {s_title, s_artist}) {
-        lv_obj_set_width(line, MEDIA_W - ART - 56 - 4 * space::m);
+        lv_obj_set_width(line, text_w);
         lv_label_set_long_mode(line, LV_LABEL_LONG_MODE_DOTS);
     }
+    // Where the title is, while an intro or the credits run: one tap.
+    s_skip = button(col, Button::Accent, nullptr, "Skip intro");
+    lv_obj_set_size(s_skip, text_w, 48);
+    lv_obj_set_style_radius(s_skip, radius::round, 0);
+    lv_obj_add_event_cb(s_skip, [](lv_event_t *) {
+        detail::media_skip();
+        check_skip(nullptr);
+    }, LV_EVENT_CLICKED, nullptr);
+    lv_obj_set_hidden(s_skip, true);
+    lv_timer_create(check_skip, 500, nullptr);
+
     s_play = button(s_media, Button::Raised, ic::pause, nullptr, true);
     lv_obj_set_size(s_play, 56, 56);
-    lv_obj_add_event_cb(s_play, [](lv_event_t *) { detail::media_toggle_play(); }, LV_EVENT_CLICKED, nullptr);
-    lv_obj_add_event_cb(s_media, [](lv_event_t *e) { open_media(lv_event_get_current_target_obj(e)); },
-                        LV_EVENT_CLICKED, nullptr);
+    lv_obj_add_event_cb(s_play, [](lv_event_t *) {
+        if (detail::media_state().has_track) {
+            detail::media_toggle_play();
+        } else {
+            open_favourites();
+        }
+    }, LV_EVENT_CLICKED, nullptr);
+    lv_obj_add_event_cb(s_media, media_touched, LV_EVENT_SHORT_CLICKED, nullptr);
+    lv_obj_add_event_cb(s_media, media_touched, LV_EVENT_LONG_PRESSED, nullptr);
     popover_source(s_media);
 }
 }  // namespace
