@@ -503,8 +503,8 @@ constexpr std::int32_t RISE  = 16;  // how far a rising card comes up
 // The frames the live screen comes back in as a popover goes, and the frost
 // spreads in as one opens: thin bands at the panel's own pace read as one
 // sweep, where a few thick ones came as so many steps.
-constexpr int          WAVES = 12;
-constexpr int          FROST_WAVES = 10;
+constexpr int          WAVES = 8;
+constexpr int          FROST_WAVES = 6;
 
 struct Pop {
     lv_obj_t *scrim    = nullptr;
@@ -878,14 +878,20 @@ void finish_close()
     }
 }
 
-// The live screen back from where the card went, a band of the screen each
-// frame, outward: drawing all of it again in one frame is the slowest frame
-// the panel has, and this is the same work spread over a few.
+// The live screen back from the far edge in, a band a frame, the frost
+// drawing back into what was tapped as the card has: drawing all of it again
+// in one frame is the slowest frame the panel has, and this is the same work
+// spread over a few. The frozen part is what is left round the source, last
+// of all the source itself, and the card goes with it.
 void give_back()
 {
     const std::int32_t length = s_pop.rows ? size::screen_h : size::screen_w;
-    const std::int32_t r = s_pop.reach * ++s_pop.wave / WAVES;
-    const std::int32_t lo = std::max<std::int32_t>(0, s_pop.centre - r), hi = std::min<std::int32_t>(length - 1, s_pop.centre + r);
+    const std::int32_t d  = s_pop.reach * (WAVES - ++s_pop.wave) / WAVES;
+    std::int32_t       lo = std::max<std::int32_t>(0, s_pop.centre - d), hi = std::min<std::int32_t>(length - 1, s_pop.centre + d);
+    if (s_pop.wave >= WAVES) {
+        lo = 1;
+        hi = 0;
+    }
     const auto band = [](std::int32_t a, std::int32_t b) {
         if (a > b) {
             return;
@@ -893,15 +899,15 @@ void give_back()
         lv_area_t area = s_pop.rows ? lv_area_t{0, a, size::screen_w - 1, b} : lv_area_t{a, 0, b, size::screen_h - 1};
         lv_obj_invalidate_area(s_pop.backdrop, &area);
     };
-    if (s_pop.lo > s_pop.hi) {
-        band(lo, hi);
+    if (lo > hi) {
+        band(s_pop.f_lo, s_pop.f_hi);
     } else {
-        band(lo, s_pop.lo - 1);
-        band(s_pop.hi + 1, hi);
+        band(s_pop.f_lo, lo - 1);
+        band(hi + 1, s_pop.f_hi);
     }
-    s_pop.lo = lo;
-    s_pop.hi = hi;
-    if (s_pop.card != nullptr) {  // it is back in its source, which is in the first band
+    s_pop.f_lo = lo;
+    s_pop.f_hi = hi;
+    if (lo > hi && s_pop.card != nullptr) {  // back in its source, which goes last
         lv_obj_delete(s_pop.card);
         s_pop.card = s_pop.body = nullptr;
     }
@@ -974,7 +980,10 @@ void back_in_source(lv_anim_t *)
     const lv_area_t &src = s_pop.from;
     s_pop.centre = s_pop.rows ? (src.y1 + src.y2) / 2 : (src.x1 + src.x2) / 2;
     const std::int32_t length = s_pop.rows ? size::screen_h : size::screen_w;
-    s_pop.reach = std::max(s_pop.centre, length - 1 - s_pop.centre) + 1;
+    s_pop.reach    = std::max(s_pop.centre, length - 1 - s_pop.centre) + 1;
+    s_pop.frosting = true;  // frozen still: all of it, drawing back into the source
+    s_pop.f_lo     = 0;
+    s_pop.f_hi     = length - 1;
     give_back();
     s_pop.stepper = lv_timer_create(
         [](lv_timer_t *) {
