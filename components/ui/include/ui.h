@@ -79,6 +79,7 @@ enum class Setting : std::uint8_t {
     PresenceGate,
     DeskBluetooth,
     Screen,
+    Light,  // the design kit's screen in its light look
     Count,
 };
 

@@ -190,7 +190,10 @@ void build_appearance(lv_obj_t *list)
 
     lv_obj_t *look = segmented(setting_row(list, ic::bedtime, "Look"), {"Dark", "Light"},
                                kit::look() == Look::Light ? 1 : 0, SEG_2);
-    on_segment(look, [](int i) { set_look(i == 1 ? Look::Light : Look::Dark); });
+    on_segment(look, [](int i) { detail::settings_pick(Setting::Light, i == 1); });
+    subscribe(Topic::Settings, detail::kNoView, [look] {
+        segmented_choose(look, detail::settings_state().on[static_cast<int>(Setting::Light)] ? 1 : 0, false);
+    });
 
     lv_obj_t *turn = segmented(setting_row(list, ic::aspect_ratio, "Orientation"),
                                {"Normal", "Flipped", "Auto"}, static_cast<int>(detail::s_orientation), SEG_3);

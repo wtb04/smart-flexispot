@@ -114,6 +114,9 @@ void on_setting(ui::Setting setting, bool on)
             settings::set(settings::Key::DeskBluetooth, on);
             restart_for_desk(on);
             break;
+        case ui::Setting::Light:
+            settings::set(settings::Key::Light, on);
+            break;
         default:
             break;
     }
@@ -450,6 +453,7 @@ extern "C" void app_main(void)
         ui::Setting::PresenceGate, settings::enabled(settings::Key::PresenceGate)));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_setting(
         ui::Setting::DeskBluetooth, settings::enabled(settings::Key::DeskBluetooth)));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_setting(ui::Setting::Light, settings::enabled(settings::Key::Light)));
     const int volume = settings::get(settings::Key::Volume);
     sound::set_volume(volume);
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_notification_volume(volume));
