@@ -24,6 +24,7 @@ void pictures_next_track();
 void pictures_redraw_mode(int mode);
 void pictures_redraw();
 void pictures_bench_done();
+void pictures_measure_corners();
 
 namespace {
 
@@ -1203,6 +1204,9 @@ void key(int code)
         break;
     case 'b':
         s_blur_scrim = !s_blur_scrim;
+        break;
+    case 'k':
+        pictures_measure_corners();
         break;
     default:
         return;
