@@ -483,7 +483,9 @@ int main(int argc, char **argv)
 
     if (opts.lab) {
         s_lab = true;
-        ui::lab::build();
+        ui::lab::build([]() -> std::uint64_t {
+            return SDL_GetPerformanceCounter() * 1000000ull / SDL_GetPerformanceFrequency();
+        });
         for (const char key : opts.keys) {
             ui::lab::key(key);
         }

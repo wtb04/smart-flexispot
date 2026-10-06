@@ -86,6 +86,8 @@ void set_look(Look look);
 /** 0 is the clearest glass, 100 nearly solid. */
 void set_glass(int percent);
 void set_accent(std::uint32_t colour);
+/** For measuring what the panel can afford: blur and shadows can each be left out. */
+void set_effects(bool blur, bool shadows);
 Look look();
 int  glass();
 const Palette &colours();
@@ -96,6 +98,16 @@ void           on_restyle(lv_obj_t *owner, void (*cb)(void *ctx), void *ctx);
 
 /** The ground every screen sits on: a warm, lamp-lit dark, or warm paper. */
 lv_obj_t *ground(lv_obj_t *parent);
+
+/**
+ * The planes a screen is built on, back to front. Content scrolls under the
+ * chrome; the chrome casts onto the content; popovers sit over both behind a
+ * scrim; notices over everything. A thing's plane decides how it is lit.
+ */
+enum class Layer : std::uint8_t { Ground, Content, Chrome, Overlay, Alert };
+/** Builds the planes on `scr`, the ground among them. Content scrolls, the rest stays put. */
+void      screen(lv_obj_t *scr);
+lv_obj_t *layer(Layer which);
 
 enum class Lift : std::uint8_t { Low, High };
 lv_obj_t *tile(lv_obj_t *parent, Lift lift = Lift::Low);
@@ -247,6 +259,21 @@ class Rail {
 enum class From : std::uint8_t { Below, Beside };
 
 /**
+ * How a popover's glass is made. Live blurs what is behind it on every frame
+ * it changes; Frozen takes one picture of the screen as it opens, blurs that
+ * once and lays the card over it, so growing only moves an outline.
+ */
+enum class PopGlass : std::uint8_t { Live, Frozen };
+void     set_pop_glass(PopGlass how);
+PopGlass pop_glass();
+/** Grow: the outline opens out of the source. Rise: the card fades in at its place, coming up a little. */
+enum class PopMotion : std::uint8_t { Grow, Rise };
+void      set_pop_motion(PopMotion how);
+PopMotion pop_motion();
+/** How long the last frozen popover took to take its picture and blur it. */
+const char *freeze_report();
+
+/**
  * A glass card that grows out of `source` on a spring, over a scrim that closes
  * it on a tap. Returns the card to fill; its size is `w` by `h`.
  */
@@ -258,5 +285,24 @@ bool      popover_open();
 /** A slab that drops from under the bar with a notice, and leaves on its own. */
 lv_obj_t *notice(const char *source, const char *glyph, const char *title, const char *message,
                  std::uint32_t timeout_ms);
+
+namespace perf {
+/** Microseconds from some fixed point; the platform's best clock. Without one, LVGL's ms tick. */
+using Clock = std::uint64_t (*)();
+void start(Clock clock = nullptr);
+struct Stats {
+    std::uint32_t frames   = 0;
+    float         avg_ms   = 0;
+    float         worst_ms = 0;
+    std::uint32_t span_ms  = 0;  // how long the measuring ran
+};
+/** Frames drawn in the second before last. */
+Stats last_second();
+void  begin();
+Stats end();
+/** Each frame of the last measuring, in ms, up to 48 of them. */
+int   frames(const std::uint16_t **ms);
+std::uint64_t now_us();
+}  // namespace perf
 
 }  // namespace ui::kit

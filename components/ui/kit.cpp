@@ -58,6 +58,7 @@ constexpr Glow LIGHT_GLOWS[] = {
 };
 
 Look          s_look   = Look::Dark;
+bool          s_blur = true, s_shadows = true;
 int           s_glass  = 50;
 std::uint32_t s_accent = 0;  // 0: the look's own
 Palette       s_pal    = DARK;
@@ -120,7 +121,7 @@ const lv_font_t *font_of(Role role)
 
 void set_shadow(lv_style_t *st, std::int32_t width, std::int32_t y, std::int32_t spread, lv_opa_t opa)
 {
-    lv_style_set_shadow_width(st, width);
+    lv_style_set_shadow_width(st, s_shadows ? width : 0);
     lv_style_set_shadow_offset_y(st, y);
     lv_style_set_shadow_spread(st, spread);
     lv_style_set_shadow_color(st, hex(s_pal.shadow));
@@ -139,8 +140,12 @@ void style_glass(lv_style_t *st, std::int32_t blur, std::int32_t shadow_w, std::
     lv_style_set_bg_opa(st, LV_OPA_COVER);
     lv_style_set_bg_main_opa(st, opa);
     lv_style_set_bg_grad_opa(st, opa);
-    lv_style_set_blur_backdrop(st, true);
-    lv_style_set_blur_radius(st, blur);
+    // no live blur in the shared glass: the chrome sits over the ground, which is
+    // soft already, and LVGL re-blurs a whole widget whenever anything near it
+    // redraws, which the panel cannot afford; popovers bring their own
+    (void)blur;
+    lv_style_set_blur_backdrop(st, false);
+    lv_style_set_blur_radius(st, 0);
     lv_style_set_border_width(st, 1);
     lv_style_set_border_color(st, hex(0xffffff));
     lv_style_set_border_opa(st, s_pal.rim_opa);
@@ -194,7 +199,7 @@ void apply()
     lv_style_set_pad_all(&s_well, space::m);
 
     const lv_opa_t g = glass_opa();
-    style_glass(&s_glass_sm, 20, 30, 10, g);
+    style_glass(&s_glass_sm, 20, 44, 16, g);
     // big glass reads more opaque, so what is on it stays legible over anything
     style_glass(&s_glass_lg, 40, 80, 28, static_cast<lv_opa_t>(g + (s_pal.glass_solid_opa - g) * 45 / 100));
     style_glass(&s_glass_clear, 10, 24, 8, static_cast<lv_opa_t>(g * 2 / 3));
@@ -240,7 +245,7 @@ void apply()
     lv_style_set_text_color(&s_btn_accent, hex(s_pal.on_accent));
     lv_style_set_shadow_color(&s_btn_accent, hex(s_pal.accent));
     lv_style_set_shadow_opa(&s_btn_accent, 110);
-    lv_style_set_shadow_width(&s_btn_accent, 22);
+    lv_style_set_shadow_width(&s_btn_accent, s_shadows ? 22 : 0);
     lv_style_set_shadow_offset_y(&s_btn_accent, 6);
 
     lv_style_set_bg_color(&s_btn_open, hex(s_look == Look::Dark ? s_pal.raised_hi : s_pal.raised_hi));
@@ -268,7 +273,7 @@ void apply()
     lv_style_set_text_color(&s_lamp_on, hex(s_pal.on_lamp));
     lv_style_set_shadow_color(&s_lamp_on, hex(s_pal.lamp));
     lv_style_set_shadow_opa(&s_lamp_on, 120);
-    lv_style_set_shadow_width(&s_lamp_on, 26);
+    lv_style_set_shadow_width(&s_lamp_on, s_shadows ? 26 : 0);
     lv_style_set_shadow_offset_y(&s_lamp_on, 6);
     lv_style_set_text_color(&s_lamp_on_ink, hex(s_pal.on_lamp));
     lv_style_set_text_opa(&s_lamp_on_ink, 200);
@@ -335,7 +340,11 @@ void init_styles()
 void paint_ground()
 {
     constexpr int W = size::screen_w, H = size::screen_h, SW = W / 8 + 1, SH = H / 8 + 1;
-    static float small[SH][SW][3];
+    // in PSRAM and only while painting: it is far too big for internal RAM
+    auto *small = static_cast<float (*)[SW][3]>(lv_malloc(sizeof(float) * SH * SW * 3));
+    if (small == nullptr) {
+        return;
+    }
     const Glow *glows = s_look == Look::Dark ? DARK_GLOWS : LIGHT_GLOWS;
     const float base[3] = {static_cast<float>((s_pal.ground >> 16) & 0xff), static_cast<float>((s_pal.ground >> 8) & 0xff),
                            static_cast<float>(s_pal.ground & 0xff)};
@@ -385,6 +394,7 @@ void paint_ground()
             row[x] = static_cast<std::uint16_t>(((out[0] >> 3) << 11) | ((out[1] >> 2) << 5) | (out[2] >> 3));
         }
     }
+    lv_free(small);
     if (s_ground_img != nullptr) {
         lv_obj_invalidate(s_ground_img);
     }
@@ -440,6 +450,13 @@ void set_glass(int percent)
     apply();
 }
 
+void set_effects(bool blur, bool shadows)
+{
+    s_blur    = blur;
+    s_shadows = shadows;
+    apply();
+}
+
 void set_accent(std::uint32_t colour)
 {
     s_accent = colour;
@@ -485,14 +502,80 @@ lv_color_t colour(Ink ink)
 
 lv_obj_t *ground(lv_obj_t *parent)
 {
-    lv_obj_add_style(parent, &s_ground, 0);
+    lv_obj_add_style(lv_obj_get_screen(parent), &s_ground, 0);
     paint_ground();
-    s_ground_img = lv_image_create(parent);
-    lv_image_set_src(s_ground_img, s_ground_buf);
-    lv_obj_set_pos(s_ground_img, 0, 0);
-    lv_obj_remove_flag(s_ground_img, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_flag(s_ground_img, LV_OBJ_FLAG_IGNORE_LAYOUT);
-    return s_ground_img;
+    // the picture as the parent's own opaque background rather than a child:
+    // LVGL only skips drawing what lies under an opaque thing it can reach
+    // through parents that are opaque themselves
+    s_ground_img = parent;
+    lv_obj_set_style_bg_image_src(parent, s_ground_buf, 0);
+    lv_obj_set_style_bg_opa(parent, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(parent, hex(s_pal.ground), 0);
+    return parent;
+}
+
+namespace {
+lv_obj_t *s_layers[5]{};
+lv_obj_t *s_edge = nullptr;
+
+// Apple's scroll edge: a band under the bar that fades in as content slides
+// beneath it, so the bar reads as floating over what scrolls rather than
+// cutting it off.
+void restyle_edge(void *)
+{
+    if (s_edge == nullptr) {
+        return;
+    }
+    lv_obj_set_style_bg_color(s_edge, hex(s_pal.ground), 0);
+    lv_obj_set_style_bg_grad_color(s_edge, hex(s_pal.ground), 0);
+}
+
+void on_content_scroll(lv_event_t *e)
+{
+    const std::int32_t y = lv_obj_get_scroll_y(lv_event_get_target_obj(e));
+    lv_obj_set_style_opa(s_edge, static_cast<lv_opa_t>(std::clamp<std::int32_t>(y * 6, 0, 255)), 0);
+}
+}  // namespace
+
+void screen(lv_obj_t *scr)
+{
+    lv_obj_remove_style_all(scr);
+    lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
+    for (int i = 0; i < 5; ++i) {
+        lv_obj_t *l = lv_obj_create(scr);
+        lv_obj_remove_style_all(l);
+        lv_obj_set_size(l, size::screen_w, size::screen_h);
+        lv_obj_remove_flag(l, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_remove_flag(l, LV_OBJ_FLAG_CLICKABLE);
+        s_layers[i] = l;
+    }
+    ground(s_layers[static_cast<int>(Layer::Ground)]);
+    lv_obj_t *content = s_layers[static_cast<int>(Layer::Content)];
+    lv_obj_add_flag(content, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(content, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_scroll_dir(content, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(content, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_set_style_pad_bottom(content, space::l, 0);
+    lv_obj_add_event_cb(content, on_content_scroll, LV_EVENT_SCROLL, nullptr);
+
+    s_edge = lv_obj_create(s_layers[static_cast<int>(Layer::Chrome)]);
+    lv_obj_remove_style_all(s_edge);
+    lv_obj_set_size(s_edge, size::screen_w, 132);
+    lv_obj_set_style_bg_opa(s_edge, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_main_opa(s_edge, 235, 0);
+    lv_obj_set_style_bg_grad_opa(s_edge, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_bg_grad_dir(s_edge, LV_GRAD_DIR_VER, 0);
+    lv_obj_set_style_bg_main_stop(s_edge, 90, 0);
+    lv_obj_set_style_opa(s_edge, LV_OPA_TRANSP, 0);
+    lv_obj_remove_flag(s_edge, LV_OBJ_FLAG_CLICKABLE);
+    restyle_edge(nullptr);
+    on_restyle(s_edge, restyle_edge, nullptr);
+}
+
+lv_obj_t *layer(Layer which)
+{
+    lv_obj_t *l = s_layers[static_cast<int>(which)];
+    return l != nullptr ? l : lv_screen_active();
 }
 
 lv_obj_t *tile(lv_obj_t *parent, Lift lift)

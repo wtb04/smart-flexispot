@@ -719,6 +719,40 @@ void zoom_end()
     s_kept_count = 0;
 }
 
+esp_err_t shrink_shown(std::uint8_t *out, std::size_t out_bytes, std::uint32_t w, std::uint32_t h)
+{
+    ESP_RETURN_ON_FALSE(s_panel != nullptr && s_ppa != nullptr && s_disp != nullptr, ESP_ERR_INVALID_STATE, TAG, "no panel");
+    while (s_showing.load(std::memory_order_relaxed) != s_asked.load(std::memory_order_relaxed)) {
+        if (xSemaphoreTake(s_swapped, SWAP_TIMEOUT) != pdTRUE) {
+            break;
+        }
+    }
+    ppa_srm_oper_config_t op{};
+    op.in.buffer  = s_fbs[s_asked.load(std::memory_order_relaxed)];
+    op.in.pic_w   = BSP_LCD_H_RES;
+    op.in.pic_h   = BSP_LCD_V_RES;
+    op.in.block_w = BSP_LCD_H_RES;
+    op.in.block_h = BSP_LCD_V_RES;
+    op.in.srm_cm  = PPA_SRM_COLOR_MODE_RGB565;
+    op.out.buffer      = out;
+    op.out.buffer_size = out_bytes;
+    op.out.pic_w       = w;
+    op.out.pic_h       = h;
+    op.out.srm_cm      = PPA_SRM_COLOR_MODE_RGB565;
+    // the turn back from the panel's way up to LVGL's: the flush's, undone
+    switch (lv_display_get_rotation(s_disp)) {
+        case LV_DISPLAY_ROTATION_90: op.rotation_angle = PPA_SRM_ROTATION_ANGLE_270; break;
+        case LV_DISPLAY_ROTATION_180: op.rotation_angle = PPA_SRM_ROTATION_ANGLE_180; break;
+        case LV_DISPLAY_ROTATION_270: op.rotation_angle = PPA_SRM_ROTATION_ANGLE_90; break;
+        default: op.rotation_angle = PPA_SRM_ROTATION_ANGLE_0; break;
+    }
+    const float scale = static_cast<float>(std::max(w, h)) / static_cast<float>(std::max(BSP_LCD_H_RES, BSP_LCD_V_RES));
+    op.scale_x = scale;
+    op.scale_y = scale;
+    op.mode    = PPA_TRANS_MODE_BLOCKING;
+    return ppa_do_scale_rotate_mirror(s_ppa, &op);
+}
+
 FlushTimes take_flush_times()
 {
     return std::exchange(s_flush_times, FlushTimes{});
