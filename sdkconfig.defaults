@@ -193,10 +193,10 @@ CONFIG_LV_USE_SYSMON=n
 CONFIG_LV_USE_PERF_MONITOR=n
 CONFIG_LV_USE_MEM_MONITOR=n
 
-# Two of these, using 1.5 KB of the eight they had. Trimmed less hard than
-# the rest: what a draw thread needs depends on what is being drawn, and an
-# overflow there is a hard crash.
-CONFIG_LV_DRAW_THREAD_STACK_SIZE=5120
+# Two of these. What a draw thread needs depends on what is being drawn, and
+# an overflow there is a hard crash: at 5 KB an image drawn by the PPA ran
+# past the end and took the thread's own record with it.
+CONFIG_LV_DRAW_THREAD_STACK_SIZE=8192
 
 # The flash is read four bits at a time rather than two. Verified booting on
 # this board: the second-stage bootloader reports SPI Mode : QIO. Note that

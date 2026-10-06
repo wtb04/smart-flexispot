@@ -237,18 +237,20 @@ void unscratch(void *p)
 #endif
 }
 
-void blur_small()
+using Plane = std::uint8_t[SH][SW];
+// The blur's planes, kept with the pictures: made each time, in a full PSRAM
+// they were sometimes not to be had, and the picture was stretched from
+// whatever the buffer held.
+Plane *s_planes = nullptr;  // three colours and one to work in
+
+bool blur_small()
 {
     constexpr int R = 3, N = 2 * R + 1;
-    using Plane = std::uint8_t[SH][SW];
-    auto *ch  = static_cast<Plane *>(scratch(sizeof(Plane) * 3));  // PSRAM: too big for internal RAM
-    auto *buf = static_cast<Plane *>(scratch(sizeof(Plane)));
-    if (ch == nullptr || buf == nullptr) {
-        unscratch(ch);
-        unscratch(buf);
-        return;
+    if (s_planes == nullptr) {
+        return false;
     }
-    Plane &tmp = *buf;
+    Plane *ch  = s_planes;
+    Plane &tmp = s_planes[3];
     for (int y = 0; y < SH; ++y) {
         const auto *row = reinterpret_cast<const std::uint16_t *>(s_small->data + y * s_small->header.stride);
         for (int x = 0; x < SW; ++x) {
@@ -300,8 +302,7 @@ void blur_small()
             }
         }
     }
-    unscratch(ch);
-    unscratch(buf);
+    return true;
 }
 
 // The card's shadow painted into the picture once, where the card comes to
@@ -380,15 +381,17 @@ bool buffers()
         s_small   = lv_draw_buf_create(SW, SH, LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO);
         s_blurred = lv_draw_buf_create(SW, SH, LV_COLOR_FORMAT_RGB888, LV_STRIDE_AUTO);
         s_frozen  = lv_draw_buf_create(FW, FH, LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO);
+        s_planes  = static_cast<Plane *>(scratch(sizeof(Plane) * 4));
 #if defined(ESP_PLATFORM)
         s_strip = lv_draw_buf_create(FW, 12 * F, LV_COLOR_FORMAT_RGB888, LV_STRIDE_AUTO);
 #endif
     }
-    return s_half != nullptr && s_quarter != nullptr && s_small != nullptr && s_blurred != nullptr && s_frozen != nullptr;
+    return s_half != nullptr && s_quarter != nullptr && s_small != nullptr && s_blurred != nullptr && s_frozen != nullptr &&
+           s_planes != nullptr;
 }
 
 // From the half-size picture on: no LVGL in it, so the panel's other core can do it.
-void finish_picture(std::uint64_t t0, std::uint64_t t1)
+bool finish_picture(std::uint64_t t0, std::uint64_t t1)
 {
     // halvings rather than one eighth: a bilinear halving is an average of each
     // two by two, where one big step would sample a few pixels of each block
@@ -403,7 +406,9 @@ void finish_picture(std::uint64_t t0, std::uint64_t t1)
     esp_cache_msync(s_small->data, s_small->data_size, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
 #endif
     const std::uint64_t t2 = perf::now_us();
-    blur_small();
+    if (!blur_small()) {
+        return false;  // no picture rather than one of whatever the buffer held
+    }
     const std::uint64_t t3 = perf::now_us();
     stretch_up_dithered(s_blurred, s_frozen, F);
     const std::uint64_t t4 = perf::now_us();
@@ -411,6 +416,7 @@ void finish_picture(std::uint64_t t0, std::uint64_t t1)
                   "  freezing for a popover: picture %.1f ms, down %.1f, blur %.1f, up %.1f\n",
                   static_cast<double>(t1 - t0) / 1000.0, static_cast<double>(t2 - t1) / 1000.0,
                   static_cast<double>(t3 - t2) / 1000.0, static_cast<double>(t4 - t3) / 1000.0);
+    return true;
 }
 
 #if defined(ESP_PLATFORM)
@@ -433,7 +439,9 @@ bool picture_from_shown()
     if (board::shrink_shown(s_half->data, s_half->data_size, FW / 2, FH / 2) != ESP_OK) {
         return false;
     }
-    finish_picture(t0, perf::now_us());
+    if (!finish_picture(t0, perf::now_us())) {
+        return false;
+    }
     s_made_at_gen.store(gen, std::memory_order_relaxed);
     s_made_from_us.store(t0, std::memory_order_relaxed);
     return true;
@@ -451,8 +459,13 @@ void work(void *)
         if (s_open.load(std::memory_order_acquire) || !(kicked || (stale && still && due))) {
             continue;
         }
-        s_working.store(true, std::memory_order_release);
-        picture_from_shown();
+        bool idle = false;
+        if (!s_working.compare_exchange_strong(idle, true, std::memory_order_acq_rel)) {
+            continue;
+        }
+        if (!s_open.load(std::memory_order_acquire)) {  // a popover may have come up since: its picture is not to be touched
+            picture_from_shown();
+        }
         s_working.store(false, std::memory_order_release);
     }
 }
@@ -475,9 +488,15 @@ void freeze()
 #if defined(ESP_PLATFORM)
     start_worker();
     const std::uint64_t waited = perf::now_us();
-    while (s_working.load(std::memory_order_acquire)) {  // never two at once: they share the buffers
+    // never two at once, as they share the buffers: the worker, once it sees the
+    // popover open, starts no other, and one under way is waited for
+    s_open.store(true, std::memory_order_release);
+    for (bool idle = false; !s_working.compare_exchange_weak(idle, true, std::memory_order_acq_rel); idle = false) {
         vTaskDelay(1);
     }
+    struct Release {
+        ~Release() { s_working.store(false, std::memory_order_release); }
+    } release;
     const bool same    = perf::generation() == s_made_at_gen.load(std::memory_order_relaxed);
     const bool pressed = s_made_from_us.load(std::memory_order_relaxed) >= s_pressed_us.load(std::memory_order_relaxed) &&
                          perf::now_us() - s_pressed_us.load(std::memory_order_relaxed) < 1000000;

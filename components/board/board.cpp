@@ -125,6 +125,7 @@ std::atomic<int>       s_showing{0};
 std::atomic<std::uint32_t> s_unsafe{1};
 int                    s_target = -1;  // the one this frame goes into, once it begins
 std::uint32_t          s_pinned = 0;   // kept as they are while a glide copies from them
+std::atomic<std::uint32_t> s_looked_at{0};  // kept while a development build sends it out
 
 board::FlushTimes s_flush_times;
 
@@ -330,7 +331,7 @@ int free_buffer()
         const int           asked  = s_asked.load(std::memory_order_relaxed);
         const std::uint32_t unsafe = s_unsafe.load(std::memory_order_relaxed);
         for (int i = 0; i < FRAME_BUFFERS; ++i) {
-            if (i != asked && (unsafe & (1u << i)) == 0 && (s_pinned & (1u << i)) == 0) {
+            if (i != asked && (unsafe & (1u << i)) == 0 && ((s_pinned | s_looked_at.load(std::memory_order_relaxed)) & (1u << i)) == 0) {
                 return i;
             }
         }
@@ -477,7 +478,6 @@ Rect          s_glide_at{};          // the region on the panel: a column of the
 std::uint32_t s_glide_w     = 0;     // the region's width on the screen
 bool          s_glide_flip  = false; // the screen's left at the region's last row
 bool          s_glide_back  = false; // the new page comes in from the left
-std::uint32_t s_glide_whole = 0;     // buffers brought up to the held frame outside the region
 std::int32_t  s_glide_shift = -1;
 board::GlideTimes s_glide_times;
 
@@ -847,7 +847,6 @@ bool glide_begin(const lv_area_t &region, bool from_left)
     s_glide_w     = static_cast<std::uint32_t>(lv_area_get_width(&region));
     s_glide_flip  = rotation == LV_DISPLAY_ROTATION_90;
     s_glide_back  = from_left;
-    s_glide_whole = 0;
     s_glide_shift = -1;
     s_glide_times = {};
     s_holding     = true;
@@ -856,34 +855,26 @@ bool glide_begin(const lv_area_t &region, bool from_left)
 
 bool glide_held() { return s_glide_held >= 0; }
 
-void glide_step(std::int32_t shift)
+bool glide_compose(std::int32_t shift)
 {
     if (s_glide_held < 0) {
-        return;
+        return false;
     }
     const auto w = static_cast<std::int32_t>(s_glide_w);
     shift        = std::clamp<std::int32_t>(shift, 0, w);
-    if (shift == s_glide_shift) {
-        return;
-    }
-    s_glide_shift          = shift;
-    const std::int64_t at  = esp_timer_get_time();
-    s_target               = free_buffer();
-    const int          t   = s_target;
-    std::uint8_t      *to  = s_fbs[t];
+    const std::int64_t at = esp_timer_get_time();
+    s_target              = free_buffer();
+    const int     t       = s_target;
+    std::uint8_t *to      = s_fbs[t];
     const std::uint8_t *old_page = s_fbs[s_glide_from], *new_page = s_fbs[s_glide_held];
-    if ((s_glide_whole & (1u << t)) == 0) {
-        // once: around the region it is the new frame
-        const Rect &g = s_glide_at;
-        for (const Rect &r : {Rect{0, 0, BSP_LCD_H_RES, g.y},
-                              Rect{0, g.y + s_glide_w, BSP_LCD_H_RES, BSP_LCD_V_RES - g.y - s_glide_w},
-                              Rect{0, g.y, g.x, s_glide_w}, Rect{g.x + g.w, g.y, BSP_LCD_H_RES - g.x - g.w, s_glide_w}}) {
-            if (r.w > 0 && r.h > 0) {
-                catch_up(new_page, to, r);
-            }
-        }
-        s_glide_whole |= 1u << t;
+    // around the region, up to the latest: the held frame, until the glide's
+    // own first is on show; the region itself is laid down whole below
+    const std::uint8_t *latest = s_glide_shift < 0 ? new_page : s_fbs[s_asked.load(std::memory_order_relaxed)];
+    for (int i = 0; i < s_behind_count[t]; ++i) {
+        catch_up_around(latest, to, s_behind[t][i], s_glide_at);
     }
+    s_behind_count[t] = 0;
+    s_glide_shift     = shift;
     // the old page moved off by `shift` columns, the new one's first `shift` after
     // it, by the PPA, which moves a block several times faster than the CPU
     const auto          n   = static_cast<std::uint32_t>(shift);
@@ -908,32 +899,49 @@ void glide_step(std::int32_t shift)
         columns(old_page, n, 0, rows - n);
         columns(new_page, 0, rows - n, n);
     }
+    note_drawn(s_glide_at);
     s_glide_times.frames += 1;
     s_glide_times.copy_us += esp_timer_get_time() - at;
-    show_back_buffer();
+    return true;  // LVGL may draw what changed round the region into it now
+}
+
+void glide_show()
+{
+    if (s_target >= 0) {  // LVGL had nothing to add
+        show_back_buffer();
+    }
 }
 
 void glide_end()
 {
     s_holding = false;
-    if (s_glide_held >= 0) {
-        s_target = s_glide_held;
-        show_back_buffer();
-        // the old frame is behind by what the held one drew, noted as it was
-        // drawn; those the glide went through, by the region alone
-        for (int i = 0; i < FRAME_BUFFERS; ++i) {
-            if ((s_glide_whole & (1u << i)) != 0) {
-                s_behind_count[i] = 0;
-                note(s_behind[i], s_behind_count[i], s_glide_at);
-            }
-        }
+    if (s_glide_held >= 0 && s_glide_shift != static_cast<std::int32_t>(s_glide_w)) {
+        glide_compose(static_cast<std::int32_t>(s_glide_w));  // cut short: the new page whole
+        glide_show();
     }
+    // every buffer is behind the one on show by what it was noted to be, the
+    // held one and the old one too, so LVGL catches up as ever
     s_glide_from = s_glide_held = -1;
     s_pinned     = 0;
-    s_glide_whole = 0;
 }
 
 GlideTimes glide_times() { return s_glide_times; }
+
+void let_go_of_frame() { s_looked_at.store(0, std::memory_order_relaxed); }
+
+const std::uint16_t *shown_frame(int *w, int *h)
+{
+    if (s_panel == nullptr) {
+        return nullptr;
+    }
+    *w = BSP_LCD_H_RES;
+    *h = BSP_LCD_V_RES;
+    const int shown = s_showing.load(std::memory_order_relaxed);
+    s_looked_at.store(1u << shown, std::memory_order_relaxed);
+    std::uint8_t *fb = s_fbs[shown];
+    esp_cache_msync(fb, FRAME_BYTES, ESP_CACHE_MSYNC_FLAG_DIR_M2C);  // what the PPA put there, not what the cache last saw
+    return reinterpret_cast<const std::uint16_t *>(fb);
+}
 
 void zoom_end()
 {
