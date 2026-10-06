@@ -74,4 +74,14 @@ void event_course(const ical::Event &event, char *out, std::size_t size);
 void event_place(const ical::Event &event, char *out, std::size_t size);
 void event_clock(std::int64_t at, char *out, std::size_t size);
 
+// The fullscreen views and the favourites, from the bar's cards. kit_front_views.cpp
+// Each with its source or without, as the caller has one to hand: without, it is
+// what the finger is on.
+/** The music view, or the cinema for a video; nothing while nothing plays. */
+void open_now_playing();
+void open_now_playing(lv_obj_t *source);
+/** The favourites to start, as a sheet; nothing while there are none. */
+void open_favourites();
+void open_favourites(lv_obj_t *source);
+
 }  // namespace ui::kitfront
