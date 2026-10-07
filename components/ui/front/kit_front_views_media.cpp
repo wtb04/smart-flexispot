@@ -185,7 +185,10 @@ constexpr std::int32_t TIMES_Y = TRANSPORT_Y - space::xl - 20, RAIL_Y = TIMES_Y 
 detail::ViewId s_view = detail::kNoView;
 Backdrop      *s_backdrop = nullptr;
 Cover         *s_cover = nullptr;
-std::uint32_t  s_covers = UINT32_MAX;  // the model's count of covers when last shown
+std::uint32_t  s_covers = UINT32_MAX;  // the model's counts of covers and large ones when last shown
+std::uint32_t  s_larges = UINT32_MAX;
+std::uint32_t  s_tinted = UINT32_MAX;  // and of covers when the backdrop was last made
+lv_timer_t    *s_retry  = nullptr;
 lv_obj_t      *s_source = nullptr, *s_title = nullptr, *s_artist = nullptr;
 Rail          *s_rail = nullptr;
 lv_obj_t      *s_elapsed = nullptr, *s_total = nullptr;
@@ -207,18 +210,44 @@ void glide(lv_timer_t *)
     }
 }
 
+// The large cover, once it follows, takes the small one's place without a
+// fade, and the backdrop it was made from stays: the colours are the same.
+// Each is marked shown only once it is, and tried again soon when it found no room.
 void show_cover()
 {
     const MediaState &media = media_state();
-    if (std::exchange(s_covers, media.covers) == media.covers) {
-        return;
+    const bool   large  = media.large != nullptr;
+    const void  *pixels = large ? media.large : media.placeholder ? nullptr : media.art;
+    const std::int32_t w = large ? media::kLargeArtSize : media.art_width, h = large ? media::kLargeArtSize : media::kArtSize;
+    bool failed = false;
+    if (s_covers != media.covers || s_larges != media.larges) {
+        const bool animate = s_covers != media.covers && lv_obj_is_visible(s_cover->obj());
+        if (pixels == nullptr) {
+            s_cover->clear(animate);
+        } else if (!s_cover->show(Picture{pixels, w, h, 0}, animate)) {
+            failed = true;
+        }
+        if (!failed) {
+            s_covers = media.covers;
+            s_larges = media.larges;
+        }
     }
-    const bool animate = lv_obj_is_visible(s_cover->obj());
-    if (media.large != nullptr) {
-        show_picture(*s_cover, *s_backdrop, media.large, media::kLargeArtSize, media::kLargeArtSize, animate);
-    } else {
-        show_picture(*s_cover, *s_backdrop, media.placeholder ? nullptr : media.art, media.art_width, media::kArtSize,
-                     animate);
+    if (s_tinted != media.covers) {
+        if (pixels == nullptr) {
+            s_backdrop->clear();
+            s_tinted = media.covers;
+        } else if (s_backdrop->show(Picture{pixels, w, h, 0})) {
+            s_tinted = media.covers;
+        } else {
+            failed = true;
+        }
+    }
+    if (failed) {
+        again_soon(s_retry, [] {
+            if (detail::view_open(s_view)) {
+                show_cover();
+            }
+        });
     }
 }
 
@@ -264,12 +293,14 @@ void build(lv_obj_t *)
     s_view         = detail::add_view({"music", detail::ViewKind::Fullscreen, root,
                                        [] {
                                            s_covers  = UINT32_MAX;
+                                           s_larges  = UINT32_MAX;
+                                           s_tinted  = UINT32_MAX;
                                            s_total_s = -1;
                                            lv_timer_resume(s_glide);
                                        },
                                        [] {
                                            lv_timer_pause(s_glide);
-                                           s_cover->clear(false);
+                                           s_cover->release();
                                            s_backdrop->clear();
                                        }});
 

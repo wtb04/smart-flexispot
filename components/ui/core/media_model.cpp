@@ -176,7 +176,7 @@ void media_take_large_cover(const void *pixels)
         return;  // goes with the cover, as apply_gone clears both
     }
     s_media.large = pixels;
-    ++s_media.covers;
+    ++s_media.larges;
     publish(Topic::Media);
 }
 
