@@ -1,6 +1,12 @@
 #include "kit_fonts.h"
 
-#include "units_font.h"
+extern "C" {
+LV_FONT_DECLARE(lv_font_units_16)
+LV_FONT_DECLARE(lv_font_units_20)
+LV_FONT_DECLARE(lv_font_units_22)
+LV_FONT_DECLARE(lv_font_units_28)
+LV_FONT_DECLARE(lv_font_units_32)
+}
 
 namespace ui::kit::fonts {
 namespace {

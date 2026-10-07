@@ -1,5 +1,4 @@
-// The radar page: the old screen's map, planes and zoom, which it keeps, on a
-// page of the design kit's.
+// The radar page, on a page of the design kit's; kit_front_radar_view.cpp draws it.
 
 #include "kit_front.h"
 

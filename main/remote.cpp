@@ -658,8 +658,6 @@ esp_err_t bench_page(httpd_req_t *req)
         n = std::strcmp(query, "open") == 0     ? ui::bench_radar_open(text, sizeof(text))
             : std::strcmp(query, "map") == 0    ? ui::bench_radar_map(text, sizeof(text), true)
             : std::strcmp(query, "back") == 0   ? ui::bench_radar_map(text, sizeof(text), false)
-            : std::strcmp(query, "desk") == 0   ? ui::bench_desk_card(text, sizeof(text))
-            : std::strcmp(query, "pages") == 0  ? ui::bench_pages(text, sizeof(text))
                                                 : ui::bench_radar(text, sizeof(text));
         lvgl_port_unlock();
     }

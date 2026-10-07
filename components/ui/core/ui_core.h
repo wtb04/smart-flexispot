@@ -1,7 +1,6 @@
 #pragma once
 
-// What the models and the plumbing under every screen share, whichever views
-// are built on them: nothing in here draws.
+// What the models and the plumbing under the screen share: nothing in here draws.
 
 #include "ui.h"
 
@@ -18,7 +17,6 @@ constexpr char TAG[] = "ui";
 constexpr std::uint32_t LOCK_TIMEOUT_MS = 500;
 
 extern Handlers    s_handlers;
-extern bool        s_dock_right;
 extern Orientation s_orientation;
 extern int         s_initial_brightness;
 
@@ -33,7 +31,7 @@ struct Notice {
 };
 
 // What the screen calls each preset. Everything off the screen says Preset 1 to 6.
-// ui_presets.h, which git ignores, can name them otherwise.
+// components/ui/ui_presets.h, which git ignores, can name them otherwise.
 #if __has_include("ui_presets.h")
 #include "ui_presets.h"
 #else
@@ -48,7 +46,7 @@ constexpr std::uint32_t PAUSE_SETTLE_MS = 1500;
 constexpr int HOME_PAGE     = 0;
 constexpr int RADAR_PAGE    = 1;
 constexpr int CALENDAR_PAGE = 2;
-constexpr int SETUP_PAGE    = 3;  // opened from the control bar's status
+constexpr int SETUP_PAGE    = 3;  // opened from the bar's status
 constexpr int PAGE_COUNT    = 4;
 
 
@@ -108,8 +106,7 @@ bool cinema_offers_skip();
 
 }  // namespace ui::detail
 
-// What a screen built on this core provides: classic_front.cpp, the screen as it
-// has been, or kit_front.cpp, the design kit's.
+// What the screen built on this core provides, in kit_front.cpp.
 namespace ui::front {
 /** In init, with the lock held: the look, and what shows while the rest is made. */
 void init(std::uint32_t accent);
