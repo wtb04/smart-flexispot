@@ -601,7 +601,7 @@ void show_later(std::int64_t starts)
     if (s_later == nullptr) {
         return;
     }
-    char text[64];
+    char text[96];
     char leave[16];
     char there[16];
     event_clock(s_later->leave, leave, sizeof(leave));
