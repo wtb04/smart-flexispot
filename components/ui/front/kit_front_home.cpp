@@ -483,6 +483,14 @@ const radar::Aircraft *pick_overhead()
     return closest;
 }
 
+void clear_plane_photo()
+{
+    s_plane->clear(false);
+    s_photo_of[0] = '\0';
+}
+
+// Taken as it comes or not at all, since radar decodes another over it before
+// long: one there was no room for is asked for again a while on.
 void show_plane_photo()
 {
     const detail::RadarLookup &lookup = detail::radar_lookup();
@@ -490,11 +498,15 @@ void show_plane_photo()
         return;
     }
     s_photo_stamp = lookup.photo_stamp;
-    if (lookup.photo != nullptr && lookup.photo_width > 0 && lookup.photo_height > 0) {
-        if (s_plane->show(Picture{lookup.photo, lookup.photo_width, lookup.photo_height,
-                                  lookup.photo_width * static_cast<std::int32_t>(sizeof(std::uint16_t))})) {
-            std::snprintf(s_photo_of, sizeof(s_photo_of), "%s", lookup.photo_hex);
-        }
+    if (lookup.photo == nullptr || lookup.photo_width <= 0 || lookup.photo_height <= 0 ||
+        std::strcmp(s_photo_of, lookup.photo_hex) == 0) {
+        return;
+    }
+    if (s_plane->show(Picture{lookup.photo, lookup.photo_width, lookup.photo_height,
+                              lookup.photo_width * static_cast<std::int32_t>(sizeof(std::uint16_t))})) {
+        std::snprintf(s_photo_of, sizeof(s_photo_of), "%s", lookup.photo_hex);
+    } else {
+        s_photo_of[0] = '\0';
     }
 }
 
@@ -576,19 +588,23 @@ void paint_overhead()
     set_text_if(s_heading_word, text);
 
     if (std::strcmp(s_photo_of, a->hex) != 0 && s_plane->has_picture()) {
-        s_plane->clear(false);  // another's photo, until this one's comes
+        clear_plane_photo();  // another's photo, until this one's comes
     }
     // Its photo: asked for once each time Home is up, as the radar page asks
-    // for its own aircraft's while it is.
-    // at most one lookup a while: the closest changes as they pass, and the
-    // lookups share their services' limits with the radar page's
+    // for its own aircraft's while it is, and again while it has not shown.
+    // At most one lookup a while: the closest changes as they pass, and the
+    // lookups share their services' limits with the radar page's.
     static std::uint32_t s_asked_ms = 0;
-    if (std::strcmp(s_asked, a->hex) != 0 &&
-        (s_asked[0] == '\0' || lv_tick_elaps(s_asked_ms) >= LOOKUP_EVERY_MS)) {
+    const bool another = std::strcmp(s_asked, a->hex) != 0;
+    const bool missing = std::strcmp(s_photo_of, a->hex) != 0 && !radar::known_without_photo(a->hex);
+    if ((another || missing) && (s_asked[0] == '\0' || lv_tick_elaps(s_asked_ms) >= LOOKUP_EVERY_MS)) {
         s_asked_ms = lv_tick_get();
         std::snprintf(s_asked, sizeof(s_asked), "%s", a->hex);
-        s_plane->clear(false);
-        s_photo_stamp = 0;  // one in hand for it already shows too
+        if (s_plane->has_picture()) {
+            clear_plane_photo();
+        }
+        // only what comes of this: one in hand is handed over again at once
+        s_photo_stamp = detail::radar_lookup().photo_stamp;
         if (detail::s_handlers.details != nullptr) {
             detail::s_handlers.details(a->hex, a->flight);
         }
@@ -673,6 +689,9 @@ void build_overhead(lv_obj_t *grid)
     lv_obj_set_style_pad_ver(s_sky_none, 0, 0);
     s_sky_why = lv_obj_get_child(s_sky_none, -1);
     lv_obj_set_hidden(s_sky_none, true);
+    // Before widget_opens' own, so the page opens on this one rather than the most notable.
+    lv_obj_add_event_cb(
+        s_sky_tile, [](lv_event_t *) { radar_opens_on(s_held); }, LV_EVENT_CLICKED, nullptr);
     widget_opens(body, RADAR);
 }
 

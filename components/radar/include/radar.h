@@ -37,13 +37,15 @@ using UpdateHandler = void (*)(const Snapshot &snapshot);
 /** Called on the radar task once a lookup comes back. */
 using DetailsHandler = void (*)(const char *hex, const Details &details);
 
-/** RGB565, `width` by `height`. The buffer lives until the next photo
- *  replaces it. Null when the aircraft has no picture on file. `credit` is
+/** RGB565, `width` by `height`, to be copied as it comes: the buffer is
+ *  reused for another photo before long. Null when the aircraft has no picture on file. `credit` is
  *  its photographer, to name with it, or empty. */
 using PhotoHandler = void (*)(const char *hex, const void *pixels, int width, int height, const char *credit);
 
-/** Looks up who is flying and where from and to. One at a time: a request
- *  replaces whatever was waiting, since only the last tap matters. */
+/** Looks up who is flying and where from and to, and its photo and trail.
+ *  The last few aircraft asked about are each answered, so Home and the radar
+ *  page do not cancel each other's; what is in hand comes at once, and the
+ *  same one asked again within seconds is not fetched again. */
 void request_details(const char *hex, const char *callsign);
 
 /** Needs the network. Nothing is fetched until a home position arrives. */
