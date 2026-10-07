@@ -198,7 +198,7 @@ void build()
         lv_obj_set_clickable(label, false);
     }
 
-    chrome(s_view, root, false);  // the timer is the view: no badge of it over it
+    chrome(s_view, root);
     // what is said round the time goes with the buttons, leaving the time and how far
     detail::fade_when_idle(s_view, s_phase);
     detail::fade_when_idle(s_view, s_under);
