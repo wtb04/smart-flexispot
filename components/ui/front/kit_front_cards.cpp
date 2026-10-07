@@ -493,11 +493,13 @@ constexpr std::uint32_t SEND_AFTER_MS = 600;   // the taps stopped: the target g
 constexpr std::uint32_t HOLD_MS      = 5000;  // ours shown until the thermostat says it has it, or this long
 constexpr int           NONE         = INT_MIN;
 
-constexpr std::int32_t  HEAT_DIAL    = 280;
-constexpr std::int32_t  HEAT_ARC     = 28;
+constexpr std::int32_t  HEAT_DIAL    = 320;
+constexpr std::int32_t  HEAT_ARC     = 30;
+constexpr std::int32_t  HEAT_FOOT    = 50;  // the bottom of the dial's box the arc leaves open
+constexpr std::int32_t  HEAT_H       = 2 * space::xxl + 40 + HEAT_DIAL - space::s - HEAT_FOOT + 60 + size::button + 2 * space::m;
 
 struct HeatCard : InPsram {
-    lv_obj_t *state = nullptr, *less = nullptr, *more = nullptr, *mode = nullptr;
+    lv_obj_t *state = nullptr, *mode = nullptr;
     Dial     *dial  = nullptr;
     lv_obj_t *toggles[kDialToggleCount]{};
     unsigned  shape = UINT_MAX;
@@ -599,9 +601,6 @@ void paint_heat_card()
     set_text_if(c->dial->figure(), buf);
     c->dial->set_ink(heat_off(t) ? Ink::Primary : heat_ink(t));
     c->dial->set_faded(heat_off(t));
-    const bool steers = target != NONE && detail::s_handlers.setpoint != nullptr;
-    set_usable(c->less, steers && target > r.min);
-    set_usable(c->more, steers && target < r.max);
 
     set_usable(c->mode, t.known && detail::s_handlers.mode != nullptr);
     segmented_choose(c->mode, is_off() ? 1 : 0, true);
@@ -645,18 +644,6 @@ void hold_target(int target)
     paint_heat_card();
 }
 
-void step_target(int dir)
-{
-    const int from = shown_target();
-    if (from == NONE) {
-        return;
-    }
-    const Range r = range();
-    // On the thermostat's own steps: anything between them it rounds away.
-    const int below = from / r.step * r.step;
-    hold_target(dir > 0 ? below + r.step : below != from ? below : from - r.step);
-}
-
 void dial_moved(lv_event_t *e)
 {
     HeatCard *c = s_heat;
@@ -682,7 +669,7 @@ void build_heat_card(lv_obj_t *body)
     s_heat  = c;
     lv_obj_set_flex_flow(body, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(body, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_row(body, space::l, 0);
+    lv_obj_set_style_pad_row(body, space::m, 0);
     lv_obj_t *head = heading(body, "Heating", nullptr);
     c->state = badge(head, "Off", Ink::Tertiary, nullptr,
                      widest(Role::Small, {"Heating", "Warm enough", "Off"}) + 2 * space::m + 14, true);
@@ -701,6 +688,7 @@ void build_heat_card(lv_obj_t *body)
     spec.unit   = "";
     c->dial     = new Dial(body, spec);
     lv_obj_t *dial = c->dial->obj();
+    lv_obj_set_style_margin_top(dial, -space::s, 0);
     lv_obj_set_width(c->dial->figure(), widest(Role::ReadXL, {"88.8°", "--"}));
     lv_obj_set_width(c->dial->caption(), widest(Role::Small, {"Room 88.8°", "No reading"}));
     lv_obj_set_style_margin_top(c->dial->caption(), -space::xs, 0);
@@ -709,19 +697,8 @@ void build_heat_card(lv_obj_t *body)
     lv_obj_add_event_cb(dial, [](lv_event_t *e) { delete static_cast<Dial *>(lv_event_get_user_data(e)); },
                         LV_EVENT_DELETE, c->dial);
 
-    // Two wide capsules under the dial, clear of its arc.
-    lv_obj_t *steps = flow(body, LV_FLEX_FLOW_ROW, space::m);
-    lv_obj_set_width(steps, HEAT_INNER);
-    lv_obj_set_style_margin_top(steps, -HEAT_DIAL / 5, 0);  // up into the dial's open foot
-    for (int dir : {-1, 1}) {
-        lv_obj_t *b = button(steps, Button::Raised, dir < 0 ? ic::remove : ic::add, nullptr);
-        lv_obj_set_height(b, size::button_lg);
-        lv_obj_set_flex_grow(b, 1);
-        on_click(b, [](lv_event_t *e) { step_target(index_of(e)); }, index_data(dir));
-        (dir < 0 ? c->less : c->more) = b;
-    }
-
     c->mode = segmented(body, {"Heat", "Off"}, is_off() ? 1 : 0, HEAT_INNER);
+    lv_obj_set_style_margin_top(c->mode, -HEAT_FOOT, 0);  // up into the dial's open foot
     lv_obj_add_event_cb(c->mode, [](lv_event_t *e) {
         // The thermostat's mode goes between the two: a tap on the one it is in already does nothing.
         if ((segmented_chosen(lv_event_get_target_obj(e)) == 1) != is_off() && detail::home_state().thermostat.known &&
@@ -1181,7 +1158,7 @@ void build_pill(lv_obj_t *bar)
 
 void open_media(lv_obj_t *source) { build_media_card(popover(source, MEDIA_W, 400, From::Below)); }
 void open_lights(lv_obj_t *source) { build_lights_card(popover(source, LIGHTS_W, 300, From::Below)); }
-void open_heating(lv_obj_t *source) { build_heat_card(popover(source, HEAT_W, 600, From::Below)); }
+void open_heating(lv_obj_t *source) { build_heat_card(popover(source, HEAT_W, HEAT_H, From::Below)); }
 
 void build_claude(lv_obj_t *bar)
 {
