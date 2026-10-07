@@ -1,4 +1,0 @@
--DREMOTE_ENABLED=1
--mabi=ilp32f
--march=rv32imafc_zicsr_zifencei_xesppie
--fno-rtti
