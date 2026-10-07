@@ -214,8 +214,9 @@ struct PickTile {
     Cover        *cover = nullptr;
     std::uint32_t arts  = 0;
 };
-PickTile  s_tiles[media::kPickCount];
-lv_obj_t *s_picks = nullptr;  // the sheet's body while it is open
+PickTile    s_tiles[media::kPickCount];
+lv_obj_t   *s_picks = nullptr;  // the sheet's body while it is open
+lv_timer_t *s_retry = nullptr;
 
 void show_pick_art(int i, bool animate)
 {
@@ -224,12 +225,17 @@ void show_pick_art(int i, bool animate)
     if (tile.cover == nullptr || tile.arts == pick.arts) {
         return;
     }
-    tile.arts = pick.arts;
-    if (pick.art != nullptr) {
-        tile.cover->show(Picture{pick.art, ART, ART, 0}, animate);
-    } else {
+    if (pick.art == nullptr) {
         tile.cover->clear(animate);
+    } else if (!tile.cover->show(Picture{pick.art, ART, ART, 0}, animate)) {
+        again_soon(s_retry, [] {
+            for (int k = 0; k < media::kPickCount; ++k) {
+                show_pick_art(k, true);
+            }
+        });
+        return;
     }
+    tile.arts = pick.arts;
 }
 
 void pick_tapped(lv_event_t *e)
