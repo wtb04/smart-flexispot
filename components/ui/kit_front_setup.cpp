@@ -392,7 +392,6 @@ void build_power(lv_obj_t *column)
             }
         },
         LV_EVENT_SHORT_CLICKED, nullptr);
-    centre_rows(g);
     subscribe(Topic::Update, detail::kNoView, paint_update);
 }
 }  // namespace
@@ -409,7 +408,6 @@ void build_setup(lv_obj_t *page)
     build_appearance(list);
     build_behaviour(list);
     build_plan(list);
-    centre_rows(list);
     build_power(left);
 
     lv_obj_t *right = flow(cols, LV_FLEX_FLOW_COLUMN, space::l);
