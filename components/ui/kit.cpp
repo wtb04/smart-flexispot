@@ -232,8 +232,11 @@ void apply()
         lv_style_set_bg_opa(&s_dot[i], ink_opa[i]);
     }
 
-    lv_style_set_bg_color(&s_btn, hex(s_pal.raised));
-    lv_style_set_bg_opa(&s_btn, LV_OPA_COVER);
+    // A light fill over whatever it is on, so a button reads as on top of a
+    // tile and of glass alike; a solid shade darker than the glass sank into it.
+    const bool dark = s_look == Look::Dark;
+    lv_style_set_bg_color(&s_btn, hex(0xffffff));
+    lv_style_set_bg_opa(&s_btn, dark ? 36 : LV_OPA_COVER);
     lv_style_set_radius(&s_btn, radius::button);
     lv_style_set_border_width(&s_btn, 0);
     lv_style_set_text_color(&s_btn, hex(s_pal.ink));
@@ -244,11 +247,12 @@ void apply()
     lv_style_set_transform_pivot_x(&s_btn, lv_pct(50));
     lv_style_set_transform_pivot_y(&s_btn, lv_pct(50));
     lv_style_set_transition(&s_btn, &s_release_tr);
-    set_shadow(&s_btn, 10, 4, -3, s_look == Look::Dark ? 120 : 44);
+    set_shadow(&s_btn, 10, 4, -3, dark ? 0 : 44);  // a shadow shows through a fill that lets the ground through
 
     lv_style_set_transform_scale_x(&s_btn_pressed, motion::press_scale);
     lv_style_set_transform_scale_y(&s_btn_pressed, motion::press_scale);
-    lv_style_set_bg_color(&s_btn_pressed, hex(s_pal.raised_hi));
+    lv_style_set_bg_color(&s_btn_pressed, dark ? hex(0xffffff) : hex(s_pal.raised_hi));
+    lv_style_set_bg_opa(&s_btn_pressed, dark ? 64 : LV_OPA_COVER);
     lv_style_set_transition(&s_btn_pressed, &s_press_tr);
 
     lv_style_set_bg_color(&s_btn_accent, hex(s_pal.accent));
@@ -258,8 +262,8 @@ void apply()
     lv_style_set_shadow_width(&s_btn_accent, s_shadows ? 22 : 0);
     lv_style_set_shadow_offset_y(&s_btn_accent, 6);
 
-    lv_style_set_bg_color(&s_btn_open, hex(s_pal.raised_hi));
-    lv_style_set_bg_opa(&s_btn_open, LV_OPA_COVER);
+    lv_style_set_bg_color(&s_btn_open, dark ? hex(0xffffff) : hex(s_pal.raised_hi));
+    lv_style_set_bg_opa(&s_btn_open, dark ? 56 : LV_OPA_COVER);
 
     lv_style_set_bg_opa(&s_btn_flat, LV_OPA_TRANSP);
     lv_style_set_shadow_opa(&s_btn_flat, LV_OPA_TRANSP);
@@ -314,16 +318,17 @@ void apply()
 
     lv_style_set_bg_color(&s_seg, hex(s_pal.ink));
     lv_style_set_bg_opa(&s_seg, s_pal.fill_opa);
-    lv_style_set_radius(&s_seg, 18);
+    lv_style_set_radius(&s_seg, radius::round);
     lv_style_set_border_width(&s_seg, 0);
     lv_style_set_pad_all(&s_seg, 5);
     lv_style_set_bg_opa(&s_seg_item, LV_OPA_TRANSP);
     lv_style_set_text_color(&s_seg_item, hex(s_pal.ink));
     lv_style_set_text_opa(&s_seg_item, s_pal.ink2_opa);
-    lv_style_set_bg_color(&s_seg_thumb, hex(s_look == Look::Dark ? s_pal.raised_hi : s_pal.surface_hi));
-    lv_style_set_bg_opa(&s_seg_thumb, LV_OPA_COVER);
-    lv_style_set_radius(&s_seg_thumb, 13);
-    set_shadow(&s_seg_thumb, 10, 2, -2, s_look == Look::Dark ? 140 : 50);
+    // lighter than its track, as a button is, so the choice sits on top
+    lv_style_set_bg_color(&s_seg_thumb, s_look == Look::Dark ? hex(0xffffff) : hex(s_pal.surface_hi));
+    lv_style_set_bg_opa(&s_seg_thumb, s_look == Look::Dark ? 46 : LV_OPA_COVER);
+    lv_style_set_radius(&s_seg_thumb, radius::round);
+    set_shadow(&s_seg_thumb, 10, 2, -2, s_look == Look::Dark ? 0 : 50);
 
     restyle_lists();
     lv_obj_report_style_change(nullptr);
