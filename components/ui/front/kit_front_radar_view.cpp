@@ -2571,8 +2571,8 @@ void show_chips(const radar::Aircraft &aircraft, bool mine)
 
 const char *climb_trend(int vertical_fpm)
 {
-    return vertical_fpm > LEVEL_FLIGHT_FPM    ? LV_SYMBOL_UP
-           : vertical_fpm < -LEVEL_FLIGHT_FPM ? LV_SYMBOL_DOWN
+    return vertical_fpm > LEVEL_FLIGHT_FPM    ? "\u2191"
+           : vertical_fpm < -LEVEL_FLIGHT_FPM ? "\u2193"
                                               : "";
 }
 
@@ -2593,7 +2593,7 @@ void show_selected_readings(const radar::Aircraft &aircraft)
             char          to[16];
             thousands(to, sizeof(to), (aircraft.selected_ft + ROUND_FT / 2) / ROUND_FT * ROUND_FT);
             std::snprintf(unit, sizeof(unit), "%s%s",
-                          aircraft.selected_ft > aircraft.altitude_ft ? LV_SYMBOL_UP : LV_SYMBOL_DOWN, to);
+                          aircraft.selected_ft > aircraft.altitude_ft ? "\u2191" : "\u2193", to);
         } else if (climb_trend(aircraft.vertical_fpm)[0] != '\0') {
             std::snprintf(unit, sizeof(unit), "ft %s", climb_trend(aircraft.vertical_fpm));
         }
