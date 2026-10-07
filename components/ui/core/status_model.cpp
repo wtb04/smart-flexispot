@@ -20,10 +20,4 @@ void status_take_battery(bool present, int percent, bool charging, bool on_batte
     publish(Topic::Status);
 }
 
-void status_splash_gone()
-{
-    status_state().splash_gone = true;
-    publish(Topic::Status);
-}
-
 }  // namespace ui::detail

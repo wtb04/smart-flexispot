@@ -76,9 +76,8 @@ extern std::atomic<bool> s_setup_visible;
 /** A page on show, or Home in its place while it is away; each front's own. */
 void select_page(int index);
 
-/** The setting that takes the owner's pages away with their phone, and whether they are away now. */
+/** The setting that takes the owner's pages away with their phone. */
 extern bool s_presence_gate;
-bool        owner_away();
 
 /** The screen lit or dark, as the schedule or a touch decides. */
 void set_screen_state(bool on);
@@ -109,6 +108,4 @@ namespace ui::front {
 void init(std::uint32_t accent);
 /** One part of the screen a call, behind what init put up; false after the last. */
 bool build_next_part();
-/** Once a pass of the pending updates, before the models take theirs. */
-void apply();
 }  // namespace ui::front

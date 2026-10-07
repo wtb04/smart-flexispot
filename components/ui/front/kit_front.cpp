@@ -158,7 +158,6 @@ bool build_next_part()
                 kit::set_look(light ? kit::Look::Light : kit::Look::Dark);
             });
             detail::start_screen_schedule();
-            detail::status_splash_gone();  // no start-up screen yet: what waits for it may show
             if (SHOT_ENABLED) {
                 lv_timer_create(take_screenshots, SHOT_START_MS, nullptr);
             }
@@ -167,8 +166,6 @@ bool build_next_part()
             return false;
     }
 }
-
-void apply() {}
 }  // namespace ui::front
 
 namespace ui::detail {
