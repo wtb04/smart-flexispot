@@ -2,6 +2,7 @@
 // fetched for real, the hardware played by hardware.cpp. See README.md.
 #include "claude_stub.h"
 #include "hardware.h"
+#include "kit.h"
 #include "home_assistant.h"
 #include "live/live.h"
 #include "media_stub.h"
@@ -526,6 +527,12 @@ int main(int argc, char **argv)
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_setting(ui::Setting::Charging, true));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_setting(ui::Setting::PresenceGate, true));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_setting(ui::Setting::DeskBluetooth, true));
+    // SIM_BACKDROP=soft or dim: what lies behind a popover, to compare them.
+    if (const char *backdrop = std::getenv("SIM_BACKDROP")) {
+        ui::kit::set_behind(std::strcmp(backdrop, "dim") == 0    ? ui::kit::Behind::Dim
+                              : std::strcmp(backdrop, "soft") == 0 ? ui::kit::Behind::Soft
+                                                                   : ui::kit::Behind::Blur);
+    }
     // SIM_LOOK=light: the light look, as Setup can choose it.
     const char *look = std::getenv("SIM_LOOK");
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_setting(ui::Setting::Light, look != nullptr && std::strcmp(look, "light") == 0));

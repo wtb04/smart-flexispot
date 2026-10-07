@@ -566,6 +566,13 @@ esp_err_t bench_page(httpd_req_t *req)
         } else if (query[0] == 'k' && query[1] == '=' && query[2] != '\0' && ui::lab::built()) {
             ui::lab::key(query[2]);  // a key as the simulator would pass it, to drive the lab from here
             n = std::snprintf(text, sizeof(text), "pressed %c\n", query[2]);
+        } else if (query[0] == 'b' && query[1] == '=') {  // what lies behind a popover, to compare them on the panel
+            ui::kit::set_behind(query[2] == 'd' ? ui::kit::Behind::Dim
+                                  : query[2] == 's' ? ui::kit::Behind::Soft
+                                                    : ui::kit::Behind::Blur);
+            n = std::snprintf(text, sizeof(text), "backdrop %c\n", query[2]);
+        } else if (std::strcmp(query, "kr") == 0) {  // the design kit's last page change and popover
+            n = std::snprintf(text, sizeof(text), "%s\n%s", ui::kit::change_report(), ui::kit::freeze_report());
         } else if (std::strcmp(query, "report") == 0) {
             n = ui::lab::report(text, sizeof(text));
         } else

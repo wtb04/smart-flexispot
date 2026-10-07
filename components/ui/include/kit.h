@@ -91,8 +91,8 @@ inline constexpr std::int32_t screen_h  = 720;
 namespace motion {
 inline constexpr std::uint32_t press_ms   = 0;     // the press shows on the first frame after the finger lands
 inline constexpr std::uint32_t release_ms = 300;
-inline constexpr std::uint32_t pop_ms     = 450;   // to settle, the spring's tail included
-inline constexpr std::uint32_t close_ms   = 240;
+inline constexpr std::uint32_t pop_ms     = 320;   // to settle, the spring's tail included
+inline constexpr std::uint32_t close_ms   = 190;
 inline constexpr std::uint32_t move_ms    = 420;   // a needle, a knob, a segment's thumb, a switch
 inline constexpr std::uint32_t leave_ms   = 200;   // a notice going, accelerating away
 inline constexpr std::uint32_t fade_ms    = 220;
@@ -355,6 +355,10 @@ void      reserve_popovers();
 /** What a finger landing on a popover source does: start on the backdrop. */
 void      prepare_popover();
 bool      popover_open();
+/** What lies behind a popover: the page frosted, frosted lightly, or only dimmed and sharp. */
+enum class Behind : std::uint8_t { Blur, Soft, Dim };
+void      set_behind(Behind behind);
+Behind    behind();
 
 /** A slab that drops from under the bar with a notice, and leaves on its own. */
 lv_obj_t *notice(const char *source, const char *glyph, const char *title, const char *message,
