@@ -1,28 +1,12 @@
 #include "kit.h"
 
-#include "kit_fonts.h"
-
 #include <algorithm>
 #include <cmath>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
 
 namespace ui::kit {
 namespace {
 
 constexpr float DEG = 3.14159265f / 180.0f;
-
-void format(char *out, std::size_t n, std::int32_t value, int decimals)
-{
-    if (decimals == 1) {
-        const std::int32_t whole = value / 10, tenth = std::abs(value % 10);
-        std::snprintf(out, n, "%s%d.%d", value < 0 && whole == 0 ? "-" : "", static_cast<int>(whole),
-                      static_cast<int>(tenth));
-    } else {
-        std::snprintf(out, n, "%d", static_cast<int>(value));
-    }
-}
 
 void animate(void *var, void *owner, std::int32_t from, std::int32_t to, lv_anim_custom_exec_cb_t exec)
 {
@@ -41,216 +25,8 @@ void animate(void *var, void *owner, std::int32_t from, std::int32_t to, lv_anim
 
 Dial::Dial(lv_obj_t *parent, const DialSpec &spec) : m_spec(spec)
 {
-    if (spec.arc > 0) {
-        m_root = lv_obj_create(parent);
-        make_arc();
-        return;
-    }
-    const std::int32_t S = spec.size, band = std::max<std::int32_t>(3, S * 18 / 1000);
-    m_major_len = std::max<std::int32_t>(7, S * (spec.bold ? 75 : 55) / 1000);
-    const std::int32_t minor_len = std::max<std::int32_t>(4, S * (spec.bold ? 50 : 28) / 1000);
     m_root = lv_obj_create(parent);
-    lv_obj_remove_style_all(m_root);
-    lv_obj_set_size(m_root, S, S);
-    lv_obj_remove_flag(m_root, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_remove_flag(m_root, LV_OBJ_FLAG_CLICKABLE);
-
-    m_scale = lv_scale_create(m_root);
-    lv_obj_set_size(m_scale, S, S);
-    lv_obj_center(m_scale);
-    lv_scale_set_mode(m_scale, LV_SCALE_MODE_ROUND_INNER);
-    lv_scale_set_range(m_scale, spec.min, spec.max);
-    lv_scale_set_total_tick_count(m_scale, static_cast<std::uint32_t>(spec.ticks));
-    lv_scale_set_major_tick_every(m_scale, static_cast<std::uint32_t>(spec.major));
-    lv_scale_set_angle_range(m_scale, static_cast<std::uint32_t>(spec.sweep));
-    lv_scale_set_rotation(m_scale, spec.start);
-    lv_obj_set_style_arc_width(m_scale, band, LV_PART_MAIN);
-    lv_obj_set_style_arc_opa(m_scale, LV_OPA_TRANSP, LV_PART_MAIN);
-    lv_obj_set_style_arc_rounded(m_scale, false, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(m_scale, 0, LV_PART_MAIN);
-    lv_obj_set_style_radial_offset(m_scale, -S * 2 / 100, LV_PART_INDICATOR);
-    lv_obj_set_style_radial_offset(m_scale, -S * 2 / 100, LV_PART_ITEMS);
-    lv_obj_set_style_length(m_scale, m_major_len, LV_PART_INDICATOR);
-    lv_obj_set_style_length(m_scale, minor_len, LV_PART_ITEMS);
-    lv_obj_set_style_line_width(m_scale, spec.bold ? std::max<std::int32_t>(4, S / 50) : std::max<std::int32_t>(2, S / 110),
-                                LV_PART_INDICATOR);
-    lv_obj_set_style_line_width(m_scale, spec.bold ? std::max<std::int32_t>(3, S / 70) : std::max<std::int32_t>(1, S / 220),
-                                LV_PART_ITEMS);
-    lv_obj_set_style_line_rounded(m_scale, true, LV_PART_INDICATOR);
-    lv_obj_set_style_line_rounded(m_scale, spec.bold, LV_PART_ITEMS);
-    if (spec.ends) {
-        format(m_ends[0], sizeof m_ends[0], spec.min, spec.decimals);
-        format(m_ends[1], sizeof m_ends[1], spec.max, spec.decimals);
-        const int majors = (spec.ticks - 1) / spec.major + 1;
-        for (int i = 0; i < majors && i < 70; ++i) {
-            m_src[i] = i == 0 ? m_ends[0] : i == majors - 1 ? m_ends[1] : "";
-        }
-        m_src[std::min(majors, 70)] = nullptr;
-        lv_scale_set_text_src(m_scale, m_src);
-        lv_scale_set_label_show(m_scale, true);
-        lv_obj_set_style_text_font(m_scale, fonts::label(), LV_PART_INDICATOR);
-        lv_obj_set_style_pad_radial(m_scale, 8, LV_PART_INDICATOR);
-    } else {
-        lv_scale_set_label_show(m_scale, false);
-    }
-
-    for (int i = 0; i < spec.zone_count && i < 6; ++i) {
-        lv_style_init(&m_zone_styles[i]);
-        lv_style_set_arc_width(&m_zone_styles[i], band);
-        lv_style_set_arc_opa(&m_zone_styles[i], 70);
-        m_zones[i] = lv_scale_add_section(m_scale);
-        lv_scale_section_set_range(m_zones[i], spec.zones[i].from, spec.zones[i].to);
-        lv_scale_section_set_style(m_zones[i], LV_PART_MAIN, &m_zone_styles[i]);
-    }
-
-    m_r_tick = S / 2 - band - S * 2 / 100;
-    const std::int32_t arc_w = std::max<std::int32_t>(5, S * 45 / 1000);
-    if (spec.fill) {
-        const std::int32_t inset = band + m_major_len + S * 6 / 100;
-        m_arc = lv_arc_create(m_root);
-        m_r_arc = (S - 2 * inset) / 2 - arc_w / 2;
-        lv_obj_set_size(m_arc, S - 2 * inset, S - 2 * inset);
-        lv_obj_center(m_arc);
-        lv_arc_set_rotation(m_arc, static_cast<std::uint32_t>(spec.start));
-        lv_arc_set_bg_angles(m_arc, 0, static_cast<std::uint32_t>(spec.sweep));
-        lv_arc_set_range(m_arc, spec.min, spec.max);
-        lv_obj_remove_flag(m_arc, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_set_style_arc_width(m_arc, arc_w, LV_PART_MAIN);
-        lv_obj_set_style_arc_width(m_arc, arc_w, LV_PART_INDICATOR);
-        lv_obj_set_style_bg_opa(m_arc, LV_OPA_TRANSP, LV_PART_KNOB);
-        lv_obj_set_style_pad_all(m_arc, 0, LV_PART_KNOB);
-        lv_obj_set_style_pad_all(m_arc, 0, LV_PART_MAIN);
-    }
-    if (spec.target) {
-        m_knob = lv_obj_create(m_root);
-        lv_obj_remove_style_all(m_knob);
-        lv_obj_set_size(m_knob, arc_w * 2 + 4, arc_w * 2 + 4);
-        lv_obj_set_style_radius(m_knob, LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_bg_color(m_knob, lv_color_hex(0xffffff), 0);
-        lv_obj_set_style_bg_opa(m_knob, LV_OPA_COVER, 0);
-        lv_obj_set_style_shadow_width(m_knob, 10, 0);
-        lv_obj_set_style_shadow_offset_y(m_knob, 2, 0);
-        lv_obj_set_style_shadow_opa(m_knob, 110, 0);
-        lv_obj_add_flag(m_knob, LV_OBJ_FLAG_IGNORE_LAYOUT);
-    }
-    if (spec.needle || spec.span) {
-        m_needle = lv_line_create(m_root);
-        lv_obj_set_style_line_width(m_needle, std::max<std::int32_t>(3, S * 16 / 1000), 0);
-        lv_obj_set_style_line_rounded(m_needle, true, 0);
-        lv_obj_add_flag(m_needle, LV_OBJ_FLAG_IGNORE_LAYOUT);
-    }
-    if (spec.span) {
-        m_mark = lv_line_create(m_root);
-        lv_obj_set_style_line_width(m_mark, std::max<std::int32_t>(5, S * 24 / 1000), 0);
-        lv_obj_set_style_line_rounded(m_mark, true, 0);
-        lv_obj_add_flag(m_mark, LV_OBJ_FLAG_IGNORE_LAYOUT);
-    }
-
-    m_face = lv_image_create(m_root);
-    lv_obj_remove_style_all(m_face);
-    lv_obj_add_flag(m_face, LV_OBJ_FLAG_IGNORE_LAYOUT);
-    lv_obj_set_hidden(m_face, true);
-    lv_obj_move_to_index(m_face, 1);
-    lv_obj_add_event_cb(
-        m_root,
-        [](lv_event_t *e) {
-            auto *d = static_cast<Dial *>(lv_event_get_user_data(e));
-            if (d->m_face_timer != nullptr) {
-                lv_timer_delete(d->m_face_timer);
-            }
-            if (d->m_face_buf != nullptr) {
-                lv_draw_buf_destroy(d->m_face_buf);
-            }
-        },
-        LV_EVENT_DELETE, this);
-
-    lv_obj_t *mid = lv_obj_create(m_root);
-    lv_obj_remove_style_all(mid);
-    lv_obj_set_size(mid, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(mid, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(mid, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_center(mid);
-    m_read = text(mid, spec.read, "");
-    if (spec.unit != nullptr) {
-        m_unit = text(mid, Role::Label, spec.unit, Ink::Secondary);
-    }
-    restyle();
-    on_restyle(m_root, [](void *ctx) { static_cast<Dial *>(ctx)->restyle(); }, this);
-    m_value = m_target = spec.min;
-    set_value(spec.min, false);
-    if (spec.target || spec.span) {
-        set_target(spec.min, false);
-    }
-}
-
-void Dial::restyle()
-{
-    const lv_color_t ink = colour(Ink::Primary);
-    for (lv_part_t part : {LV_PART_INDICATOR, LV_PART_ITEMS}) {
-        lv_obj_set_style_line_color(m_scale, ink, part);
-        lv_obj_set_style_line_opa(m_scale, colours().tick_opa, part);
-    }
-    lv_obj_set_style_text_color(m_scale, ink, LV_PART_INDICATOR);
-    lv_obj_set_style_text_opa(m_scale, colours().ink3_opa, LV_PART_INDICATOR);
-    for (int i = 0; i < m_spec.zone_count && i < 6; ++i) {
-        lv_style_set_arc_color(&m_zone_styles[i], colour(m_spec.zones[i].ink));
-    }
-    if (m_lit_section != nullptr) {
-        lv_style_set_line_color(&m_lit_style, colour(Ink::Accent));
-    }
-    if (m_arc != nullptr) {
-        lv_obj_set_style_arc_color(m_arc, colour(Ink::Primary), LV_PART_MAIN);
-        lv_obj_set_style_arc_opa(m_arc, colours().fill_opa, LV_PART_MAIN);
-        lv_obj_set_style_arc_color(m_arc, colour(Ink::Accent), LV_PART_INDICATOR);
-    }
-    if (m_needle != nullptr) {
-        lv_obj_set_style_line_color(m_needle, ink, 0);
-    }
-    if (m_mark != nullptr) {
-        lv_obj_set_style_line_color(m_mark, colour(Ink::Accent), 0);
-    }
-    lv_obj_invalidate(m_root);
-    stale_face();
-}
-
-// The scale, its ticks, figures and zones, as a picture: drawn live, every
-// small redraw on the dial, a needle's or the readout's, goes through each
-// tick again. While the picture is being made again the scale shows itself.
-void Dial::stale_face()
-{
-    if (!lv_obj_is_hidden(m_face)) {
-        lv_obj_set_hidden(m_face, true);
-        lv_obj_set_hidden(m_scale, false);
-    }
-    if (m_face_timer == nullptr) {
-        m_face_timer = lv_timer_create(
-            [](lv_timer_t *t) {
-                auto *d         = static_cast<Dial *>(lv_timer_get_user_data(t));
-                d->m_face_timer = nullptr;
-                d->make_face();
-            },
-            0, this);
-        lv_timer_set_repeat_count(m_face_timer, 1);
-    }
-}
-
-void Dial::make_face()
-{
-    // under a fade the picture would take the fade in and be faded again
-    if (lv_obj_get_style_opa_recursive(m_scale, LV_PART_MAIN) < LV_OPA_COVER) {
-        return;
-    }
-    if (m_face_buf == nullptr) {
-        m_face_buf = lv_snapshot_create_draw_buf(m_scale, LV_COLOR_FORMAT_ARGB8888);
-    }
-    if (m_face_buf == nullptr || lv_snapshot_take_to_draw_buf(m_scale, LV_COLOR_FORMAT_ARGB8888, m_face_buf) != LV_RESULT_OK) {
-        return;
-    }
-    const std::int32_t ext = (static_cast<std::int32_t>(m_face_buf->header.w) - lv_obj_get_width(m_scale)) / 2;
-    lv_image_set_src(m_face, m_face_buf);
-    lv_obj_set_pos(m_face, lv_obj_get_x(m_scale) - ext, lv_obj_get_y(m_scale) - ext);
-    lv_obj_set_hidden(m_face, false);
-    lv_obj_set_hidden(m_scale, true);
+    make_arc();
 }
 
 float Dial::angle_of(std::int32_t value) const
@@ -261,203 +37,18 @@ float Dial::angle_of(std::int32_t value) const
                 static_cast<float>(m_spec.max - m_spec.min)) * DEG;
 }
 
-void Dial::place_needle(std::int32_t value)
+void Dial::set_value(std::int32_t value, bool)
 {
-    if (m_needle != nullptr) {
-        place_line(m_needle, m_points, value, static_cast<float>(m_r_tick) + 2.0f,
-                   static_cast<float>(m_r_tick - m_major_len * 17 / 10));
+    const bool none = value == INT32_MIN;
+    if (!none) {
+        m_value = std::clamp(value, m_spec.min, m_spec.max);
+        lv_arc_set_value(m_arc, m_value);  // sets nothing when it is there already
+    }
+    if (none != m_none) {
+        m_none = none;
+        restyle_arc();
     }
 }
-
-void Dial::place_line(lv_obj_t *line, lv_point_precise_t *points, std::int32_t value, float r0, float r1)
-{
-    const float a = angle_of(value), c = m_spec.size / 2.0f;
-    const auto x0 = static_cast<std::int32_t>(c + r0 * std::cos(a)), y0 = static_cast<std::int32_t>(c + r0 * std::sin(a));
-    const auto x1 = static_cast<std::int32_t>(c + r1 * std::cos(a)), y1 = static_cast<std::int32_t>(c + r1 * std::sin(a));
-    // the line only as big as the needle: a move then redraws two small boxes
-    // rather than the whole face, with every tick and the readout under it
-    const std::int32_t left = std::min(x0, x1), top = std::min(y0, y1);
-    const lv_point_precise_t p0{static_cast<lv_value_precise_t>(x0 - left), static_cast<lv_value_precise_t>(y0 - top)};
-    const lv_point_precise_t p1{static_cast<lv_value_precise_t>(x1 - left), static_cast<lv_value_precise_t>(y1 - top)};
-    const std::int32_t w = std::abs(x1 - x0) + 1, h = std::abs(y1 - y0) + 1;
-    if (lv_obj_get_style_x(line, LV_PART_MAIN) == left && lv_obj_get_style_y(line, LV_PART_MAIN) == top &&
-        lv_obj_get_style_width(line, LV_PART_MAIN) == w && lv_obj_get_style_height(line, LV_PART_MAIN) == h &&
-        points[0].x == p0.x && points[0].y == p0.y && points[1].x == p1.x && points[1].y == p1.y) {
-        return;  // a spring's tail often lands on the same pixel a few frames running
-    }
-    points[0] = p0;
-    points[1] = p1;
-    lv_obj_set_pos(line, left, top);
-    lv_obj_set_size(line, w, h);
-    lv_line_set_points(line, points, 2);
-}
-
-void Dial::place_target(std::int32_t value)
-{
-    if (m_mark != nullptr) {
-        place_line(m_mark, m_mark_points, value, static_cast<float>(m_r_tick) + 6.0f,
-                   static_cast<float>(m_r_tick - m_major_len * 22 / 10));
-    }
-    if (m_arc != nullptr) {
-        lv_arc_set_value(m_arc, value);
-    }
-    if (m_knob != nullptr && m_arc != nullptr) {
-        const float r = static_cast<float>(m_r_arc), a = angle_of(value), c = m_spec.size / 2.0f;
-        const std::int32_t k = lv_obj_get_style_width(m_knob, LV_PART_MAIN);
-        const std::int32_t x = static_cast<std::int32_t>(c + r * std::cos(a)) - k / 2;
-        const std::int32_t y = static_cast<std::int32_t>(c + r * std::sin(a)) - k / 2;
-        if (lv_obj_get_style_x(m_knob, LV_PART_MAIN) != x || lv_obj_get_style_y(m_knob, LV_PART_MAIN) != y) {
-            lv_obj_set_pos(m_knob, x, y);
-        }
-    }
-}
-
-void Dial::show_value(std::int32_t value)
-{
-    if (value == m_shown) {
-        return;
-    }
-    m_shown = value;
-    char buf[16];
-    format(buf, sizeof buf, value, m_spec.decimals);
-    lv_label_set_text(m_read, buf);
-}
-
-void Dial::light_zone(std::int32_t value)
-{
-    int zone = -1;
-    for (int i = 0; i < m_spec.zone_count && i < 6; ++i) {
-        if (value >= m_spec.zones[i].from && value <= m_spec.zones[i].to) {
-            zone = i;
-        }
-    }
-    if (zone == m_zone) {
-        return;
-    }
-    m_zone = zone;
-    for (int i = 0; i < m_spec.zone_count && i < 6; ++i) {
-        lv_style_set_arc_opa(&m_zone_styles[i], i == zone ? LV_OPA_COVER : 70);
-    }
-    lv_obj_invalidate(m_scale);
-    stale_face();
-}
-
-void Dial::on_value(void *var, int32_t v)
-{
-    auto *d = static_cast<Dial *>(static_cast<lv_anim_t *>(var)->user_data);
-    d->place_needle(v);
-    if (!d->m_spec.span) {
-        d->show_value(v);
-    }
-}
-
-void Dial::on_target(void *var, int32_t v)
-{
-    auto *d = static_cast<Dial *>(static_cast<lv_anim_t *>(var)->user_data);
-    d->place_target(v);
-    if (!d->m_spec.needle || d->m_spec.span) {
-        d->show_value(v);
-    }
-}
-
-void Dial::set_value(std::int32_t value, bool animate_it)
-{
-    if (m_spec.arc > 0) {
-        const bool none = value == INT32_MIN;
-        if (!none) {
-            m_value = std::clamp(value, m_spec.min, m_spec.max);
-            lv_arc_set_value(m_arc, m_value);  // sets nothing when it is there already
-        }
-        if (none != m_none) {
-            m_none = none;
-            restyle_arc();
-        }
-        return;
-    }
-    const std::int32_t from = m_value;
-    m_value = value;
-    light_zone(value);
-    light_span();
-    lv_anim_delete(&m_value, nullptr);
-    if (!animate_it || from == value) {
-        place_needle(value);
-        if (!m_spec.span) {
-            show_value(value);
-        }
-        return;
-    }
-    animate(&m_value, this, from, value, [](lv_anim_t *a, int32_t v) { on_value(a, v); });
-}
-
-void Dial::set_target(std::int32_t value, bool animate_it)
-{
-    if (m_spec.arc > 0) {
-        set_value(value, animate_it);
-        return;
-    }
-    const std::int32_t from = m_target;
-    m_target = value;
-    light_span();
-    lv_anim_delete(&m_target, nullptr);
-    if (!animate_it || from == value) {
-        place_target(value);
-        if (!m_spec.needle || m_spec.span) {
-            show_value(value);
-        }
-        return;
-    }
-    animate(&m_target, this, from, value, [](lv_anim_t *a, int32_t v) { on_target(a, v); });
-}
-
-// Ticks from the reading up to the target, only while it is below it: the
-// span snaps to where the two are going, and the marks follow on the spring,
-// so the face is drawn again once a change rather than every frame of it.
-void Dial::light_span()
-{
-    if (!m_spec.span) {
-        return;
-    }
-    std::int32_t lo = 0, hi = -1;
-    if (m_target > m_value) {
-        lo = m_value, hi = m_target;
-    }
-    if (lo == m_span_lo && hi == m_span_hi) {
-        return;
-    }
-    m_span_lo = lo, m_span_hi = hi;
-    m_lit = -1;
-    set_lit(0);
-    lv_scale_section_set_range(m_lit_section, lo, hi < lo ? lo - 1 : hi);
-}
-
-void Dial::set_caption(const char *caption)
-{
-    if (m_unit != nullptr && std::strcmp(lv_label_get_text(m_unit), caption) != 0) {
-        lv_label_set_text(m_unit, caption);
-    }
-}
-
-void Dial::set_lit(int ticks)
-{
-    if (ticks == m_lit) {
-        return;
-    }
-    m_lit = ticks;
-    if (m_lit_section == nullptr) {
-        lv_style_init(&m_lit_style);
-        lv_style_set_line_color(&m_lit_style, colour(Ink::Accent));
-        lv_style_set_line_opa(&m_lit_style, LV_OPA_COVER);
-        m_lit_section = lv_scale_add_section(m_scale);
-        lv_scale_section_set_style(m_lit_section, LV_PART_INDICATOR, &m_lit_style);
-        lv_scale_section_set_style(m_lit_section, LV_PART_ITEMS, &m_lit_style);
-    }
-    const std::int32_t step = (m_spec.max - m_spec.min) / std::max<std::int32_t>(1, m_spec.ticks - 1);
-    lv_scale_section_set_range(m_lit_section, m_spec.min, ticks <= 0 ? m_spec.min - 1 : m_spec.min + step * (ticks - 1));
-    lv_obj_invalidate(m_scale);
-    stale_face();
-}
-
-// --- arc dials ---------------------------------------------------------------
 
 void Dial::make_arc()
 {
@@ -670,13 +261,11 @@ Rail::Rail(lv_obj_t *parent, const RailSpec &spec) : m_spec(spec)
         lv_obj_set_pos(m_track, v ? END + (TRACK - LINE) / 2 : END, v ? END : END + (TRACK - LINE) / 2);
     }
 
-    if (spec.fill) {
-        m_fill = lv_obj_create(m_track);
-        lv_obj_remove_style_all(m_fill);
-        lv_obj_set_style_radius(m_fill, LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_bg_opa(m_fill, LV_OPA_COVER, 0);
-        lv_obj_remove_flag(m_fill, LV_OBJ_FLAG_CLICKABLE);
-    }
+    m_fill = lv_obj_create(m_track);
+    lv_obj_remove_style_all(m_fill);
+    lv_obj_set_style_radius(m_fill, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(m_fill, LV_OPA_COVER, 0);
+    lv_obj_remove_flag(m_fill, LV_OBJ_FLAG_CLICKABLE);
     for (int i = 0; i < spec.notch_count; ++i) {
         lv_obj_t *n = lv_obj_create(m_track);
         lv_obj_remove_style_all(n);
@@ -736,10 +325,8 @@ Rail::Rail(lv_obj_t *parent, const RailSpec &spec) : m_spec(spec)
 
 void Rail::restyle()
 {
-    if (m_fill != nullptr) {
-        lv_obj_set_style_bg_color(m_fill, colour(m_spec.quiet ? Ink::Primary : Ink::Accent), 0);
-    }
-    lv_obj_set_style_bg_color(m_knob, m_spec.fill ? lv_color_hex(0xffffff) : colour(Ink::Accent), 0);
+    lv_obj_set_style_bg_color(m_fill, colour(m_spec.quiet ? Ink::Primary : Ink::Accent), 0);
+    lv_obj_set_style_bg_color(m_knob, lv_color_hex(0xffffff), 0);
     for (std::uint32_t i = 0; i < lv_obj_get_child_count(m_track); ++i) {
         lv_obj_t *n = lv_obj_get_child(m_track, static_cast<int32_t>(i));
         if (lv_obj_has_flag(n, LV_OBJ_FLAG_USER_1)) {
@@ -769,14 +356,12 @@ void Rail::place(std::int32_t value)
             lv_obj_set_pos(obj, x, y);
         }
     };
-    if (m_fill != nullptr) {
-        const std::int32_t thick = m_spec.quiet ? 4 : TRACK;  // a quiet track's line, which would cut a thicker fill in half
-        const std::int32_t w = v ? thick : at + TRACK, h = v ? at + TRACK : thick;
-        if (lv_obj_get_style_width(m_fill, LV_PART_MAIN) != w || lv_obj_get_style_height(m_fill, LV_PART_MAIN) != h) {
-            lv_obj_set_size(m_fill, w, h);
-        }
-        put(m_fill, 0, v ? len - at - TRACK : 0);
+    const std::int32_t thick = m_spec.quiet ? 4 : TRACK;  // a quiet track's line, which would cut a thicker fill in half
+    const std::int32_t w = v ? thick : at + TRACK, h = v ? at + TRACK : thick;
+    if (lv_obj_get_style_width(m_fill, LV_PART_MAIN) != w || lv_obj_get_style_height(m_fill, LV_PART_MAIN) != h) {
+        lv_obj_set_size(m_fill, w, h);
     }
+    put(m_fill, 0, v ? len - at - TRACK : 0);
     const std::int32_t knob_at = at + TRACK / 2 - KNOB / 2;
     put(m_knob, v ? 0 : END + knob_at, v ? END + len - knob_at - KNOB : 0);
 }
