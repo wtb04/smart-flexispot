@@ -1,6 +1,6 @@
-#include "ui_internal.h"
+#include "ui_core.h"
+#include "media_model.h"
 #include "focus_model.h"
-#include "focus_view.h"
 #include "diagnostics_model.h"
 #include "home_model.h"
 #include "notices_model.h"
@@ -10,12 +10,16 @@
 #include "status_model.h"
 #include "topics.h"
 
-#ifndef SHOT_DESK_CARD
-#define SHOT_DESK_CARD 0
-#endif
-#ifndef SHOT_ENABLED
-#define SHOT_ENABLED 0
-#endif
+#include "esp_check.h"
+#include "esp_heap_caps.h"
+#include "esp_lvgl_port.h"
+#include "media.h"
+#include "units.h"
+
+#include <algorithm>
+#include <cstdio>
+#include <cstring>
+#include <utility>
 
 namespace ui::detail {
 namespace {
@@ -24,7 +28,6 @@ constexpr std::uint32_t APPLY_PERIOD_MS = 20;
 constexpr int DEFAULT_BRIGHTNESS_PERCENT = 80;
 }  // namespace
 
-bool        s_dock_right         = true;
 Orientation s_orientation        = Orientation::Normal;
 int         s_initial_brightness = DEFAULT_BRIGHTNESS_PERCENT;
 Handlers    s_handlers{};
@@ -1073,10 +1076,9 @@ esp_err_t notify(const char *source, const char *title, const char *message, Lev
 }
 
 esp_err_t init(const Handlers &handlers, int initial_brightness, std::uint32_t accent,
-               bool dock_right, Orientation orientation)
+               Orientation orientation)
 {
     ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
-    s_dock_right         = dock_right;
     s_orientation        = orientation;
     s_handlers           = handlers;
     s_initial_brightness = initial_brightness;
@@ -1110,7 +1112,7 @@ esp_err_t build()
         lvgl_port_unlock();
         vTaskDelay(BETWEEN_PARTS);
     }
-    ESP_LOGI(TAG, "built behind the splash in %u ms", static_cast<unsigned>(lv_tick_elaps(from)));
+    ESP_LOGI(TAG, "built in %u ms", static_cast<unsigned>(lv_tick_elaps(from)));
     return ESP_OK;
 }
 

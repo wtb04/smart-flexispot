@@ -1,6 +1,4 @@
-// The screen as the design kit draws it, on the shared core in ui.cpp: being
-// built beside classic_front.cpp, which the panel still runs, until it does
-// all that one does.
+// The screen as the design kit draws it, on the shared core in ui.cpp.
 
 #include "kit_front.h"
 
@@ -8,14 +6,17 @@
 #include "esp_timer.h"
 #endif
 
+#include "screenshot.h"
 #include "settings_model.h"
-#include "theme.h"  // the radar keeps the old one's map and planes, and their styles
-#include "units_font.h"
 #include "status_model.h"
 #include "topics.h"
 
-#include <cstdio>
+#include <iterator>
 #include <utility>
+
+#ifndef SHOT_ENABLED
+#define SHOT_ENABLED 0
+#endif
 
 namespace ui::kitfront {
 namespace {
@@ -67,6 +68,35 @@ void follow_away()
     subscribe(Topic::Status, detail::kNoView, away);
     subscribe(Topic::Settings, detail::kNoView, away);
 }
+
+// Development: a picture of each page wanted to the console for
+// tools/screenshot.py, a little after boot. Each holds the LVGL lock for
+// several seconds, so it is off unless built with SHOT_ENABLED. One page a
+// tick, so each is drawn before it is taken; the presence gate is lifted
+// meanwhile, as the pages it hides are the ones most often worth a look.
+constexpr std::uint32_t SHOT_START_MS = 25000;
+constexpr std::uint32_t SHOT_PAGE_MS  = 2000;
+
+void take_screenshots(lv_timer_t *timer)
+{
+    static const int PAGES[] = {detail::CALENDAR_PAGE};
+    static int       step    = -1;
+    static bool      gated   = false;
+    if (step >= 0) {
+        screenshot();
+    } else {
+        gated                   = detail::s_presence_gate;
+        detail::s_presence_gate = false;
+    }
+    if (++step < static_cast<int>(std::size(PAGES))) {
+        detail::select_page(PAGES[step]);
+        lv_timer_set_period(timer, SHOT_PAGE_MS);
+        return;
+    }
+    detail::s_presence_gate = gated;
+    detail::select_page(detail::HOME_PAGE);
+    lv_timer_delete(timer);
+}
 }  // namespace
 
 bool owner_away() { return detail::s_presence_gate && !detail::status_state().present; }
@@ -85,11 +115,6 @@ void init(std::uint32_t accent)
     kit::init(kit::Look::Dark);
     if (accent != 0) {
         kit::set_accent(accent);
-    }
-    fonts::init();
-    theme::init_accents();
-    if (accent != 0) {
-        theme::set_primary(accent);
     }
     kit::screen(lv_screen_active());
     // Asked for a frame twice a refresh rather than about once: at 16 ms the
@@ -134,6 +159,9 @@ bool build_next_part()
             });
             detail::start_screen_schedule();
             detail::status_splash_gone();  // no start-up screen yet: what waits for it may show
+            if (SHOT_ENABLED) {
+                lv_timer_create(take_screenshots, SHOT_START_MS, nullptr);
+            }
             return true;
         default:
             return false;
@@ -145,7 +173,7 @@ void apply() {}
 
 namespace ui::detail {
 bool s_presence_gate = true;  // the gate, as the radar's bench lifts it
-bool owner_away() { return kitfront::owner_away(); }  // the radar's, which the old screen's nav.cpp has
+bool owner_away() { return kitfront::owner_away(); }
 
 void select_page(int index)
 {
@@ -155,18 +183,3 @@ void select_page(int index)
     kit::show_page(kitfront::KIT_OF[index], true);
 }
 }  // namespace ui::detail
-
-namespace ui {
-esp_err_t splash_step(const char *) { return ESP_OK; }  // the start-up screen comes later
-esp_err_t splash_done() { return ESP_OK; }
-
-// The benches of the old screen's dock and pages; the kit's own is the lab's.
-namespace {
-int not_here(char *out, std::size_t size)
-{
-    return std::snprintf(out, size, "not in the design kit's screen: its bench is /bench?lab\n");
-}
-}  // namespace
-int bench_desk_card(char *out, std::size_t size) { return not_here(out, size); }
-int bench_pages(char *out, std::size_t size) { return not_here(out, size); }
-}  // namespace ui

@@ -1,25 +1,24 @@
-// The radar as the design kit's screen has it: the old screen's map, planes
-// and zoom, kept, under the kit's chips and column. Forked from radar_page.cpp,
-// which goes with the old screen.
+// The radar page: the map, its planes and zoom, under the kit's chips and column.
 
 #include "radar_page.h"
 
 #include "kit.h"
 #include "kit_fonts.h"
 
-#include "ui_internal.h"
 #include "radar_model.h"
+#include "ui_core.h"
 #include "topics.h"
 
 #if REMOTE_ENABLED
 #include "lvgl_private.h"  // for the bench, the areas waiting to be drawn
 #endif
 
+#include "board.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "map_data.h"
-#include "theme.h"
 #include "icons.h"
+#include "units.h"
 
 #include <algorithm>
 #include <cmath>
@@ -34,8 +33,7 @@
 #endif
 
 namespace ui {
-// The old theme's names over the kit's look, so the radar's own code reads as
-// it did and draws in the kit's colours and type.
+// The radar's own names for the kit's colours, sizes and type.
 namespace look {
 namespace space {
 inline constexpr std::int32_t xs = 4, s = 8, m = 16, l = 24;
@@ -278,11 +276,10 @@ constexpr float         UPPER_INK_TO_TEXT = 0.45f;
 constexpr int           LEVEL_FLIGHT_FPM  = 245;
 
 constexpr std::int32_t COLUMN_W   = 294;
-constexpr std::int32_t COLUMN_GAP = look::space::m;
 
 // Both cards in the column are inset by the same amount, so the callsign, the
 // readings and the photograph all start on one edge.
-constexpr std::int32_t INSET          = detail::PANEL_PAD;
+constexpr std::int32_t INSET          = look::space::m;
 constexpr std::int32_t INNER_W        = COLUMN_W - 2 * INSET;
 constexpr std::int32_t PHOTO_ASPECT_W = 3;
 constexpr std::int32_t PHOTO_ASPECT_H = 2;
@@ -391,12 +388,7 @@ lv_obj_t *s_zoom_in     = nullptr;
 lv_obj_t *s_zoom_out    = nullptr;
 int       s_range_step  = INITIAL_RANGE_STEP;
 
-// The two cards, the scope's and the column beside it, on Home; on the radar
-// page they become the map, to the page's every edge, with the column over it.
-// One radar, moved between the two as the page changes.
-lv_obj_t    *s_home_area      = nullptr;  // Home's place for them
-std::int32_t s_home_w    = 0;
-std::int32_t s_home_h    = 0;
+// The map, to the page's every edge, with the column over it.
 lv_obj_t    *s_bezel     = nullptr;
 lv_obj_t    *s_column    = nullptr;
 lv_obj_t    *s_map_page      = nullptr;  // the radar page, which the map fills
@@ -3299,7 +3291,7 @@ void lay_out_map()
 {
     const std::int32_t w      = s_map_w;
     const std::int32_t h      = s_map_h;
-    const std::int32_t area_w = w - COLUMN_W - detail::GAP;  // the map beside the column
+    const std::int32_t area_w = w - COLUMN_W - look::space::m;  // the map beside the column
     lv_obj_set_parent(s_bezel, s_map_page);
     lv_obj_set_style_bg_opa(s_bezel, LV_OPA_TRANSP, 0);
     lv_obj_set_pos(s_bezel, 0, 0);
@@ -3311,11 +3303,11 @@ void lay_out_map()
     place_summary(area_w, h);
 
     lv_obj_set_parent(s_column, s_map_page);
-    lv_obj_set_pos(s_column, area_w, detail::GAP);
-    lv_obj_set_size(s_column, COLUMN_W, h - 2 * detail::GAP);
+    lv_obj_set_pos(s_column, area_w, look::space::m);
+    lv_obj_set_size(s_column, COLUMN_W, h - 2 * look::space::m);
     lv_obj_set_style_bg_color(s_column, lv_color_hex(look::background()), 0);
     lv_obj_set_style_bg_opa(s_column, FLOATING_COLUMN_OPA, 0);
-    place_readings_at(h - 2 * detail::GAP);
+    place_readings_at(h - 2 * look::space::m);
     show_radar(*s_last);
 }
 
@@ -3344,11 +3336,6 @@ void build_radar_page(lv_obj_t *page, std::int32_t width, std::int32_t height)
     s_map_page        = page;
     s_map_w      = width;
     s_map_h      = height;
-    if (s_home_area == nullptr) {  // no place on Home: the cards on the radar page
-        s_home_area   = page;
-        s_home_w = width;
-        s_home_h = height;
-    }
     s_shown_range = static_cast<float>(RANGES[s_range_step]);
     s_bezel       = kit::tile(page, kit::Lift::Low);
     lv_obj_set_style_pad_all(s_bezel, 0, 0);
@@ -3947,24 +3934,6 @@ bool radar_choose(const char *hex)
     return true;
 }
 
-
-std::int32_t radar_cards_width(std::int32_t height)
-{
-    return height + COLUMN_GAP + COLUMN_W;
-}
-
-void radar_home_area(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int32_t w, std::int32_t h)
-{
-    s_home_area = lv_obj_create(parent);
-    lv_obj_remove_style_all(s_home_area);
-    lv_obj_set_pos(s_home_area, x, y);
-    lv_obj_set_size(s_home_area, w, h);
-    lv_obj_set_scrollable(s_home_area, false);
-    s_home_w = w;
-    s_home_h = h;
-    // Away with the radar page while the phone is, as the feed stops then.
-    detail::subscribe(detail::Topic::Page, detail::kNoView, [] { lv_obj_set_hidden(s_home_area, detail::owner_away()); });
-}
 
 void set_radar_range(int km)
 {
