@@ -33,6 +33,7 @@ constexpr std::uint32_t REFRESH_MS = 30 * units::kMsPerSecond;
 constexpr int           AFTER_ROWS = 4;
 constexpr float         KM_PER_NM  = 1.852f;
 constexpr float         OVERHEAD_KM = 80.0f;  // as far as the radar's page looks at first
+constexpr std::uint32_t LOOKUP_EVERY_MS = 30 * units::kMsPerSecond;
 constexpr std::int32_t  DOT = 10;
 
 void set_text_if(lv_obj_t *label, const char *value)
@@ -444,6 +445,7 @@ void build_next(lv_obj_t *grid)
 KIT_IN_PSRAM radar::Snapshot s_sky;
 char         s_held[radar::kHexLen] = "";
 char         s_asked[radar::kHexLen] = "";  // whose photo was asked for, this time Home is up
+char         s_photo_of[radar::kHexLen] = "";  // whose photo the widget shows
 std::uint32_t s_photo_stamp = 0;
 Cover       *s_plane = nullptr;
 lv_obj_t    *s_sky_tile = nullptr, *s_sky_some = nullptr, *s_sky_none = nullptr, *s_sky_why = nullptr;
@@ -459,28 +461,21 @@ const char *compass(float bearing)
 
 // The most notable in range, a heavy cruising over a 737 climbing out, the
 // nearer of two alike; the one shown stays while it is as notable as any.
+// The closest aircraft in the air.
 const radar::Aircraft *pick_overhead()
 {
-    const radar::Aircraft *best = nullptr, *held = nullptr;
-    int                    best_score = -1, held_score = -1;
+    const radar::Aircraft *closest = nullptr;
     for (int i = 0; i < s_sky.count; ++i) {
         const radar::Aircraft &a = s_sky.list[i];
         if (a.on_ground || a.distance_nm * KM_PER_NM > OVERHEAD_KM) {
             continue;
         }
-        const int score = radar::ranking(a, radar::known_without_photo(a.hex));
-        if (score > best_score || (score == best_score && a.distance_nm < best->distance_nm)) {
-            best       = &a;
-            best_score = score;
-        }
-        if (std::strcmp(a.hex, s_held) == 0) {
-            held       = &a;
-            held_score = score;
+        if (closest == nullptr || a.distance_nm < closest->distance_nm) {
+            closest = &a;
         }
     }
-    const radar::Aircraft *chosen = held != nullptr && held_score >= best_score ? held : best;
-    std::snprintf(s_held, sizeof(s_held), "%s", chosen != nullptr ? chosen->hex : "");
-    return chosen;
+    std::snprintf(s_held, sizeof(s_held), "%s", closest != nullptr ? closest->hex : "");
+    return closest;
 }
 
 void show_plane_photo()
@@ -491,8 +486,10 @@ void show_plane_photo()
     }
     s_photo_stamp = lookup.photo_stamp;
     if (lookup.photo != nullptr && lookup.photo_width > 0 && lookup.photo_height > 0) {
-        s_plane->show(Picture{lookup.photo, lookup.photo_width, lookup.photo_height,
-                              lookup.photo_width * static_cast<std::int32_t>(sizeof(std::uint16_t))});
+        if (s_plane->show(Picture{lookup.photo, lookup.photo_width, lookup.photo_height,
+                                  lookup.photo_width * static_cast<std::int32_t>(sizeof(std::uint16_t))})) {
+            std::snprintf(s_photo_of, sizeof(s_photo_of), "%s", lookup.photo_hex);
+        }
     }
 }
 
@@ -527,9 +524,17 @@ void paint_overhead()
     set_text_if(s_alt, text);
     lv_obj_set_x(s_alt_unit, lv_obj_get_x(s_alt) + widest(Role::ReadM, {text}) + space::xs);
 
+    if (std::strcmp(s_photo_of, a->hex) != 0 && s_plane->has_picture()) {
+        s_plane->clear(false);  // another's photo, until this one's comes
+    }
     // Its photo: asked for once each time Home is up, as the radar page asks
     // for its own aircraft's while it is.
-    if (std::strcmp(s_asked, a->hex) != 0) {
+    // at most one lookup a while: the closest changes as they pass, and the
+    // lookups share their services' limits with the radar page's
+    static std::uint32_t s_asked_ms = 0;
+    if (std::strcmp(s_asked, a->hex) != 0 &&
+        (s_asked[0] == '\0' || lv_tick_elaps(s_asked_ms) >= LOOKUP_EVERY_MS)) {
+        s_asked_ms = lv_tick_get();
         std::snprintf(s_asked, sizeof(s_asked), "%s", a->hex);
         s_plane->clear(false);
         s_photo_stamp = 0;  // one in hand for it already shows too
