@@ -2,5 +2,5 @@
 components/esp_hosted/** linguist-vendored
 components/esp_lcd/** linguist-vendored
 components/ui/fonts/*.c linguist-generated
-components/ui/icons.h linguist-generated
+components/ui/fonts/icons.h linguist-generated
 components/radar/map_data.h linguist-generated
