@@ -493,10 +493,17 @@ constexpr std::uint32_t SEND_AFTER_MS = 600;   // the taps stopped: the target g
 constexpr std::uint32_t HOLD_MS      = 5000;  // ours shown until the thermostat says it has it, or this long
 constexpr int           NONE         = INT_MIN;
 
+constexpr std::int32_t  HEAT_DIAL    = 320;
+constexpr std::int32_t  HEAT_ARC     = 28;
+constexpr std::int32_t  HEAT_STEP_D  = size::button;
+constexpr std::int32_t  HEAT_STEP_X  = 40;  // either side of the middle, in the dial's open foot
+
 struct HeatCard : InPsram {
-    lv_obj_t *sub = nullptr, *state = nullptr, *target = nullptr, *less = nullptr, *more = nullptr, *mode = nullptr;
+    lv_obj_t *state = nullptr, *less = nullptr, *more = nullptr, *mode = nullptr;
+    Dial     *dial  = nullptr;
     lv_obj_t *toggles[kDialToggleCount]{};
     unsigned  shape = UINT_MAX;
+    bool      dragging = false;
 };
 HeatCard *s_heat = nullptr;
 
@@ -546,6 +553,16 @@ bool is_off()
     return t.state == Hvac::Off;
 }
 
+Ink heat_ink(const detail::ThermostatState &t)
+{
+    return !t.known ? Ink::Tertiary : t.state == Hvac::Heating ? Ink::Accent : t.state == Hvac::Idle ? Ink::Amber : Ink::Tertiary;
+}
+
+// Off, the arc is the ink faded, as something paused is: the tertiary ink is only faint as text.
+bool heat_off(const detail::ThermostatState &t) { return t.known && t.state != Hvac::Heating && t.state != Hvac::Idle; }
+
+void write_degrees(char *out, std::size_t size, int tenths_c) { std::snprintf(out, size, "%d.%d°", tenths_c / 10, tenths_c % 10); }
+
 void paint_heat_card()
 {
     HeatCard *c = s_heat;
@@ -555,25 +572,35 @@ void paint_heat_card()
     const detail::HomeState       &home = detail::home_state();
     const detail::ThermostatState &t    = home.thermostat;
     char buf[40] = "";
-    if (t.known && t.current_c >= 0.0f) {
-        const int now = tenths(t.current_c);
-        std::snprintf(buf, sizeof buf, "The room is at %d.%d°", now / 10, now % 10);
-    } else {
-        std::snprintf(buf, sizeof buf, "No reading from the thermostat");
-    }
-    set_text_if(c->sub, buf);
     set_hidden_if(c->state, !t.known);
-    set_badge(c->state, t.state == Hvac::Heating ? "Heating" : t.state == Hvac::Idle ? "Warm enough" : "Off",
-              t.state == Hvac::Heating ? Ink::Accent : t.state == Hvac::Idle ? Ink::Amber : Ink::Tertiary);
+    set_badge(c->state, t.state == Hvac::Heating ? "Heating" : t.state == Hvac::Idle ? "Warm enough" : "Off", heat_ink(t));
 
-    const int   target = shown_target();
-    const Range r      = range();
+    const Range r = range();
+    c->dial->set_range(r.min, r.max);
+    const bool room = t.known && t.current_c >= 0.0f;
+    if (room) {
+        char now[16];
+        write_degrees(now, sizeof now, tenths(t.current_c));
+        std::snprintf(buf, sizeof buf, "Room %s", now);
+    } else {
+        std::snprintf(buf, sizeof buf, "No reading");
+    }
+    set_text_if(c->dial->caption(), buf);
+    c->dial->set_mark(room ? std::clamp(tenths(t.current_c), r.min, r.max) : INT32_MIN);
+
+    const int target = shown_target();
     if (target == NONE) {
         std::snprintf(buf, sizeof buf, "--");
+        c->dial->set_value(INT32_MIN);
     } else {
-        std::snprintf(buf, sizeof buf, "%d.%d°", target / 10, target % 10);
+        write_degrees(buf, sizeof buf, target);
+        if (!c->dragging) {
+            c->dial->set_value(target);
+        }
     }
-    set_text_if(c->target, buf);
+    set_text_if(c->dial->figure(), buf);
+    c->dial->set_ink(heat_off(t) ? Ink::Primary : heat_ink(t));
+    c->dial->set_faded(heat_off(t));
     const bool steers = target != NONE && detail::s_handlers.setpoint != nullptr;
     set_usable(c->less, steers && target > r.min);
     set_usable(c->more, steers && target < r.max);
@@ -606,17 +633,11 @@ void send_target(lv_timer_t *)
     }
 }
 
-void step_target(int dir)
+// The target as tapped or dragged to, sent once the finger has been still a moment.
+void hold_target(int target)
 {
-    const int from = shown_target();
-    if (from == NONE) {
-        return;
-    }
     const Range r = range();
-    // On the thermostat's own steps: anything between them it rounds away.
-    const int below = from / r.step * r.step;
-    const int next  = dir > 0 ? below + r.step : below != from ? below : from - r.step;
-    s_held    = std::clamp(next, r.min, r.max);
+    s_held    = std::clamp(target, r.min, r.max);
     s_held_ms = lv_tick_get();
     if (s_send == nullptr) {
         s_send = lv_timer_create(send_target, SEND_AFTER_MS, nullptr);
@@ -626,6 +647,37 @@ void step_target(int dir)
     paint_heat_card();
 }
 
+void step_target(int dir)
+{
+    const int from = shown_target();
+    if (from == NONE) {
+        return;
+    }
+    const Range r = range();
+    // On the thermostat's own steps: anything between them it rounds away.
+    const int below = from / r.step * r.step;
+    hold_target(dir > 0 ? below + r.step : below != from ? below : from - r.step);
+}
+
+void dial_moved(lv_event_t *e)
+{
+    HeatCard *c = s_heat;
+    if (c == nullptr || shown_target() == NONE || detail::s_handlers.setpoint == nullptr) {
+        return;
+    }
+    if (lv_event_get_code(e) == LV_EVENT_RELEASED) {
+        c->dragging = false;
+        c->dial->set_value(shown_target());
+        return;
+    }
+    c->dragging = true;
+    const Range r    = range();
+    const int   step = (c->dial->value() - r.min + r.step / 2) / r.step * r.step + r.min;
+    if (step != s_held || s_send == nullptr) {
+        hold_target(step);
+    }
+}
+
 void build_heat_card(lv_obj_t *body)
 {
     auto *c = new HeatCard{};
@@ -633,21 +685,37 @@ void build_heat_card(lv_obj_t *body)
     lv_obj_set_flex_flow(body, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(body, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_row(body, space::l, 0);
-    lv_obj_t *head = heading(body, "Heating", "");
-    c->sub = lv_obj_get_child(lv_obj_get_child(head, 0), 1);
+    lv_obj_t *head = heading(body, "Heating", nullptr);
     c->state = badge(head, "Off", Ink::Tertiary, nullptr,
                      widest(Role::Small, {"Heating", "Warm enough", "Off"}) + 2 * space::m + 14, true);
 
-    c->target = text(body, Role::ReadXXL, "--");
-    lv_obj_set_width(c->target, widest(Role::ReadXXL, {"88.8°"}));
-    lv_obj_set_style_text_align(c->target, LV_TEXT_ALIGN_CENTER, 0);
+    DialSpec spec;
+    spec.size   = HEAT_DIAL;
+    spec.arc    = HEAT_ARC;
+    spec.start  = 135;
+    spec.sweep  = 270;
+    spec.min    = range().min;
+    spec.max    = range().max;
+    spec.target = true;
+    spec.drag   = true;
+    spec.mark   = true;
+    spec.read   = Role::ReadXL;
+    spec.unit   = "";
+    c->dial     = new Dial(body, spec);
+    lv_obj_t *dial = c->dial->obj();
+    lv_obj_set_width(c->dial->figure(), widest(Role::ReadXL, {"88.8°", "--"}));
+    lv_obj_set_width(c->dial->caption(), widest(Role::Small, {"Room 88.8°", "No reading"}));
+    lv_obj_set_style_margin_top(c->dial->caption(), -space::xs, 0);
+    lv_obj_add_event_cb(dial, dial_moved, LV_EVENT_VALUE_CHANGED, nullptr);
+    lv_obj_add_event_cb(dial, dial_moved, LV_EVENT_RELEASED, nullptr);
+    lv_obj_add_event_cb(dial, [](lv_event_t *e) { delete static_cast<Dial *>(lv_event_get_user_data(e)); },
+                        LV_EVENT_DELETE, c->dial);
 
-    lv_obj_t *steps = flow(body, LV_FLEX_FLOW_ROW, space::m);
-    lv_obj_set_width(steps, LV_PCT(100));
+    // In the dial's open foot, as a thermostat's buttons are.
     for (int dir : {-1, 1}) {
-        lv_obj_t *b = button(steps, Button::Raised, dir < 0 ? ic::remove : ic::add, nullptr);
-        lv_obj_set_flex_grow(b, 1);
-        lv_obj_set_height(b, size::button_lg);
+        lv_obj_t *b = button(dial, Button::Raised, dir < 0 ? ic::remove : ic::add, nullptr, true);
+        lv_obj_set_size(b, HEAT_STEP_D, HEAT_STEP_D);
+        lv_obj_align(b, LV_ALIGN_BOTTOM_MID, dir * HEAT_STEP_X, 0);
         on_click(b, [](lv_event_t *e) { step_target(index_of(e)); }, index_data(dir));
         (dir < 0 ? c->less : c->more) = b;
     }
@@ -1112,7 +1180,7 @@ void build_pill(lv_obj_t *bar)
 
 void open_media(lv_obj_t *source) { build_media_card(popover(source, MEDIA_W, 400, From::Below)); }
 void open_lights(lv_obj_t *source) { build_lights_card(popover(source, LIGHTS_W, 300, From::Below)); }
-void open_heating(lv_obj_t *source) { build_heat_card(popover(source, HEAT_W, 480, From::Below)); }
+void open_heating(lv_obj_t *source) { build_heat_card(popover(source, HEAT_W, 600, From::Below)); }
 
 void build_claude(lv_obj_t *bar)
 {
