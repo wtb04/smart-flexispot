@@ -875,7 +875,6 @@ void Cover::release()
 Backdrop::Backdrop(lv_obj_t *parent, std::int32_t w, std::int32_t h, std::int32_t radius)
     : m_w(w), m_h(h), m_r(std::min(radius, std::min(w, h) / 2))
 {
-    m_on_ground = w == size::screen_w && h == size::screen_h && m_r == 0;
     m_sw   = (w - 1) / STEP + 2;
     m_sh   = (h - 1) / STEP + 2;
     m_root = lv_obj_create(parent);
@@ -904,7 +903,7 @@ Backdrop::Backdrop(lv_obj_t *parent, std::int32_t w, std::int32_t h, std::int32_
 
 std::size_t Backdrop::bytes() const
 {
-    std::size_t n = (m_lent ? 0 : bytes_of(m_made)) + (m_small != nullptr ? sizeof(std::uint16_t) * 3 * m_sw * m_sh : 0);
+    std::size_t n = bytes_of(m_made) + (m_small != nullptr ? sizeof(std::uint16_t) * 3 * m_sw * m_sh : 0);
     return n + (m_job != nullptr ? sizeof(std::uint16_t) * 3 * m_sw * m_sh : 0);
 }
 
@@ -969,21 +968,15 @@ bool Backdrop::show(const Picture &picture)
     }
     m_warned = false;
     std::snprintf(s_backdrop_report, sizeof s_backdrop_report,
-                  "backdrop %dx%d%s: %.1f KB, %.1f KB of it kept to remake it in another look; shrunk and blurred in %.2f ms%s",
-                  static_cast<int>(m_w), static_cast<int>(m_h), m_lent ? " in the ground's picture" : "", kb(bytes()),
+                  "backdrop %dx%d: %.1f KB, %.1f KB of it kept to remake it in another look; shrunk and blurred in %.2f ms%s",
+                  static_cast<int>(m_w), static_cast<int>(m_h), kb(bytes()),
                   kb(sizeof(std::uint16_t) * 3 * n), ms(small_us), hw ? " (PPA)" : "");
     return true;
 }
 
 void Backdrop::give_back()
 {
-    if (m_lent) {
-        m_made.main = nullptr;
-        m_lent      = false;
-        ground_back();
-    } else {
-        destroy(m_made);
-    }
+    destroy(m_made);
 }
 
 // False, and the plain ground, when there is nothing to make it into or no
@@ -992,16 +985,10 @@ bool Backdrop::start()
 {
     stop();
     if (m_made.main == nullptr) {
-        if (m_on_ground) {
-            m_made.main = lend_ground();
-            m_lent      = m_made.main != nullptr;
-        } else {
-            allocate(m_made, m_w, m_h, m_r);
-        }
+        allocate(m_made, m_w, m_h, m_r);
     }
     if (m_made.main == nullptr) {
-        no_room(m_warned, m_on_ground ? "backdrop, the ground's picture lent already," : "backdrop", m_w, m_h,
-                m_on_ground ? 0 : bytes_for(m_w, m_h, m_r));
+        no_room(m_warned, "backdrop", m_w, m_h, bytes_for(m_w, m_h, m_r));
         clear();
         return false;
     }

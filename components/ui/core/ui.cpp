@@ -680,11 +680,6 @@ void apply_pending(lv_timer_t *)
 }
 }  // namespace
 
-void detail::request_apply()
-{
-    s_pending.store(true, std::memory_order_release);
-}
-
 esp_err_t set_preset_active(int index, bool active)
 {
     ESP_RETURN_ON_FALSE(index >= 0 && index < kPresetCount, ESP_ERR_INVALID_ARG, TAG, "preset %d",

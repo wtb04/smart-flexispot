@@ -80,9 +80,6 @@ void select_page(int index);
 extern bool s_presence_gate;
 bool        owner_away();
 
-/** For updates kept outside ui.cpp's slots: asks the LVGL task to look. */
-void request_apply();
-
 /** The screen lit or dark, as the schedule or a touch decides. */
 void set_screen_state(bool on);
 

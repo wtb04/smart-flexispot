@@ -39,7 +39,7 @@ lv_draw_buf_t *s_frozen = nullptr;
 // A quarter of the screen: a lighter blur, about 15 px, stays smooth at this
 // size, where at an eighth only a heavy one hid the grid of the small picture.
 constexpr int FW = size::screen_w, FH = size::screen_h, F = 4, SW = FW / F, SH = FH / F;
-lv_draw_buf_t *s_shot = nullptr, *s_half = nullptr, *s_quarter = nullptr, *s_small = nullptr;
+lv_draw_buf_t *s_shot = nullptr, *s_half = nullptr, *s_small = nullptr;
 // the blurred picture in 24-bit, B, G, R as the PPA takes it: kept at 16-bit,
 // neighbours in a soft area come out the same and stretch into flat plateaus
 lv_draw_buf_t *s_blurred = nullptr;
@@ -229,15 +229,6 @@ void *scratch(std::size_t bytes)
 #endif
 }
 
-void unscratch(void *p)
-{
-#if defined(ESP_PLATFORM)
-    heap_caps_free(p);
-#else
-    std::free(p);
-#endif
-}
-
 using Plane = std::uint8_t[SH][SW];
 // The blur's planes, kept with the pictures: made each time, in a full PSRAM
 // they were sometimes not to be had, and the picture was stretched from
@@ -382,7 +373,6 @@ bool buffers()
     // a dim is the frozen picture alone: the blur's 1.1 MB only for a blur
     if (s_behind.load(std::memory_order_relaxed) != Behind::Dim && s_half == nullptr) {
         s_half    = lv_draw_buf_create(FW / 2, FH / 2, LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO);
-        s_quarter = F == 8 ? lv_draw_buf_create(FW / 4, FH / 4, LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO) : nullptr;
         s_small   = lv_draw_buf_create(SW, SH, LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO);
         s_blurred = lv_draw_buf_create(SW, SH, LV_COLOR_FORMAT_RGB888, LV_STRIDE_AUTO);
         s_planes  = static_cast<Plane *>(scratch(sizeof(Plane) * 4));
@@ -394,21 +384,16 @@ bool buffers()
         return false;
     }
     return s_behind.load(std::memory_order_relaxed) == Behind::Dim ||
-           (s_half != nullptr && (F != 8 || s_quarter != nullptr) && s_small != nullptr && s_blurred != nullptr && s_planes != nullptr);
+           (s_half != nullptr && s_small != nullptr && s_blurred != nullptr && s_planes != nullptr);
 }
 
 // From the half-size picture on: no LVGL in it, so the panel's other core can do it.
 bool finish_picture(std::uint64_t t0, std::uint64_t t1)
 {
-    // halvings rather than one eighth: a bilinear halving is an average of each
+    // halvings rather than one quarter: a bilinear halving is an average of each
     // two by two, where one big step would sample a few pixels of each block
     // and alias into blobs
-    if (F == 8) {
-        stretch(s_half, s_quarter, 0.5f);
-        stretch(s_quarter, s_small, 0.5f);
-    } else {
-        stretch(s_half, s_small, 0.5f);
-    }
+    stretch(s_half, s_small, 0.5f);
 #if defined(ESP_PLATFORM)
     esp_cache_msync(s_small->data, s_small->data_size, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
 #endif
