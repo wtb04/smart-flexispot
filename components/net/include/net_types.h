@@ -96,7 +96,6 @@ struct Response {
     const char *body     = "";      // inflated, NUL-terminated, and valid only in the callback
     std::size_t length   = 0;
     int         ms       = 0;       // on the wire, the last attempt
-    int         attempts = 0;
 
     bool ok() const { return outcome == Outcome::Answered && status >= 200 && status < 300; }
 };
