@@ -359,9 +359,46 @@ void init_styles()
 // The ground at an eighth of the screen, worked out from the glows, then
 // stretched to the screen with a little noise: the noise is the grain, and it
 // keeps the soft gradients from banding in 16-bit colour.
+constexpr int GROUND_SW = size::screen_w / 8 + 1, GROUND_SH = size::screen_h / 8 + 1;
+// The ground at an eighth, kept so any part of it can be painted again where a
+// shadow was, rather than kept whole a second time: in 64ths of a level.
+std::uint16_t (*s_ground_small)[GROUND_SW][3] = nullptr;
+
+// The grain by where it falls, so a part painted again matches what is round it.
+int grain(int x, int y)
+{
+    std::uint32_t h = static_cast<std::uint32_t>(x) * 0x8da6b343u ^ static_cast<std::uint32_t>(y) * 0xd8163841u;
+    h ^= h >> 13;
+    h *= 0x85ebca6bu;
+    h ^= h >> 16;
+    return static_cast<int>(h & 0xff) * 64 - 8192;  // two levels either way, in 4096ths
+}
+
+void paint_ground_area(const lv_area_t &a)
+{
+    if (s_ground_small == nullptr || s_ground_buf == nullptr) {
+        return;
+    }
+    for (std::int32_t y = a.y1; y <= a.y2; ++y) {
+        auto     *row = reinterpret_cast<std::uint16_t *>(s_ground_buf->data + y * s_ground_buf->header.stride);
+        const int y0 = y >> 3, y1 = std::min(y0 + 1, GROUND_SH - 1), ty = y & 7;
+        for (std::int32_t x = a.x1; x <= a.x2; ++x) {
+            const int x0 = x >> 3, x1 = std::min(x0 + 1, GROUND_SW - 1), tx = x & 7;
+            const int noise = grain(x, y);
+            int       out[3];
+            for (int k = 0; k < 3; ++k) {
+                const int top = s_ground_small[y0][x0][k] * (8 - tx) + s_ground_small[y0][x1][k] * tx;
+                const int bot = s_ground_small[y1][x0][k] * (8 - tx) + s_ground_small[y1][x1][k] * tx;
+                out[k] = std::clamp((top * (8 - ty) + bot * ty + noise) >> 12, 0, 255);
+            }
+            row[x] = pixels::dither(out[0], out[1], out[2], x, y);
+        }
+    }
+}
+
 void paint_ground()
 {
-    constexpr int W = size::screen_w, H = size::screen_h, SW = W / 8 + 1, SH = H / 8 + 1;
+    constexpr int W = size::screen_w, H = size::screen_h, SW = GROUND_SW, SH = GROUND_SH;
     // in PSRAM and only while painting: it is far too big for internal RAM
     auto *small = static_cast<float (*)[SW][3]>(lv_malloc(sizeof(float) * SH * SW * 3));
     if (small == nullptr) {
@@ -401,28 +438,22 @@ void paint_ground()
     if (s_ground_buf == nullptr) {
         s_ground_buf = lv_draw_buf_create(W, H, LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO);
     }
-    std::uint32_t seed = 0x9e3779b9u;
-    for (int y = 0; y < H; ++y) {
-        auto *row = reinterpret_cast<std::uint16_t *>(s_ground_buf->data + y * s_ground_buf->header.stride);
-        const float fy = y / 8.0f;
-        const int   y0 = static_cast<int>(fy), y1 = std::min(y0 + 1, SH - 1);
-        const float ty = fy - y0;
-        for (int x = 0; x < W; ++x) {
-            const float fx = x / 8.0f;
-            const int   x0 = static_cast<int>(fx), x1 = std::min(x0 + 1, SW - 1);
-            const float tx = fx - x0;
-            seed = seed * 1664525u + 1013904223u;
-            const float noise = static_cast<float>((seed >> 24) & 0xff) / 255.0f * 4.0f - 2.0f;  // the grain
-            int out[3];
+    if (s_ground_small == nullptr) {
+        s_ground_small = static_cast<std::uint16_t (*)[SW][3]>(lv_malloc(sizeof(std::uint16_t) * SH * SW * 3));
+    }
+    if (s_ground_buf == nullptr || s_ground_small == nullptr) {
+        lv_free(small);
+        return;
+    }
+    for (int y = 0; y < SH; ++y) {
+        for (int x = 0; x < SW; ++x) {
             for (int k = 0; k < 3; ++k) {
-                const float top = small[y0][x0][k] + (small[y0][x1][k] - small[y0][x0][k]) * tx;
-                const float bot = small[y1][x0][k] + (small[y1][x1][k] - small[y1][x0][k]) * tx;
-                out[k] = std::clamp(static_cast<int>(top + (bot - top) * ty + noise), 0, 255);
+                s_ground_small[y][x][k] = static_cast<std::uint16_t>(std::clamp(small[y][x][k], 0.0f, 255.0f) * 64.0f + 0.5f);
             }
-            row[x] = pixels::dither(out[0], out[1], out[2], x, y);
         }
     }
     lv_free(small);
+    paint_ground_area({0, 0, W - 1, H - 1});
     lv_draw_buf_flush_cache(s_ground_buf, nullptr);
     bake::painted();
     if (s_ground_img != nullptr) {
@@ -608,7 +639,7 @@ void screen(lv_obj_t *scr)
     }
     ground(s_layers[static_cast<int>(Layer::Ground)]);
     lv_obj_t *content = s_layers[static_cast<int>(Layer::Content)];
-    bake::begin(s_layers[static_cast<int>(Layer::Ground)], content, s_ground_buf);
+    bake::begin(s_layers[static_cast<int>(Layer::Ground)], content, s_ground_buf, paint_ground_area);
     lv_obj_add_flag(content, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(content, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_scroll_dir(content, LV_DIR_VER);

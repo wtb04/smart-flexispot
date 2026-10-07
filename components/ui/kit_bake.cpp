@@ -62,7 +62,8 @@ struct Caster {
 KIT_IN_PSRAM Caster s_casters[96];
 int            s_count   = 0;
 lv_obj_t      *s_ground  = nullptr, *s_content = nullptr, *s_canvas = nullptr;
-lv_draw_buf_t *s_picture = nullptr, *s_pristine = nullptr, *s_strip = nullptr;  // all in PSRAM on the panel
+lv_draw_buf_t *s_picture = nullptr, *s_strip = nullptr;  // in PSRAM on the panel
+void (*s_repaint)(const lv_area_t &area) = nullptr;
 std::uint32_t  s_look    = 1;
 lv_style_t     s_settled;
 
@@ -257,12 +258,7 @@ void invalidate_rim(const lv_area_t &box, const lv_area_t &body, std::int32_t r)
 
 void restore(const lv_area_t &a)
 {
-    const std::uint32_t stride = s_picture->header.stride;
-    const std::size_t   bytes  = static_cast<std::size_t>(lv_area_get_width(&a)) * 2;
-    for (std::int32_t y = a.y1; y <= a.y2; ++y) {
-        const std::size_t at = static_cast<std::size_t>(y) * stride + static_cast<std::size_t>(a.x1) * 2;
-        std::memcpy(s_picture->data + at, s_pristine->data + at, bytes);
-    }
+    s_repaint(a);
     lv_draw_buf_flush_cache(s_picture, &a);
 }
 
@@ -658,7 +654,7 @@ void on_tick(lv_timer_t *)
         const Caster &c = s_casters[i];
         due = !c.baked && !c.refused && c.seen.shown && lv_tick_elaps(c.still_since) >= REST_MS;
     }
-    if (!due || s_pristine == nullptr) {
+    if (!due || s_repaint == nullptr) {
         return;
     }
     lv_obj_update_layout(lv_screen_active());
@@ -689,7 +685,7 @@ void on_delete(lv_event_t *e)
 
 }  // namespace
 
-void begin(lv_obj_t *ground, lv_obj_t *content, lv_draw_buf_t *picture)
+void begin(lv_obj_t *ground, lv_obj_t *content, lv_draw_buf_t *picture, void (*repaint)(const lv_area_t &area))
 {
     if (s_ground == nullptr) {
         lv_style_init(&s_settled);
@@ -701,6 +697,7 @@ void begin(lv_obj_t *ground, lv_obj_t *content, lv_draw_buf_t *picture)
     s_ground  = ground;
     s_content = content;
     s_picture = picture;
+    s_repaint = repaint;
     s_canvas  = lv_canvas_create(ground);
     lv_obj_set_hidden(s_canvas, true);
     painted();
@@ -711,22 +708,6 @@ void painted()
     if (s_picture == nullptr) {
         return;
     }
-    if (s_pristine == nullptr) {
-#if defined(ESP_PLATFORM)
-        // a speed-up, not a need: it waits while the old pages still take most of the memory
-        constexpr std::size_t HEADROOM = 3 * 1024 * 1024;
-        if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < s_picture->data_size + HEADROOM) {
-            return;
-        }
-#endif
-        s_pristine = lv_draw_buf_create(static_cast<std::uint32_t>(s_picture->header.w),
-                                        static_cast<std::uint32_t>(s_picture->header.h), LV_COLOR_FORMAT_RGB565,
-                                        LV_STRIDE_AUTO);
-        if (s_pristine == nullptr) {
-            return;
-        }
-    }
-    std::memcpy(s_pristine->data, s_picture->data, std::min(s_pristine->data_size, s_picture->data_size));
     for (int i = 0; i < s_count; ++i) {
         if (s_casters[i].baked) {
             s_casters[i].baked = false;
@@ -760,7 +741,7 @@ void restyle()
 
 void now()
 {
-    if (s_pristine == nullptr) {
+    if (s_repaint == nullptr) {
         return;
     }
     lv_obj_update_layout(lv_screen_active());
