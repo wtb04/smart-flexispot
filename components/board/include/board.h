@@ -92,6 +92,12 @@ struct ZoomFrame {
     const std::uint8_t  *ring_opa   = nullptr;
     std::size_t          ring_count = 0;
     std::uint16_t        ring_ink   = 0;
+    // What of each row of the picture is the picture, from and to: the rest,
+    // its rounded corners, came out square magnified, and is laid in
+    // `around` where it is, as the rings are.
+    const std::int16_t *row_from = nullptr;
+    const std::int16_t *row_to   = nullptr;
+    std::uint16_t       around   = 0;
 };
 esp_err_t zoom_begin(const lv_area_t *keep, int count);
 
