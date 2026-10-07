@@ -359,6 +359,7 @@ constexpr std::int64_t DARK_AFTER_MS = 15 * 1000;
 detail::ViewId s_view = detail::kNoView;
 Cover         *s_still = nullptr;
 std::uint32_t  s_stills = UINT32_MAX;
+lv_timer_t    *s_still_retry = nullptr;
 lv_obj_t      *s_skip = nullptr;
 lv_obj_t      *s_series = nullptr, *s_title = nullptr, *s_episode = nullptr;
 Rail          *s_rail = nullptr;
@@ -429,12 +430,20 @@ void show()
         return;
     }
     show_words();
-    if (std::exchange(s_stills, media.stills) != media.stills) {
+    // marked shown once it is: without room, the still is tried again shortly
+    if (s_stills != media.stills) {
         const bool animate = lv_obj_is_visible(s_still->obj());
-        if (media.still != nullptr) {
-            s_still->show(Picture{media.still, media::kStillW, media::kStillH, 0}, animate);
-        } else {
+        if (media.still == nullptr) {
             s_still->clear(animate);
+            s_stills = media.stills;
+        } else if (s_still->show(Picture{media.still, media::kStillW, media::kStillH, 0}, animate)) {
+            s_stills = media.stills;
+        } else {
+            again_soon(s_still_retry, [] {
+                if (detail::view_open(s_view)) {
+                    show();
+                }
+            });
         }
     }
     tick(nullptr);
@@ -493,7 +502,7 @@ void build(lv_obj_t *)
                                        },
                                        [] {
                                            lv_timer_pause(s_tick);
-                                           s_still->clear(false);
+                                           s_still->release();  // its buffer back, while no film shows
                                        }});
 
     s_still = new Cover(root, STILL_W, STILL_H, Shape::Rounded, 20, ic::aspect_ratio);
