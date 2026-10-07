@@ -9,6 +9,7 @@
 #include "ical.h"
 #include "kit_fonts.h"
 #include "radar.h"
+#include "radar_model.h"
 #include "room_model.h"
 #include "topics.h"
 #include "units.h"
@@ -442,8 +443,11 @@ void build_next(lv_obj_t *grid)
 
 KIT_IN_PSRAM radar::Snapshot s_sky;
 char         s_held[radar::kHexLen] = "";
+char         s_asked[radar::kHexLen] = "";  // whose photo was asked for, this time Home is up
+std::uint32_t s_photo_stamp = 0;
+Cover       *s_plane = nullptr;
 lv_obj_t    *s_sky_tile = nullptr, *s_sky_some = nullptr, *s_sky_none = nullptr, *s_sky_why = nullptr;
-lv_obj_t    *s_call = nullptr, *s_type = nullptr, *s_alt = nullptr, *s_alt_unit = nullptr, *s_away = nullptr;
+lv_obj_t    *s_call = nullptr, *s_type = nullptr, *s_alt = nullptr, *s_alt_unit = nullptr;
 
 const char *compass(float bearing)
 {
@@ -479,6 +483,19 @@ const radar::Aircraft *pick_overhead()
     return chosen;
 }
 
+void show_plane_photo()
+{
+    const detail::RadarLookup &lookup = detail::radar_lookup();
+    if (lookup.photo_stamp == s_photo_stamp || std::strcmp(lookup.photo_hex, s_held) != 0) {
+        return;
+    }
+    s_photo_stamp = lookup.photo_stamp;
+    if (lookup.photo != nullptr && lookup.photo_width > 0 && lookup.photo_height > 0) {
+        s_plane->show(Picture{lookup.photo, lookup.photo_width, lookup.photo_height,
+                              lookup.photo_width * static_cast<std::int32_t>(sizeof(std::uint16_t))});
+    }
+}
+
 void paint_overhead()
 {
     lv_obj_set_hidden(s_sky_tile, owner_away());
@@ -496,7 +513,10 @@ void paint_overhead()
     }
     set_text_if(s_call, a->flight[0] != '\0' ? a->flight : a->hex);
     char text[48];
-    sentence_case(a->desc[0] != '\0' ? a->desc : a->type, text, sizeof(text));
+    char what[48];
+    sentence_case(a->desc[0] != '\0' ? a->desc : a->type, what, sizeof(what));
+    std::snprintf(text, sizeof(text), "%s, %d km %s", what, static_cast<int>(a->distance_nm * KM_PER_NM + 0.5f),
+                  compass(a->bearing_deg));
     set_text_if(s_type, text);
     const int ft = a->altitude_ft;
     if (ft >= 1000) {
@@ -505,8 +525,19 @@ void paint_overhead()
         std::snprintf(text, sizeof(text), "%d", ft);
     }
     set_text_if(s_alt, text);
-    std::snprintf(text, sizeof(text), "%d km %s", static_cast<int>(a->distance_nm * KM_PER_NM + 0.5f), compass(a->bearing_deg));
-    set_text_if(s_away, text);
+    lv_obj_set_x(s_alt_unit, lv_obj_get_x(s_alt) + widest(Role::ReadM, {text}) + space::xs);
+
+    // Its photo: asked for once each time Home is up, as the radar page asks
+    // for its own aircraft's while it is.
+    if (std::strcmp(s_asked, a->hex) != 0) {
+        std::snprintf(s_asked, sizeof(s_asked), "%s", a->hex);
+        s_plane->clear(false);
+        s_photo_stamp = 0;  // one in hand for it already shows too
+        if (detail::s_handlers.details != nullptr) {
+            detail::s_handlers.details(a->hex, a->flight);
+        }
+    }
+    show_plane_photo();
 }
 
 void build_overhead(lv_obj_t *grid)
@@ -518,25 +549,23 @@ void build_overhead(lv_obj_t *grid)
 
     s_sky_some = plain(body);
     lv_obj_set_size(s_sky_some, w, h);
-    const std::int32_t right_w = widest(Role::ReadM, {"88,888"}) + space::xs + widest(Role::Body, {"ft"});
-    const std::int32_t left_w  = w - right_w - space::l;
-    // At the foot, as the desk's and the focus timer's figures are.
-    const std::int32_t foot = h - fonts::read_m()->line_height - fonts::small()->line_height;
-    s_call = line(s_sky_some, Role::H1, Ink::Primary, left_w);
-    s_type = line(s_sky_some, Role::Small, Ink::Secondary, left_w);
-    lv_obj_set_y(s_call, foot + fonts::read_m()->line_height - fonts::h1()->line_height);
-    lv_obj_set_y(s_type, foot + fonts::read_m()->line_height);
-
+    // its photo at the left, as tall as the widget, and what it is beside it
+    const std::int32_t photo_w = h * 16 / 9;
+    s_plane = new Cover(s_sky_some, photo_w, h, Shape::Rounded, radius::inner, ic::flight);
+    lv_obj_set_pos(s_plane->obj(), 0, 0);
+    const std::int32_t x0 = photo_w + space::l, text_w = w - x0;
+    s_call = line(s_sky_some, Role::H2, Ink::Primary, text_w);
+    s_type = line(s_sky_some, Role::Small, Ink::Secondary, text_w);
+    lv_obj_set_pos(s_call, x0, 0);
+    lv_obj_set_pos(s_type, x0, fonts::h2()->line_height);
+    // at the foot, as the desk's and the focus timer's figures are
+    const std::int32_t foot   = h - fonts::read_m()->line_height;
     const std::int32_t unit_w = widest(Role::Body, {"ft"});
-    s_alt      = line(s_sky_some, Role::ReadM, Ink::Primary, right_w - unit_w - space::xs);
+    s_alt      = line(s_sky_some, Role::ReadM, Ink::Primary, widest(Role::ReadM, {"88,888"}));
     s_alt_unit = line(s_sky_some, Role::Body, Ink::Secondary, unit_w);
     lv_label_set_text(s_alt_unit, "ft");
-    lv_obj_set_style_text_align(s_alt, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_obj_set_pos(s_alt, w - right_w, foot);
-    lv_obj_set_pos(s_alt_unit, w - unit_w, foot + baseline_y(Role::ReadM, Role::Body));
-    s_away = line(s_sky_some, Role::Small, Ink::Secondary, right_w + space::xxl * 2);
-    lv_obj_set_style_text_align(s_away, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_obj_set_pos(s_away, w - right_w - space::xxl * 2, foot + fonts::read_m()->line_height);
+    lv_obj_set_pos(s_alt, x0, foot);
+    lv_obj_set_pos(s_alt_unit, x0, foot + baseline_y(Role::ReadM, Role::Body));
 
     s_sky_none = empty(body, ic::flight, "");
     lv_obj_set_size(s_sky_none, w, h);
@@ -718,7 +747,17 @@ void build_home(lv_obj_t *page)
             paint_focus();
         });
     }
-    subscribe(Topic::Page, detail::kNoView, paint_all);
+    subscribe(Topic::Page, detail::kNoView, [] {
+        if (!on_home()) {
+            s_asked[0] = '\0';  // the radar page asks for its own aircraft's meanwhile
+        }
+        paint_all();
+    });
+    subscribe(Topic::Lookup, detail::kNoView, [] {
+        if (on_home() && !owner_away()) {
+            show_plane_photo();
+        }
+    });
     lv_timer_create([](lv_timer_t *) { paint_next(); }, REFRESH_MS, nullptr);
 }
 

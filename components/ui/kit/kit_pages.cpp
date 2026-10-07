@@ -494,8 +494,16 @@ void place_mark(lv_anim_t *, int32_t p)
     light_under_mark();
 }
 
+constexpr std::uint32_t MARK_MS      = 200;  // the dock's mark from one item to another
+constexpr std::uint32_t MARK_LEAD_MS = 90;   // how far on it is before the page is drawn, nine tenths of its way
+
+int s_mark_target = -1;  // where the mark is on its way to, while it moves
+
 void mark(int index, bool animate)
 {
+    if (animate && index == s_mark_target && lv_anim_get(s_mark, nullptr) != nullptr) {
+        return;  // already on its way there, as the press sent it
+    }
     lv_obj_t *item = index >= 0 ? s_pages[index].item : nullptr;
     if (s_mark == nullptr || item == nullptr || lv_obj_get_parent(item) != lv_obj_get_parent(s_mark)) {
         if (s_mark != nullptr) {
@@ -513,15 +521,40 @@ void mark(int index, bool animate)
         place_mark(nullptr, PROGRESS);
         return;
     }
-    s_mark_from = s_mark_at;
+    s_mark_from   = s_mark_at;
+    s_mark_target = index;
     lv_anim_t a;
     lv_anim_init(&a);
     lv_anim_set_var(&a, s_mark);
     lv_anim_set_values(&a, 0, PROGRESS);
     lv_anim_set_custom_exec_cb(&a, place_mark);
-    lv_anim_set_duration(&a, motion::move_ms);
-    lv_anim_set_path_cb(&a, motion::spring);
+    lv_anim_set_duration(&a, MARK_MS);
+    lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
     lv_anim_start(&a);
+}
+
+// A tap on the dock: the mark sets off at once, over the dock alone, which
+// draws in a few milliseconds; the page follows once it is most of the way,
+// as drawing a page holds everything else up for a few hundred.
+lv_timer_t *s_going = nullptr;
+
+void go_to(int index)
+{
+    if (index == s_shown && s_going == nullptr) {
+        return;
+    }
+    mark(index, true);
+    if (s_going != nullptr) {
+        lv_timer_delete(s_going);
+    }
+    s_going = lv_timer_create(
+        [](lv_timer_t *t) {
+            const int to = static_cast<int>(reinterpret_cast<std::intptr_t>(lv_timer_get_user_data(t)));
+            lv_timer_delete(t);
+            s_going = nullptr;
+            show_page(to);
+        },
+        MARK_LEAD_MS, reinterpret_cast<void *>(static_cast<std::intptr_t>(index)));
 }
 
 void restyle_mark(void *)
@@ -652,7 +685,7 @@ int add_page(lv_obj_t *item, void (*build)(lv_obj_t *page))
     if (item != nullptr) {
         // as the finger lands rather than as it lifts: the page is there a tap's length sooner
         lv_obj_add_event_cb(
-            item, [](lv_event_t *e) { show_page(static_cast<int>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e)))); },
+            item, [](lv_event_t *e) { go_to(static_cast<int>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e)))); },
             LV_EVENT_PRESSED, reinterpret_cast<void *>(static_cast<std::intptr_t>(index)));
     }
     return index;
@@ -961,7 +994,7 @@ void widget_opens(lv_obj_t *body, int page_index)
     lv_obj_set_clickable(t, true);
     lv_obj_add_style(t, &s_widget_pressed, LV_STATE_PRESSED);
     lv_obj_add_event_cb(
-        t, [](lv_event_t *e) { show_page(static_cast<int>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e)))); },
+        t, [](lv_event_t *e) { go_to(static_cast<int>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e)))); },
         LV_EVENT_CLICKED, reinterpret_cast<void *>(static_cast<std::intptr_t>(page_index)));
 }
 
