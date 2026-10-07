@@ -50,15 +50,14 @@ ROLES = {
 
 ICON_SIZES = (24, 28, 34)
 ICONS = """
-home calendar_month flight timer lightbulb local_fire_department thermostat wifi wifi_off
-smartphone mobile_off battery_full battery_5_bar battery_2_bar bolt play_arrow pause stop
-skip_previous skip_next replay_10 forward_10 volume_up volume_down subtitles open_in_full
-close_fullscreen close add remove check chevron_right chevron_left keyboard_arrow_up
-keyboard_arrow_down my_location desk wall_lamp floor_lamp light bedtime settings palette
-dashboard tune monitor_heart restart_alt power_settings_new co2 air humidity_percentage grain
-directions_bike train directions_bus directions_walk schedule event music_note speaker laptop
-info aspect_ratio add_circle drag_indicator local_laundry_service notifications warning error
-check_circle sync height arrow_upward arrow_downward radar visibility_off
+home calendar_month flight timer lightbulb wifi smartphone battery_full battery_5_bar
+battery_2_bar bolt play_arrow pause stop skip_previous skip_next replay_10 forward_10
+volume_up volume_down subtitles open_in_full close_fullscreen close add remove check
+chevron_right chevron_left keyboard_arrow_up keyboard_arrow_down my_location desk wall_lamp
+floor_lamp light bedtime settings palette tune monitor_heart restart_alt power_settings_new
+air directions_bike train directions_bus directions_walk schedule event music_note info
+aspect_ratio local_laundry_service notifications warning error check_circle sync
+arrow_upward arrow_downward visibility_off
 """.split()
 
 
