@@ -87,7 +87,7 @@ Ticket Core::submit(Request request, std::int64_t now, Tells &tells)
 
     if (!request.key.empty() && request.dedupe != Dedupe::None) {
         for (Job &job : jobs_) {
-            if (job.cancelled || job.request.host != request.host || job.request.key != request.key) {
+            if (job.request.host != request.host || job.request.key != request.key) {
                 continue;
             }
             if (request.dedupe == Dedupe::Join) {
@@ -177,7 +177,6 @@ bool Core::next(std::int64_t now, bool online, bool screen_on, Running &out, Tel
     }
     HostState &host                              = hosts_[best->request.host];
     host.busy[static_cast<std::size_t>(best_slot)] = true;
-    ++host.requests;
     best->running = true;
     ++best->attempt;
     out.ticket  = best->ticket;
@@ -195,8 +194,7 @@ void Core::finish(const Running &running, const Exchange &exchange, std::int64_t
     if (running.slot >= 0 && running.slot < static_cast<int>(host.busy.size())) {
         host.busy[static_cast<std::size_t>(running.slot)] = false;
     }
-    host.last_ms = exchange.ms;
-    Job *job     = find(running.ticket);
+    Job *job = find(running.ticket);
     if (job == nullptr) {
         return;
     }
@@ -210,18 +208,12 @@ void Core::finish(const Running &running, const Exchange &exchange, std::int64_t
             host.failures_in_row = 0;
         }
     } else if (!exchange.ours) {
-        ++host.failures;
         ++host.failures_in_row;
         if (host.config.rest.failure_ms > 0 && host.failures_in_row >= std::max(host.config.rest.failures, 1)) {
             host.rest_until = std::max(host.rest_until, now + host.config.rest.failure_ms * US_PER_MS);
         }
     }
 
-    if (job->cancelled) {
-        tell(*job, Outcome::Cancelled, tells);
-        drop(job->ticket);
-        return;
-    }
     if (!answered) {
         const Retry &retry = *job->request.retry;
         if (job->attempt <= retry.attempts && job->request.repeatable && (!exchange.timed_out || retry.after_timeout)) {
@@ -247,33 +239,6 @@ void Core::finish(const Running &running, const Exchange &exchange, std::int64_t
     drop(job->ticket);
 }
 
-void Core::cancel(Ticket ticket, Tells &tells)
-{
-    Job *job = find(ticket);
-    if (job == nullptr) {
-        return;
-    }
-    if (job->running) {
-        job->cancelled = true;
-        return;
-    }
-    tell(*job, Outcome::Cancelled, tells);
-    drop(ticket);
-}
-
-void Core::cancel(Host host, const std::string &key, Tells &tells)
-{
-    std::vector<Ticket> matching;
-    for (const Job &job : jobs_) {
-        if (job.request.host == host && job.request.key == key) {
-            matching.push_back(job.ticket);
-        }
-    }
-    for (const Ticket ticket : matching) {
-        cancel(ticket, tells);
-    }
-}
-
 HostStatus Core::status(Host host, std::int64_t now) const
 {
     HostStatus out;
@@ -282,11 +247,7 @@ HostStatus Core::status(Host host, std::int64_t now) const
     }
     const HostState &state = hosts_[host];
     out.resting            = state.rest_until > now;
-    out.rest_left_ms       = out.resting ? static_cast<int>((state.rest_until - now) / US_PER_MS) : 0;
     out.failures_in_row    = state.failures_in_row;
-    out.last_ms            = state.last_ms;
-    out.requests           = state.requests;
-    out.failures           = state.failures;
     return out;
 }
 

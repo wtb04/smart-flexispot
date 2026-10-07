@@ -64,9 +64,6 @@ Fetched fetch(Request request, std::string &into);
 
 inline constexpr int kFetchDeadlineMs = 60 * 1000;
 
-void cancel(Ticket ticket);
-void cancel(Host host, const std::string &key);
-
 HostStatus status(Host host);
 bool       resting(Host host);
 

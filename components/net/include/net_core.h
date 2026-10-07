@@ -7,7 +7,7 @@
 #include <vector>
 
 // Which request goes when, and what becomes of each: priorities with aging,
-// deduplication, retries after a delay, rests, deadlines and cancelling. Pure:
+// deduplication, retries after a delay, rests and deadlines. Pure:
 // it is given the time and what came back, and says what to send and whom to
 // tell, so the host tests run it as the panel does and the simulator can too.
 // Not thread-safe; whoever drives it keeps it under a lock.
@@ -72,10 +72,6 @@ public:
      *  be tried again. */
     void finish(const Running &running, const Exchange &exchange, std::int64_t now, Tells &tells);
 
-    /** Told Cancelled at once when waiting, and when its answer comes if under way. */
-    void cancel(Ticket ticket, Tells &tells);
-    void cancel(Host host, const std::string &key, Tells &tells);
-
     HostStatus  status(Host host, std::int64_t now) const;
     std::size_t waiting() const;
 
@@ -89,16 +85,12 @@ private:
         std::int64_t      ready_us    = 0;  // not before, as after a failure
         std::int64_t      deadline_us = 0;
         bool              running     = false;
-        bool              cancelled   = false;
     };
     struct HostState {
         HostConfig        config;
         std::vector<bool> busy;
         std::int64_t      rest_until      = 0;
         int               failures_in_row = 0;
-        int               last_ms         = 0;
-        std::uint32_t     requests        = 0;
-        std::uint32_t     failures        = 0;
     };
 
     Job *find(Ticket ticket);

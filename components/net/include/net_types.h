@@ -75,7 +75,6 @@ enum class Outcome : std::uint8_t {
     Resting,    // the host rests past this one's deadline
     Replaced,   // a newer one with its key took its place
     Expired,    // its deadline came before it could go
-    Cancelled,  // cancel() asked
 };
 
 inline const char *outcome_name(Outcome outcome)
@@ -86,7 +85,6 @@ inline const char *outcome_name(Outcome outcome)
         case Outcome::Resting: return "host resting";
         case Outcome::Replaced: return "replaced";
         case Outcome::Expired: return "expired";
-        case Outcome::Cancelled: return "cancelled";
     }
     return "?";
 }
@@ -130,14 +128,10 @@ struct Request {
     Done                 done;                  // always called, once, on a worker
 };
 
-/** How a host is doing, for diagnostics and for choosing another. */
+/** How a host is doing, for choosing another. */
 struct HostStatus {
-    bool          resting         = false;
-    int           rest_left_ms    = 0;
-    int           failures_in_row = 0;
-    int           last_ms         = 0;
-    std::uint32_t requests        = 0;
-    std::uint32_t failures        = 0;
+    bool resting         = false;
+    int  failures_in_row = 0;
 };
 
 }  // namespace net
