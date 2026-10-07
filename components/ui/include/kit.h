@@ -434,13 +434,9 @@ class Cover : public InPsram {
 };
 
 /**
- * What the music and the cinema views lay behind everything: their picture
- * enlarged to fill, blurred, dithered, and darkened in the dark look or
- * lightened in the light one so their text reads on it. Made off the LVGL task
+ * A picture enlarged to fill, blurred, dithered, and darkened in the dark look
+ * or lightened in the light one so text reads on it. Made off the LVGL task
  * and laid down a band of rows a frame; opaque, so nothing under it is drawn.
- * One the size of the screen is made into the ground's own picture, which
- * nothing shows while it covers the screen, and the ground is painted again
- * when it goes.
  */
 class Backdrop : public InPsram {
   public:
@@ -472,20 +468,10 @@ class Backdrop : public InPsram {
     std::int32_t   m_shown = 0;  // rows that hold a picture, until it is whole
     std::int32_t   m_pass  = 0;  // rows laid down by the picture being made
     bool           m_whole = false;
-    bool           m_on_ground = false;  // made into the ground's picture rather than its own
-    bool           m_lent = false;       // holding the ground's picture now
     bool           m_warned = false;
     Job           *m_job = nullptr;
     lv_timer_t    *m_timer = nullptr;
 };
-
-/**
- * The ground's picture, for a backdrop over the whole screen to be made into:
- * the content under it is hidden meanwhile, so no shadow is painted into it.
- * Null while it is lent already. Given back, it is painted again.
- */
-lv_draw_buf_t *lend_ground();
-void           ground_back();
 
 /** Calls `fn` once, a second and a half from now, as when a picture found no room: asked again, from then. */
 void again_soon(lv_timer_t *&timer, void (*fn)());

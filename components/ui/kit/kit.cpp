@@ -6,8 +6,6 @@
 #include "kit_fonts.h"
 #include "kit_pixels.h"
 
-#include "esp_log.h"
-
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -103,7 +101,6 @@ int      s_restyler_count = 0;
 
 lv_draw_buf_t *s_ground_buf = nullptr;
 lv_obj_t      *s_ground_img = nullptr;
-bool           s_ground_lent = false;  // a backdrop is made in it: nothing paints the ground there until it comes back
 
 lv_color_t hex(std::uint32_t c) { return lv_color_hex(c); }
 
@@ -388,7 +385,7 @@ int grain(int x, int y)
 
 void paint_ground_area(const lv_area_t &a)
 {
-    if (s_ground_small == nullptr || s_ground_buf == nullptr || s_ground_lent) {
+    if (s_ground_small == nullptr || s_ground_buf == nullptr) {
         return;
     }
     for (std::int32_t y = a.y1; y <= a.y2; ++y) {
@@ -694,32 +691,6 @@ lv_obj_t *layer(Layer which)
 {
     lv_obj_t *l = s_layers[static_cast<int>(which)];
     return l != nullptr ? l : lv_screen_active();
-}
-
-lv_draw_buf_t *lend_ground()
-{
-    lv_obj_t *content = s_layers[static_cast<int>(Layer::Content)];
-    if (s_ground_lent || s_ground_buf == nullptr || content == nullptr) {
-        return nullptr;
-    }
-    s_ground_lent = true;
-    lv_obj_set_hidden(content, true);
-    return s_ground_buf;
-}
-
-void ground_back()
-{
-    if (!s_ground_lent) {
-        return;
-    }
-    s_ground_lent = false;
-    const std::uint64_t t0 = perf::now_us();
-    paint_ground_area({0, 0, size::screen_w - 1, size::screen_h - 1});
-    lv_draw_buf_flush_cache(s_ground_buf, nullptr);
-    bake::painted();
-    lv_obj_set_hidden(s_layers[static_cast<int>(Layer::Content)], false);
-    lv_obj_invalidate(s_ground_img);
-    ESP_LOGI("kit", "ground painted again in %u ms", static_cast<unsigned>((perf::now_us() - t0) / 1000));
 }
 
 lv_obj_t *tile(lv_obj_t *parent, Lift lift)
