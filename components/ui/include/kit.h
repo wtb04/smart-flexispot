@@ -384,6 +384,8 @@ void      reserve_popovers();
 /** What a finger landing on a popover source does: start on the backdrop. */
 void      prepare_popover();
 bool      popover_open();
+/** The open popover's glass in `colour`, or its own again with null: a media card in its cover's colours. */
+void      tint_popover(const lv_color_t *colour);
 /** What lies behind a popover: the page frosted, frosted lightly, or only dimmed and sharp. */
 enum class Behind : std::uint8_t { Blur, Soft, Dim };
 void      set_behind(Behind behind);

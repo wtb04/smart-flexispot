@@ -494,8 +494,8 @@ void place_mark(lv_anim_t *, int32_t p)
     light_under_mark();
 }
 
-constexpr std::uint32_t MARK_MS      = 180;  // the dock's mark from one item to another
-constexpr std::uint32_t MARK_LEAD_MS = MARK_MS + 20;  // there before the page is drawn, which holds everything up
+constexpr std::uint32_t MARK_MS      = 150;  // the dock's mark from one item to another
+constexpr std::uint32_t MARK_LEAD_MS = MARK_MS;  // there as the page is drawn, which holds everything up
 
 int  s_mark_target = -1;  // where the mark is, or is on its way to: ahead of the page shown, after a tap
 bool s_placing     = false;  // in mark(), whose laying out the dock answers, and must not move it ahead of time

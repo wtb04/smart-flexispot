@@ -91,4 +91,13 @@ void open_favourites(lv_obj_t *source);
 /** As Home's Overhead opens the radar page: that aircraft chosen, and on the scope. */
 void radar_opens_on(const char *hex);
 
+// What plays, in its cover's colours, in kit_front_album.cpp.
+struct AlbumColours {
+    bool       vivid = false;  // false: a cover of greys, which keeps the page's colours
+    lv_color_t back{}, surface{}, accent{};
+    lv_color_t ink{};  // the hue as text reads on `back`: the accent on the dark, a deep shade of it on the pale
+};
+/** From an RGB565 cover; `dark` for the dark look's shades, the light look's paler ones otherwise. */
+AlbumColours album_colours(const std::uint16_t *pixels, int count, bool dark);
+
 }  // namespace ui::kitfront
