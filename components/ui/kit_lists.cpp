@@ -489,10 +489,8 @@ lv_obj_t *row(lv_obj_t *parent, const RowSpec &spec)
     lv_obj_set_size(col, 0, LV_SIZE_CONTENT);
     lv_obj_set_flex_grow(col, 1);
     lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
-    // The row's least height is its words' column's: flex sets a row that is as
-    // tall as its contents on its top, held up to a least height of its own, so
-    // everything in it would sit high. The column holds the line, and the rest
-    // is centred on it.
+    // the least height on the words, not the row: flex puts what is in a row
+    // as tall as its contents at its top, which held taller sat everything high
     lv_obj_set_flex_align(col, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     lv_obj_set_style_min_height(col, ROW_H - 2 * ROW_PAD, 0);
     if (data->toggles) {
