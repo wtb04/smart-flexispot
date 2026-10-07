@@ -46,20 +46,28 @@ constexpr int           NOT_FOUND       = 404;
 // the one unused longest is closed for the next.
 constexpr int           MAX_OPEN        = 10;
 
-// Grown to what a request needs, and kept, in PSRAM. Never by realloc: the
-// heap copies the old contents with its lock held and interrupts off, and a
-// buffer of a hundred kilobytes and more cost the panel a frame, a flicker of
-// blue. A fresh block, and the copy made here, with interrupts on.
+// Grown to what a request needs, in PSRAM, and given back after it when that
+// was more than kKeepBytes: three workers that each kept the most they ever
+// took held megabytes. Never by realloc: the heap copies the old contents with
+// its lock held and interrupts off, and a buffer of a hundred kilobytes and
+// more cost the panel a frame, a flicker of blue. A fresh block, and the copy
+// made here, with interrupts on.
 struct Buffer {
-    char       *data  = nullptr;
-    std::size_t size  = 0;
-    std::size_t len   = 0;
-    std::size_t limit = 0;  // what this request allows
+    char       *data          = nullptr;
+    std::size_t size          = 0;
+    std::size_t len           = 0;
+    std::size_t limit         = 0;      // what this request allows
+    std::size_t expected      = 0;      // what Content-Length said, 0 when it did not
+    bool        own           = true;   // false for the caller's, which cannot grow
+    bool        short_of_room = false;  // a part came that there was no memory for
 
     bool reserve(std::size_t want, bool keep = true)
     {
         if (want <= size) {
             return true;
+        }
+        if (!own) {
+            return false;
         }
         auto *grown = static_cast<char *>(heap_caps_malloc(want, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
         if (grown == nullptr) {
@@ -72,6 +80,36 @@ struct Buffer {
         data = grown;
         size = want;
         return true;
+    }
+
+    // Room for `need` bytes and the end of text: the step grown_size() says,
+    // or less when there is no memory for that.
+    bool grow(std::size_t need)
+    {
+        constexpr std::size_t SLACK = 16 * units::kBytesPerKiB;
+        const std::size_t     have  = size > 0 ? size - 1 : 0;
+        return reserve(grown_size(need, have, limit, expected) + 1) || reserve(std::min(limit, need + SLACK) + 1) ||
+               reserve(need + 1);
+    }
+
+    void restart()
+    {
+        len           = 0;
+        expected      = 0;
+        short_of_room = false;
+        if (data != nullptr) {
+            data[0] = '\0';
+        }
+    }
+
+    void give_back_over(std::size_t keep)
+    {
+        if (own && size > keep) {
+            heap_caps_free(data);
+            data = nullptr;
+            size = 0;
+            len  = 0;
+        }
     }
 };
 
@@ -117,18 +155,35 @@ esp_err_t on_event(esp_http_client_event_t *event)
         connection->retry_after_ms = std::atoi(event->header_value) * units::kMsPerSecond;  // seconds; a date is ignored
         return ESP_OK;
     }
-    if (event->event_id != HTTP_EVENT_ON_DATA || event->data_len <= 0 || connection->into == nullptr) {
+    if (connection->into == nullptr) {
         return ESP_OK;
     }
-    Buffer           &buffer = *connection->into;
-    const std::size_t room   = buffer.limit > buffer.len ? buffer.limit - buffer.len : 0;
-    const std::size_t take   = std::min(static_cast<std::size_t>(event->data_len), room);
-    const std::size_t grown  = std::max(buffer.len + take + 1, std::min(buffer.limit + 1, buffer.size * 2));
-    if (take > 0 && buffer.reserve(grown)) {
-        std::memcpy(buffer.data + buffer.len, event->data, take);
-        buffer.len += take;
-        buffer.data[buffer.len] = '\0';
+    Buffer &buffer = *connection->into;
+    // Once for each request written, a redirect's too: what came before is
+    // not this answer's.
+    if (event->event_id == HTTP_EVENT_HEADERS_SENT) {
+        buffer.restart();
+        return ESP_OK;
     }
+    if (event->event_id == HTTP_EVENT_ON_HEADER && strcasecmp(event->header_key, "Content-Length") == 0) {
+        buffer.expected = std::strtoul(event->header_value, nullptr, 10);
+        return ESP_OK;
+    }
+    if (event->event_id != HTTP_EVENT_ON_DATA || event->data_len <= 0 || buffer.short_of_room) {
+        return ESP_OK;
+    }
+    const std::size_t room = buffer.limit > buffer.len ? buffer.limit - buffer.len : 0;
+    const std::size_t take = std::min(static_cast<std::size_t>(event->data_len), room);
+    if (take == 0) {
+        return ESP_OK;
+    }
+    if (buffer.len + take + 1 > buffer.size && !buffer.grow(buffer.len + take)) {
+        buffer.short_of_room = true;  // what came after would leave a hole in it
+        return ESP_OK;
+    }
+    std::memcpy(buffer.data + buffer.len, event->data, take);
+    buffer.len += take;
+    buffer.data[buffer.len] = '\0';
     return ESP_OK;
 }
 
@@ -176,14 +231,16 @@ esp_http_client_handle_t open_client(const HostConfig &config, Connection &conne
     return client;
 }
 
-// Inflated into `out` when `in` is a whole gzip stream; false otherwise.
-bool gunzip(const Buffer &in, Buffer &out, tinfl_decompressor *state)
+enum class Gunzip : std::uint8_t { NotGzip, Inflated, NoRoom };
+
+// Inflated into `out` when `in` is a whole gzip stream.
+Gunzip gunzip(const Buffer &in, Buffer &out, tinfl_decompressor *state)
 {
     constexpr std::size_t  HEADER = 10, TRAILER = 8;
     constexpr std::uint8_t FHCRC = 2, FEXTRA = 4, FNAME = 8, FCOMMENT = 16;
     const auto            *bytes = reinterpret_cast<const std::uint8_t *>(in.data);
     if (in.len < HEADER + TRAILER || bytes[0] != 0x1f || bytes[1] != 0x8b || bytes[2] != 8) {
-        return false;
+        return Gunzip::NotGzip;
     }
     std::size_t at = HEADER;
     if ((bytes[3] & FEXTRA) != 0) {
@@ -201,13 +258,16 @@ bool gunzip(const Buffer &in, Buffer &out, tinfl_decompressor *state)
         at += 2;
     }
     if (at + TRAILER >= in.len) {
-        return false;
+        return Gunzip::NotGzip;
     }
-    // The trailer says how long it comes to, so the buffer is made that size.
+    // The trailer says how long it comes to, so the buffer is made that size,
+    // or the request's limit, past which it is cut as a plain answer would be.
     const std::uint8_t *tail  = bytes + in.len - 4;
-    const std::size_t   whole = tail[0] | (tail[1] << 8) | (tail[2] << 16) | (static_cast<std::size_t>(tail[3]) << 24);
+    const std::size_t   said  = tail[0] | (tail[1] << 8) | (tail[2] << 16) | (static_cast<std::size_t>(tail[3]) << 24);
+    const std::size_t   whole = std::min(said, in.limit);
+    out.len                   = 0;
     if (!out.reserve(whole + 1, false)) {
-        return false;
+        return Gunzip::NoRoom;
     }
     std::size_t in_bytes  = in.len - at - TRAILER;
     std::size_t out_bytes = whole;
@@ -215,12 +275,13 @@ bool gunzip(const Buffer &in, Buffer &out, tinfl_decompressor *state)
     const tinfl_status status =
         tinfl_decompress(state, bytes + at, &in_bytes, reinterpret_cast<mz_uint8 *>(out.data),
                          reinterpret_cast<mz_uint8 *>(out.data), &out_bytes, TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF);
-    if (status != TINFL_STATUS_DONE) {
-        return false;
+    const bool cut = status == TINFL_STATUS_HAS_MORE_OUTPUT && whole < said && out_bytes == whole;
+    if (status != TINFL_STATUS_DONE && !cut) {
+        return Gunzip::NotGzip;
     }
     out.len           = out_bytes;
     out.data[out.len] = '\0';
-    return true;
+    return Gunzip::Inflated;
 }
 
 // What each worker keeps: where answers come in, and where they are inflated.
@@ -235,7 +296,7 @@ bool timed_out(esp_err_t err)
     return err == ESP_ERR_HTTP_EAGAIN || err == ESP_ERR_TIMEOUT;
 }
 
-void send_once(const HostConfig &config, Connection &connection, const Request &request, Worker &worker,
+void send_once(const HostConfig &config, Connection &connection, const Request &request, Buffer &body,
                Exchange &out)
 {
     const std::string url = url_of(config, request.path);
@@ -244,6 +305,7 @@ void send_once(const HostConfig &config, Connection &connection, const Request &
     }
     if (connection.client == nullptr) {
         out.error = ESP_ERR_NO_MEM;
+        out.ours  = true;
         return;
     }
     esp_http_client_set_url(connection.client, url.c_str());
@@ -262,13 +324,9 @@ void send_once(const HostConfig &config, Connection &connection, const Request &
         esp_http_client_set_method(connection.client, HTTP_METHOD_GET);
         esp_http_client_set_post_field(connection.client, nullptr, 0);
     }
-    worker.body.len   = 0;
-    worker.body.limit = request.max_body;
-    worker.body.reserve(std::min(request.max_body + 1, FIRST_RESERVE));
-    if (worker.body.data != nullptr) {
-        worker.body.data[0] = '\0';
-    }
-    connection.into           = &worker.body;
+    body.reserve(std::min(body.limit + 1, FIRST_RESERVE));
+    body.restart();
+    connection.into           = &body;
     connection.retry_after_ms = 0;
 
     const std::int64_t began = esp_timer_get_time();
@@ -286,23 +344,49 @@ void send_once(const HostConfig &config, Connection &connection, const Request &
     }
 }
 
+// A failure, to be tried again, rather than an answer with a hole in it or none.
+void no_room(const HostConfig &config, const Running &running, std::size_t wanted, Exchange &exchange)
+{
+    ESP_LOGW(TAG, "%s %s: no room for %u KB, the largest free block %u KB", config.name, running.request.what,
+             static_cast<unsigned>(wanted / units::kBytesPerKiB),
+             static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) / units::kBytesPerKiB));
+    exchange.error  = ESP_ERR_NO_MEM;
+    exchange.status = 0;
+    exchange.ours   = true;
+}
+
 Exchange send(const HostConfig &config, Connection &connection, const Running &running, Worker &worker)
 {
+    const Request &request = running.request;
+    Buffer         theirs;
+    theirs.own   = false;
+    theirs.data  = request.into;
+    theirs.size  = request.into != nullptr ? request.into_size : 0;
+    Buffer &body = theirs.size > 0 ? theirs : worker.body;
+    body.limit   = theirs.size > 0 ? std::min(request.max_body, theirs.size - 1) : request.max_body;
+
     Exchange   exchange;
     const bool was_open = connection.open;
-    send_once(config, connection, running.request, worker, exchange);
+    send_once(config, connection, request, body, exchange);
     // A kept connection the server has since closed fails at once: once more,
     // on a fresh one. Not after a timeout, which the server may have acted on.
-    if (exchange.error != 0 && was_open && running.request.repeatable && !exchange.timed_out) {
+    if (exchange.error != 0 && was_open && request.repeatable && !exchange.timed_out) {
         exchange = Exchange{};
-        send_once(config, connection, running.request, worker, exchange);
+        send_once(config, connection, request, body, exchange);
     }
-    const Buffer *answer = &worker.body;
-    if (exchange.error == 0 && gunzip(worker.body, worker.inflated, worker.inflater)) {
-        answer = &worker.inflated;
+    if (exchange.error == 0 && body.short_of_room) {
+        no_room(config, running, std::max(body.expected, body.len), exchange);
     }
-    exchange.body   = answer->data != nullptr ? answer->data : "";
-    exchange.length = answer->len;
+    const Buffer *answer = &body;
+    if (exchange.error == 0) {
+        switch (gunzip(body, worker.inflated, worker.inflater)) {
+            case Gunzip::Inflated: answer = &worker.inflated; break;
+            case Gunzip::NoRoom: no_room(config, running, body.limit, exchange); break;
+            case Gunzip::NotGzip: break;
+        }
+    }
+    exchange.body   = exchange.error == 0 && answer->data != nullptr ? answer->data : "";
+    exchange.length = exchange.error == 0 ? answer->len : 0;
     return exchange;
 }
 
@@ -400,7 +484,9 @@ void log_outcome(const HostConfig &config, const Running &running, const Exchang
             connection->busy = false;
             s_core.finish(running, exchange, esp_timer_get_time(), tells);
         }
-        tell(tells);             // while the answer is still in this worker's buffers
+        tell(tells);  // while the answer is still in this worker's buffers
+        worker.body.give_back_over(kKeepBytes);
+        worker.inflated.give_back_over(kKeepBytes);
         xSemaphoreGive(s_wake);  // a connection is free: another may go
     }
 }
@@ -526,7 +612,9 @@ Fetched wait_for(Request request, Waiting &waiting)
         if (waiting.into != nullptr && waiting.size > 0) {
             got.length    = std::min(answer.length, waiting.size - 1);
             got.truncated = got.length < answer.length;
-            std::memcpy(waiting.into, answer.body, got.length);
+            if (answer.body != waiting.into) {
+                std::memcpy(waiting.into, answer.body, got.length);
+            }
             waiting.into[got.length] = '\0';
         } else if (waiting.text != nullptr) {
             got.length    = std::min(answer.length, waiting.text_max);
@@ -548,6 +636,8 @@ Fetched fetch(Request request, char *into, std::size_t size)
     if (waiting.done == nullptr) {
         return {};
     }
+    request.into      = into;
+    request.into_size = size;
     return wait_for(std::move(request), waiting);
 }
 

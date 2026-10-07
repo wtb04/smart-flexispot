@@ -18,11 +18,12 @@ constexpr char TAG[] = "jpeg";
 
 constexpr int ENGINE_TIMEOUT_MS = 2 * units::kMsPerSecond;
 
-constexpr std::size_t OUT_BUFFER_SIZE = kMaxSide * kMaxSide * sizeof(std::uint16_t);
+constexpr std::size_t OUT_BUFFER_SIZE = kMaxPixels * sizeof(std::uint16_t);
 
-// An MCU is 16 pixels wide where the chroma is halved across, 8 where it is not.
-constexpr int MCU_WIDTH_SUBSAMPLED = 16;
-constexpr int MCU_WIDTH_FULL       = 8;
+// An MCU is 16 pixels wide where the chroma is halved across, 8 where it is
+// not; and 16 high where it is halved down too.
+constexpr int MCU_SUBSAMPLED = 16;
+constexpr int MCU_FULL       = 8;
 
 // The engine only takes pictures whose pixel count is a multiple of this.
 constexpr unsigned ENGINE_PIXEL_MULTIPLE = 8;
@@ -47,21 +48,32 @@ constexpr std::size_t SEGMENT_HEADER = MARKER_LENGTH + LENGTH_FIELD;
 constexpr int         BITS_PER_BYTE  = 8;
 
 jpeg_decoder_handle_t s_engine = nullptr;
-std::uint8_t         *s_in     = nullptr;  // where the engine reads from
-std::uint8_t         *s_out    = nullptr;  // and writes to
+std::uint8_t         *s_out    = nullptr;  // where the engine writes; it reads the caller's bytes where they are
 SemaphoreHandle_t     s_lock   = nullptr;
 StaticSemaphore_t     s_lock_ctrl;
+
+int round_up(int value, int step)
+{
+    return (value + step - 1) / step * step;
+}
 
 // The engine writes whole MCUs, so a picture whose width is not a multiple of
 // the MCU width comes back padded on the end of every row. Reading it at the
 // picture width shears the image into diagonal streaks.
 int decoded_stride(const jpeg_decode_picture_info_t &info)
 {
-    const int mcu_w = info.sample_method == JPEG_DOWN_SAMPLING_YUV422 ||
-                              info.sample_method == JPEG_DOWN_SAMPLING_YUV420
-                          ? MCU_WIDTH_SUBSAMPLED
-                          : MCU_WIDTH_FULL;
-    return (static_cast<int>(info.width) + mcu_w - 1) / mcu_w * mcu_w;
+    const bool across = info.sample_method == JPEG_DOWN_SAMPLING_YUV422 ||
+                        info.sample_method == JPEG_DOWN_SAMPLING_YUV420;
+    return round_up(static_cast<int>(info.width), across ? MCU_SUBSAMPLED : MCU_FULL);
+}
+
+// What the engine writes, padded rows and all.
+std::size_t decoded_bytes(const jpeg_decode_picture_info_t &info)
+{
+    const int rows = round_up(static_cast<int>(info.height),
+                              info.sample_method == JPEG_DOWN_SAMPLING_YUV420 ? MCU_SUBSAMPLED : MCU_FULL);
+    const std::size_t pixel = info.sample_method == JPEG_DOWN_SAMPLING_GRAY ? 1 : sizeof(std::uint16_t);
+    return static_cast<std::size_t>(decoded_stride(info)) * rows * pixel;
 }
 
 bool starts_other_frame(std::uint8_t marker)
@@ -124,14 +136,15 @@ bool decode_soft(const void *data, std::size_t length, std::uint16_t *out, int m
     info.scale_num       = 1;
     info.scale_denom     = 1;
     jpeg_calc_output_dimensions(&info);
-    while ((static_cast<int>(info.output_width) > max_w ||
-            static_cast<int>(info.output_height) > max_h) &&
-           info.scale_denom < MAX_SCALE_DENOM) {
+    const auto too_big = [&info, max_w, max_h] {
+        return static_cast<int>(info.output_width) > max_w || static_cast<int>(info.output_height) > max_h ||
+               static_cast<std::size_t>(info.output_width) * info.output_height > kMaxPixels;
+    };
+    while (too_big() && info.scale_denom < MAX_SCALE_DENOM) {
         info.scale_denom *= 2;
         jpeg_calc_output_dimensions(&info);
     }
-    if (static_cast<int>(info.output_width) > max_w ||
-        static_cast<int>(info.output_height) > max_h) {
+    if (too_big()) {
         jpeg_destroy_decompress(&info);
         return false;
     }
@@ -149,20 +162,18 @@ bool decode_soft(const void *data, std::size_t length, std::uint16_t *out, int m
     return true;
 }
 
-bool decode_locked(std::size_t length, int max_w, int max_h, Picture &picture)
+bool decode_locked(const std::uint8_t *data, std::size_t length, int max_w, int max_h, Picture &picture)
 {
-    max_w = std::min(max_w, kMaxSide);
-    max_h = std::min(max_h, kMaxSide);
-
     // The engine takes baseline pictures whose pixel count divides by eight;
-    // anything else, or anything too big for the box, goes through software.
-    // Baseline is checked first: the engine cannot read a progressive header,
-    // and says so on the console at error level when asked to.
+    // anything else, or anything too big for the box or the buffer, goes
+    // through software. Baseline is checked first: the engine cannot read a
+    // progressive header, and says so on the console at error level when asked to.
     jpeg_decode_picture_info_t info{};
-    const bool engine = baseline(s_in, length) &&
-                        jpeg_decoder_get_info(s_in, length, &info) == ESP_OK &&
+    const bool engine = baseline(data, length) &&
+                        jpeg_decoder_get_info(data, length, &info) == ESP_OK &&
                         static_cast<int>(info.width) <= max_w &&
                         static_cast<int>(info.height) <= max_h &&
+                        decoded_bytes(info) <= OUT_BUFFER_SIZE &&
                         (info.width * info.height) % ENGINE_PIXEL_MULTIPLE == 0;
     if (engine) {
         const bool grey = info.sample_method == JPEG_DOWN_SAMPLING_GRAY;
@@ -172,7 +183,7 @@ bool decode_locked(std::size_t length, int max_w, int max_h, Picture &picture)
         cfg.rgb_order     = JPEG_DEC_RGB_ELEMENT_ORDER_BGR;
 
         std::uint32_t produced = 0;
-        const esp_err_t err = jpeg_decoder_process(s_engine, &cfg, s_in, length, s_out,
+        const esp_err_t err = jpeg_decoder_process(s_engine, &cfg, data, length, s_out,
                                                    OUT_BUFFER_SIZE, &produced);
         if (err == ESP_OK) {
             picture = {s_out, static_cast<int>(info.width), static_cast<int>(info.height),
@@ -185,7 +196,7 @@ bool decode_locked(std::size_t length, int max_w, int max_h, Picture &picture)
 
     int width  = 0;
     int height = 0;
-    if (!decode_soft(s_in, length, reinterpret_cast<std::uint16_t *>(s_out), max_w, max_h, width,
+    if (!decode_soft(data, length, reinterpret_cast<std::uint16_t *>(s_out), max_w, max_h, width,
                      height)) {
         return false;
     }
@@ -231,12 +242,10 @@ esp_err_t start()
     const jpeg_decode_engine_cfg_t engine{.intr_priority = 0, .timeout_ms = ENGINE_TIMEOUT_MS};
     ESP_RETURN_ON_ERROR(jpeg_new_decoder_engine(&engine, &s_engine), TAG, "engine");
 
-    jpeg_decode_memory_alloc_cfg_t in{.buffer_direction = JPEG_DEC_ALLOC_INPUT_BUFFER};
     jpeg_decode_memory_alloc_cfg_t out{.buffer_direction = JPEG_DEC_ALLOC_OUTPUT_BUFFER};
     std::size_t got = 0;
-    s_in  = static_cast<std::uint8_t *>(jpeg_alloc_decoder_mem(kMaxInput, &in, &got));
     s_out = static_cast<std::uint8_t *>(jpeg_alloc_decoder_mem(OUT_BUFFER_SIZE, &out, &got));
-    ESP_RETURN_ON_FALSE(s_in != nullptr && s_out != nullptr, ESP_ERR_NO_MEM, TAG, "buffers");
+    ESP_RETURN_ON_FALSE(s_out != nullptr, ESP_ERR_NO_MEM, TAG, "buffer");
     return ESP_OK;
 }
 
@@ -247,9 +256,8 @@ bool decode(const void *data, std::size_t length, int max_w, int max_h, Use use,
         return false;
     }
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    std::memcpy(s_in, data, length);
     Picture   picture{};
-    const bool ok = decode_locked(length, max_w, max_h, picture);
+    const bool ok = decode_locked(static_cast<const std::uint8_t *>(data), length, max_w, max_h, picture);
     if (ok) {
         use(picture, context);
     }

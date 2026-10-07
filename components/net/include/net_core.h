@@ -20,6 +20,7 @@ struct Exchange {
     bool        timed_out      = false;
     int         ms             = 0;
     int         retry_after_ms = 0;   // from a Retry-After header, 0 for none
+    bool        ours           = false;  // it failed here, as for want of memory: not held against the host
     const char *body           = "";
     std::size_t length         = 0;
 };
@@ -39,6 +40,16 @@ struct Tell {
     Response          response;
 };
 using Tells = std::vector<Tell>;
+
+/** The most a worker keeps between answers; a bigger buffer is given back. */
+inline constexpr std::size_t kKeepBytes = 64 * 1024;
+
+/** How many bytes a worker's buffer of `have` grows to when `need` no longer
+ *  fit: what Content-Length said is coming, when it said and that covers
+ *  `need`, or else four times as much with kKeepBytes the least, so that a big
+ *  answer leaves few holes behind it; never past `limit`, what the request
+ *  takes. None of them count the end of text. */
+std::size_t grown_size(std::size_t need, std::size_t have, std::size_t limit, std::size_t expected);
 
 class Core {
 public:

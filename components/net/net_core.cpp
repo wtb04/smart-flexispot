@@ -16,6 +16,15 @@ bool busy_status(int status)
 }
 }  // namespace
 
+std::size_t grown_size(std::size_t need, std::size_t have, std::size_t limit, std::size_t expected)
+{
+    if (expected > 0 && std::min(expected, limit) >= need) {
+        return std::min(expected, limit);
+    }
+    const std::size_t step = std::max(have > limit / 4 ? limit : have * 4, kKeepBytes);
+    return std::min(limit, std::max(need, step));
+}
+
 Host Core::add_host(const HostConfig &config)
 {
     HostState state;
@@ -200,7 +209,7 @@ void Core::finish(const Running &running, const Exchange &exchange, std::int64_t
         } else {
             host.failures_in_row = 0;
         }
-    } else {
+    } else if (!exchange.ours) {
         ++host.failures;
         ++host.failures_in_row;
         if (host.config.rest.failure_ms > 0 && host.failures_in_row >= std::max(host.config.rest.failures, 1)) {
