@@ -864,6 +864,7 @@ bool glide_compose(std::int32_t shift)
     shift        = std::clamp<std::int32_t>(shift, 0, w);
     const std::int64_t at = esp_timer_get_time();
     s_target              = free_buffer();
+    s_glide_times.wait_us += esp_timer_get_time() - at;
     const int     t       = s_target;
     std::uint8_t *to      = s_fbs[t];
     const std::uint8_t *old_page = s_fbs[s_glide_from], *new_page = s_fbs[s_glide_held];

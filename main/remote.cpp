@@ -100,6 +100,7 @@ struct Walk {
     int         count;
     std::size_t small_bytes;
     int         small_count;
+    std::size_t listed = LISTED_BLOCK;
 };
 
 bool walk_block(walker_heap_into_t, walker_block_info_t block, void *user)
@@ -108,7 +109,7 @@ bool walk_block(walker_heap_into_t, walker_block_info_t block, void *user)
     if (!block.used) {
         return true;
     }
-    if (block.size < LISTED_BLOCK || walk->count == MAX_BLOCKS) {
+    if (block.size < walk->listed || walk->count == MAX_BLOCKS) {
         walk->small_bytes += block.size;
         ++walk->small_count;
     } else {
@@ -141,15 +142,20 @@ esp_err_t heap_page(httpd_req_t *req)
     while (tasks < MAX_TASKS && xTaskGetNext(&it) != -1) {
         stacks[tasks++] = {pxTaskGetStackStart(it.pxTaskHandle), pcTaskGetName(it.pxTaskHandle)};
     }
-    Walk walk{blocks, 0, 0, 0};
-    heap_caps_walk(MALLOC_CAP_DMA, walk_block, &walk);
+    // ?psram: PSRAM's big blocks rather than the DMA-capable heap's
+    char query[8] = "";
+    httpd_req_get_url_query_str(req, query, sizeof(query));
+    const bool     psram = std::strcmp(query, "psram") == 0;
+    const uint32_t caps  = psram ? MALLOC_CAP_SPIRAM : MALLOC_CAP_DMA;
+    Walk walk{blocks, 0, 0, 0, psram ? 32 * 1024 : LISTED_BLOCK};
+    heap_caps_walk(caps, walk_block, &walk);
 
     httpd_resp_set_type(req, "text/plain");
     char line[128];
     int  n = std::snprintf(line, sizeof(line), "free %u largest %u low %u\n",
-                           static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_DMA)),
-                           static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_DMA)),
-                           static_cast<unsigned>(heap_caps_get_minimum_free_size(MALLOC_CAP_DMA)));
+                           static_cast<unsigned>(heap_caps_get_free_size(caps)),
+                           static_cast<unsigned>(heap_caps_get_largest_free_block(caps)),
+                           static_cast<unsigned>(heap_caps_get_minimum_free_size(caps)));
     httpd_resp_send_chunk(req, line, n);
     for (int i = 0; i < walk.count; ++i) {
         const auto *from = static_cast<const std::uint8_t *>(blocks[i].ptr);
@@ -547,6 +553,75 @@ esp_err_t panel_page(httpd_req_t *req)
     return err == ESP_OK ? httpd_resp_send_chunk(req, nullptr, 0) : err;
 }
 
+// A finger on the screen from here, for testing on the panel with nobody at
+// it: the touch's own reading, overridden while it lasts, so what LVGL sees is
+// what a real press is.
+struct Touch {
+    lv_indev_t      *indev = nullptr;
+    lv_indev_read_cb_t read = nullptr;
+    lv_point_t       raw{};
+    std::uint32_t    until = 0;
+    bool             on    = false, lifting = false;
+} s_touch;
+
+lv_point_t turned(lv_point_t p)
+{
+    if (lv_indev_get_ccw(s_touch.indev)) {
+        lv_display_rotate_point_ccw(lv_indev_get_display(s_touch.indev), &p);
+    } else {
+        lv_display_rotate_point(lv_indev_get_display(s_touch.indev), &p);
+    }
+    return p;
+}
+
+void touch_read(lv_indev_t *indev, lv_indev_data_t *data)
+{
+    s_touch.read(indev, data);
+    if (!s_touch.on) {
+        return;
+    }
+    data->point = s_touch.raw;
+    if (static_cast<std::int32_t>(lv_tick_get() - s_touch.until) < 0) {
+        data->state = LV_INDEV_STATE_PRESSED;
+    } else {
+        data->state = LV_INDEV_STATE_RELEASED;
+        s_touch.on  = false;
+    }
+}
+
+bool press(int x, int y, int ms)
+{
+    if (s_touch.indev == nullptr) {
+        for (lv_indev_t *dev = lv_indev_get_next(nullptr); dev != nullptr; dev = lv_indev_get_next(dev)) {
+            if (lv_indev_get_type(dev) == LV_INDEV_TYPE_POINTER) {
+                s_touch.indev = dev;
+                s_touch.read  = lv_indev_get_read_cb(dev);
+                lv_indev_set_read_cb(dev, touch_read);
+                break;
+            }
+        }
+        if (s_touch.indev == nullptr) {
+            return false;
+        }
+    }
+    // the screen's point back to the touch's own, from where the turn sends three
+    const lv_point_t o = turned({0, 0}), ex = turned({1, 0}), ey = turned({0, 1});
+    const int ax = ex.x - o.x, ay = ex.y - o.y, bx = ey.x - o.x, by = ey.y - o.y;
+    const int dx = x - o.x, dy = y - o.y;
+    s_touch.raw   = {static_cast<std::int32_t>(ax * dx + ay * dy), static_cast<std::int32_t>(bx * dx + by * dy)};
+    s_touch.until = lv_tick_get() + static_cast<std::uint32_t>(ms);
+    s_touch.on    = true;
+    lv_timer_create(
+        [](lv_timer_t *t) {
+            lv_indev_read(s_touch.indev);  // a touch that only reads when the controller signals
+            if (!s_touch.on) {
+                lv_timer_delete(t);
+            }
+        },
+        10, nullptr);
+    return true;
+}
+
 esp_err_t bench_page(httpd_req_t *req)
 {
     if (!ota::authorised(req)) {
@@ -555,7 +630,7 @@ esp_err_t bench_page(httpd_req_t *req)
     EXT_RAM_BSS_ATTR static char text[7000];
     int         n = 0;
     if (lvgl_port_lock(STATS_LOCK_MS)) {
-        char query[8] = "";
+        char query[24] = "";
         httpd_req_get_url_query_str(req, query, sizeof(query));
         if (std::strcmp(query, "lab") == 0) {
             if (!ui::lab::built()) {
@@ -571,6 +646,10 @@ esp_err_t bench_page(httpd_req_t *req)
                                   : query[2] == 's' ? ui::kit::Behind::Soft
                                                     : ui::kit::Behind::Blur);
             n = std::snprintf(text, sizeof(text), "backdrop %c\n", query[2]);
+        } else if (query[0] == 't' && query[1] == '=') {  // t=x,y,ms: a press there, that long
+            int x = 0, y = 0, ms = 80;
+            std::sscanf(query + 2, "%d,%d,%d", &x, &y, &ms);
+            n = std::snprintf(text, sizeof(text), press(x, y, ms) ? "pressed %d,%d for %d ms\n" : "no touch\n", x, y, ms);
         } else if (std::strcmp(query, "kr") == 0) {  // the design kit's last page change and popover
             n = std::snprintf(text, sizeof(text), "%s\n%s", ui::kit::change_report(), ui::kit::freeze_report());
         } else if (std::strcmp(query, "report") == 0) {

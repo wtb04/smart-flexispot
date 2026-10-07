@@ -76,7 +76,7 @@ struct Run {
     std::uint32_t frames = 0;
 } s_run;
 
-char          s_report[160] = "no page change yet";
+char          s_report[240] = "no page change yet";
 std::uint32_t s_run_id      = 1;
 
 const char *name_of(Change how)
@@ -679,6 +679,7 @@ void hide_pages()
 #if defined(ESP_PLATFORM)
 std::int32_t  s_glide_w  = 0;
 std::uint32_t s_glide_at = 0;
+std::uint64_t s_glide_show_us = 0;
 
 void glide_tick(lv_timer_t *)
 {
@@ -690,8 +691,10 @@ void glide_tick(lv_timer_t *)
     a.act_time    = std::min<std::int32_t>(static_cast<std::int32_t>(lv_tick_elaps(s_glide_at)), a.duration);
     const bool last = a.act_time >= a.duration;
     if (board::glide_compose(last ? s_glide_w : motion::spring(&a))) {
+        const std::uint64_t drawn = perf::now_us();
         lv_refr_now(lv_display_get_default());
         board::glide_show();
+        s_glide_show_us += perf::now_us() - drawn;
     }
     if (!last) {
         return;
@@ -700,10 +703,13 @@ void glide_tick(lv_timer_t *)
     s_run.stepper = nullptr;
     end_glide();
     const board::GlideTimes t = board::glide_times();
-    std::snprintf(s_report, sizeof s_report, "glide: %u frames in %.0f ms, the new page drawn in %.1f ms, %.1f ms a frame copying",
+    const double f = t.frames != 0 ? t.frames * 1000.0 : 1.0;
+    std::snprintf(s_report, sizeof s_report,
+                  "glide: %u frames in %.0f ms, the new page drawn in %.1f ms; a frame: %.1f ms copying, %.1f of it waiting, %.1f drawing and showing",
                   static_cast<unsigned>(t.frames), static_cast<double>(perf::now_us() - s_run.began_us) / 1000.0,
-                  static_cast<double>(s_run.ready_us - s_run.began_us) / 1000.0,
-                  t.frames != 0 ? static_cast<double>(t.copy_us) / 1000.0 / t.frames : 0.0);
+                  static_cast<double>(s_run.ready_us - s_run.began_us) / 1000.0, static_cast<double>(t.copy_us) / f,
+                  static_cast<double>(t.wait_us) / f, static_cast<double>(s_glide_show_us) / f);
+    s_glide_show_us = 0;
     s_run = Run{};
     ++s_run_id;
 }
