@@ -28,6 +28,7 @@ lv_obj_t  *s_media = nullptr, *s_title = nullptr, *s_artist = nullptr, *s_play =
 lv_obj_t  *s_skip = nullptr;  // Skip intro, or Next episode, over the title while it is offered
 Cover     *s_cover = nullptr;
 std::uint32_t s_covers = 0;
+lv_timer_t   *s_retry  = nullptr;
 
 void set_text_if(lv_obj_t *label, const char *value)
 {
@@ -84,11 +85,13 @@ void paint_media()
     lv_obj_set_hidden(s_play, m.has_track && !m.remote);
     set_icon(lv_obj_get_child(s_play, 0), m.has_track && m.playing ? ic::pause : ic::play_arrow, true);
     if (m.covers != s_covers) {
-        s_covers = m.covers;
-        if (m.art != nullptr && !m.placeholder) {
-            s_cover->show(Picture{m.art, m.art_width, media::kArtSize, 0});
-        } else {
+        if (m.art == nullptr || m.placeholder) {
             s_cover->clear();
+            s_covers = m.covers;
+        } else if (s_cover->show(Picture{m.art, m.art_width, media::kArtSize, 0})) {
+            s_covers = m.covers;
+        } else {
+            again_soon(s_retry, paint_media);
         }
     }
 }

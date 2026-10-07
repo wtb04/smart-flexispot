@@ -164,6 +164,8 @@ void glide_media(lv_timer_t *)
     }
 }
 
+lv_timer_t *s_cover_retry = nullptr;
+
 void paint_media_card()
 {
     MediaCard *c = s_media;
@@ -195,11 +197,13 @@ void paint_media_card()
     set_hidden_if(c->episode, episode[0] == 0);
 
     if (m.covers != c->covers) {
-        c->covers = m.covers;
-        if (m.has_track && m.art != nullptr && !m.placeholder) {
-            c->cover->show(Picture{m.art, m.art_width, media::kArtSize, 0});
-        } else {
+        if (!m.has_track || m.art == nullptr || m.placeholder) {
             c->cover->clear();
+            c->covers = m.covers;
+        } else if (c->cover->show(Picture{m.art, m.art_width, media::kArtSize, 0})) {
+            c->covers = m.covers;
+        } else {
+            again_soon(s_cover_retry, paint_media_card);
         }
     }
 

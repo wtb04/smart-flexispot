@@ -11,6 +11,9 @@
 
 namespace {
 constexpr std::uint32_t LV_PSRAM_CAPS = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
+// Only a small one goes to internal RAM when PSRAM is out: that is Wi-Fi's and
+// TLS's, and a picture there would hide the shortage and starve them.
+constexpr size_t INTERNAL_MAX = 4096;
 }
 
 extern "C" {
@@ -22,13 +25,13 @@ void lv_mem_deinit() {}
 void *lv_malloc_core(size_t size)
 {
     void *p = heap_caps_malloc(size, LV_PSRAM_CAPS);
-    return p != nullptr ? p : heap_caps_malloc(size, MALLOC_CAP_8BIT);
+    return p != nullptr || size > INTERNAL_MAX ? p : heap_caps_malloc(size, MALLOC_CAP_8BIT);
 }
 
 void *lv_realloc_core(void *p, size_t new_size)
 {
     void *q = heap_caps_realloc(p, new_size, LV_PSRAM_CAPS);
-    return q != nullptr ? q : heap_caps_realloc(p, new_size, MALLOC_CAP_8BIT);
+    return q != nullptr || new_size > INTERNAL_MAX ? q : heap_caps_realloc(p, new_size, MALLOC_CAP_8BIT);
 }
 
 void lv_free_core(void *p)

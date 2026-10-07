@@ -41,6 +41,7 @@ struct MediaState {
     bool          placeholder = false;    // no cover will come: a blank where it would be
     const void   *large       = nullptr;  // the same cover at media::kLargeArtSize, or null
     std::uint32_t covers      = 0;        // counts every cover that came, as one may come into the same buffer
+    std::uint32_t larges      = 0;        // counts every large one, which follows its cover
 
     // A video's own: its still, its subtitles, the episodes either side, its
     // intro and credits.

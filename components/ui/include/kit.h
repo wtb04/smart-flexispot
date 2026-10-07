@@ -428,8 +428,9 @@ enum class Shape : std::uint8_t { Rounded, Round };
 /**
  * A picture in a rounded rectangle or a circle: album art, a video's still, a
  * channel's or a plane's picture. It is scaled to its size and its corners cut
- * once, as it arrives, so drawing it is a plain copy; a new one fades in over
- * the old. Without one it is an empty well with a glyph.
+ * once, as it arrives, into the same memory every time, so drawing it is a
+ * plain copy; a new one fades in over a small copy of the old. Without one it
+ * is an empty well with a glyph.
  */
 class Cover : public InPsram {
   public:
@@ -439,11 +440,13 @@ class Cover : public InPsram {
     Cover(lv_obj_t *parent, std::int32_t w, std::int32_t h, Shape shape = Shape::Rounded, std::int32_t radius = -1,
           const char *glyph = nullptr);
     lv_obj_t *obj() const { return m_root; }
-    /** False when there is no memory for it, and the cover is left as it was. */
+    /** False when there is no memory for it: the cover keeps what it showed, and the caller tries again later. */
     bool show(const Picture &picture, bool animate = true);
-    /** Back to the empty well. */
+    /** Back to the empty well, its memory kept for the next picture. */
     void clear(bool animate = true);
-    bool        has_picture() const { return m_cur.main != nullptr; }
+    /** Back to the empty well, and its memory given back. */
+    void release();
+    bool        has_picture() const { return m_has; }
     std::size_t bytes() const;
 
     struct Made {
@@ -452,15 +455,22 @@ class Cover : public InPsram {
     };
 
   private:
+    enum class Fade : std::uint8_t { None, Over, In, Out };  // over the old one's copy, in from the well, out to it
+
     static void on_draw(lv_event_t *e);
     static void on_mix(void *var, int32_t v);
-    void fade(bool animate);
+    bool keep_ghost();
+    void fade(Fade kind);
     void settle();
 
-    lv_obj_t    *m_root = nullptr, *m_well = nullptr, *m_pic = nullptr;
-    Made         m_cur{}, m_prev{};
-    std::int32_t m_w = 0, m_h = 0, m_r = 0;
-    std::int32_t m_mix = 255;
+    lv_obj_t      *m_root = nullptr, *m_well = nullptr, *m_pic = nullptr;
+    Made           m_cur{};
+    lv_draw_buf_t *m_ghost = nullptr;  // what was shown, at a fraction of the size, while the new one fades in over it
+    std::int32_t   m_w = 0, m_h = 0, m_r = 0;
+    std::int32_t   m_mix = 255;
+    Fade           m_fade = Fade::None;
+    bool           m_has = false;
+    bool           m_warned = false;
 };
 
 /**
@@ -468,6 +478,9 @@ class Cover : public InPsram {
  * enlarged to fill, blurred, dithered, and darkened in the dark look or
  * lightened in the light one so their text reads on it. Made off the LVGL task
  * and laid down a band of rows a frame; opaque, so nothing under it is drawn.
+ * One the size of the screen is made into the ground's own picture, which
+ * nothing shows while it covers the screen, and the ground is painted again
+ * when it goes.
  */
 class Backdrop : public InPsram {
   public:
@@ -490,6 +503,7 @@ class Backdrop : public InPsram {
     bool start();
     void stop();
     void restyle();
+    void give_back();
 
     lv_obj_t      *m_root = nullptr;
     Cover::Made    m_made{};
@@ -498,9 +512,23 @@ class Backdrop : public InPsram {
     std::int32_t   m_shown = 0;  // rows that hold a picture, until it is whole
     std::int32_t   m_pass  = 0;  // rows laid down by the picture being made
     bool           m_whole = false;
+    bool           m_on_ground = false;  // made into the ground's picture rather than its own
+    bool           m_lent = false;       // holding the ground's picture now
+    bool           m_warned = false;
     Job           *m_job = nullptr;
     lv_timer_t    *m_timer = nullptr;
 };
+
+/**
+ * The ground's picture, for a backdrop over the whole screen to be made into:
+ * the content under it is hidden meanwhile, so no shadow is painted into it.
+ * Null while it is lent already. Given back, it is painted again.
+ */
+lv_draw_buf_t *lend_ground();
+void           ground_back();
+
+/** Calls `fn` once, a second and a half from now, as when a picture found no room: asked again, from then. */
+void again_soon(lv_timer_t *&timer, void (*fn)());
 
 /** What the last cover and backdrop held and took to make. */
 const char *pictures_report();
