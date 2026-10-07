@@ -105,6 +105,9 @@ bool build_next_part()
             kit::add_page(s_items.radar, build_radar);
             kit::add_page(nullptr, build_setup);
             kit::on_page_shown(shown);
+            // at once: on the panel a slide could not be drawn smoothly, the page
+            // to come taking 400 ms to draw and each frame of it 45
+            kit::set_change(kit::Change::Instant);
             kit::show_page(HOME, false);
             return true;
         case 2:

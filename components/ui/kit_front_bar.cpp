@@ -157,17 +157,19 @@ void build_media(lv_obj_t *bar)
     s_media = capsule(bar);
     lv_obj_set_width(s_media, MEDIA_W);
     lv_obj_set_style_pad_column(s_media, space::m, 0);
+    lv_obj_set_style_pad_left(s_media, (size::bar - ART) / 2, 0);  // as far from the edge as from the top
     lv_obj_add_flag(s_media, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_style_bg_opa(s_media, colours().glass_solid_opa, LV_STATE_PRESSED);  // the glass firms up under the finger
-    s_cover = new Cover(s_media, ART, ART, Shape::Rounded, 12, ic::music_note);
+    s_cover = new Cover(s_media, ART, ART, Shape::Rounded, 14, ic::music_note);
     lv_obj_remove_flag(s_cover->obj(), LV_OBJ_FLAG_CLICKABLE);
     lv_obj_t *col = flow(s_media, LV_FLEX_FLOW_COLUMN, 0);
     lv_obj_set_flex_grow(col, 1);
-    s_title  = text(col, Role::H3, "");
+    s_title  = text(col, Role::Body, "");
     s_artist = text(col, Role::Small, "", Ink::Secondary);
     const std::int32_t text_w = MEDIA_W - ART - 56 - 4 * space::m;
+    // one line each, cut short with dots, however long a video's title runs
     for (lv_obj_t *line : {s_title, s_artist}) {
-        lv_obj_set_width(line, text_w);
+        lv_obj_set_size(line, text_w, lv_font_get_line_height(lv_obj_get_style_text_font(line, LV_PART_MAIN)));
         lv_label_set_long_mode(line, LV_LABEL_LONG_MODE_DOTS);
     }
     // Where the title is, while an intro or the credits run: one tap.
