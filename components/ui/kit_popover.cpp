@@ -45,7 +45,7 @@ lv_draw_buf_t *s_shot = nullptr, *s_half = nullptr, *s_quarter = nullptr, *s_sma
 lv_draw_buf_t *s_blurred = nullptr;
 lv_draw_buf_t *s_strip   = nullptr;  // the 24-bit strip the PPA stretches into, made on LVGL's task
 std::atomic<bool> s_open{false};      // a popover is up: its picture is not to be touched
-std::atomic<Behind> s_behind{Behind::Blur};
+std::atomic<Behind> s_behind{Behind::Dim};
 
 #if defined(ESP_PLATFORM)
 ppa_client_handle_t s_ppa = nullptr;
@@ -377,18 +377,24 @@ void bake_shadow(const lv_area_t &at, const lv_area_t &reach)
 bool buffers()
 {
     if (s_frozen == nullptr) {
+        s_frozen = lv_draw_buf_create(FW, FH, LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO);
+    }
+    // a dim is the frozen picture alone: the blur's 1.1 MB only for a blur
+    if (s_behind.load(std::memory_order_relaxed) != Behind::Dim && s_half == nullptr) {
         s_half    = lv_draw_buf_create(FW / 2, FH / 2, LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO);
         s_quarter = lv_draw_buf_create(FW / 4, FH / 4, LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO);
         s_small   = lv_draw_buf_create(SW, SH, LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO);
         s_blurred = lv_draw_buf_create(SW, SH, LV_COLOR_FORMAT_RGB888, LV_STRIDE_AUTO);
-        s_frozen  = lv_draw_buf_create(FW, FH, LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO);
         s_planes  = static_cast<Plane *>(scratch(sizeof(Plane) * 4));
 #if defined(ESP_PLATFORM)
         s_strip = lv_draw_buf_create(FW, 12 * F, LV_COLOR_FORMAT_RGB888, LV_STRIDE_AUTO);
 #endif
     }
-    return s_half != nullptr && s_quarter != nullptr && s_small != nullptr && s_blurred != nullptr && s_frozen != nullptr &&
-           s_planes != nullptr;
+    if (s_frozen == nullptr) {
+        return false;
+    }
+    return s_behind.load(std::memory_order_relaxed) == Behind::Dim ||
+           (s_half != nullptr && s_quarter != nullptr && s_small != nullptr && s_blurred != nullptr && s_planes != nullptr);
 }
 
 // From the half-size picture on: no LVGL in it, so the panel's other core can do it.
@@ -468,7 +474,7 @@ bool picture_from_shown()
         std::snprintf(s_freeze_report, sizeof s_freeze_report, "  freezing for a popover: dimmed whole, %.1f ms\n",
                       static_cast<double>(perf::now_us() - t0) / 1000.0);
     } else {
-        if (board::shrink_shown(s_half->data, s_half->data_size, FW / 2, FH / 2) != ESP_OK) {
+        if (s_half == nullptr || board::shrink_shown(s_half->data, s_half->data_size, FW / 2, FH / 2) != ESP_OK) {
             return false;
         }
         if (!finish_picture(t0, perf::now_us())) {
@@ -555,6 +561,9 @@ void freeze()
     if (s_behind.load(std::memory_order_relaxed) == Behind::Dim) {
         std::memcpy(s_frozen->data, s_shot->data, std::min(s_frozen->data_size, s_shot->data_size));
         dim_frozen();
+        return;
+    }
+    if (s_half == nullptr) {
         return;
     }
     stretch(s_shot, s_half, 0.5f);
