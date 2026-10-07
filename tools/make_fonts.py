@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Builds the design kit's fonts: Instrument Sans for text, Material Symbols Rounded for icons.
+"""Builds the design kit's fonts: Instrument Sans for text, Material Symbols Rounded for icons,
+and Montserrat for the few letters Instrument Sans lacks.
 
-Both come as variable fonts, which lv_font_conv cannot pick an instance from,
-so fontTools cuts the static ones first. Needs fontTools (pip install fonttools)
-and node's npx on PATH for lv_font_conv. Run from the repository's root:
+The first two come as variable fonts, which lv_font_conv cannot pick an instance from,
+so fontTools cuts the static ones first. Needs fontTools (pip install fonttools),
+node's npx on PATH for lv_font_conv, and a build done once, for the Montserrat in
+LVGL's managed component. Run from the repository's root:
 
     tools/make_fonts.py
 """
@@ -27,11 +29,17 @@ LV_FONT_CONV = "lv_font_conv@1.5.3"
 TEXT_URL = "https://raw.githubusercontent.com/google/fonts/main/ofl/instrumentsans/InstrumentSans[wdth,wght].ttf"
 ICON_URL = ("https://raw.githubusercontent.com/google/material-design-icons/master/variablefont/"
             "MaterialSymbolsRounded[FILL,GRAD,opsz,wght]")
+MONTSERRAT = ROOT / "managed_components/lvgl__lvgl/scripts/generators/built_in_font/Montserrat-Medium.ttf"
 
 TEXT = ([*range(0x20, 0x7F), *range(0xA0, 0x100), *range(0x100, 0x180)]
         + [ord(c) for c in "–—‘’“”…•→←↑↓−€µ₂"])
 # Units beside a readout are set in a smaller font, so the big sizes carry only these.
 READOUT = [ord(c) for c in " 0123456789+,-.:%°−"]
+
+# The text roles fall back on these, at the nearest size Montserrat comes in;
+# see kit_fonts.cpp. Each carries only what the text fonts do not.
+UNITS = [*range(0xA0, 0x180), *range(0x2010, 0x2028), *range(0x2030, 0x203B), 0x20AC, 0x3BC]
+UNITS_SIZES = (16, 20, 22, 28, 32)
 
 # role: (weight, size, range)
 ROLES = {
@@ -41,7 +49,6 @@ ROLES = {
     "h3": (600, 25, TEXT),
     "h2": (600, 30, TEXT),
     "h1": (600, 36, TEXT),
-    "read_s": (600, 30, TEXT),
     "read_m": (600, 40, READOUT),
     "read_l": (600, 52, READOUT),
     "read_xl": (600, 64, READOUT),
@@ -50,15 +57,14 @@ ROLES = {
 
 ICON_SIZES = (24, 28, 34)
 ICONS = """
-home calendar_month flight timer lightbulb local_fire_department thermostat wifi wifi_off
-smartphone mobile_off battery_full battery_5_bar battery_2_bar bolt play_arrow pause stop
-skip_previous skip_next replay_10 forward_10 volume_up volume_down subtitles open_in_full
-close_fullscreen close add remove check chevron_right chevron_left keyboard_arrow_up
-keyboard_arrow_down my_location desk wall_lamp floor_lamp light bedtime settings palette
-dashboard tune monitor_heart restart_alt power_settings_new co2 air humidity_percentage grain
-directions_bike train directions_bus directions_walk schedule event music_note speaker laptop
-info aspect_ratio add_circle drag_indicator local_laundry_service notifications warning error
-check_circle sync height arrow_upward arrow_downward radar visibility_off
+home calendar_month flight timer lightbulb wifi smartphone battery_full battery_5_bar
+battery_2_bar bolt play_arrow pause stop skip_previous skip_next replay_10 forward_10
+volume_up volume_down subtitles open_in_full close_fullscreen close add remove check
+chevron_right chevron_left keyboard_arrow_up keyboard_arrow_down my_location desk wall_lamp
+floor_lamp light bedtime settings palette tune monitor_heart restart_alt power_settings_new
+air directions_bike train directions_bus directions_walk schedule event music_note info
+aspect_ratio local_laundry_service notifications warning error check_circle sync
+arrow_upward arrow_downward visibility_off
 """.split()
 
 
@@ -182,6 +188,11 @@ def main():
     made = []
     for role, (weight, size, codes) in ROLES.items():
         made.append(convert(weights[weight], size, [c for c in codes if c in have], f"lv_font_kit_{role}"))
+    text = {c for c in TEXT if c in have}
+    montserrat = TTFont(MONTSERRAT).getBestCmap()
+    fallback = [c for c in UNITS if c in montserrat and c not in text]
+    for size in UNITS_SIZES:
+        made.append(convert(MONTSERRAT, size, fallback, f"lv_font_units_{size}"))
     for style, font in styles.items():
         for size in ICON_SIZES:
             made.append(convert(font, size, icon_codes, f"lv_font_kit_icon_{style}_{size}"))

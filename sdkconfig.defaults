@@ -72,7 +72,6 @@ CONFIG_ESP_HOSTED_PRIV_SDIO_OPTION=y
 CONFIG_ESP_HOSTED_SDIO_PIN_D2=9
 CONFIG_ESP_HOSTED_SDIO_PIN_D3=8
 CONFIG_ESP_HOSTED_SDIO_GPIO_RESET_SLAVE=15
-CONFIG_ESP_HOSTED_RESET_GPIO_ACTIVE_LOW=y
 CONFIG_ESP_HOSTED_SDIO_OPTIMIZATION_RX_STREAMING_MODE=y
 
 # Lets a DHCP-offered NTP server win over pool.ntp.org, which esp_netif_sntp
@@ -185,8 +184,6 @@ CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
 # never take effect. On a wall panel whose content changes once a minute that
 # is continuous CPU and power for two debug labels.
 CONFIG_LV_USE_SYSMON=n
-CONFIG_LV_USE_PERF_MONITOR=n
-CONFIG_LV_USE_MEM_MONITOR=n
 
 # Two of these. What a draw thread needs depends on what is being drawn, and
 # an overflow there is a hard crash: at 5 KB an image drawn by the PPA ran
