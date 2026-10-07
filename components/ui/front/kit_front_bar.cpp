@@ -19,7 +19,7 @@ namespace {
 namespace ic = kit::glyph;
 using namespace kit;
 
-constexpr std::int32_t MEDIA_W = 452, ART = 52;
+constexpr std::int32_t MEDIA_W = 452, ART = 48, ART_R = 10, ART_IN = 16;
 
 Status     s_status;
 lv_obj_t  *s_lights = nullptr, *s_lights_count = nullptr;
@@ -164,10 +164,10 @@ void build_media(lv_obj_t *bar)
     s_media = capsule(bar);
     lv_obj_set_width(s_media, MEDIA_W);
     lv_obj_set_style_pad_column(s_media, space::m, 0);
-    lv_obj_set_style_pad_left(s_media, (size::bar - ART) / 2, 0);  // as far from the edge as from the top
+    lv_obj_set_style_pad_left(s_media, ART_IN, 0);  // further in than from the top, clear of the capsule's round end
     lv_obj_add_flag(s_media, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_style_bg_opa(s_media, colours().glass_solid_opa, LV_STATE_PRESSED);  // the glass firms up under the finger
-    s_cover = new Cover(s_media, ART, ART, Shape::Rounded, 14, ic::music_note);
+    s_cover = new Cover(s_media, ART, ART, Shape::Rounded, ART_R, ic::music_note);
     lv_obj_remove_flag(s_cover->obj(), LV_OBJ_FLAG_CLICKABLE);
     lv_obj_t *col = flow(s_media, LV_FLEX_FLOW_COLUMN, 0);
     lv_obj_set_flex_grow(col, 1);

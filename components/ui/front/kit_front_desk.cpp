@@ -24,7 +24,7 @@ constexpr int GUESTS[]  = {4, 5};
 
 constexpr std::int32_t COL_W = 176, MOVE_H = 80, PRESET_H = 120, GAP = space::m, TILE_R = 20, FOOT_H = 72;
 constexpr std::int32_t INNER  = 2 * COL_W + GAP;
-constexpr std::int32_t CARD_W = INNER + 2 * space::xl;
+constexpr std::int32_t CARD_W = INNER + 2 * space::xxl;
 constexpr std::uint32_t IDLE_MS = 20 * 1000;
 
 enum class Tile : std::uint8_t { Plain, At, Going };
@@ -244,7 +244,7 @@ void open_desk(lv_obj_t *source)
     const int          rows   = (shown + 1) / 2;
     const std::int32_t grid_h = MOVE_H + rows * (PRESET_H + GAP);
     const std::int32_t head_h = fonts::h3()->line_height;
-    const std::int32_t card_h = 2 * space::xl + head_h + space::l + grid_h + space::l + FOOT_H;
+    const std::int32_t card_h = 2 * space::xxl + head_h + space::l + grid_h + space::l + FOOT_H;
 
     lv_obj_t *body = popover(source, CARD_W, card_h, From::Beside);
     lv_obj_set_flex_flow(body, LV_FLEX_FLOW_COLUMN);

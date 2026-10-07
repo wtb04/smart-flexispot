@@ -115,6 +115,7 @@ void build_height(lv_obj_t *dock)
 {
     s_height = button(dock, Button::Flat, nullptr, nullptr);
     lv_obj_set_size(s_height, ITEM_W, 104);
+    lv_obj_set_style_radius(s_height, 24, 0);  // its open and pressed looks the well's shape, not a pill on it
     lv_obj_set_style_pad_all(s_height, 0, 0);
     lv_obj_set_style_pad_left(s_height, PAD, 0);
     lv_obj_set_style_pad_row(s_height, 2, 0);
