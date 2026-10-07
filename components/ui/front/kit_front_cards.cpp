@@ -22,11 +22,6 @@
 #include <new>
 
 namespace ui::kitfront {
-
-// Until kit_front_views.cpp has the views and the favourites.
-__attribute__((weak)) void open_now_playing() {}
-__attribute__((weak)) void open_favourites() {}
-
 namespace {
 namespace ic = kit::glyph;
 using namespace kit;
@@ -120,7 +115,6 @@ constexpr std::uint32_t GLIDE_MS    = 250;
 constexpr std::int32_t  PERMILLE    = 1000;
 
 struct MediaCard : InPsram {
-    lv_obj_t *body = nullptr;
     Cover    *cover = nullptr;
     std::uint32_t covers = UINT32_MAX;
     lv_obj_t *source = nullptr, *title = nullptr, *artist = nullptr, *episode = nullptr;
@@ -307,7 +301,6 @@ void build_media_card(lv_obj_t *body)
 {
     auto *c = new MediaCard{};
     s_media = c;
-    c->body = body;
     lv_obj_set_flex_flow(body, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(body, space::l, 0);
 

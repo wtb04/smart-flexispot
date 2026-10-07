@@ -173,7 +173,6 @@ void apply() {}
 
 namespace ui::detail {
 bool s_presence_gate = true;  // the gate, as the radar's bench lifts it
-bool owner_away() { return kitfront::owner_away(); }
 
 void select_page(int index)
 {

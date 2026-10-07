@@ -396,8 +396,6 @@ void open_now_playing()
         views::open_music();
     }
 }
-
-void open_now_playing(lv_obj_t *) { open_now_playing(); }
 }  // namespace ui::kitfront
 
 // --- the notices -------------------------------------------------------------

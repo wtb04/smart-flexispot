@@ -321,7 +321,7 @@ void build_air(lv_obj_t *grid)
 struct After {
     lv_obj_t *root = nullptr, *when = nullptr, *what = nullptr;
 };
-lv_obj_t    *s_next = nullptr, *s_next_body = nullptr, *s_next_some = nullptr, *s_next_none = nullptr;
+lv_obj_t    *s_next = nullptr, *s_next_some = nullptr, *s_next_none = nullptr;
 lv_obj_t    *s_next_dot = nullptr, *s_next_kind = nullptr, *s_next_start = nullptr, *s_next_until = nullptr;
 lv_obj_t    *s_next_place = nullptr, *s_next_title = nullptr, *s_after_head = nullptr;
 After        s_after[AFTER_ROWS];
@@ -398,7 +398,6 @@ void paint_next()
 void build_next(lv_obj_t *grid)
 {
     lv_obj_t *body = widget(grid, Span::Big, "Next");
-    s_next_body    = body;
     s_next         = lv_obj_get_parent(body);
     lv_obj_update_layout(grid);
     s_next_w = lv_obj_get_content_width(body);
