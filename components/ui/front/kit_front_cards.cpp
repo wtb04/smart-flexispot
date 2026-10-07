@@ -511,16 +511,17 @@ void build_lights_card(lv_obj_t *body)
 
 // ---- The heating ------------------------------------------------------------
 
-constexpr std::int32_t  HEAT_W       = 480;
+constexpr std::int32_t  HEAT_W       = 520;
 constexpr std::int32_t  HEAT_INNER   = HEAT_W - 2 * space::xxl;
 constexpr std::uint32_t SEND_AFTER_MS = 600;   // the taps stopped: the target goes to the thermostat
 constexpr std::uint32_t HOLD_MS      = 5000;  // ours shown until the thermostat says it has it, or this long
 constexpr int           NONE         = INT_MIN;
 
-constexpr std::int32_t  HEAT_DIAL    = 320;
-constexpr std::int32_t  HEAT_ARC     = 30;
-constexpr std::int32_t  HEAT_FOOT    = 50;  // the bottom of the dial's box the arc leaves open
-constexpr std::int32_t  HEAT_H       = 2 * space::xxl + size::button + HEAT_DIAL - space::s - HEAT_FOOT + 60 + space::m;
+constexpr std::int32_t  HEAT_DIAL    = 360;
+constexpr std::int32_t  HEAT_ARC     = 32;
+constexpr std::int32_t  HEAT_FOOT    = 56;  // the bottom of the dial's box the arc leaves open
+constexpr std::int32_t  HEAT_MODE_GAP = space::xl;  // between the arc's ends and Heat and Off
+constexpr std::int32_t  HEAT_H       = 2 * space::xxl + size::button + HEAT_DIAL - space::s - HEAT_FOOT + HEAT_MODE_GAP + 60 + space::m;
 
 struct HeatCard : InPsram {
     lv_obj_t *mode = nullptr;
@@ -723,7 +724,8 @@ void build_heat_card(lv_obj_t *body)
     lv_obj_t *dial = c->dial->obj();
     lv_obj_set_style_margin_top(dial, -space::s, 0);
     lv_obj_set_width(c->dial->figure(), widest(Role::ReadXL, {"88.8°", "--"}));
-    lv_obj_set_width(c->dial->caption(), widest(Role::Small, {"Room 88.8°", "No reading"}));
+    lv_obj_set_style_text_font(c->dial->caption(), fonts::body(), 0);
+    lv_obj_set_width(c->dial->caption(), widest(Role::Body, {"Room 88.8°", "No reading"}));
     lv_obj_set_style_margin_top(c->dial->caption(), -space::xs, 0);
     lv_obj_add_event_cb(dial, dial_moved, LV_EVENT_VALUE_CHANGED, nullptr);
     lv_obj_add_event_cb(dial, dial_moved, LV_EVENT_RELEASED, nullptr);
@@ -731,7 +733,7 @@ void build_heat_card(lv_obj_t *body)
                         LV_EVENT_DELETE, c->dial);
 
     c->mode = segmented(body, {"Heat", "Off"}, is_off() ? 1 : 0, HEAT_INNER);
-    lv_obj_set_style_margin_top(c->mode, -HEAT_FOOT, 0);  // up into the dial's open foot
+    lv_obj_set_style_margin_top(c->mode, HEAT_MODE_GAP - HEAT_FOOT, 0);  // up into the dial's open foot
     lv_obj_add_event_cb(c->mode, [](lv_event_t *e) {
         // The thermostat's mode goes between the two: a tap on the one it is in already does nothing.
         if ((segmented_chosen(lv_event_get_target_obj(e)) == 1) != is_off() && detail::home_state().thermostat.known &&

@@ -12,7 +12,6 @@
 #include <atomic>
 #include <cstdlib>
 #include <mutex>
-#include <span>
 #include <utility>
 
 // The media card, the music view and the cinema: whichever player is chosen,
@@ -54,24 +53,31 @@ Player &steered()
 }
 
 /** The player the card shows and steers: anything playing before anything
- *  paused, Jellyfin before the speaker before the laptop; the speaker while
- *  none has anything. Among the paused the one on the card stays: a pause from
- *  here must not hand the card, and the next tap, to another paused player. */
+ *  paused, and in each the speaker before Jellyfin before the laptop; the
+ *  speaker while none has anything. The laptop's Spotify shows the speaker's
+ *  own track, so the laptop with what the speaker has is passed over: paused
+ *  on the speaker, the card stayed on that copy of it. */
 Player &choose(PlayerView &view)
 {
-    Player *const order[] = {&jellyfin_player(), &speaker_player(), &laptop_player()};
-    Player *const shown   = &steered();
-    Player *const paused[] = {shown, order[0], order[1], order[2]};
+    Player *const     order[] = {&speaker_player(), &jellyfin_player(), &laptop_player()};
+    const PlayerView  speaker = speaker_player().view();
+    const auto        mirrors = [&speaker](const PlayerView &v) {
+        return speaker.going() && !v.title.empty() && v.title == speaker.title && v.artist == speaker.artist;
+    };
     for (const bool want_playing : {true, false}) {
-        for (Player *player : want_playing ? std::span<Player *const>(order) : std::span<Player *const>(paused)) {
+        for (Player *player : order) {
             PlayerView candidate = player->view();
-            if (candidate.going() && (candidate.state == "paused") != want_playing) {
-                view = std::move(candidate);
-                return *player;
+            if (!candidate.going() || (candidate.state == "paused") == want_playing) {
+                continue;
             }
+            if (player == &laptop_player() && mirrors(candidate)) {
+                continue;
+            }
+            view = std::move(candidate);
+            return *player;
         }
     }
-    view = speaker_player().view();
+    view = speaker;
     return speaker_player();
 }
 

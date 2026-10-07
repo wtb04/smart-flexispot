@@ -583,8 +583,9 @@ void paint_overhead()
     if (lv_image_get_rotation(s_heading) != turn) {
         lv_image_set_rotation(s_heading, turn);
     }
-    std::snprintf(text, sizeof(text), "%s, %d km", compass(a->track_deg),
-                  static_cast<int>(a->distance_nm * KM_PER_NM + 0.5f));
+    // the plane its course, the words where it is from here
+    std::snprintf(text, sizeof(text), "%d km %s", static_cast<int>(a->distance_nm * KM_PER_NM + 0.5f),
+                  compass(a->bearing_deg));
     set_text_if(s_heading_word, text);
 
     if (std::strcmp(s_photo_of, a->hex) != 0 && s_plane->has_picture()) {
@@ -672,7 +673,7 @@ void build_overhead(lv_obj_t *grid)
     lv_label_set_text(s_alt_unit, "ft");
     lv_obj_set_pos(s_alt, x0, foot);
     lv_obj_set_pos(s_alt_unit, x0, foot + baseline_y(Role::ReadS, Role::Body));
-    const std::int32_t word_w = widest(Role::Small, {"NW, 888 km"});
+    const std::int32_t word_w = widest(Role::Small, {"888 km NW"});
     s_heading_word = line(s_sky_some, Role::Small, Ink::Secondary, word_w);
     const std::int32_t word_y = foot + baseline_y(Role::ReadS, Role::Small);
     lv_obj_set_pos(s_heading_word, x0 + text_w - word_w, word_y);
