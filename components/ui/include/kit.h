@@ -41,13 +41,13 @@ struct InPsram {
 enum class Look : std::uint8_t { Dark, Light };
 
 struct Palette {
-    std::uint32_t ground, surface, surface_hi, raised, raised_hi;
+    std::uint32_t ground, surface, surface_hi, raised_hi;
     lv_opa_t      fill_opa;  // a flat area, a track or a dial's arc: the ink, faintly, on whatever is under it
     std::uint32_t ink;
     lv_opa_t      ink2_opa, ink3_opa, hair_opa, tick_opa;
     std::uint32_t hair;  // the colour hairlines and the grid are drawn in, at hair_opa
     std::uint32_t accent, on_accent;
-    std::uint32_t green, amber, red, lamp, on_lamp, blue;
+    std::uint32_t green, amber, red, lamp, on_lamp;
     std::uint32_t shadow;
     lv_opa_t      shadow_opa, edge_opa;
     std::uint32_t glass;
@@ -75,7 +75,6 @@ inline constexpr std::int32_t round  = LV_RADIUS_CIRCLE;
 }  // namespace radius
 
 namespace size {
-inline constexpr std::int32_t touch     = 56;  // the smallest thing a finger is asked to hit
 inline constexpr std::int32_t button    = 56;
 inline constexpr std::int32_t button_lg = 72;
 inline constexpr std::int32_t toggle_w  = 92;  // a switch a thumb lands on, not a fingertip

@@ -22,12 +22,11 @@ namespace {
 // blue than of the green.
 constexpr Palette DARK{
     .ground = 0x100c08, .surface = 0x201c18, .surface_hi = 0x282420,
-    .raised = 0x302820, .raised_hi = 0x383028, .fill_opa = 20,
+    .raised_hi = 0x383028, .fill_opa = 20,
     .ink = 0xf6efe7, .ink2_opa = 158, .ink3_opa = 92, .hair_opa = 20, .tick_opa = 72,
     .hair = 0xffffff,
     .accent = 0xff8a3d, .on_accent = 0x1f0e03,
     .green = 0x86d27c, .amber = 0xffbe55, .red = 0xff6b5e, .lamp = 0xffd36b, .on_lamp = 0x2e1f00,
-    .blue = 0x6fb6ff,
     .shadow = 0x000000, .shadow_opa = 110, .edge_opa = 120,
     .glass = 0x484038, .glass_clear_opa = 56, .glass_solid_opa = 214, .rim_opa = 38,
     .glass_edge_opa = 115, .glass_shadow_opa = 170,
@@ -36,12 +35,11 @@ constexpr Palette DARK{
 
 constexpr Palette LIGHT{
     .ground = 0xe9e3db, .surface = 0xfbf8f4, .surface_hi = 0xfffbf5,
-    .raised = 0xf1ebe4, .raised_hi = 0xe8e0d7, .fill_opa = 18,
+    .raised_hi = 0xe8e0d7, .fill_opa = 18,
     .ink = 0x1d1813, .ink2_opa = 158, .ink3_opa = 97, .hair_opa = 20, .tick_opa = 77,
     .hair = 0x1d1813,
     .accent = 0xf2711c, .on_accent = 0xffffff,
     .green = 0x3f9f45, .amber = 0xd68a00, .red = 0xe0483b, .lamp = 0xf4b400, .on_lamp = 0x2e1f00,
-    .blue = 0x2f86e0,
     .shadow = 0x50371e, .shadow_opa = 46, .edge_opa = 22,
     .glass = 0xfcf9f5, .glass_clear_opa = 87, .glass_solid_opa = 224, .rim_opa = 230,
     .glass_edge_opa = 31, .glass_shadow_opa = 85,
