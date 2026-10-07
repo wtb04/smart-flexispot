@@ -7,10 +7,15 @@
 #include <cstdint>
 
 namespace jpeg {
-/** The panel has one JPEG engine; this component owns it, its buffers and the
- *  software fallback for what the engine will not take. */
-inline constexpr std::size_t kMaxInput = 512 * units::kBytesPerKiB;
-inline constexpr int         kMaxSide  = 800;
+/** The panel has one JPEG engine; this component owns it, its buffer and the
+ *  software fallback for what the engine will not take. It reads the bytes
+ *  where the caller has them, in PSRAM or internal RAM.
+ *
+ *  A decode comes to kMaxPixels at most, a cover of 640 square: the engine
+ *  decodes at full size, so a bigger picture, as a 1280 by 720 frame, is
+ *  decoded in software at a half, quarter or eighth until it fits. */
+inline constexpr std::size_t kMaxInput  = 512 * units::kBytesPerKiB;
+inline constexpr std::size_t kMaxPixels = 640 * 640;
 
 /** A decoded picture. Valid only inside the callback that is handed it. */
 struct Picture {
@@ -27,9 +32,10 @@ using Use = void (*)(const Picture &picture, void *context);
 esp_err_t start();
 
 /** Decodes and hands the picture to `use`, holding the engine meanwhile so
- *  nothing else can overwrite it. A picture bigger than the box is decoded in
- *  software at a half, quarter or eighth of its size until it fits, and
- *  refused if even that will not. From any task; one decode at a time.
+ *  nothing else can overwrite it. A picture bigger than the box, or than
+ *  kMaxPixels, is decoded in software at a half, quarter or eighth of its size
+ *  until it fits, and refused if even that will not. `data` is read until it
+ *  returns. From any task; one decode at a time.
  *
  *  The software path runs on the caller's stack and needs several kilobytes
  *  of it: give a task that decodes 8 KB or more. */

@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 
 namespace media {
 namespace {
@@ -66,7 +67,7 @@ ArtHandler     s_on_art      = nullptr;
 PickArtHandler s_on_pick_art = nullptr;
 StillHandler   s_on_still    = nullptr;
 
-std::uint8_t  *s_body = nullptr;  // the cover as downloaded
+std::uint8_t  *s_body = nullptr;  // the cover as downloaded, which the decoder reads where it is
 std::uint16_t *s_art[ART_BUFFERS]   = {};
 std::uint16_t *s_large[ART_BUFFERS] = {};  // the same covers, at kLargeArtSize
 int            s_next             = 0;
@@ -88,6 +89,21 @@ struct PickCover {
 };
 PickCover *s_picks = nullptr;  // kPickCount of them, in PSRAM
 PickCover *s_still = nullptr;  // the same, for the wide still, of kStillW by kStillH
+
+// A favourite's pixels and the still's are made the first time one is asked
+// for, as a panel with no favourites and no videos never wants them, and then
+// kept: the screen may draw from them for as long as it likes.
+std::uint16_t *pixels_of(PickCover &cover, int w, int h)
+{
+    if (cover.pixels == nullptr) {
+        cover.pixels = static_cast<std::uint16_t *>(
+            heap_caps_malloc(static_cast<std::size_t>(w) * h * sizeof(std::uint16_t), MALLOC_CAP_SPIRAM));
+    }
+    if (cover.pixels == nullptr) {
+        ESP_LOGW(TAG, "no room for a picture of %dx%d", w, h);
+    }
+    return cover.pixels;
+}
 
 void copy_path(char *dest, const char *path)
 {
@@ -246,7 +262,8 @@ void take_cover(const jpeg::Picture &picture, void *target)
 
 bool decode(std::size_t bytes, Target to)
 {
-    const bool ok = jpeg::decode(s_body, bytes, jpeg::kMaxSide, jpeg::kMaxSide, take_cover, &to);
+    constexpr int ANY_SIDE = std::numeric_limits<int>::max();  // cropped and shrunk here, whatever its shape
+    const bool    ok       = jpeg::decode(s_body, bytes, ANY_SIDE, ANY_SIDE, take_cover, &to);
     if (!ok) {
         ESP_LOGW(TAG, "cover would not decode");
     }
@@ -360,7 +377,8 @@ void refresh_picks()
         if (std::strcmp(wanted, pick.loaded) == 0 || esp_timer_get_time() < pick.retry_at) {
             continue;
         }
-        const bool got = wanted[0] != '\0' && fetch(wanted, {pick.pixels, kPickArtSize, kPickArtSize});
+        const bool got = wanted[0] != '\0' && pixels_of(pick, kPickArtSize, kPickArtSize) != nullptr &&
+                         fetch(wanted, {pick.pixels, kPickArtSize, kPickArtSize});
         if (wanted[0] != '\0' && !got) {
             pick.retry_at = esp_timer_get_time() + PICK_RETRY_US;
             ESP_LOGW(TAG, "favourite %d's cover failed", i);
@@ -382,7 +400,8 @@ void refresh_still()
     if (std::strcmp(wanted, s_still->loaded) == 0 || esp_timer_get_time() < s_still->retry_at) {
         return;
     }
-    const bool got = wanted[0] != '\0' && fetch(wanted, {s_still->pixels, kStillW, kStillH});
+    const bool got = wanted[0] != '\0' && pixels_of(*s_still, kStillW, kStillH) != nullptr &&
+                     fetch(wanted, {s_still->pixels, kStillW, kStillH});
     if (wanted[0] != '\0' && !got) {
         s_still->retry_at = esp_timer_get_time() + PICK_RETRY_US;
         return;
@@ -433,17 +452,9 @@ esp_err_t start(const char *origin, ArtHandler on_art, PickArtHandler on_pick_ar
     s_picks = static_cast<PickCover *>(
         heap_caps_calloc(kPickCount, sizeof(PickCover), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     ESP_RETURN_ON_FALSE(s_picks != nullptr, ESP_ERR_NO_MEM, TAG, "favourites");
-    for (int i = 0; i < kPickCount; ++i) {
-        s_picks[i].pixels = static_cast<std::uint16_t *>(heap_caps_malloc(
-            kPickArtSize * kPickArtSize * sizeof(std::uint16_t), MALLOC_CAP_SPIRAM));
-        ESP_RETURN_ON_FALSE(s_picks[i].pixels != nullptr, ESP_ERR_NO_MEM, TAG, "favourite cover");
-    }
     s_still = static_cast<PickCover *>(
         heap_caps_calloc(1, sizeof(PickCover), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     ESP_RETURN_ON_FALSE(s_still != nullptr, ESP_ERR_NO_MEM, TAG, "still");
-    s_still->pixels = static_cast<std::uint16_t *>(
-        heap_caps_malloc(kStillW * kStillH * sizeof(std::uint16_t), MALLOC_CAP_SPIRAM));
-    ESP_RETURN_ON_FALSE(s_still->pixels != nullptr, ESP_ERR_NO_MEM, TAG, "still pixels");
 
     s_task_stack = static_cast<StackType_t *>(
         heap_caps_malloc(TASK_STACK * sizeof(StackType_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
