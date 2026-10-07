@@ -414,8 +414,8 @@ esp_err_t notify(const char *source, const char *title, const char *message, Lev
  *  draw, zoom and go back, written to `out`. With the LVGL lock. */
 int bench_radar(char *out, std::size_t size);
 
-/** A development build's: Home shown with the radar for bench_radar, with the
- *  phone away too, and whether its feed has answered yet. With the LVGL lock. */
+/** A development build's: Home shown for bench_radar, the radar's feed running
+ *  with the phone away too, and whether it has answered yet. With the LVGL lock. */
 int bench_radar_open(char *out, std::size_t size);
 
 /** A development build's: the radar page left open, running as it does,
