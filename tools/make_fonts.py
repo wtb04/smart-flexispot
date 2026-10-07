@@ -35,17 +35,17 @@ READOUT = [ord(c) for c in " 0123456789+,-.:%°−"]
 
 # role: (weight, size, range)
 ROLES = {
-    "label": (600, 13, TEXT),
-    "small": (500, 16, TEXT),
-    "body": (500, 19, TEXT),
-    "h3": (600, 21, TEXT),
-    "h2": (600, 26, TEXT),
-    "h1": (600, 34, TEXT),
-    "read_s": (600, 28, TEXT),
+    "label": (600, 15, TEXT),
+    "small": (500, 19, TEXT),
+    "body": (500, 23, TEXT),
+    "h3": (600, 25, TEXT),
+    "h2": (600, 30, TEXT),
+    "h1": (600, 36, TEXT),
+    "read_s": (600, 30, TEXT),
     "read_m": (600, 40, READOUT),
-    "read_l": (600, 56, READOUT),
-    "read_xl": (600, 76, READOUT),
-    "read_xxl": (600, 160, READOUT),
+    "read_l": (600, 52, READOUT),
+    "read_xl": (600, 64, READOUT),
+    "read_xxl": (600, 140, READOUT),
 }
 
 ICON_SIZES = (24, 28, 34)
