@@ -24,7 +24,6 @@ bool          focus_resting(const Focus &focus);
 bool          focus_waiting(const Focus &focus);
 bool          focus_paused(const Focus &focus);
 std::int32_t  focus_left_ms(const Focus &focus);
-/** Green resting, the accent working. */
 /** How long is left as MM:SS, or Ready while it waits. */
 void          focus_clock_text(const Focus &focus, char *out, std::size_t size);
 

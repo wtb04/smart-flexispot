@@ -5,20 +5,19 @@
 #include <cstdint>
 #include <functional>
 
-// Everything that opens over the pages, in one place: the fullscreen views
-// (radar, focus, cinema) and the popups. Each gives its root and what to do as
-// it opens and closes; this shows, hides and stacks them, keeps one fullscreen
-// view at a time, and answers what is open. On the LVGL task only.
+// The fullscreen views, the music, the cinema and the focus timer, in one
+// place. Each gives its root and what to do as it opens and closes; this
+// shows, hides and stacks them, keeps one open at a time, and answers what is
+// open. On the LVGL task only.
 namespace ui::detail {
 
 enum class ViewKind : std::uint8_t {
     Fullscreen,  // over the whole screen, the dock and the bar too
-    Popup,       // a card on a scrim over part of it
 };
 
 struct ViewSpec {
     const char           *name = "";
-    ViewKind              kind = ViewKind::Popup;
+    ViewKind              kind = ViewKind::Fullscreen;
     lv_obj_t             *root = nullptr;  // hidden until opened
     std::function<void()> opened;          // after it is shown and on top: lay out, start timers
     std::function<void()> closed;          // after it is hidden: stop them
