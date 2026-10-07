@@ -1,6 +1,7 @@
 // The Calendar page: the next event, with the way there or the rest of its
-// day under it, and the coming week as a list beside it; or the week as a
-// grid in their place. A tap on any event shows it whole in a sheet.
+// day under it, or in the middle of its tile when neither is to be had, and
+// the coming week as a list beside it; or the week as a grid in their place.
+// A tap on any event shows it whole in a sheet.
 
 #include "kit_front.h"
 
@@ -59,7 +60,7 @@ constexpr float WORKDAY_LAST_HOUR  = 18.0f;
 // Over this many hours, a line an hour is a grid, so they go every other hour.
 constexpr int HOURLY_MARKS_MAX = 12;
 
-constexpr std::int64_t SHOW_WAYS_WITHIN = 3 * units::kSecondsPerHour;  // hours off is nothing to act on yet
+constexpr std::int64_t SHOW_WAYS_WITHIN = 3 * units::kSecondsPerHour;  // hours off is nothing to act on yet, beyond a line of when
 constexpr std::int64_t LONG_EVENT       = 4 * units::kSecondsPerHour;  // said with its end, as a day at work
 
 constexpr std::int32_t W = inset::width, H = inset::height;
@@ -69,8 +70,6 @@ constexpr std::int32_t INNER_W  = CARD_W - 2 * space::xl;
 constexpr std::int32_t HEAD_H   = size::button;
 constexpr std::int32_t TIME_W   = 68;
 constexpr std::int32_t MARK_W   = 4;
-constexpr std::int32_t STEP_H   = 46;
-constexpr std::int32_t ALSO_H   = 50;
 constexpr std::int32_t CHIP_H   = 44;
 constexpr std::int32_t DOT      = 10;
 
@@ -452,6 +451,7 @@ int                         s_way_count = 0;
 int                         s_way_order[travel::kOptionsMax];
 std::int64_t                s_picked_leave = 0;
 const travel::Option       *s_going        = nullptr;
+const travel::Option       *s_later        = nullptr;  // the best way while they are hours off
 
 void keep_ways_worth_taking(bool wanted, std::int64_t now)
 {
@@ -462,9 +462,6 @@ void keep_ways_worth_taking(bool wanted, std::int64_t now)
         if (options[i].leave >= now) {
             s_ways[s_way_count++] = options[i];
         }
-    }
-    if (s_way_count > 0 && s_ways[0].leave - now > SHOW_WAYS_WITHIN) {
-        s_way_count = 0;
     }
 }
 
@@ -502,6 +499,11 @@ void order_ways_by_leaving()
 void pick_journey(bool wanted, std::int64_t now)
 {
     keep_ways_worth_taking(wanted, now);
+    s_later = nullptr;
+    if (s_way_count > 0 && s_ways[0].leave - now > SHOW_WAYS_WITHIN) {
+        s_later     = best_way();
+        s_way_count = 0;
+    }
     s_going = picked_way();
     if (s_going == nullptr) {
         s_picked_leave = 0;
@@ -562,9 +564,10 @@ struct Slot {  // a day's name, or an event, in the coming week's list
 lv_obj_t *s_overview = nullptr, *s_week = nullptr;
 bool      s_detailed = false;
 
-lv_obj_t *s_card = nullptr, *s_top = nullptr, *s_none = nullptr, *s_card_gap = nullptr;
+lv_obj_t *s_card = nullptr, *s_top = nullptr, *s_none = nullptr, *s_card_lead = nullptr, *s_card_gap = nullptr;
 lv_obj_t *s_kind_dot = nullptr, *s_kind = nullptr, *s_title = nullptr, *s_session = nullptr;
 lv_obj_t *s_start = nullptr, *s_until = nullptr, *s_place = nullptr;
+lv_obj_t *s_later_row = nullptr, *s_later_glyph = nullptr, *s_later_text = nullptr;
 
 lv_obj_t *s_foot = nullptr, *s_foot_head = nullptr;
 lv_obj_t *s_leave_row = nullptr, *s_leave = nullptr, *s_there = nullptr, *s_spare = nullptr;
@@ -588,11 +591,39 @@ void on_event_tap(lv_event_t *e)
     open_event(lv_event_get_current_target_obj(e), *static_cast<const ical::Event *>(lv_event_get_user_data(e)));
 }
 
+// A step on the way or another event of the day: a line and a quieter one under it.
+std::int32_t two_lines() { return fonts::body()->line_height + fonts::small()->line_height; }
+
+// Hours before it, when to go, quietly: the way itself once it is near.
+void show_later(std::int64_t starts)
+{
+    lv_obj_set_hidden(s_later_row, s_later == nullptr);
+    if (s_later == nullptr) {
+        return;
+    }
+    char text[64];
+    char leave[16];
+    char there[16];
+    event_clock(s_later->leave, leave, sizeof(leave));
+    event_clock(s_later->arrive, there, sizeof(there));
+    if (s_later->cancelled) {
+        std::snprintf(text, sizeof(text), "Leave at %s, cancelled", leave);
+    } else {
+        const int spare = whole_minutes(starts - s_later->arrive);
+        std::snprintf(text, sizeof(text), "Leave at %s, there %s, %d min %s", leave, there, spare >= 0 ? spare : -spare,
+                      spare >= 0 ? "early" : "late");
+    }
+    set_text_if(s_later_text, text);
+    set_icon(s_later_glyph, glyph_of(s_later->leg_count > 0 ? s_later->legs[0].mode : "walk"), false);
+}
+
 void show_next(const ical::Event *first, std::int64_t now)
 {
+    const bool way = first != nullptr && s_going != nullptr;
     lv_obj_set_hidden(s_top, first == nullptr);
     lv_obj_set_hidden(s_none, first != nullptr);
     lv_obj_set_hidden(s_card_gap, first == nullptr);  // the empty card's line in its middle
+    lv_obj_set_hidden(s_card_lead, first == nullptr || way);  // in the middle, with nothing to do under it
     if (first == nullptr) {
         return;
     }
@@ -605,7 +636,7 @@ void show_next(const ical::Event *first, std::int64_t now)
     char session[ical::kSummaryMax];
     split_title(first->summary, text, sizeof(text), session, sizeof(session));
     set_text_if(s_title, text);
-    fit_lines(s_title, INNER_W, TITLE_LINES);
+    fit_lines(s_title, INNER_W, way ? 1 : TITLE_LINES);
     set_text_if(s_session, session);
     lv_obj_set_hidden(s_session, session[0] == '\0');
 
@@ -617,7 +648,10 @@ void show_next(const ical::Event *first, std::int64_t now)
     set_text_if(s_until, to);
     event_place(*first, text, sizeof(text));
     set_text_if(s_place, text);
-    lv_obj_set_hidden(s_place, text[0] == '\0');
+    // a way there that ends on foot or by bike names the place as its last step
+    const bool named = way && s_going->leg_count > 0 && is_walk_or_bike(s_going->legs[s_going->leg_count - 1].mode);
+    lv_obj_set_hidden(s_place, text[0] == '\0' || named);
+    show_later(first->start);
 }
 
 // The other times to leave, a tap taking one.
@@ -843,6 +877,13 @@ void build_top(lv_obj_t *card)
                    (big->line_height - big->base_line) - (small->line_height - small->base_line));
     s_place = line(s_top, Role::H2, Ink::Primary, INNER_W);
 
+    s_later_row = flow(s_top, LV_FLEX_FLOW_ROW, space::s);
+    lv_obj_set_flex_align(s_later_row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_margin_top(s_later_row, space::s, 0);
+    s_later_glyph = icon(s_later_row, ic::directions_walk, 24, false, Ink::Secondary);
+    s_later_text  = line(s_later_row, Role::Body, Ink::Secondary, INNER_W - 24 - space::s);
+    lv_obj_set_hidden(s_later_row, true);
+
     s_none = empty(card, ic::event, "Nothing coming up");
     lv_obj_set_hidden(s_none, true);
 }
@@ -850,7 +891,7 @@ void build_top(lv_obj_t *card)
 void build_step(Step &step)
 {
     step.root = plain(s_foot);
-    lv_obj_set_size(step.root, INNER_W, STEP_H);
+    lv_obj_set_size(step.root, INNER_W, two_lines());
     step.time  = line(step.root, Role::Body, Ink::Primary, TIME_W);
     step.glyph = icon(step.root, ic::directions_walk, 24, false, Ink::Secondary);
     lv_obj_set_pos(step.glyph, TIME_W, 0);
@@ -864,15 +905,15 @@ void build_step(Step &step)
 void build_also(Also &also, int index)
 {
     also.root = plain(s_foot);
-    lv_obj_set_size(also.root, INNER_W + 2 * space::s, ALSO_H);
+    lv_obj_set_size(also.root, INNER_W + 2 * space::s, two_lines() + 2 * space::xs);
     lv_obj_set_style_margin_hor(also.root, -space::s, 0);
     lv_obj_set_style_radius(also.root, radius::inner, 0);
     lv_obj_set_style_pad_hor(also.root, space::s, 0);
     lv_obj_set_style_pad_top(also.root, space::xs, 0);
     pressable(also.root, on_event_tap, &s_also_event[index]);
     also.time = line(also.root, Role::Body, Ink::Primary, TIME_W);
-    also.mark = feed_mark(also.root, ALSO_H - 2 * space::s);
-    lv_obj_set_pos(also.mark, TIME_W, 0);
+    also.mark = feed_mark(also.root, two_lines() - 2 * space::xs);
+    lv_obj_set_pos(also.mark, TIME_W, space::xs);
     also.title = line(also.root, Role::Body, Ink::Primary, INNER_W - TIME_W - space::l);
     also.note  = line(also.root, Role::Small, Ink::Secondary, INNER_W - TIME_W - space::l);
     lv_obj_set_pos(also.title, TIME_W + space::l, 0);
@@ -883,15 +924,13 @@ void build_also(Also &also, int index)
 // Under the next event, set off by a line: the way there, or the rest of its day.
 void build_foot(lv_obj_t *card)
 {
-    s_foot = flow(card, LV_FLEX_FLOW_COLUMN, space::s);
+    s_foot = flow(card, LV_FLEX_FLOW_COLUMN, space::xs);
     lv_obj_set_width(s_foot, LV_PCT(100));
     hairline(s_foot, false, INNER_W);
     s_foot_head = line(s_foot, Role::Small, Ink::Secondary, INNER_W);
-    lv_obj_set_style_margin_top(s_foot_head, space::xs, 0);
 
     const lv_font_t *big = fonts::read_l();
     s_leave_row          = plain(s_foot);
-    lv_obj_set_size(s_leave_row, INNER_W, big->line_height);
     s_leave                  = line(s_leave_row, Role::ReadL, Ink::Primary, widest(Role::ReadL, {"88:88"}));
     const std::int32_t there = widest(Role::H3, {"there 88:88"});
     const std::int32_t spare = widest(Role::Small, {"888 min early"});
@@ -900,11 +939,15 @@ void build_foot(lv_obj_t *card)
     for (lv_obj_t *l : {s_there, s_spare}) {
         lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_RIGHT, 0);
     }
-    // The two lines at the right stand on the figures' baseline.
+    // The two lines at the right stand on the figures' baseline, the row tall enough for both.
     const lv_font_t   *sm      = fonts::small();
     const std::int32_t spare_y = (big->line_height - big->base_line) - (sm->line_height - sm->base_line);
-    lv_obj_set_pos(s_spare, INNER_W - spare, spare_y);
-    lv_obj_set_pos(s_there, INNER_W - there, spare_y - fonts::h3()->line_height);
+    const std::int32_t there_y = spare_y - fonts::h3()->line_height;
+    const std::int32_t down    = std::max<std::int32_t>(0, -there_y);
+    lv_obj_set_pos(s_leave, 0, down);
+    lv_obj_set_pos(s_spare, INNER_W - spare, spare_y + down);
+    lv_obj_set_pos(s_there, INNER_W - there, there_y + down);
+    lv_obj_set_size(s_leave_row, INNER_W, std::max(big->line_height, spare_y + sm->line_height) + down);
 
     for (Step &step : s_step) {
         build_step(step);
@@ -931,6 +974,7 @@ void build_card(lv_obj_t *parent)
     lv_obj_set_size(s_card, CARD_W, H);
     lv_obj_set_flex_flow(s_card, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(s_card, space::s, 0);
+    s_card_lead = filler(s_card);
     build_top(s_card);
     s_card_gap = filler(s_card);
     build_foot(s_card);
