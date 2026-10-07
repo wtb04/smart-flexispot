@@ -3127,28 +3127,9 @@ void grow_tick(lv_timer_t *timer)
     }
 }
 
-// Everything in the scope is laid out for one frame, so a view of another
-// size builds it again, and draws the map again to fit.
 void build_scope_in(const Frame &frame, std::int32_t x, std::int32_t y)
 {
     const Timed timed{"scope built"};
-    if (s_scope != nullptr) {
-        lv_anim_delete(s_scope, nullptr);  // a zoom under way ends where it was going
-        lv_obj_delete(s_scope);
-        for (void *buffer : {static_cast<void *>(s_ground), static_cast<void *>(s_frame),
-                             static_cast<void *>(s_land_mask), static_cast<void *>(s_air_opa),
-                             static_cast<void *>(s_map_points), static_cast<void *>(s_row_from),
-                             static_cast<void *>(s_row_to), static_cast<void *>(s_crossings),
-                             static_cast<void *>(s_crossing_count)}) {
-            heap_caps_free(buffer);
-        }
-        s_ground = s_frame = nullptr;
-        s_land_mask = s_air_opa = s_crossing_count = nullptr;
-        s_row_from = s_row_to = nullptr;
-        s_crossings = nullptr;
-        s_map_points            = nullptr;
-        s_canvas                = nullptr;
-    }
     s_shown_range = static_cast<float>(RANGES[s_range_step]);
     build_scope(s_bezel, frame, RANGES[s_range_step]);
     lv_obj_move_to_index(s_scope, 0);  // under the corners and the summary
@@ -3157,10 +3138,8 @@ void build_scope_in(const Frame &frame, std::int32_t x, std::int32_t y)
     if (map_located()) {
         draw_map(s_map_lat, s_map_lon, static_cast<float>(RANGES[s_range_step]));
     }
-    // A reading shown next puts all of the map into the frame with the planes; copying it here as well cost the map 20 ms.
-    if (s_frame != nullptr && (s_last == nullptr || s_fast_zooming)) {
-        std::memcpy(s_frame, s_ground, ground_pixels() * RGB565_BYTES_PER_PX);
-    }
+    // A reading shown next puts all of the map into the frame with the planes:
+    // copying it here as well cost the map 20 ms.
 }
 
 // On the radar page the column floats over the map, on a darkened patch of it.
@@ -3181,7 +3160,6 @@ void lay_out_map()
     const std::int32_t w      = s_map_w;
     const std::int32_t h      = s_map_h;
     const std::int32_t area_w = w - COLUMN_W - look::space::m;  // the map beside the column
-    lv_obj_set_parent(s_bezel, s_map_page);
     lv_obj_set_style_bg_opa(s_bezel, LV_OPA_TRANSP, 0);
     lv_obj_set_pos(s_bezel, 0, 0);
     lv_obj_set_size(s_bezel, w, h);
@@ -3189,7 +3167,6 @@ void lay_out_map()
     place_corners(area_w, h);
     place_summary(area_w, h);
 
-    lv_obj_set_parent(s_column, s_map_page);
     lv_obj_set_pos(s_column, area_w, look::space::m);
     lv_obj_set_size(s_column, COLUMN_W, h - 2 * look::space::m);
     lv_obj_set_style_bg_color(s_column, lv_color_hex(look::background()), 0);
