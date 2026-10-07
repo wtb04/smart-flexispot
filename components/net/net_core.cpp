@@ -209,7 +209,7 @@ void Core::finish(const Running &running, const Exchange &exchange, std::int64_t
         } else {
             host.failures_in_row = 0;
         }
-    } else {
+    } else if (!exchange.ours) {
         ++host.failures;
         ++host.failures_in_row;
         if (host.config.rest.failure_ms > 0 && host.failures_in_row >= std::max(host.config.rest.failures, 1)) {

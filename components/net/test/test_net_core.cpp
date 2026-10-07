@@ -269,6 +269,26 @@ TEST(NetCore, rest)
     EXPECT_EQ(core.status(host, 1000 * MS).failures_in_row, 0) << "an answer ends the run of failures";
 }
 
+TEST(NetCore, our_failure_spares_the_host)
+{
+    Core       core;
+    HostConfig config;
+    config.rest = Rest{1, 1000, 500};
+    Host    host = core.add_host(config);
+    Tells   tells;
+    Log     log;
+    Running running;
+    core.submit(make(host, "x", Priority::Now, log.done("x")), 0, tells);
+    next_path(core, 0, running, tells);
+    Exchange no_room = failure();
+    no_room.ours     = true;
+    core.finish(running, no_room, 0, tells);
+    run(tells);
+    EXPECT_TRUE(log.has("x failed")) << "it failed all the same";
+    EXPECT_FALSE(core.status(host, 0).resting) << "but for want of memory here, which is not the host's doing";
+    EXPECT_EQ(core.status(host, 0).failures_in_row, 0);
+}
+
 TEST(NetCore, busy)
 {
     Core       core;
