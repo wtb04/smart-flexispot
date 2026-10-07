@@ -350,7 +350,7 @@ esp_err_t set_preset_height(int index, int height_mm);
 /** Pass nullptr while the time is unknown. */
 esp_err_t set_time(const char *text);
 
-esp_err_t set_links(bool wifi, bool mqtt);
+esp_err_t set_links(bool wifi);
 
 /** Once the phone has been recognised at least once, this also gates which pages appear. */
 esp_err_t set_presence(bool has_key, bool present, bool ever_seen);
@@ -369,12 +369,6 @@ esp_err_t set_card(int card, const char *summary, Level level);
 /** One row of a card, by its place in Card::rows. The level colours the value;
  *  null shows "--". Strings are copied. */
 esp_err_t set_row(int card, int row, const char *value, Level level = Level::Neutral);
-
-/** The readings Setup's Diagnostics tile shows at a glance, each a few
- *  characters; null shows "--". */
-enum class Glance : std::uint8_t { Uptime, Wifi, DeskLink };
-inline constexpr int kGlanceCount = 3;
-esp_err_t set_glance(Glance which, const char *value);
 
 
 /** Re-reads the calendar and redraws its page. Thread-safe. */

@@ -23,7 +23,7 @@ enum class Topic : std::uint8_t {
     Home,    // the home page's pills, thermostat and toggles: see home_model.h
     Settings,  // the choices and the notification volume: see settings_model.h
     Update,    // firmware on its way or waiting: see settings_model.h
-    Diagnostics,  // the panel's own report and its glances: see diagnostics_model.h
+    Diagnostics,  // the panel's own report: see diagnostics_model.h
     Calendar,  // the calendar fetched again: the ical component has it
     Radar,     // the traffic fetched again: the radar component has it
     Claude,    // the laptops' sessions: the claude component has them

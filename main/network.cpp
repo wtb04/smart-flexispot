@@ -219,8 +219,7 @@ bool links_up()
 
 void show_links(const ble::Stats &radio)
 {
-    ESP_ERROR_CHECK_WITHOUT_ABORT(
-        ui::set_links(wifi::connected(), hass::connected() && hass::ws::connected()));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_links(wifi::connected()));
     ESP_ERROR_CHECK_WITHOUT_ABORT(
         ui::set_presence(radio.has_key, radio.phone_present, radio.ever_seen));
 }
