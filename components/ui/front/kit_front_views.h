@@ -8,8 +8,14 @@
 
 namespace ui::kitfront::views {
 
-/** A fullscreen view's root on the Chrome layer, over the dock and the bar. */
-lv_obj_t *fullscreen_root();
+/** A fullscreen view's root on the Chrome layer, over the dock and the bar: the ground, or black in either look. */
+lv_obj_t *fullscreen_root(bool black = false);
+/** The dark look's ink for what sits on black, whatever the look. */
+inline constexpr std::uint32_t ON_BLACK = 0xf6efe7;
+/** A label on black, at `ink`'s strength. */
+void ink_on_black(lv_obj_t *label, kit::Ink ink);
+/** A fill button on black: faint and white in either look, lit in white. */
+void on_black(lv_obj_t *button);
 
 /** Over a view, as round chips with a light fill: Stand or Sit at the left,
  *  then its quick actions; the battery while unplugged, the time and the way
@@ -17,7 +23,7 @@ lv_obj_t *fullscreen_root();
 struct Chrome {
     lv_obj_t *left = nullptr;  // the row the quick actions go in
 };
-Chrome chrome(detail::ViewId view, lv_obj_t *root);
+Chrome chrome(detail::ViewId view, lv_obj_t *root, bool black = false);
 /** A round button with a light fill and a filled glyph `px` big. */
 lv_obj_t *fill_button(lv_obj_t *parent, const char *glyph, std::int32_t side, std::int32_t px);
 /** The one primary action: a solid accent capsule, its glyph in the ink that goes on it. */

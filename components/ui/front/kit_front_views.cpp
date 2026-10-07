@@ -37,6 +37,7 @@ int shortcut_target()
 struct Over : InPsram {
     lv_obj_t *shortcut = nullptr, *arrow = nullptr;
     lv_obj_t *power = nullptr, *cell = nullptr, *percent = nullptr, *clock = nullptr;
+    bool      black = false;
 };
 
 lv_style_t s_lit;
@@ -82,6 +83,9 @@ void paint_status(const Over &o)
         const int pct = std::clamp(st.battery_percent, 0, 100);
         set_icon(o.cell, pct > 80 ? ic::battery_full : pct > 20 ? ic::battery_5_bar : ic::battery_2_bar, false);
         set_ink(o.cell, pct <= 20 ? Ink::Amber : Ink::Primary);
+        if (o.black) {
+            lv_obj_set_style_text_color(o.cell, pct <= 20 ? colour(Ink::Amber) : lv_color_hex(ON_BLACK), 0);
+        }
         char buf[8];
         std::snprintf(buf, sizeof buf, "%d%%", pct);
         set_text_if(o.percent, buf);
@@ -120,7 +124,25 @@ lv_obj_t *figures(lv_obj_t *parent, const char *widest_text, lv_text_align_t ali
     return label;
 }
 
-lv_obj_t *fullscreen_root()
+void ink_on_black(lv_obj_t *label, Ink ink)
+{
+    lv_obj_set_style_text_color(label, lv_color_hex(ON_BLACK), 0);
+    lv_obj_set_style_text_opa(label, ink == Ink::Secondary ? 158 : ink == Ink::Tertiary ? 92 : LV_OPA_COVER, 0);
+}
+
+void on_black(lv_obj_t *b)
+{
+    lv_obj_set_style_bg_color(b, lv_color_hex(0xffffff), 0);
+    lv_obj_set_style_bg_opa(b, 36, 0);
+    lv_obj_set_style_shadow_opa(b, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_text_color(b, lv_color_hex(ON_BLACK), 0);
+    lv_obj_set_style_bg_opa(b, 64, LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(b, lv_color_hex(ON_BLACK), LV_STATE_CHECKED);
+    lv_obj_set_style_bg_opa(b, 240, LV_STATE_CHECKED);
+    lv_obj_set_style_text_color(b, lv_color_hex(0x100c08), LV_STATE_CHECKED);
+}
+
+lv_obj_t *fullscreen_root(bool black)
 {
     lv_obj_t *root = lv_obj_create(layer(Layer::Chrome));
     lv_obj_remove_style_all(root);
@@ -128,6 +150,10 @@ lv_obj_t *fullscreen_root()
     lv_obj_remove_flag(root, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(root, LV_OBJ_FLAG_CLICKABLE);  // what is under it takes no taps
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
+    if (black) {
+        lv_obj_set_style_bg_color(root, lv_color_hex(0x000000), 0);
+        return root;
+    }
     const auto paint = [](void *obj) { lv_obj_set_style_bg_color(static_cast<lv_obj_t *>(obj), lv_color_hex(colours().ground), 0); };
     paint(root);
     on_restyle(root, paint, root);
@@ -159,15 +185,19 @@ lv_obj_t *desk_chip(lv_obj_t *parent, const char *top, const char *bottom)
     lv_obj_t *b = fill_button(parent, top, CHIP, 20);
     lv_obj_set_flex_flow(b, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(b, -2, 0);
-    lv_obj_t *g = icon(b, bottom, 28);
-    set_ink(g, Ink::Primary);
+    // the button's own ink, as the glyph button() makes has, so lit and black recolour it too
+    lv_obj_t *g = lv_label_create(b);
+    lv_obj_set_style_text_font(g, fonts::icon(28), 0);
+    lv_obj_set_user_data(g, reinterpret_cast<void *>(static_cast<std::intptr_t>(28)));
+    lv_label_set_text(g, bottom);
     lv_obj_set_event_bubble(g, true);
     return b;
 }
 
-Chrome chrome(detail::ViewId view, lv_obj_t *root)
+Chrome chrome(detail::ViewId view, lv_obj_t *root, bool black)
 {
-    auto *o = new Over;
+    auto *o  = new Over;
+    o->black = black;
 
     lv_obj_t *left = row_of(root);
     lv_obj_set_style_pad_column(left, space::m, 0);
@@ -192,6 +222,13 @@ Chrome chrome(detail::ViewId view, lv_obj_t *root)
     lv_obj_add_event_cb(close, [](lv_event_t *e) { detail::close_view(static_cast<detail::ViewId>(id_of(e))); },
                         LV_EVENT_CLICKED, as_data(view));
 
+    if (black) {
+        on_black(o->shortcut);
+        on_black(close);
+        ink_on_black(o->clock, Ink::Primary);
+        ink_on_black(o->percent, Ink::Secondary);
+        lv_obj_set_style_text_color(o->cell, lv_color_hex(ON_BLACK), 0);
+    }
     detail::fade_when_idle(view, left);
     detail::fade_when_idle(view, right);
     detail::subscribe(Topic::Desk, view, [o] { paint_desk(*o); });
