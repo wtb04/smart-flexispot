@@ -72,7 +72,7 @@ struct Run {
     int          unit_count = 0;
     lv_timer_t  *stepper  = nullptr;
     std::uint32_t frame_at = 0, ms_at = 0;
-    std::uint64_t began_us = 0, ready_us = 0, first_us = 0, bake_us = 0;
+    std::uint64_t began_us = 0, ready_us = 0, first_us = 0, bake_us = 0, told_us = 0;
     std::uint32_t frames = 0;
 } s_run;
 
@@ -390,11 +390,11 @@ void finish()
     }
     const std::uint64_t end = perf::now_us();
     std::snprintf(s_report, sizeof s_report,
-                  "%s: %u frames in %.0f ms, started in %.1f ms (shadows %.1f), first frame out %.1f ms after",
+                  "%s: %u frames in %.0f ms, started in %.1f ms (pages told %.1f, shadows %.1f), first frame out %.1f ms after",
                   name_of(s_run.how), static_cast<unsigned>(s_run.frames),
                   static_cast<double>(end - s_run.began_us) / 1000.0,
                   static_cast<double>(s_run.ready_us - s_run.began_us) / 1000.0,
-                  static_cast<double>(s_run.bake_us) / 1000.0,
+                  static_cast<double>(s_run.told_us) / 1000.0, static_cast<double>(s_run.bake_us) / 1000.0,
                   s_run.first_us != 0 ? static_cast<double>(s_run.first_us - s_run.ready_us) / 1000.0 : 0.0);
     s_run = Run{};
     ++s_run_id;
@@ -800,9 +800,11 @@ void show_page(int index, bool animate)
     // all of it made without marking anything for drawing: the change draws
     // the region itself, as it opens
     quiet(true);
+    const std::uint64_t told = perf::now_us();
     if (s_told != nullptr) {
         s_told(index);
     }
+    s_run.told_us = perf::now_us() - told;
     if (from >= 0 && !whole(how)) {
         lv_obj_set_hidden(s_pages[from].obj, true);
     }

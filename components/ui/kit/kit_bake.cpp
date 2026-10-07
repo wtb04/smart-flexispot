@@ -54,6 +54,9 @@ struct Caster {
     Pose          seen, baked_at;
     std::uint32_t still_since = 0;
     lv_area_t     painted{};  // where its shadow is in the picture
+    lv_area_t     body{};     // the tile it fell from, as it stood
+    std::int32_t  corner  = 0;
+    bool          cover   = false;  // opaque, so nothing was painted along its sides under it
     std::int32_t  radius  = 0;
     bool          baked   = false;
     bool          refused = false;  // as it stands now; asked again once it moves
@@ -225,11 +228,14 @@ bool scratch()
 
 // One strip of a shadow, `y0` rows down `box`, drawn by LVGL as the object
 // would draw it, into the transparent scratch.
-void shadow_strip(const lv_draw_box_shadow_dsc_t &dsc, const lv_area_t &body, const lv_area_t &box, std::int32_t y0)
+void shadow_strip(const lv_draw_box_shadow_dsc_t &dsc, const lv_area_t &body, const lv_area_t &box, std::int32_t y0,
+                  std::int32_t x1, std::int32_t x2)
 {
     lv_draw_buf_clear(s_strip, nullptr);
     lv_layer_t layer;
     lv_canvas_init_layer(s_canvas, &layer);
+    layer._clip_area = {x1 - box.x1, 0, x2 - box.x1, STRIP - 1};
+    layer.phy_clip_area = layer._clip_area;
     lv_area_t at = body;
     lv_area_move(&at, -box.x1, -y0);
     lv_draw_box_shadow(&layer, &dsc, &at);
@@ -256,10 +262,36 @@ void invalidate_rim(const lv_area_t &box, const lv_area_t &body, std::int32_t r)
     }
 }
 
-void restore(const lv_area_t &a)
+// The parts of `box` a shadow is painted into, a strip at a time: whole
+// strips across it, but along the straight sides of an opaque tile only the
+// columns either side, as under the tile nothing of it shows.
+template <typename Fn>
+void each_painted(const lv_area_t &box, const lv_area_t &body, std::int32_t corner, bool cover, Fn &&fn)
 {
-    s_repaint(a);
-    lv_draw_buf_flush_cache(s_picture, &a);
+    for (std::int32_t y0 = box.y1; y0 <= box.y2; y0 += STRIP) {
+        const std::int32_t rows  = std::min(STRIP, box.y2 - y0 + 1);
+        const bool         sides = cover && y0 >= body.y1 + corner && y0 + rows - 1 <= body.y2 - corner &&
+                           body.x2 - body.x1 > 2 * corner;
+        if (sides) {
+            fn(y0, rows, box.x1, body.x1 + corner);
+            fn(y0, rows, body.x2 - corner, box.x2);
+        } else {
+            fn(y0, rows, box.x1, box.x2);
+        }
+    }
+}
+
+std::int32_t corner_of(std::int32_t radius, const lv_area_t &body)
+{
+    return std::min({radius, lv_area_get_width(&body) / 2, lv_area_get_height(&body) / 2}) + 1;
+}
+
+void restore(const Caster &c)
+{
+    each_painted(c.painted, c.body, c.corner, c.cover, [](std::int32_t y0, std::int32_t rows, std::int32_t x1, std::int32_t x2) {
+        s_repaint({x1, y0, x2, y0 + rows - 1});
+    });
+    lv_draw_buf_flush_cache(s_picture, &c.painted);
 }
 
 void unbake(Caster &c)
@@ -268,7 +300,7 @@ void unbake(Caster &c)
         return;
     }
     c.baked = false;
-    restore(c.painted);
+    restore(c);
     invalidate_rim(c.painted, c.baked_at.coords, c.radius);
     quietly(c.tile, false);
     for (int i = 0; i < s_count; ++i) {
@@ -285,13 +317,13 @@ void paint(const lv_draw_box_shadow_dsc_t &dsc, const lv_area_t &body, const lv_
     const std::uint32_t stride = s_picture->header.stride;
     const int sr = static_cast<int>((dsc.color.red)), sg = static_cast<int>(dsc.color.green),
               sb = static_cast<int>(dsc.color.blue);
-    for (std::int32_t y0 = box.y1; y0 <= box.y2; y0 += STRIP) {
-        shadow_strip(dsc, body, box, y0);
-        const std::int32_t rows = std::min(STRIP, box.y2 - y0 + 1), w = lv_area_get_width(&box);
+    each_painted(box, body, corner_of(dsc.radius, body), dsc.bg_cover != 0,
+                 [&](std::int32_t y0, std::int32_t rows, std::int32_t x1, std::int32_t x2) {
+        shadow_strip(dsc, body, box, y0, x1, x2);
         for (std::int32_t r = 0; r < rows; ++r) {
             const std::uint8_t *in  = s_strip->data + static_cast<std::size_t>(r) * s_strip->header.stride;
             auto              *out = reinterpret_cast<std::uint16_t *>(s_picture->data + static_cast<std::size_t>(y0 + r) * stride) + box.x1;
-            for (std::int32_t x = 0; x < w; ++x) {
+            for (std::int32_t x = x1 - box.x1; x <= x2 - box.x1; ++x) {
                 const int a = in[x * 4 + 3];
                 if (a == 0) {
                     continue;
@@ -303,7 +335,7 @@ void paint(const lv_draw_box_shadow_dsc_t &dsc, const lv_area_t &body, const lv_
                                         (sb * a + gb * (255 - a) + 127) / 255, box.x1 + x, y0 + r);
             }
         }
-    }
+    });
     lv_draw_buf_flush_cache(s_picture, &box);
 }
 
@@ -343,6 +375,9 @@ bool bake(Caster &c, const Pose &pose)
         return false;
     }
     paint(s, pose.coords, box);
+    c.body     = pose.coords;
+    c.corner   = corner_of(s.radius, pose.coords);
+    c.cover    = s.bg_cover != 0;
     c.radius   = std::min({s.radius, lv_area_get_width(&pose.coords) / 2, lv_area_get_height(&pose.coords) / 2}) + 1;
     c.baked    = true;
     c.painted  = box;
@@ -467,7 +502,7 @@ bool draw_picture(Pane &p, const Shape &s)
     dsc.bg_cover = 0;  // glass lets what is under it show, so its shadow stops at its edge
     const lv_area_t body{0, 0, s.w - 1, s.h - 1};
     for (std::int32_t y0 = box.y1; y0 <= box.y2; y0 += STRIP) {
-        shadow_strip(dsc, body, box, y0);
+        shadow_strip(dsc, body, box, y0, box.x1, box.x2);
         const std::int32_t rows = std::min(STRIP, box.y2 - y0 + 1);
         for (std::int32_t r = 0; r < rows; ++r) {
             const std::uint8_t *in  = s_strip->data + static_cast<std::size_t>(r) * s_strip->header.stride;
