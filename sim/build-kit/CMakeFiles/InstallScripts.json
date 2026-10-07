@@ -1,8 +1,0 @@
-{
-	"InstallScripts" : 
-	[
-		"/Users/wtb/dev/tab5-hello-design/sim/build-kit/cmake_install.cmake",
-		"/Users/wtb/dev/tab5-hello-design/sim/build-kit/lvgl/cmake_install.cmake"
-	],
-	"Parallel" : false
-}
