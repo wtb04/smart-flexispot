@@ -45,6 +45,7 @@ lv_draw_buf_t *s_shot = nullptr, *s_half = nullptr, *s_quarter = nullptr, *s_sma
 lv_draw_buf_t *s_blurred = nullptr;
 lv_draw_buf_t *s_strip   = nullptr;  // the 24-bit strip the PPA stretches into, made on LVGL's task
 std::atomic<bool> s_open{false};      // a popover is up: its picture is not to be touched
+std::atomic<Behind> s_behind{Behind::Blur};
 
 #if defined(ESP_PLATFORM)
 ppa_client_handle_t s_ppa = nullptr;
@@ -243,9 +244,9 @@ using Plane = std::uint8_t[SH][SW];
 // whatever the buffer held.
 Plane *s_planes = nullptr;  // three colours and one to work in
 
-bool blur_small()
+bool blur_small(int R, int passes, int scrim_opa)
 {
-    constexpr int R = 3, N = 2 * R + 1;
+    const int N = 2 * R + 1;
     if (s_planes == nullptr) {
         return false;
     }
@@ -261,7 +262,7 @@ bool blur_small()
     }
     for (int plane = 0; plane < 3; ++plane) {
         Plane &c = ch[plane];
-        for (int pass = 0; pass < 3; ++pass) {
+        for (int pass = 0; pass < passes; ++pass) {
             for (int y = 0; y < SH; ++y) {  // a running sum along each row, then each column
                 int sum = c[y][0] * (R + 1);
                 for (int x = 1; x <= R; ++x) {
@@ -292,7 +293,7 @@ bool blur_small()
         }
     }
     const std::uint32_t tint = colours().scrim;
-    const int a = colours().scrim_opa, t[3] = {static_cast<int>((tint >> 16) & 0xff), static_cast<int>((tint >> 8) & 0xff),
+    const int a = scrim_opa, t[3] = {static_cast<int>((tint >> 16) & 0xff), static_cast<int>((tint >> 8) & 0xff),
                                                static_cast<int>(tint & 0xff)};
     for (int y = 0; y < SH; ++y) {
         std::uint8_t *row = s_blurred->data + y * s_blurred->header.stride;
@@ -391,6 +392,27 @@ bool buffers()
 }
 
 // From the half-size picture on: no LVGL in it, so the panel's other core can do it.
+// The page as it is, only dimmed: the frozen picture taken whole and sharp.
+void dim_frozen()
+{
+    const std::uint32_t tint = colours().scrim;
+    const int a = colours().scrim_opa, keep = 256 - a;
+    const int tr = static_cast<int>((tint >> 19) & 0x1f) * a, tg = static_cast<int>((tint >> 10) & 0x3f) * a,
+              tb = static_cast<int>((tint >> 3) & 0x1f) * a;
+    for (int y = 0; y < FH; ++y) {
+        auto *row = reinterpret_cast<std::uint16_t *>(s_frozen->data + y * s_frozen->header.stride);
+        for (int x = 0; x < FW; ++x) {
+            const int px = row[x];
+            const int r = ((px >> 11) * keep + tr) >> 8, g = (((px >> 5) & 0x3f) * keep + tg) >> 8,
+                      b = ((px & 0x1f) * keep + tb) >> 8;
+            row[x] = static_cast<std::uint16_t>((r << 11) | (g << 5) | b);
+        }
+    }
+#if defined(ESP_PLATFORM)
+    esp_cache_msync(s_frozen->data, s_frozen->data_size, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+#endif
+}
+
 bool finish_picture(std::uint64_t t0, std::uint64_t t1)
 {
     // halvings rather than one eighth: a bilinear halving is an average of each
@@ -406,7 +428,8 @@ bool finish_picture(std::uint64_t t0, std::uint64_t t1)
     esp_cache_msync(s_small->data, s_small->data_size, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
 #endif
     const std::uint64_t t2 = perf::now_us();
-    if (!blur_small()) {
+    const bool soft = s_behind.load(std::memory_order_relaxed) == Behind::Soft;
+    if (!blur_small(soft ? 2 : 3, soft ? 2 : 3, soft ? colours().scrim_opa * 2 / 3 : colours().scrim_opa)) {
         return false;  // no picture rather than one of whatever the buffer held
     }
     const std::uint64_t t3 = perf::now_us();
@@ -436,11 +459,21 @@ bool picture_from_shown()
 {
     const std::uint64_t t0 = perf::now_us();
     const std::uint32_t gen = perf::generation();
-    if (board::shrink_shown(s_half->data, s_half->data_size, FW / 2, FH / 2) != ESP_OK) {
-        return false;
-    }
-    if (!finish_picture(t0, perf::now_us())) {
-        return false;
+    if (s_behind.load(std::memory_order_relaxed) == Behind::Dim) {
+        if (board::shrink_shown(s_frozen->data, s_frozen->data_size, FW, FH) != ESP_OK) {
+            return false;
+        }
+        esp_cache_msync(s_frozen->data, s_frozen->data_size, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+        dim_frozen();
+        std::snprintf(s_freeze_report, sizeof s_freeze_report, "  freezing for a popover: dimmed whole, %.1f ms\n",
+                      static_cast<double>(perf::now_us() - t0) / 1000.0);
+    } else {
+        if (board::shrink_shown(s_half->data, s_half->data_size, FW / 2, FH / 2) != ESP_OK) {
+            return false;
+        }
+        if (!finish_picture(t0, perf::now_us())) {
+            return false;
+        }
     }
     s_made_at_gen.store(gen, std::memory_order_relaxed);
     s_made_from_us.store(t0, std::memory_order_relaxed);
@@ -517,6 +550,11 @@ void freeze()
         s_shot = lv_draw_buf_create(FW, FH, LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO);
     }
     if (s_shot == nullptr || lv_snapshot_take_to_draw_buf(lv_screen_active(), LV_COLOR_FORMAT_RGB565, s_shot) != LV_RESULT_OK) {
+        return;
+    }
+    if (s_behind.load(std::memory_order_relaxed) == Behind::Dim) {
+        std::memcpy(s_frozen->data, s_shot->data, std::min(s_frozen->data_size, s_shot->data_size));
+        dim_frozen();
         return;
     }
     stretch(s_shot, s_half, 0.5f);
@@ -768,7 +806,7 @@ void show_picture(bool on)
         lv_obj_set_style_bg_opa(s_pop.card, LV_OPA_TRANSP, 0);
     } else {
         lv_obj_remove_flag(s_pop.body, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_remove_local_style_prop(s_pop.card, LV_STYLE_BG_OPA, 0);
+        lv_obj_set_style_bg_opa(s_pop.card, s_pop.glass_opa, 0);
     }
 }
 
@@ -1056,6 +1094,16 @@ void on_frame(lv_event_t *)
 
 bool popover_open() { return s_pop.card != nullptr && !s_pop.closing; }
 
+void set_behind(Behind behind)
+{
+    s_behind.store(behind, std::memory_order_relaxed);
+#if defined(ESP_PLATFORM)
+    s_made_at_gen.store(~perf::generation(), std::memory_order_relaxed);  // the one made ahead is of the other kind
+#endif
+}
+
+Behind behind() { return s_behind.load(std::memory_order_relaxed); }
+
 void reserve_popovers()
 {
 #if defined(ESP_PLATFORM)
@@ -1182,6 +1230,9 @@ lv_obj_t *popover(lv_obj_t *source, std::int32_t w, std::int32_t h, From from, b
 
     s_pop.card = glass(top, Glass::Large);
     lv_obj_set_style_radius(s_pop.card, radius::pop, 0);
+    if (behind() == Behind::Dim) {
+        lv_obj_set_style_bg_opa(s_pop.card, LV_OPA_COVER, 0);  // over a sharp page, nothing frosts what shows through
+    }
     s_pop.glass_opa = lv_obj_get_style_bg_opa(s_pop.card, LV_PART_MAIN);
     if (s_pop.backdrop == nullptr) {
         lv_obj_set_style_blur_backdrop(s_pop.card, true, 0);
