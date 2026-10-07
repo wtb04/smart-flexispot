@@ -16,6 +16,15 @@ bool busy_status(int status)
 }
 }  // namespace
 
+std::size_t grown_size(std::size_t need, std::size_t have, std::size_t limit, std::size_t expected)
+{
+    if (expected > 0 && std::min(expected, limit) >= need) {
+        return std::min(expected, limit);
+    }
+    const std::size_t step = std::max(have > limit / 4 ? limit : have * 4, kKeepBytes);
+    return std::min(limit, std::max(need, step));
+}
+
 Host Core::add_host(const HostConfig &config)
 {
     HostState state;

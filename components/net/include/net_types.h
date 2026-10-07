@@ -121,6 +121,11 @@ struct Request {
     std::optional<Retry> retry;                 // the host's when not given
     bool                 repeatable = true;     // safe to send twice: a retry, or once more on a fresh connection
     std::size_t          max_body = 64 * 1024;
+    // Where the answer is written as it comes, rather than in a worker's own
+    // buffer: room for into_size - 1 bytes and the end of text, kept until
+    // done is called. Gzipped, it is inflated elsewhere. As fetch() gives it.
+    char                *into      = nullptr;
+    std::size_t          into_size = 0;
     const char          *what     = "";         // in the log
     Done                 done;                  // always called, once, on a worker
 };

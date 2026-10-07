@@ -40,6 +40,16 @@ struct Tell {
 };
 using Tells = std::vector<Tell>;
 
+/** The most a worker keeps between answers; a bigger buffer is given back. */
+inline constexpr std::size_t kKeepBytes = 64 * 1024;
+
+/** How many bytes a worker's buffer of `have` grows to when `need` no longer
+ *  fit: what Content-Length said is coming, when it said and that covers
+ *  `need`, or else four times as much with kKeepBytes the least, so that a big
+ *  answer leaves few holes behind it; never past `limit`, what the request
+ *  takes. None of them count the end of text. */
+std::size_t grown_size(std::size_t need, std::size_t have, std::size_t limit, std::size_t expected);
+
 class Core {
 public:
     static constexpr std::int64_t kAgeUs = 10 * 1000 * 1000;
