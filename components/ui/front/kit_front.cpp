@@ -4,6 +4,10 @@
 
 #include "kit_front.h"
 
+#if defined(ESP_PLATFORM)
+#include "esp_timer.h"
+#endif
+
 #include "settings_model.h"
 #include "theme.h"  // the radar keeps the old one's map and planes, and their styles
 #include "units_font.h"
@@ -88,6 +92,17 @@ void init(std::uint32_t accent)
         theme::set_primary(accent);
     }
     kit::screen(lv_screen_active());
+    // Asked for a frame twice a refresh rather than about once: at 16 ms the
+    // timer drifted against the panel's 60 Hz, and frames came one refresh
+    // apart, then two, so a moving mark stuttered. Each still waits for the
+    // panel to take the last, and asking costs nothing when nothing changed.
+    lv_timer_set_period(lv_display_get_refr_timer(lv_display_get_default()), 8);
+    // frames counted: a popover's picture made ahead is only current while none has been drawn since
+#if defined(ESP_PLATFORM)
+    kit::perf::start([] { return static_cast<std::uint64_t>(esp_timer_get_time()); });
+#else
+    kit::perf::start();
+#endif
 }
 
 // One part a call, so the pages are made between frames rather than in one long stall.

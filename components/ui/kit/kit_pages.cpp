@@ -494,8 +494,8 @@ void place_mark(lv_anim_t *, int32_t p)
     light_under_mark();
 }
 
-constexpr std::uint32_t MARK_MS      = 200;  // the dock's mark from one item to another
-constexpr std::uint32_t MARK_LEAD_MS = 90;   // how far on it is before the page is drawn, nine tenths of its way
+constexpr std::uint32_t MARK_MS      = 180;  // the dock's mark from one item to another
+constexpr std::uint32_t MARK_LEAD_MS = MARK_MS + 20;  // there before the page is drawn, which holds everything up
 
 int s_mark_target = -1;  // where the mark is on its way to, while it moves
 
@@ -537,6 +537,7 @@ void mark(int index, bool animate)
 // draws in a few milliseconds; the page follows once it is most of the way,
 // as drawing a page holds everything else up for a few hundred.
 lv_timer_t *s_going = nullptr;
+char        s_mark_report[200] = "";
 
 void go_to(int index)
 {
@@ -544,6 +545,7 @@ void go_to(int index)
         return;
     }
     mark(index, true);
+    perf::begin();
     if (s_going != nullptr) {
         lv_timer_delete(s_going);
     }
@@ -552,6 +554,14 @@ void go_to(int index)
             const int to = static_cast<int>(reinterpret_cast<std::intptr_t>(lv_timer_get_user_data(t)));
             lv_timer_delete(t);
             s_going = nullptr;
+            const perf::Stats glide = perf::end();
+            const std::uint16_t *each = nullptr;
+            const int n = std::min(perf::frames(&each), 12);
+            int at = std::snprintf(s_mark_report, sizeof s_mark_report, "mark: %u frames, worst %.0f ms:",
+                                   static_cast<unsigned>(glide.frames), static_cast<double>(glide.worst_ms));
+            for (int i = 0; i < n && at < static_cast<int>(sizeof s_mark_report) - 6; ++i) {
+                at += std::snprintf(s_mark_report + at, sizeof s_mark_report - at, " %u", static_cast<unsigned>(each[i]));
+            }
             show_page(to);
         },
         MARK_LEAD_MS, reinterpret_cast<void *>(static_cast<std::intptr_t>(index)));
@@ -666,6 +676,10 @@ lv_obj_t *dock_item(lv_obj_t *dock, const char *glyph)
     }
     lv_obj_t *item = button(dock, Button::Flat, glyph, nullptr);
     lv_obj_set_size(item, 88, 80);
+    // no give under the finger: the mark is what answers it, and a scaled item
+    // is drawn through a layer of its own, which held up the mark's frames
+    lv_obj_set_style_transform_scale_x(item, LV_SCALE_NONE, LV_STATE_PRESSED);
+    lv_obj_set_style_transform_scale_y(item, LV_SCALE_NONE, LV_STATE_PRESSED);
     lv_obj_set_style_radius(item, 24, 0);
     lv_obj_set_style_text_opa(item, colours().ink2_opa, 0);
     lv_obj_set_style_text_font(lv_obj_get_child(item, 0), fonts::icon(34, false), 0);
@@ -697,7 +711,12 @@ lv_obj_t *page_at(int index) { return index >= 0 && index < s_page_count ? s_pag
 
 void on_page_shown(void (*cb)(int index)) { s_told = cb; }
 
-const char *change_report() { return s_report; }
+const char *change_report()
+{
+    static char both[sizeof s_report + sizeof s_mark_report + 2];
+    std::snprintf(both, sizeof both, "%s\n%s", s_report, s_mark_report);
+    return both;
+}
 
 void hide_pages()
 {
