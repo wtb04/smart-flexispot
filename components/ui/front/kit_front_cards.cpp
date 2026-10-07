@@ -519,7 +519,7 @@ Range range()
 {
     const detail::ThermostatState &t = detail::home_state().thermostat;
     if (!t.ranged || t.max_c <= t.min_c) {
-        return {150, 300, 5};  // the old dial's, until the thermostat tells its own
+        return {150, 300, 5};  // 15 to 30 degrees in halves, until the thermostat tells its own
     }
     return {tenths(t.min_c), tenths(t.max_c), std::max(1, tenths(t.step_c))};
 }
@@ -731,7 +731,7 @@ void build_heat_card(lv_obj_t *body)
     }, LV_EVENT_VALUE_CHANGED, nullptr);
 
     // A toggle's label is what it is set to ("1" or "2" for which radiator, say),
-    // not what it does, so it is a button showing it, lit when on, as the old card's chips were.
+    // not what it does, so it is a button showing it, lit when on.
     lv_obj_t *pair = flow(body, LV_FLEX_FLOW_ROW, space::m);
     lv_obj_set_width(pair, HEAT_INNER);
     for (int i = 0; i < kDialToggleCount; ++i) {

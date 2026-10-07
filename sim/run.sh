@@ -1,7 +1,7 @@
 #!/bin/sh
 # Builds the simulator and opens it. With --watch it builds and opens it again
 # whenever components/ui or sim changes. The rest is passed on to it: --page N,
-# --shot S, --splash.
+# --shot S, --lab.
 set -e
 cd "$(dirname "$0")"
 if [ -f sim.env ]; then

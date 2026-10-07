@@ -12,7 +12,7 @@
 namespace ui::detail {
 
 enum class ViewKind : std::uint8_t {
-    Fullscreen,  // over the whole screen, the dock and the control bar too
+    Fullscreen,  // over the whole screen, the dock and the bar too
     Popup,       // a card on a scrim over part of it
 };
 

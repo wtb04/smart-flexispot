@@ -65,7 +65,6 @@ for an aircraft whose own is not on file.
 ```sh
 SIM_HOME=lat,lon   # the radar's centre, in place of zone.home
 SIM_ZOOM=0.75      # the window's scale, for a smaller screen
-SIM_DOCK=left      # the dock at the left, as Setup can put it
 SIM_LOOK=light     # the light look, as Setup can choose it
 SIM_CLOCK=9:41     # the top bar shows that rather than the time
 ```
@@ -74,8 +73,8 @@ SIM_CLOCK=9:41     # the top bar shows that rather than the time
 it starts, `am` for Home Assistant answering and music, `--tap X,Y` taps the
 screen there, as often as given, `--hold X,Y,MS` presses there that long, `--wait MS` waits that long where it stands
 among the taps, `--swipe X1,Y1,X2,Y2` swipes after the taps, `--shot S` saves a
-screenshot after S seconds and quits, and `--splash` plays the twelve-second
-splash the panel boots with. `--pick-above FT` chooses the nearest airliner
+screenshot after S seconds and quits, and `--lab` opens the design kit's lab
+in place of the panel. `--pick-above FT` chooses the nearest airliner
 flying at least that high, and `--out2 FILE` saves a second screenshot a few
 seconds after the first, after the `--tap2 X,Y` taps, so both show the same
 moment. `--draw-page P N` draws page P whole N times and prints how long a
