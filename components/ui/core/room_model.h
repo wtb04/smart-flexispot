@@ -19,14 +19,11 @@ struct DeskState {
 
 struct LightState {
     char name[48]  = "";  // empty leaves it out
-    char state[32] = "";
 };
 
 struct LightsState {
     bool       on = false;                 // any of them, as the lights button shows
     bool       light_on[kLightCount] = {}; // each, by its place on the page
-    char       label[40] = "";             // the lights button's, and what it says of them
-    char       state[32] = "";
     LightState lights[kLightCount];
     bool       room_known = false;  // Home Assistant has told the two below
     bool       room_lit   = false;  // the big light or the light scene: someone is in
@@ -43,8 +40,8 @@ void desk_take_preset_height(int index, int height_mm);
  *  stops, as the control box's own buttons do. */
 void desk_go_to(int index);
 
-void lights_take(const char *label, const char *state, bool on);
-void lights_take_light(int index, const char *name, const char *state, bool on);
+void lights_take(bool on);
+void lights_take_light(int index, const char *name, bool on);
 void lights_take_room(bool lit);
 
 }  // namespace ui::detail

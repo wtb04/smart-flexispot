@@ -28,7 +28,6 @@ struct Gone {
     lv_timer_t *timer = nullptr;
     char        source[sizeof(MediaState::source)] = "";
     char        state[sizeof(MediaState::state)]   = "";
-    bool        controllable = false;
     bool        video_told   = false;  // the player stopped seeking meanwhile, or started again
     bool        video        = false;
     bool        cover_told   = false;  // the cover went blank meanwhile
@@ -82,7 +81,7 @@ void settle_gone()
 }
 
 void media_apply_track(const char *source, const char *title, const char *artist, const char *state,
-                       bool playing, bool controllable);
+                       bool playing);
 
 // It stayed gone: shown so now, as it was told.
 void apply_gone(lv_timer_t *)
@@ -102,18 +101,17 @@ void apply_gone(lv_timer_t *)
         s_media.still = nullptr;
         ++s_media.stills;
     }
-    media_apply_track(s_gone.source, nullptr, nullptr, s_gone.state, false, s_gone.controllable);
+    media_apply_track(s_gone.source, nullptr, nullptr, s_gone.state, false);
 }
 }  // namespace
 
 void media_take_track(const char *source, const char *title, const char *artist, const char *state,
-                      bool playing, bool controllable)
+                      bool playing)
 {
     const bool has_track = title != nullptr && title[0] != '\0';
     if (!has_track && s_media.has_track && s_media.video) {
         copy(s_gone.source, sizeof(s_gone.source), source);
         copy(s_gone.state, sizeof(s_gone.state), state);
-        s_gone.controllable = controllable;
         if (s_gone.timer == nullptr) {
             s_gone.video_told = false;
             s_gone.cover_told = false;
@@ -130,12 +128,12 @@ void media_take_track(const char *source, const char *title, const char *artist,
             s_media.video = s_gone.video;
         }
     }
-    media_apply_track(source, title, artist, state, playing, controllable);
+    media_apply_track(source, title, artist, state, playing);
 }
 
 namespace {
 void media_apply_track(const char *source, const char *title, const char *artist, const char *state,
-                       bool playing, bool controllable)
+                       bool playing)
 {
     const bool has_track = title != nullptr && title[0] != '\0';
     copy(s_media.source, sizeof(s_media.source), source != nullptr && source[0] != '\0' ? source : "SPEAKER");
@@ -143,7 +141,6 @@ void media_apply_track(const char *source, const char *title, const char *artist
     copy(s_media.artist, sizeof(s_media.artist), has_track ? artist : "");
     copy(s_media.state, sizeof(s_media.state), state != nullptr ? state : "--");
     s_media.has_track    = has_track;
-    s_media.controllable = controllable;
     if (playing || !has_track || !s_media.pause_settles) {
         cancel_pause_settle();
         s_media.playing = playing;

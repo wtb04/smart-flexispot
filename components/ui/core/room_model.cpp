@@ -221,10 +221,8 @@ void desk_go_to(int index)
     press(index);
 }
 
-void lights_take(const char *label, const char *state, bool on)
+void lights_take(bool on)
 {
-    copy(s_lights.label, sizeof(s_lights.label), label);
-    copy(s_lights.state, sizeof(s_lights.state), state);
     s_lights.on = on;
     publish(Topic::Lights);
 }
@@ -236,11 +234,10 @@ void lights_take_room(bool lit)
     publish(Topic::Lights);
 }
 
-void lights_take_light(int index, const char *name, const char *state, bool on)
+void lights_take_light(int index, const char *name, bool on)
 {
     LightState &light = s_lights.lights[index];
     copy(light.name, sizeof(light.name), name);
-    copy(light.state, sizeof(light.state), state);
     s_lights.light_on[index] = light.name[0] != '\0' && on;
     publish(Topic::Lights);
 }

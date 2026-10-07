@@ -30,14 +30,6 @@ std::string display_value(const hass::ws::Entity &entity)
     return entity.state;
 }
 
-const char *on_off(const hass::ws::Entity *entity)
-{
-    if (!known(entity)) {
-        return "--";
-    }
-    return is_on(entity->state) ? "ON" : "OFF";
-}
-
 std::atomic<bool> s_climate_on{false};
 std::atomic<bool> s_all_lights_on{false};
 std::atomic<bool> s_light_on[LIGHT_COUNT];
@@ -146,8 +138,7 @@ void render(const hass::ws::EntityStore &store)
 
     const hass::ws::Entity *all = store.find(ALL_LIGHTS_ENTITY);
     s_all_lights_on.store(all != nullptr && is_on(all->state), std::memory_order_relaxed);
-    ESP_ERROR_CHECK_WITHOUT_ABORT(
-        ui::set_lights("LIGHTS", on_off(all), all != nullptr && is_on(all->state)));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_lights(all != nullptr && is_on(all->state)));
     if (const hass::ws::Entity *main = store.find(MAIN_LIGHT_ENTITY); all != nullptr || main != nullptr) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_room_lit((all != nullptr && is_on(all->state)) ||
                                                        (main != nullptr && is_on(main->state))));
@@ -157,10 +148,10 @@ void render(const hass::ws::EntityStore &store)
         const hass::ws::Entity *entity = store.find(LIGHTS[i].entity);
         const bool              on     = entity != nullptr && is_on(entity->state);
         s_light_on[i].store(on, std::memory_order_relaxed);
-        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_light(i, LIGHTS[i].name, on_off(entity), on));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_light(i, LIGHTS[i].name, on));
     }
     for (int i = LIGHT_COUNT; i < ui::kLightCount; ++i) {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_light(i, "", "", false));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_light(i, "", false));
     }
 
     media_from_store(store);
@@ -191,8 +182,7 @@ void on_lights()
     const bool currently_on = s_all_lights_on.load(std::memory_order_relaxed);
     ESP_LOGI(TAG, "all lights -> %s", currently_on ? "off" : "on");
 
-    ESP_ERROR_CHECK_WITHOUT_ABORT(
-        ui::set_lights("LIGHTS", currently_on ? "OFF" : "ON", !currently_on));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_lights(!currently_on));
     run_script(currently_on ? ALL_LIGHTS_OFF : ALL_LIGHTS_ON);
 }
 
@@ -204,8 +194,7 @@ void on_light(int index)
     const bool currently_on = s_light_on[index].load(std::memory_order_relaxed);
     ESP_LOGI(TAG, "light %s -> %s", LIGHTS[index].name, currently_on ? "off" : "on");
 
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_light(index, LIGHTS[index].name,
-                                                currently_on ? "OFF" : "ON", !currently_on));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_light(index, LIGHTS[index].name, !currently_on));
     ESP_ERROR_CHECK_WITHOUT_ABORT(hass::ws::call_service("light", "toggle", LIGHTS[index].entity));
 }
 
