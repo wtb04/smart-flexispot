@@ -565,7 +565,7 @@ void paint_overhead()
         std::snprintf(text, sizeof(text), "%d", ft);
     }
     set_text_if(s_alt, text);
-    lv_obj_set_x(s_alt_unit, lv_obj_get_x(s_alt) + widest(Role::ReadM, {text}) + space::xs);
+    lv_obj_set_x(s_alt_unit, lv_obj_get_x(s_alt) + widest(Role::ReadS, {text}) + space::xs);
     // turned in steps of five degrees, so a plane holding its course draws once
     const std::int32_t turn = static_cast<std::int32_t>(std::lround(a->track_deg / 5.0f)) * 50 % 3600;
     if (lv_image_get_rotation(s_heading) != turn) {
@@ -649,16 +649,16 @@ void build_overhead(lv_obj_t *grid)
     lv_obj_set_pos(s_call, x0, route_y + (fonts::body()->line_height - fonts::small()->line_height) / 2);
 
     // at the foot, as the desk's and the focus timer's figures are
-    const std::int32_t foot   = h - fonts::read_m()->line_height;
+    const std::int32_t foot   = h - fonts::read_s()->line_height;
     const std::int32_t unit_w = widest(Role::Body, {"ft"});
-    s_alt      = line(s_sky_some, Role::ReadM, Ink::Primary, widest(Role::ReadM, {"88,888"}));
+    s_alt      = line(s_sky_some, Role::ReadS, Ink::Primary, widest(Role::ReadS, {"88,888"}));
     s_alt_unit = line(s_sky_some, Role::Body, Ink::Secondary, unit_w);
     lv_label_set_text(s_alt_unit, "ft");
     lv_obj_set_pos(s_alt, x0, foot);
-    lv_obj_set_pos(s_alt_unit, x0, foot + baseline_y(Role::ReadM, Role::Body));
+    lv_obj_set_pos(s_alt_unit, x0, foot + baseline_y(Role::ReadS, Role::Body));
     const std::int32_t word_w = widest(Role::Small, {"NW, 888 km"});
     s_heading_word = line(s_sky_some, Role::Small, Ink::Secondary, word_w);
-    const std::int32_t word_y = foot + baseline_y(Role::ReadM, Role::Small);
+    const std::int32_t word_y = foot + baseline_y(Role::ReadS, Role::Small);
     lv_obj_set_pos(s_heading_word, x0 + text_w - word_w, word_y);
     s_heading = lv_image_create(s_sky_some);
     lv_image_set_src(s_heading, &icons::plane_icon);

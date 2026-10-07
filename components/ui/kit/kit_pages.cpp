@@ -497,13 +497,14 @@ void place_mark(lv_anim_t *, int32_t p)
 constexpr std::uint32_t MARK_MS      = 180;  // the dock's mark from one item to another
 constexpr std::uint32_t MARK_LEAD_MS = MARK_MS + 20;  // there before the page is drawn, which holds everything up
 
-int s_mark_target = -1;  // where the mark is on its way to, while it moves
+int s_mark_target = -1;  // where the mark is, or is on its way to: ahead of the page shown, after a tap
 
 void mark(int index, bool animate)
 {
     if (animate && index == s_mark_target && lv_anim_get(s_mark, nullptr) != nullptr) {
         return;  // already on its way there, as the press sent it
     }
+    s_mark_target = index;
     lv_obj_t *item = index >= 0 ? s_pages[index].item : nullptr;
     if (s_mark == nullptr || item == nullptr || lv_obj_get_parent(item) != lv_obj_get_parent(s_mark)) {
         if (s_mark != nullptr) {
@@ -521,8 +522,7 @@ void mark(int index, bool animate)
         place_mark(nullptr, PROGRESS);
         return;
     }
-    s_mark_from   = s_mark_at;
-    s_mark_target = index;
+    s_mark_from = s_mark_at;
     lv_anim_t a;
     lv_anim_init(&a);
     lv_anim_set_var(&a, s_mark);
@@ -664,12 +664,15 @@ lv_obj_t *dock_item(lv_obj_t *dock, const char *glyph)
         lv_obj_move_to_index(s_mark, 0);
         restyle_mark(nullptr);
         on_restyle(s_mark, restyle_mark, nullptr);
-        // the dock laid out again, as a button of it comes or goes: the mark to where its item now is
+        // the dock laid out again, as a button of it comes or goes: the mark to
+        // where its item now is, the one it went to after a tap and not the
+        // page still shown, which pulled it back as the item it reached lit up
         lv_obj_add_event_cb(
             dock,
             [](lv_event_t *) {
-                if (s_shown >= 0 && !lv_anim_get(s_mark, nullptr)) {
-                    mark(s_shown, false);
+                const int at = s_mark_target >= 0 ? s_mark_target : s_shown;
+                if (at >= 0 && !lv_anim_get(s_mark, nullptr)) {
+                    mark(at, false);
                 }
             },
             LV_EVENT_LAYOUT_CHANGED, nullptr);
