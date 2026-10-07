@@ -34,8 +34,9 @@ endif()
 target_link_libraries(lvgl PUBLIC PkgConfig::SDL2)
 target_compile_definitions(lvgl PUBLIC LV_INV_BUF_SIZE=64)  # as the firmware's CMakeLists.txt
 
-file(GLOB UI_SOURCES ${ROOT}/components/ui/*.cpp ${ROOT}/components/ui/fonts/*.c
-     ${ROOT}/components/ui/fonts/*.cpp)
+set(UI_DIR ${ROOT}/components/ui)
+file(GLOB UI_SOURCES ${UI_DIR}/core/*.cpp ${UI_DIR}/kit/*.cpp ${UI_DIR}/lab/*.cpp ${UI_DIR}/classic/*.cpp
+     ${UI_DIR}/front/*.cpp ${UI_DIR}/fonts/*.c ${UI_DIR}/fonts/*.cpp)
 # One of the two screens, as the firmware's CONFIG_UI_KIT picks: -DSIM_UI_KIT=ON for the design kit's.
 option(SIM_UI_KIT "the screen the design kit draws, in place of the one the panel has had" OFF)
 include(${ROOT}/components/ui/fronts.cmake)
@@ -80,7 +81,8 @@ if(SIM_UI_KIT)
 endif()
 target_include_directories(sim PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/shim
-    ${ROOT}/components/ui ${ROOT}/components/ui/include ${ROOT}/components/ui/fonts
+    ${UI_DIR} ${UI_DIR}/include ${UI_DIR}/fonts ${UI_DIR}/core ${UI_DIR}/kit ${UI_DIR}/front ${UI_DIR}/classic
+    ${UI_DIR}/lab
     ${ROOT}/components/board/include
     ${ROOT}/components/claude/include
     ${ROOT}/components/deskproto/include
