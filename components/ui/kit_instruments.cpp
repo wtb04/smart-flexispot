@@ -525,6 +525,7 @@ void Dial::make_arc()
     lv_obj_set_flex_align(mid, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_remove_flag(mid, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_remove_flag(mid, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_center(mid);
     if (m_spec.over) {
         m_over = text(mid, Role::Small, "", Ink::Secondary);
         lv_obj_set_style_text_align(m_over, LV_TEXT_ALIGN_CENTER, 0);
@@ -619,13 +620,22 @@ void Dial::place_mark()
     }
 }
 
-void Dial::set_size(std::int32_t size)
+void Dial::set_size(std::int32_t size, std::int32_t arc)
 {
     m_spec.size = size;
+    if (arc > 0 && arc != m_spec.arc) {
+        m_spec.arc = arc;
+        const std::int32_t knob = m_spec.target ? arc / 4 + 2 : 0;
+        for (lv_part_t part : {LV_PART_MAIN, LV_PART_INDICATOR}) {
+            lv_obj_set_style_arc_width(m_arc, arc, part);
+        }
+        lv_obj_set_style_pad_all(m_arc, knob, LV_PART_MAIN);
+        lv_obj_set_style_pad_all(m_arc, knob, LV_PART_KNOB);
+        m_r_arc = knob + arc / 2;
+    }
     if (lv_obj_get_style_width(m_root, LV_PART_MAIN) != size) {
         lv_obj_set_size(m_root, size, size);
         lv_obj_set_size(m_arc, size, size);
-        lv_obj_center(lv_obj_get_child(m_root, -1));
     }
     place_mark();
 }
