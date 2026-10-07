@@ -772,12 +772,6 @@ void set_soft(lv_obj_t *btn, bool on);
 void set_row_title(lv_obj_t *row, const char *title, Ink ink = Ink::Primary);
 /** The glyph in a row's square, for a row that has one. */
 void set_row_glyph(lv_obj_t *row, const char *glyph);
-/**
- * Flex lays a row that is as tall as its contents out from its top, so in one
- * held up to its least height they sit high: this holds each such row under
- * `parent` at that height, which puts them in its middle. Once its rows are made.
- */
-void centre_rows(lv_obj_t *parent);
 
 // --- rows used again (Home and Calendar) -----------------------------------
 
@@ -820,5 +814,10 @@ void      dismiss_notice();
  */
 lv_obj_t *fill_slider(lv_obj_t *parent, std::int32_t width, const char *glyph, std::int32_t min = 0,
                       std::int32_t max = 100);
+
+// --- rows, calmer ------------------------------------------------------------
+
+/** The least a row stands, 64 unless told, what is in it centred on its middle whatever it holds. */
+void row_height(lv_obj_t *row, std::int32_t h);
 
 }  // namespace ui::kit
