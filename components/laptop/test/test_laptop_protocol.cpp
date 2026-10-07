@@ -35,7 +35,6 @@ TEST(LaptopProtocol, reads_a_video_playing)
     EXPECT_EQ(now.square, "9c1e");
     EXPECT_TRUE(now.video);
     EXPECT_TRUE(now.takes_pause);
-    EXPECT_TRUE(now.takes_seek);
     EXPECT_TRUE(now.takes_next);
     EXPECT_FALSE(now.takes_previous) << "only what it lists";
     EXPECT_TRUE(now.takes_volume);

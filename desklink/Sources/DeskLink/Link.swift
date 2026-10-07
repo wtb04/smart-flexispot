@@ -18,9 +18,6 @@ final class Link: ObservableObject {
     @Published private(set) var reachesBack: Bool?  // the panel's commands get here, as it last said
     @Published private(set) var firmware = ""
 
-    /// The output takes no level, an app would take the volume keys, and
-    /// Desk Link may not press them yet: the menu offers to ask.
-    var asksForKeys: Bool { output.percent == nil && VolumeKeys.taken && !VolumeKeys.allowed }
     @Published var sharesClaude: Bool {
         didSet { defaults.set(sharesClaude, forKey: "claude") }
     }

@@ -8,7 +8,6 @@ struct State {
     float bus_volts;
     float current_amps;  // positive on discharge, negative on charge
     int   percent;       // counted from the current, see power_gauge.h; 0 unless present
-    float shunt_millivolts;
     bool  charging;
     bool  on_battery;
     bool  full;          // at the top of its range and taking nothing more

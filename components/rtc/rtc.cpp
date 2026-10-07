@@ -59,8 +59,7 @@ constexpr std::uint8_t IRQ_BITS   = IRQ_ALARM | IRQ_TIMER | IRQ_UPDATE;
 
 constexpr std::uint8_t CTRL1_BACKUP = (1 << 4) | (1 << 5);
 
-i2c_master_dev_handle_t s_dev   = nullptr;
-bool                    s_valid = false;
+i2c_master_dev_handle_t s_dev = nullptr;
 
 esp_err_t read_bytes(std::uint8_t reg, std::uint8_t *out, std::size_t count)
 {
@@ -119,8 +118,6 @@ void disarm_leftover_interrupts(std::uint8_t flags)
 
 }  // namespace
 
-bool holding_time() { return s_valid; }
-
 esp_err_t store(std::time_t when)
 {
     ESP_RETURN_ON_FALSE(s_dev != nullptr, ESP_ERR_INVALID_STATE, TAG, "not started");
@@ -145,7 +142,6 @@ esp_err_t store(std::time_t when)
     if (read_bytes(REG_FLAG, &flags, 1) == ESP_OK && (flags & FLAG_VOLTAGE_LOW) != 0) {
         write_byte(REG_FLAG, static_cast<std::uint8_t>(flags & ~FLAG_VOLTAGE_LOW));
     }
-    s_valid = true;
     return ESP_OK;
 }
 
@@ -190,7 +186,6 @@ esp_err_t start()
 
     const timeval now{when, 0};
     settimeofday(&now, nullptr);
-    s_valid = true;
     ESP_LOGI(TAG, "clock set from the backup: %04d-%02d-%02d %02d:%02d:%02d UTC",
              utc.tm_year + kTmYearBase, utc.tm_mon + 1, utc.tm_mday, utc.tm_hour, utc.tm_min,
              utc.tm_sec);

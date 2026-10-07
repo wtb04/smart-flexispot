@@ -14,11 +14,8 @@ namespace ble {
 struct LinkStats {
     bool connected;
     int  samples;
-    int  min_us;
     int  median_us;
-    int  p99_us;
     int  max_us;
-    int  lost;
 };
 
 /** How the link to the companion is doing, for the diagnostics page. */

@@ -126,7 +126,6 @@ struct GlideTimes {
     std::uint32_t frames  = 0;
     std::int64_t  copy_us = 0;
     std::int64_t  wait_us = 0;  // of copy_us, waiting for a buffer the panel is done with
-    std::int64_t  show_us = 0;  // LVGL's own drawing round the region, and the frame put on show
 };
 GlideTimes glide_times();
 

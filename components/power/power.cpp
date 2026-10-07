@@ -26,7 +26,6 @@ constexpr std::uint32_t I2C_SPEED_HZ   = 400000;
 constexpr int           I2C_TIMEOUT_MS = 100;
 
 constexpr std::uint8_t REG_CONFIG        = 0x00;
-constexpr std::uint8_t REG_SHUNT_VOLTAGE = 0x01;
 constexpr std::uint8_t REG_BUS_VOLTAGE   = 0x02;
 constexpr std::uint8_t REG_CURRENT       = 0x04;
 constexpr std::uint8_t REG_CALIBRATION   = 0x05;
@@ -62,7 +61,6 @@ constexpr float CURRENT_STEPS     = 32768.0f;  // the positive half of the signe
 constexpr float CURRENT_LSB       = MAX_CURRENT_AMPS / CURRENT_STEPS;
 constexpr float CALIBRATION_SCALE = 0.00512f;  // the datasheet's constant
 constexpr float BUS_VOLTAGE_LSB   = 0.00125f;
-constexpr float SHUNT_LSB_MV      = 0.0025f;
 
 constexpr int CELLS_IN_SERIES = 2;
 
@@ -128,14 +126,12 @@ bool pack_voltage(float volts)
 struct Raw {
     std::uint16_t bus     = 0;
     std::uint16_t current = 0;
-    std::uint16_t shunt   = 0;
 };
 
 esp_err_t read_raw(Raw &raw)
 {
     ESP_RETURN_ON_ERROR(read_register(REG_BUS_VOLTAGE, raw.bus), TAG, "bus voltage");
     ESP_RETURN_ON_ERROR(read_register(REG_CURRENT, raw.current), TAG, "current");
-    ESP_RETURN_ON_ERROR(read_register(REG_SHUNT_VOLTAGE, raw.shunt), TAG, "shunt voltage");
     return ESP_OK;
 }
 
@@ -170,7 +166,6 @@ esp_err_t read_locked(State &out)
 {
     Raw raw;
     ESP_RETURN_ON_ERROR(read_raw(raw), TAG, "registers");
-    out.shunt_millivolts = static_cast<std::int16_t>(raw.shunt) * SHUNT_LSB_MV;
 
     out.bus_volts    = static_cast<std::int16_t>(raw.bus) * BUS_VOLTAGE_LSB;
     out.current_amps = static_cast<std::int16_t>(raw.current) * CURRENT_LSB;

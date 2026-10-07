@@ -120,7 +120,6 @@ bool read(const char *body, std::size_t length, NowPlaying &out)
         }
         const char *name   = take->valuestring;
         out.takes_pause    = out.takes_pause || std::strcmp(name, "pause") == 0;
-        out.takes_seek     = out.takes_seek || std::strcmp(name, "seek") == 0;
         out.takes_next     = out.takes_next || std::strcmp(name, "next") == 0;
         out.takes_previous = out.takes_previous || std::strcmp(name, "previous") == 0;
         out.takes_volume   = out.takes_volume || std::strcmp(name, "volume") == 0;

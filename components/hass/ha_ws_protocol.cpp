@@ -205,7 +205,6 @@ MessageType classify(const cJSON *root)
     if (type == "auth_invalid") return MessageType::AuthInvalid;
     if (type == "result") return MessageType::Result;
     if (type == "event") return MessageType::Event;
-    if (type == "pong") return MessageType::Pong;
     return MessageType::Unknown;
 }
 
@@ -257,14 +256,6 @@ const cJSON *reply_result(const cJSON *root)
         return nullptr;
     }
     return cJSON_GetObjectItemCaseSensitive(root, "result");
-}
-
-std::string ping_message(int id)
-{
-    cJSON *root = cJSON_CreateObject();
-    cJSON_AddNumberToObject(root, "id", id);
-    cJSON_AddStringToObject(root, "type", "ping");
-    return print_and_free(root);
 }
 
 std::string call_service_message(int id, const std::string &domain, const std::string &service,

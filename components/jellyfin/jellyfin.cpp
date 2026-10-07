@@ -262,11 +262,6 @@ esp_err_t start(Handler on_change)
     return net::open_websocket(s_stream, config, std::move(on));
 }
 
-bool connected()
-{
-    return net::stream_is_ready(s_stream);
-}
-
 bool fetch(const std::string &path, std::string &out)
 {
     net::Request request;
