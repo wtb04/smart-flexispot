@@ -512,7 +512,7 @@ void paint_overhead()
         return;
     }
     set_text_if(s_call, a->flight[0] != '\0' ? a->flight : a->hex);
-    char text[48];
+    char text[96];
     char what[48];
     sentence_case(a->desc[0] != '\0' ? a->desc : a->type, what, sizeof(what));
     std::snprintf(text, sizeof(text), "%s, %d km %s", what, static_cast<int>(a->distance_nm * KM_PER_NM + 0.5f),
