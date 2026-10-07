@@ -306,5 +306,17 @@ TEST(NetCore, cancel)
     run(tells);
     EXPECT_TRUE(log.has("sent cancelled") && !log.has("sent answered")) << "one under way when its answer comes";
 }
+
+TEST(NetCore, buffer_growth)
+{
+    constexpr std::size_t KB = 1024;
+    EXPECT_EQ(grown_size(5 * KB, 4 * KB, 640 * KB, 300 * KB), 300 * KB) << "grown once, to what Content-Length says";
+    EXPECT_EQ(grown_size(5 * KB, 4 * KB, 256 * KB, 300 * KB), 256 * KB) << "never past what the request takes";
+    EXPECT_EQ(grown_size(5 * KB, 4 * KB, 640 * KB, 0), kKeepBytes) << "unsaid, a step of what is kept the least";
+    EXPECT_EQ(grown_size(65 * KB, 64 * KB, 640 * KB, 0), 256 * KB) << "and then four times as much";
+    EXPECT_EQ(grown_size(257 * KB, 256 * KB, 640 * KB, 0), 640 * KB) << "up to the limit";
+    EXPECT_EQ(grown_size(70 * KB, 64 * KB, 640 * KB, 60 * KB), 256 * KB) << "a Content-Length that was wrong is grown past";
+    EXPECT_EQ(grown_size(3 * KB, 2 * KB, 3 * KB, 0), 3 * KB) << "a small limit is all that is made";
+}
 }  // namespace
 
