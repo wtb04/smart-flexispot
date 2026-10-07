@@ -277,7 +277,7 @@ void place_air()
     const std::int32_t w = lv_obj_get_content_width(s_air_body), h = lv_obj_get_content_height(s_air_body);
     const bool         row = w > h * 5 / 2;  // across the page, away
     const int          across = row ? kPillCount : 2;
-    const std::int32_t gap_x = row ? space::xl : space::xl, gap_y = space::l;
+    const std::int32_t gap_x = space::xl, gap_y = space::l;
     const std::int32_t cell_w = (w - (across - 1) * gap_x) / across;
     const std::int32_t cell_h = row ? h : (h - gap_y) / 2;
     for (int i = 0; i < kPillCount; ++i) {
@@ -322,7 +322,7 @@ void build_air(lv_obj_t *grid)
 struct After {
     lv_obj_t *root = nullptr, *when = nullptr, *what = nullptr;
 };
-lv_obj_t    *s_next = nullptr, *s_next_body = nullptr, *s_next_some = nullptr, *s_next_none = nullptr;
+lv_obj_t    *s_next = nullptr, *s_next_some = nullptr, *s_next_none = nullptr;
 lv_obj_t    *s_next_dot = nullptr, *s_next_kind = nullptr, *s_next_start = nullptr, *s_next_until = nullptr;
 lv_obj_t    *s_next_place = nullptr, *s_next_title = nullptr, *s_after_head = nullptr;
 After        s_after[AFTER_ROWS];
@@ -399,7 +399,6 @@ void paint_next()
 void build_next(lv_obj_t *grid)
 {
     lv_obj_t *body = widget(grid, Span::Big, "Next");
-    s_next_body    = body;
     s_next         = lv_obj_get_parent(body);
     lv_obj_update_layout(grid);
     s_next_w = lv_obj_get_content_width(body);
