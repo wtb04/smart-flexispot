@@ -382,7 +382,7 @@ bool buffers()
     // a dim is the frozen picture alone: the blur's 1.1 MB only for a blur
     if (s_behind.load(std::memory_order_relaxed) != Behind::Dim && s_half == nullptr) {
         s_half    = lv_draw_buf_create(FW / 2, FH / 2, LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO);
-        s_quarter = lv_draw_buf_create(FW / 4, FH / 4, LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO);
+        s_quarter = F == 8 ? lv_draw_buf_create(FW / 4, FH / 4, LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO) : nullptr;
         s_small   = lv_draw_buf_create(SW, SH, LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO);
         s_blurred = lv_draw_buf_create(SW, SH, LV_COLOR_FORMAT_RGB888, LV_STRIDE_AUTO);
         s_planes  = static_cast<Plane *>(scratch(sizeof(Plane) * 4));
@@ -394,7 +394,7 @@ bool buffers()
         return false;
     }
     return s_behind.load(std::memory_order_relaxed) == Behind::Dim ||
-           (s_half != nullptr && s_quarter != nullptr && s_small != nullptr && s_blurred != nullptr && s_planes != nullptr);
+           (s_half != nullptr && (F != 8 || s_quarter != nullptr) && s_small != nullptr && s_blurred != nullptr && s_planes != nullptr);
 }
 
 // From the half-size picture on: no LVGL in it, so the panel's other core can do it.
