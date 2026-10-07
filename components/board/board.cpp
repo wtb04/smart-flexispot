@@ -721,32 +721,52 @@ inline std::uint16_t blend565(std::uint16_t under, std::uint16_t over, std::uint
     return static_cast<std::uint16_t>((r << 11) | (g << 5) | b);
 }
 
-// The rings over a zoom's frame, each pixel where it is in the picture, turned
-// onto the panel as the frame is; then out of the cache, for the DMA.
-void lay_rings(const ZoomFrame &f, std::uint8_t *to)
+// The pixel of the panel at (sx, sy) on the screen, or null outside `within`.
+std::uint16_t *panel_pixel(std::uint8_t *to, std::int32_t sx, std::int32_t sy, const lv_area_t &within)
 {
-    if (f.ring_at == nullptr || f.ring_count == 0) {
+    if (sx < within.x1 || sx > within.x2 || sy < within.y1 || sy > within.y2) {
+        return nullptr;
+    }
+    const std::int32_t hres = lv_display_get_horizontal_resolution(s_disp);
+    const std::int32_t vres = lv_display_get_vertical_resolution(s_disp);
+    std::int32_t       px = sx, py = sy;
+    switch (lv_display_get_rotation(s_disp)) {
+        case LV_DISPLAY_ROTATION_90:  px = sy; py = hres - sx - 1; break;
+        case LV_DISPLAY_ROTATION_180: px = hres - sx - 1; py = vres - sy - 1; break;
+        case LV_DISPLAY_ROTATION_270: px = vres - sy - 1; py = sx; break;
+        default: break;
+    }
+    return reinterpret_cast<std::uint16_t *>(to) + static_cast<std::size_t>(py) * BSP_LCD_H_RES + px;
+}
+
+// The rings over a zoom's frame, each pixel where it is in the picture, and
+// the picture's corners, turned onto the panel as the frame is; then out of
+// the cache, for the DMA.
+void lay_still(const ZoomFrame &f, std::uint8_t *to)
+{
+    const bool rings   = f.ring_at != nullptr && f.ring_count > 0;
+    const bool corners = f.row_from != nullptr && f.row_to != nullptr;
+    if (!rings && !corners) {
         return;
     }
-    const std::int32_t hres  = lv_display_get_horizontal_resolution(s_disp);
-    const std::int32_t vres  = lv_display_get_vertical_resolution(s_disp);
-    const auto         turn  = lv_display_get_rotation(s_disp);
-    auto              *frame = reinterpret_cast<std::uint16_t *>(to);
-    for (std::size_t i = 0; i < f.ring_count; ++i) {
+    for (std::size_t i = 0; rings && i < f.ring_count; ++i) {
         const std::int32_t sx = f.x + static_cast<std::int32_t>(f.ring_at[i] % static_cast<std::uint32_t>(f.w));
         const std::int32_t sy = f.y + static_cast<std::int32_t>(f.ring_at[i] / static_cast<std::uint32_t>(f.w));
-        if (sx < f.to.x1 || sx > f.to.x2 || sy < f.to.y1 || sy > f.to.y2) {
-            continue;
+        if (std::uint16_t *pixel = panel_pixel(to, sx, sy, f.to); pixel != nullptr) {
+            *pixel = blend565(*pixel, f.ring_ink, f.ring_opa[i]);
         }
-        std::int32_t px = sx, py = sy;
-        switch (turn) {
-            case LV_DISPLAY_ROTATION_90:  px = sy; py = hres - sx - 1; break;
-            case LV_DISPLAY_ROTATION_180: px = hres - sx - 1; py = vres - sy - 1; break;
-            case LV_DISPLAY_ROTATION_270: px = vres - sy - 1; py = sx; break;
-            default: break;
+    }
+    for (std::int32_t y = 0; corners && y < f.h; ++y) {
+        for (std::int32_t x = 0; x < f.row_from[y]; ++x) {
+            if (std::uint16_t *pixel = panel_pixel(to, f.x + x, f.y + y, f.to); pixel != nullptr) {
+                *pixel = f.around;
+            }
         }
-        std::uint16_t &pixel = frame[static_cast<std::size_t>(py) * BSP_LCD_H_RES + px];
-        pixel                = blend565(pixel, f.ring_ink, f.ring_opa[i]);
+        for (std::int32_t x = f.row_to[y] + 1; x < f.w; ++x) {
+            if (std::uint16_t *pixel = panel_pixel(to, f.x + x, f.y + y, f.to); pixel != nullptr) {
+                *pixel = f.around;
+            }
+        }
     }
     esp_cache_msync(to, FRAME_BYTES, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
 }
@@ -833,7 +853,7 @@ esp_err_t zoom_frame(const ZoomFrame &f)
     const esp_err_t    err     = ppa_do_scale_rotate_mirror(s_ppa, &op);
     s_flush_times.rotate_us += esp_timer_get_time() - turning;
     note_drawn(place.rect);
-    lay_rings(f, s_fbs[s_target]);
+    lay_still(f, s_fbs[s_target]);
 
     constexpr std::size_t PIXEL = sizeof(std::uint16_t);
     for (int i = 0; i < s_kept_count; ++i) {

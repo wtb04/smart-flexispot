@@ -24,6 +24,10 @@ void show_radar_details(const char *hex, const radar::Details &details);
 
 void show_radar_photo(const char *hex, const void *pixels, int width, int height, const char *credit);
 
+/** The aircraft chosen as a tap on it would, for the page about to open, and
+ *  the range widened as far as it takes to have it on the scope. */
+void radar_open_on(const char *hex);
+
 /** Chooses the aircraft as a tap on it would; false when it is not on show.
  *  For the simulator's screenshots. LVGL lock held. */
 bool radar_choose(const char *hex);

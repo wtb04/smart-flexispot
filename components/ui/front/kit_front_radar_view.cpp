@@ -467,7 +467,7 @@ lv_obj_t *s_chip_military = nullptr;
 lv_obj_t *s_chip_country  = nullptr;
 lv_obj_t *s_credit      = nullptr;  // the photographer, on the photo's corner
 lv_obj_t *s_summary     = nullptr;
-lv_obj_t *s_photo       = nullptr;
+kit::Cover *s_photo     = nullptr;
 lv_obj_t *s_photo_frame = nullptr;
 lv_obj_t *s_photo_wait  = nullptr;
 lv_obj_t *s_photo_plane = nullptr;  // faint inside the spinner while it turns
@@ -475,7 +475,6 @@ lv_obj_t *s_photo_none  = nullptr;
 lv_obj_t *s_identity    = nullptr;
 lv_obj_t *s_nearby      = nullptr;
 
-lv_image_dsc_t s_photo_dsc      = {};
 Fact           s_facts[FACTS]   = {};
 
 radar::Snapshot *s_last                        = nullptr;
@@ -487,9 +486,19 @@ radar::Details   s_details                     = {};
 char             s_details_hex[radar::kHexLen] = {};
 char             s_picture_hex[radar::kHexLen] = {};  // whose photo s_picture is about
 Picture          s_picture                     = Picture::Idle;
+char             s_open_on[radar::kHexLen]     = {};  // to bring into view as the page opens
+char             s_asked_hex[radar::kHexLen]   = {};
+std::uint32_t    s_asked_at                    = 0;
+int              s_asked_times                 = 0;  // for s_asked_hex
 
 void ask_details(const char *hex, const char *callsign)
 {
+    if (std::strcmp(s_asked_hex, hex) != 0) {
+        std::snprintf(s_asked_hex, sizeof(s_asked_hex), "%s", hex);
+        s_asked_times = 0;
+    }
+    ++s_asked_times;
+    s_asked_at = lv_tick_get();
     if (detail::s_handlers.details != nullptr) {
         detail::s_handlers.details(hex, callsign);
     }
@@ -1480,6 +1489,9 @@ void show_magnified(std::int32_t steps)
     frame.ring_opa   = s_ring_opa;
     frame.ring_count = s_ring_count;
     frame.ring_ink   = rgb565(look::secondary());
+    frame.row_from   = s_row_from;
+    frame.row_to     = s_row_to;
+    frame.around     = rgb565(look::background());
     board::zoom_frame(frame);
     ++s_fast_frames;
 }
@@ -1920,14 +1932,14 @@ void build_photo(lv_obj_t *card)
     lv_obj_set_size(s_photo_frame, INNER_W, PHOTO_H);
     look::style_panel(s_photo_frame, look::panel(), look::radius::row);
     lv_obj_set_style_pad_all(s_photo_frame, 0, 0);
-    lv_obj_set_style_clip_corner(s_photo_frame, true, 0);
     lv_obj_set_hidden(s_photo_frame, true);
     quiet(s_photo_frame);
 
-    s_photo = lv_image_create(s_photo_frame);
-    lv_obj_set_pos(s_photo, 0, 0);
-    lv_image_set_inner_align(s_photo, LV_IMAGE_ALIGN_CONTAIN);
-    quiet(s_photo);
+    // A copy of its own, scaled and its corners cut as it comes: radar's
+    // buffer is decoded over before long, and clipped corners cost a layer.
+    s_photo = new kit::Cover(s_photo_frame, INNER_W, PHOTO_H, kit::Shape::Rounded, look::radius::row,
+                             kit::glyph::flight);
+    lv_obj_set_hidden(s_photo->obj(), true);
 
     // Who took it, on a dark patch in its corner, as Planespotters asks.
     s_credit = look::make_label(s_photo_frame, "", look::text(), look::type_label());
@@ -2191,12 +2203,10 @@ void show_waiting(bool waiting)
 void show_picture()
 {
     const bool shown = s_picture == Picture::Shown;
-    if (!shown) {
-        lv_obj_set_size(s_photo_frame, INNER_W, PHOTO_H);
-    }
     lv_obj_set_hidden(s_photo_frame, s_picture == Picture::Idle);
-    lv_obj_set_hidden(s_photo, !shown);
+    lv_obj_set_hidden(s_photo->obj(), !shown);
     if (!shown) {
+        s_photo->clear(false);  // so the next fades in from nothing, not from the last aircraft's
         lv_obj_set_hidden(s_credit, true);  // the last photo's, while the next is fetched
     }
     show_waiting(s_picture == Picture::Looking || s_picture == Picture::Loading);
@@ -2561,8 +2571,8 @@ void show_chips(const radar::Aircraft &aircraft, bool mine)
 
 const char *climb_trend(int vertical_fpm)
 {
-    return vertical_fpm > LEVEL_FLIGHT_FPM    ? LV_SYMBOL_UP
-           : vertical_fpm < -LEVEL_FLIGHT_FPM ? LV_SYMBOL_DOWN
+    return vertical_fpm > LEVEL_FLIGHT_FPM    ? "\u2191"
+           : vertical_fpm < -LEVEL_FLIGHT_FPM ? "\u2193"
                                               : "";
 }
 
@@ -2583,7 +2593,7 @@ void show_selected_readings(const radar::Aircraft &aircraft)
             char          to[16];
             thousands(to, sizeof(to), (aircraft.selected_ft + ROUND_FT / 2) / ROUND_FT * ROUND_FT);
             std::snprintf(unit, sizeof(unit), "%s%s",
-                          aircraft.selected_ft > aircraft.altitude_ft ? LV_SYMBOL_UP : LV_SYMBOL_DOWN, to);
+                          aircraft.selected_ft > aircraft.altitude_ft ? "\u2191" : "\u2193", to);
         } else if (climb_trend(aircraft.vertical_fpm)[0] != '\0') {
             std::snprintf(unit, sizeof(unit), "ft %s", climb_trend(aircraft.vertical_fpm));
         }
@@ -3321,6 +3331,52 @@ void map_clicked(lv_event_t *)
 {
     open_map();
 }
+
+// A photo still awaited is asked for again: once soon, past radar's own
+// few seconds, as two photos handed over at once leave only the later, and
+// then now and then, as the services limit how often they are asked.
+constexpr std::uint32_t ASK_AGAIN_SOON_MS = 6 * units::kMsPerSecond;
+constexpr std::uint32_t ASK_AGAIN_MS      = 30 * units::kMsPerSecond;
+
+void ask_again_while_waiting(const radar::Aircraft &aircraft)
+{
+    if (detail::s_page != detail::RADAR_PAGE || std::strcmp(aircraft.hex, s_chosen) != 0 ||
+        (s_picture != Picture::Looking && s_picture != Picture::Loading)) {
+        return;
+    }
+    const bool          asked = std::strcmp(s_asked_hex, s_chosen) == 0;
+    const std::uint32_t wait  = asked && s_asked_times <= 1 ? ASK_AGAIN_SOON_MS : ASK_AGAIN_MS;
+    if (!asked || lv_tick_elaps(s_asked_at) >= wait) {
+        ask_details(aircraft.hex, aircraft.flight);
+    }
+}
+
+// The smallest range at least as wide as the one on show that has `hex` on
+// the scope, as Home's widget opens the page on it.
+void bring_into_view(const char *hex)
+{
+    const radar::Aircraft *aircraft = nullptr;
+    for (int i = 0; i < s_last->count && aircraft == nullptr; ++i) {
+        aircraft = std::strcmp(s_last->list[i].hex, hex) == 0 ? &s_last->list[i] : nullptr;
+    }
+    if (aircraft == nullptr || s_radius <= 0) {
+        return;
+    }
+    float east_km = 0.0f, north_km = 0.0f;
+    flat_km(aircraft->lat, aircraft->lon, east_km, north_km);
+    for (int step = s_range_step; step < RANGE_COUNT; ++step) {
+        const float scale = static_cast<float>(s_radius) / static_cast<float>(RANGES[step]);
+        const auto  x     = static_cast<std::int32_t>(std::lround(static_cast<float>(s_cx) + east_km * scale));
+        const auto  y     = static_cast<std::int32_t>(std::lround(static_cast<float>(s_cy) - north_km * scale));
+        if (within_scope(x, y)) {
+            if (step != s_range_step) {
+                s_range_step = step;
+                apply_range(0);
+            }
+            return;
+        }
+    }
+}
 }  // namespace
 
 void build_radar_page(lv_obj_t *page, std::int32_t width, std::int32_t height)
@@ -3373,17 +3429,46 @@ void build_radar_page(lv_obj_t *page, std::int32_t width, std::int32_t height)
     });
 }
 
-// Keeps what was on show: asking again only blanked the photograph while it
-// was fetched anew.
-// Laid out as the map once and for good; opening its page only brings it up to date.
+// Laid out as the map once and for good; opening its page only brings it up
+// to date, and asks again for what of the chosen one has not come, as Home
+// may have asked for its own meanwhile.
 void radar_page_opened()
 {
     if (s_chosen[0] == '\0') {
         s_following = true;
     }
-    if (detail::s_page == detail::RADAR_PAGE) {
-        refresh_radar();  // what the feed holds now, whatever came while the page was away
+    if (detail::s_page != detail::RADAR_PAGE) {
+        return;
     }
+    const bool opened_on = s_open_on[0] != '\0';
+    if (opened_on && s_last != nullptr) {
+        radar::snapshot(*s_last);
+        bring_into_view(s_open_on);
+    }
+    s_open_on[0]   = '\0';
+    s_asked_hex[0] = '\0';  // asked again for what is missing, at once
+    refresh_radar();         // what the feed holds now, whatever came while the page was away
+    if (opened_on && s_chosen[0] == '\0') {
+        follow_again();  // gone from the sky meanwhile
+    } else if (const int at = s_chosen[0] != '\0' ? plot_of(s_chosen) : -1;
+               at >= 0 && s_asked_hex[0] == '\0' && std::strcmp(s_details_hex, s_chosen) != 0) {
+        ask_details(s_chosen, s_plots[at].aircraft->flight);
+    }
+}
+
+void radar_open_on(const char *hex)
+{
+    if (hex == nullptr || hex[0] == '\0') {
+        return;
+    }
+    s_following = false;
+    s_held      = false;
+    if (std::strcmp(s_chosen, hex) != 0) {
+        std::snprintf(s_chosen, sizeof(s_chosen), "%s", hex);
+        forget_details();
+        await_picture();
+    }
+    std::snprintf(s_open_on, sizeof(s_open_on), "%s", hex);
 }
 
 void show_radar(const radar::Snapshot &snapshot)
@@ -3421,6 +3506,7 @@ void show_radar(const radar::Snapshot &snapshot)
 
     if (chosen != nullptr) {
         show_selected(*chosen);
+        ask_again_while_waiting(*chosen);
     } else {
         s_chosen[0] = '\0';
         lv_obj_set_hidden(s_marker, true);
@@ -3447,26 +3533,19 @@ void show_radar_photo(const char *hex, const void *pixels, int width, int height
     if (s_photo == nullptr || hex == nullptr || std::strcmp(hex, s_chosen) != 0) {
         return;  // the tap has moved on
     }
+    if (s_picture == Picture::Shown && std::strcmp(s_picture_hex, hex) == 0) {
+        return;  // in hand already, asked for again by Home
+    }
     if (pixels == nullptr || width <= 0 || height <= 0) {
         s_picture = Picture::Missing;
         show_picture();
         return;
     }
-
-    s_photo_dsc.header.magic  = LV_IMAGE_HEADER_MAGIC;
-    s_photo_dsc.header.cf     = LV_COLOR_FORMAT_RGB565;
-    s_photo_dsc.header.w      = static_cast<std::uint32_t>(width);
-    s_photo_dsc.header.h      = static_cast<std::uint32_t>(height);
-    s_photo_dsc.header.stride = static_cast<std::uint32_t>(width) * RGB565_BYTES_PER_PX;
-    s_photo_dsc.data_size     = static_cast<std::uint32_t>(width * height) * RGB565_BYTES_PER_PX;
-    s_photo_dsc.data          = static_cast<const std::uint8_t *>(pixels);
-
-    const std::int32_t fit_h = height * INNER_W / width;
-    lv_obj_set_size(s_photo_frame, INNER_W, std::min(PHOTO_H, fit_h));
-    lv_obj_set_size(s_photo, INNER_W, fit_h);
-    lv_obj_set_y(s_photo, std::min<std::int32_t>(0, (PHOTO_H - fit_h) / 2));
-
-    lv_image_set_src(s_photo, &s_photo_dsc);
+    // Copied now or never: no room leaves it waiting, and asked for again a while on.
+    const kit::Picture picture{pixels, width, height, width * static_cast<std::int32_t>(RGB565_BYTES_PER_PX)};
+    if (!s_photo->show(picture)) {
+        return;
+    }
     // Their name, without the handle many add after a bar.
     char by[radar::kPhotographerLen + 8] = "";
     if (credit != nullptr && credit[0] != '\0') {
@@ -3484,8 +3563,8 @@ void show_radar_photo(const char *hex, const void *pixels, int width, int height
     lv_obj_set_hidden(s_credit, by[0] == '\0');
     lv_obj_move_foreground(s_credit);
     s_picture = Picture::Shown;
+    std::snprintf(s_picture_hex, sizeof(s_picture_hex), "%s", hex);
     show_picture();
-    lv_obj_invalidate(s_photo);
 }
 
 void show_radar_details(const char *hex, const radar::Details &details)
@@ -3500,7 +3579,9 @@ void show_radar_details(const char *hex, const radar::Details &details)
     if (s_picture == Picture::Looking) {
         s_picture = Picture::Loading;
     }
-    show_radar(*s_last);
+    if (detail::s_page == detail::RADAR_PAGE) {  // off it, its reading is old and would let the chosen one go
+        show_radar(*s_last);
+    }
 }
 
 #if REMOTE_ENABLED
