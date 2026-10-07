@@ -255,12 +255,10 @@ void apply()
     lv_style_set_bg_opa(&s_btn_pressed, dark ? 64 : LV_OPA_COVER);
     lv_style_set_transition(&s_btn_pressed, &s_press_tr);
 
+    // solid: over the dark look's faint white fill the accent came out a muddy brown
     lv_style_set_bg_color(&s_btn_accent, hex(s_pal.accent));
+    lv_style_set_bg_opa(&s_btn_accent, LV_OPA_COVER);
     lv_style_set_text_color(&s_btn_accent, hex(s_pal.on_accent));
-    lv_style_set_shadow_color(&s_btn_accent, hex(s_pal.accent));
-    lv_style_set_shadow_opa(&s_btn_accent, 110);
-    lv_style_set_shadow_width(&s_btn_accent, s_shadows ? 22 : 0);
-    lv_style_set_shadow_offset_y(&s_btn_accent, 6);
 
     lv_style_set_bg_color(&s_btn_open, dark ? hex(0xffffff) : hex(s_pal.raised_hi));
     lv_style_set_bg_opa(&s_btn_open, dark ? 56 : LV_OPA_COVER);
@@ -271,6 +269,7 @@ void apply()
     lv_style_set_bg_color(&s_btn_flat_pressed, hex(s_pal.hair));
     lv_style_set_bg_opa(&s_btn_flat_pressed, static_cast<lv_opa_t>(s_pal.hair_opa * 2));
     lv_style_set_bg_color(&s_btn_accent_pressed, hex(mix(s_pal.accent, 0x000000, 16)));
+    lv_style_set_bg_opa(&s_btn_accent_pressed, LV_OPA_COVER);
     lv_style_set_bg_color(&s_btn_checked_pressed, hex(mix(s_pal.accent, 0x000000, 16)));
     lv_style_set_bg_opa(&s_btn_checked_pressed, LV_OPA_COVER);
     lv_style_set_bg_color(&s_lamp_on_pressed, hex(mix(s_pal.lamp, 0x000000, 14)));

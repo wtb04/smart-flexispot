@@ -4,7 +4,6 @@
 
 #include "kit_front_views.h"
 
-#include "focus_model.h"
 #include "kit_fonts.h"
 #include "media.h"
 #include "media_model.h"
@@ -24,7 +23,7 @@ namespace {
 namespace ic = kit::glyph;
 using namespace kit;
 
-constexpr std::int32_t EDGE = 32, TOP = 24, ROW_H = size::button;
+constexpr std::int32_t EDGE = 32, TOP = 28, CHIP = 64;
 
 std::intptr_t id_of(lv_event_t *e) { return reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e)); }
 void         *as_data(std::intptr_t v) { return reinterpret_cast<void *>(v); }
@@ -37,9 +36,31 @@ int shortcut_target()
 
 struct Over : InPsram {
     lv_obj_t *shortcut = nullptr, *arrow = nullptr;
-    lv_obj_t *right = nullptr, *power = nullptr, *cell = nullptr, *percent = nullptr, *clock = nullptr;
-    lv_obj_t *badge = nullptr;
+    lv_obj_t *power = nullptr, *cell = nullptr, *percent = nullptr, *clock = nullptr;
+    bool      black = false;
 };
+
+lv_style_t s_lit;
+bool       s_lit_made = false;
+
+void paint_lit(void *)
+{
+    lv_style_set_bg_color(&s_lit, lv_color_hex(colours().ink));
+    lv_style_set_bg_opa(&s_lit, 240);
+    lv_style_set_text_color(&s_lit, lv_color_hex(colours().ground));
+    lv_obj_report_style_change(&s_lit);
+}
+
+lv_style_t *lit_style()
+{
+    if (!s_lit_made) {
+        s_lit_made = true;
+        lv_style_init(&s_lit);
+        paint_lit(nullptr);
+        on_restyle(layer(Layer::Chrome), paint_lit, nullptr);
+    }
+    return &s_lit;
+}
 
 void paint_desk(const Over &o)
 {
@@ -62,35 +83,19 @@ void paint_status(const Over &o)
         const int pct = std::clamp(st.battery_percent, 0, 100);
         set_icon(o.cell, pct > 80 ? ic::battery_full : pct > 20 ? ic::battery_5_bar : ic::battery_2_bar, false);
         set_ink(o.cell, pct <= 20 ? Ink::Amber : Ink::Primary);
+        if (o.black) {
+            lv_obj_set_style_text_color(o.cell, pct <= 20 ? colour(Ink::Amber) : lv_color_hex(ON_BLACK), 0);
+        }
         char buf[8];
         std::snprintf(buf, sizeof buf, "%d%%", pct);
         set_text_if(o.percent, buf);
     }
-    if (o.badge != nullptr) {
-        // left of what stays put while the rest fades, so it never moves as they do
-        lv_obj_update_layout(o.right);
-        lv_obj_align_to(o.badge, o.right, LV_ALIGN_OUT_LEFT_MID, -space::m, 0);
-    }
-}
-
-void paint_focus(const Over &o)
-{
-    const Focus &focus = detail::focus_state();
-    const bool   idle  = detail::focus_idle(focus);
-    lv_obj_set_hidden(o.badge, idle);
-    if (idle) {
-        return;
-    }
-    char buf[16];
-    detail::focus_clock_text(focus, buf, sizeof buf);
-    set_badge(o.badge, buf,
-              detail::focus_paused(focus) ? Ink::Secondary : detail::focus_resting(focus) ? Ink::Green : Ink::Accent);
 }
 
 lv_obj_t *row_of(lv_obj_t *parent)
 {
     lv_obj_t *row = flow(parent, LV_FLEX_FLOW_ROW, space::s);
-    lv_obj_set_height(row, ROW_H);
+    lv_obj_set_height(row, CHIP);
     lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     return row;
 }
@@ -119,7 +124,25 @@ lv_obj_t *figures(lv_obj_t *parent, const char *widest_text, lv_text_align_t ali
     return label;
 }
 
-lv_obj_t *fullscreen_root()
+void ink_on_black(lv_obj_t *label, Ink ink)
+{
+    lv_obj_set_style_text_color(label, lv_color_hex(ON_BLACK), 0);
+    lv_obj_set_style_text_opa(label, ink == Ink::Secondary ? 158 : ink == Ink::Tertiary ? 92 : LV_OPA_COVER, 0);
+}
+
+void on_black(lv_obj_t *b)
+{
+    lv_obj_set_style_bg_color(b, lv_color_hex(0xffffff), 0);
+    lv_obj_set_style_bg_opa(b, 36, 0);
+    lv_obj_set_style_shadow_opa(b, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_text_color(b, lv_color_hex(ON_BLACK), 0);
+    lv_obj_set_style_bg_opa(b, 64, LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(b, lv_color_hex(ON_BLACK), LV_STATE_CHECKED);
+    lv_obj_set_style_bg_opa(b, 240, LV_STATE_CHECKED);
+    lv_obj_set_style_text_color(b, lv_color_hex(0x100c08), LV_STATE_CHECKED);
+}
+
+lv_obj_t *fullscreen_root(bool black)
 {
     lv_obj_t *root = lv_obj_create(layer(Layer::Chrome));
     lv_obj_remove_style_all(root);
@@ -127,52 +150,87 @@ lv_obj_t *fullscreen_root()
     lv_obj_remove_flag(root, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(root, LV_OBJ_FLAG_CLICKABLE);  // what is under it takes no taps
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
+    if (black) {
+        lv_obj_set_style_bg_color(root, lv_color_hex(0x000000), 0);
+        return root;
+    }
     const auto paint = [](void *obj) { lv_obj_set_style_bg_color(static_cast<lv_obj_t *>(obj), lv_color_hex(colours().ground), 0); };
     paint(root);
     on_restyle(root, paint, root);
     return root;
 }
 
-Chrome chrome(detail::ViewId view, lv_obj_t *root, bool focus_badge)
+lv_obj_t *fill_button(lv_obj_t *parent, const char *glyph, std::int32_t side, std::int32_t px)
 {
-    auto *o = new Over;
+    lv_obj_t *b = button(parent, Button::Raised, glyph, nullptr, true);
+    lv_obj_set_size(b, side, side);
+    lv_obj_t *g = lv_obj_get_child(b, 0);
+    lv_obj_set_user_data(g, reinterpret_cast<void *>(static_cast<std::intptr_t>(px)));  // the size set_icon keeps
+    set_icon(g, glyph, true);
+    return b;
+}
+
+lv_obj_t *primary(lv_obj_t *parent, const char *glyph, std::int32_t w, std::int32_t h)
+{
+    lv_obj_t *b = button(parent, Button::Accent, glyph, nullptr);
+    lv_obj_set_size(b, w, h);
+    lv_obj_t *g = lv_obj_get_child(b, 0);
+    lv_obj_set_user_data(g, reinterpret_cast<void *>(static_cast<std::intptr_t>(40)));
+    set_icon(g, glyph, true);
+    return b;
+}
+
+lv_obj_t *desk_chip(lv_obj_t *parent, const char *top, const char *bottom)
+{
+    lv_obj_t *b = fill_button(parent, top, CHIP, 20);
+    lv_obj_set_flex_flow(b, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(b, -2, 0);
+    // the button's own ink, as the glyph button() makes has, so lit and black recolour it too
+    lv_obj_t *g = lv_label_create(b);
+    lv_obj_set_style_text_font(g, fonts::icon(28), 0);
+    lv_obj_set_user_data(g, reinterpret_cast<void *>(static_cast<std::intptr_t>(28)));
+    lv_label_set_text(g, bottom);
+    lv_obj_set_event_bubble(g, true);
+    return b;
+}
+
+Chrome chrome(detail::ViewId view, lv_obj_t *root, bool black)
+{
+    auto *o  = new Over;
+    o->black = black;
 
     lv_obj_t *left = row_of(root);
+    lv_obj_set_style_pad_column(left, space::m, 0);
     lv_obj_set_pos(left, EDGE, TOP);
-    o->shortcut = button(left, Button::Flat, nullptr, nullptr);
-    o->arrow    = icon(o->shortcut, ic::arrow_upward, 24);
-    icon(o->shortcut, ic::desk, 28);
+    o->shortcut = desk_chip(left, ic::arrow_upward, ic::desk);
+    o->arrow    = lv_obj_get_child(o->shortcut, 0);
     lv_obj_add_event_cb(o->shortcut, [](lv_event_t *) { detail::desk_go_to(shortcut_target()); }, LV_EVENT_CLICKED,
                         nullptr);
 
-    o->right = row_of(root);
-    lv_obj_set_style_pad_column(o->right, space::m, 0);
-    lv_obj_align(o->right, LV_ALIGN_TOP_RIGHT, -EDGE, TOP);
-    o->power = flow(o->right, LV_FLEX_FLOW_ROW, space::xs);
+    lv_obj_t *right = row_of(root);
+    lv_obj_set_style_pad_column(right, space::m, 0);
+    lv_obj_align(right, LV_ALIGN_TOP_RIGHT, -EDGE, TOP);
+    o->power = flow(right, LV_FLEX_FLOW_ROW, space::xs);
     lv_obj_set_flex_align(o->power, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     o->cell    = icon(o->power, ic::battery_full, 24);
     o->percent = figures(o->power, "100%", LV_TEXT_ALIGN_LEFT);
     lv_obj_set_hidden(o->power, true);
-    o->clock = text(o->right, Role::H3, "");
+    o->clock = text(right, Role::H3, "");
     lv_obj_set_width(o->clock, widest(Role::H3, {"00:00"}));
     lv_obj_set_style_text_align(o->clock, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_obj_t *close = button(o->right, Button::Flat, ic::keyboard_arrow_down, nullptr, true);
-    lv_obj_set_size(close, size::button, size::button);
+    lv_obj_t *close = fill_button(right, ic::close_fullscreen, CHIP, 30);
     lv_obj_add_event_cb(close, [](lv_event_t *e) { detail::close_view(static_cast<detail::ViewId>(id_of(e))); },
                         LV_EVENT_CLICKED, as_data(view));
 
-    if (focus_badge) {
-        const bool digits_wider = widest(Role::Small, {"00:00"}) >= widest(Role::Small, {"Ready"});
-        o->badge = badge(root, digits_wider ? "00:00" : "Ready", Ink::Accent, ic::timer);
-        lv_obj_add_flag(o->badge, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_set_ext_click_area(o->badge, space::m);
-        lv_obj_add_event_cb(o->badge, [](lv_event_t *) { open_focus_view(); }, LV_EVENT_CLICKED, nullptr);
-        lv_obj_set_hidden(o->badge, true);
-        detail::subscribe(Topic::Focus, view, [o] { paint_focus(*o); });
-        detail::subscribe(Topic::Second, view, [o] { paint_focus(*o); });
+    if (black) {
+        on_black(o->shortcut);
+        on_black(close);
+        ink_on_black(o->clock, Ink::Primary);
+        ink_on_black(o->percent, Ink::Secondary);
+        lv_obj_set_style_text_color(o->cell, lv_color_hex(ON_BLACK), 0);
     }
     detail::fade_when_idle(view, left);
-    detail::fade_when_idle(view, o->right);
+    detail::fade_when_idle(view, right);
     detail::subscribe(Topic::Desk, view, [o] { paint_desk(*o); });
     detail::subscribe(Topic::Status, view, [o] { paint_status(*o); });
     detail::subscribe(Topic::Second, view, [o] {
@@ -183,20 +241,19 @@ Chrome chrome(detail::ViewId view, lv_obj_t *root, bool focus_badge)
     return {left};
 }
 
-lv_obj_t *quick_action(const Chrome &chrome, const char *glyph, const char *label)
+lv_obj_t *quick_action(const Chrome &chrome, const char *glyph)
 {
-    return button(chrome.left, Button::Flat, glyph, label);
+    return fill_button(chrome.left, glyph, CHIP, 30);
 }
 
-// Lit quietly, its glyph filled in the accent, as what it does reports back
-// rather than as it is tapped: a filled button would shout over the picture.
 void light(lv_obj_t *b, bool on)
 {
-    lv_obj_t *glyph = lv_obj_get_child(b, 0);
-    set_icon(glyph, lv_label_get_text(glyph), on);
+    if (lv_obj_get_user_data(b) == nullptr) {
+        lv_obj_set_user_data(b, b);  // marked as one that lights
+        lv_obj_add_style(b, lit_style(), LV_STATE_CHECKED);
+    }
     if (lv_obj_has_state(b, LV_STATE_CHECKED) != on) {
         lv_obj_set_state(b, LV_STATE_CHECKED, on);
-        set_ink(glyph, on ? Ink::Accent : Ink::Primary);
     }
 }
 }  // namespace ui::kitfront::views
