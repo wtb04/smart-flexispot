@@ -118,8 +118,8 @@ void set_look(Look look);
 /** 0 is the clearest glass, 100 nearly solid. */
 void set_glass(int percent);
 void set_accent(std::uint32_t colour);
-/** For measuring what the panel can afford: blur and shadows can each be left out. */
-void set_effects(bool blur, bool shadows);
+/** For measuring what the panel can afford: shadows can be left out. */
+void set_effects(bool shadows);
 Look look();
 int  glass();
 const Palette &colours();
@@ -147,7 +147,7 @@ lv_obj_t *well(lv_obj_t *parent);
 
 // Dock is large glass beside the content: its shadow ends in the gap, as one
 // across a tile's edge comes out a hard step in the panel's 16-bit colour.
-enum class Glass : std::uint8_t { Small, Large, Clear, Dock, Notice };
+enum class Glass : std::uint8_t { Small, Large, Dock, Notice };
 lv_obj_t *glass(lv_obj_t *parent, Glass kind = Glass::Small);
 
 lv_obj_t *text(lv_obj_t *parent, Role role, const char *value, Ink ink = Ink::Primary);
@@ -515,7 +515,6 @@ lv_obj_t *dock_item(lv_obj_t *dock, const char *glyph);
 int       add_page(lv_obj_t *item, void (*build)(lv_obj_t *page));
 void      show_page(int index, bool animate = true);
 int       shown_page();
-lv_obj_t *page_at(int index);
 /** No page shows, for a screen with other content of its own; showing one brings them back. */
 void      hide_pages();
 /** Told of each page as it comes to show, before anything of it is drawn. */
@@ -560,7 +559,6 @@ enum class Trail : std::uint8_t { None, Value, Chevron, Toggle, Badge };
 struct RowSpec {
     const char   *glyph  = nullptr;
     Ink           tint   = Ink::Accent;  // the glyph and the square it sits in
-    bool          bare   = false;        // the glyph without its square
     const char   *lead   = nullptr;      // a time or a figure before the rest, `lead_w` wide (0: as it is)
     std::int32_t  lead_w = 0;
     std::uint32_t mark   = 0;            // a bar this colour before the title, as a calendar's; 0 for none
@@ -585,8 +583,6 @@ struct RowSpec {
  */
 lv_obj_t *row(lv_obj_t *parent, const RowSpec &spec);
 void      set_row_value(lv_obj_t *row, const char *value);
-/** The value and its dot's ink, or the badge's text and ink. */
-void      set_row_state(lv_obj_t *row, const char *value, Ink ink);
 void      set_row_detail(lv_obj_t *row, const char *detail);
 /** Its value, toggle or badge. */
 lv_obj_t *row_trail(lv_obj_t *row);
@@ -623,9 +619,6 @@ class Readout : public InPsram {
     lv_obj_t *obj() const { return m_root; }
     /** Counts there on the spring when `animate`. */
     void set_value(std::int32_t value, bool animate = false);
-    /** No reading: a dash, never a made-up figure. */
-    void clear();
-    std::int32_t value() const { return m_value; }
 
   private:
     static void on_count(void *var, int32_t v);
@@ -633,7 +626,7 @@ class Readout : public InPsram {
 
     ReadoutSpec  m_spec{};
     lv_obj_t    *m_root = nullptr, *m_read = nullptr;
-    std::int32_t m_value = 0, m_shown = INT32_MIN;
+    std::int32_t m_shown = INT32_MIN;
 };
 
 struct StepperSpec {
@@ -722,14 +715,12 @@ class Reading : public InPsram {
     /** Fills `parent`, a tile, from top to bottom. */
     Reading(lv_obj_t *parent, const ReadingSpec &spec);
     void set_value(std::int32_t value, bool animate = true);
-    /** No reading: a dash, no word, no dot. */
-    void clear();
 
   private:
     void        show(std::int32_t value);
 
     ReadingSpec m_spec{};
-    lv_obj_t   *m_figure = nullptr, *m_unit = nullptr, *m_word = nullptr;
+    lv_obj_t   *m_figure = nullptr, *m_word = nullptr;
     std::int32_t m_shown = INT32_MIN;
     Scale      *m_scale = nullptr;
     int         m_zone = -2;

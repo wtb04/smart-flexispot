@@ -68,13 +68,13 @@ constexpr Glow LIGHT_GLOWS[] = {
 };
 
 Look          s_look   = Look::Dark;
-bool          s_blur = true, s_shadows = true;
+bool          s_shadows = true;
 int           s_glass  = 50;
 std::uint32_t s_accent = 0;  // 0: the look's own
 Palette       s_pal    = DARK;
 
 lv_style_t s_ground, s_tile, s_tile_hi, s_well;
-lv_style_t s_glass_sm, s_glass_lg, s_glass_clear, s_glass_dock, s_glass_note;
+lv_style_t s_glass_sm, s_glass_lg, s_glass_dock, s_glass_note;
 lv_style_t s_role[11];
 lv_style_t s_ink[8], s_dot[8], s_mark;
 lv_style_t s_btn_open;
@@ -140,8 +140,7 @@ void set_shadow(lv_style_t *st, std::int32_t width, std::int32_t y, std::int32_t
     lv_style_set_shadow_opa(st, opa);
 }
 
-void style_glass(lv_style_t *st, std::int32_t blur, std::int32_t shadow_w, std::int32_t shadow_y,
-                 lv_opa_t opa)
+void style_glass(lv_style_t *st, std::int32_t shadow_w, std::int32_t shadow_y, lv_opa_t opa)
 {
     // a flat tint: a sheen this soft and this tall bands on the panel, which LVGL does not dither
     lv_style_set_bg_color(st, hex(s_pal.glass));
@@ -150,7 +149,6 @@ void style_glass(lv_style_t *st, std::int32_t blur, std::int32_t shadow_w, std::
     // no live blur in the shared glass: the chrome sits over the ground, which is
     // soft already, and LVGL re-blurs a whole widget whenever anything near it
     // redraws, which the panel cannot afford; popovers bring their own
-    (void)blur;
     lv_style_set_blur_backdrop(st, false);
     lv_style_set_blur_radius(st, 0);
     lv_style_set_border_width(st, 1);
@@ -205,16 +203,12 @@ void apply()
     lv_style_set_pad_all(&s_well, space::m);
 
     const lv_opa_t g = glass_opa();
-    style_glass(&s_glass_sm, 20, 28, 6, g);  // the bar's: its shadow ends in the gap above the pages
+    style_glass(&s_glass_sm, 28, 6, g);  // the bar's: its shadow ends in the gap above the pages
     // big glass reads more opaque, so what is on it stays legible over anything
-    style_glass(&s_glass_lg, 40, 80, 28, static_cast<lv_opa_t>(g + (s_pal.glass_solid_opa - g) * 45 / 100));
-    style_glass(&s_glass_dock, 40, 28, 10, static_cast<lv_opa_t>(g + (s_pal.glass_solid_opa - g) * 45 / 100));
+    style_glass(&s_glass_lg, 80, 28, static_cast<lv_opa_t>(g + (s_pal.glass_solid_opa - g) * 45 / 100));
+    style_glass(&s_glass_dock, 28, 10, static_cast<lv_opa_t>(g + (s_pal.glass_solid_opa - g) * 45 / 100));
     // a notice lands over a busy page with nothing frozen behind it to blur
-    style_glass(&s_glass_note, 40, 36, 12, LV_OPA_COVER);
-    style_glass(&s_glass_clear, 10, 24, 8, static_cast<lv_opa_t>(g * 2 / 3));
-    lv_style_set_bg_color(&s_glass_clear, hex(0x14100d));
-    lv_style_set_bg_grad_color(&s_glass_clear, hex(0x14100d));
-    lv_style_set_text_color(&s_glass_clear, hex(0xffffff));
+    style_glass(&s_glass_note, 36, 12, LV_OPA_COVER);
 
     for (int i = 0; i < 11; ++i) {
         lv_style_set_text_font(&s_role[i], font_of(static_cast<Role>(i)));
@@ -339,7 +333,7 @@ void apply()
 
 void init_styles()
 {
-    for (lv_style_t *st : {&s_ground, &s_tile, &s_tile_hi, &s_well, &s_glass_sm, &s_glass_lg, &s_glass_clear, &s_glass_dock,
+    for (lv_style_t *st : {&s_ground, &s_tile, &s_tile_hi, &s_well, &s_glass_sm, &s_glass_lg, &s_glass_dock,
                            &s_glass_note, &s_btn, &s_btn_open, &s_btn_pressed, &s_btn_accent, &s_btn_flat, &s_btn_soft, &s_btn_round,
                            &s_btn_flat_pressed, &s_btn_accent_pressed, &s_btn_checked_pressed, &s_lamp_on_pressed,
                            &s_btn_checked, &s_lamp, &s_lamp_on, &s_lamp_on_ink, &s_hair, &s_switch,
@@ -546,12 +540,11 @@ void set_glass(int percent)
     apply();
 }
 
-void set_effects(bool blur, bool shadows)
+void set_effects(bool shadows)
 {
-    if (blur == s_blur && shadows == s_shadows) {
+    if (shadows == s_shadows) {
         return;
     }
-    s_blur    = blur;
     s_shadows = shadows;
     apply();
 }
@@ -719,8 +712,7 @@ lv_obj_t *glass(lv_obj_t *parent, Glass kind)
     const lv_style_t *st = kind == Glass::Small   ? &s_glass_sm
                            : kind == Glass::Large ? &s_glass_lg
                            : kind == Glass::Dock  ? &s_glass_dock
-                           : kind == Glass::Notice ? &s_glass_note
-                                                  : &s_glass_clear;
+                                                  : &s_glass_note;
     lv_obj_add_style(obj, st, 0);
     lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
     bake::glass(obj, st);
