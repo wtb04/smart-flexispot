@@ -1,4 +1,7 @@
 #include "ui_internal.h"
+#if defined(ESP_PLATFORM)
+#include "watchdog.h"
+#endif
 #include "focus_model.h"
 #include "focus_view.h"
 #include "diagnostics_model.h"
@@ -1092,6 +1095,7 @@ esp_err_t init(const Handlers &handlers, int initial_brightness, std::uint32_t a
 esp_err_t build()
 {
     constexpr TickType_t BETWEEN_PARTS = pdMS_TO_TICKS(20);
+    constexpr int        SCREEN_STUCK_MS = 20 * 1000;
     const std::uint32_t  from          = lv_tick_get();
     // The screen's first frames are drawn between the parts, and on the panel
     // one can hold the lock for longer than any later frame does.
@@ -1106,6 +1110,17 @@ esp_err_t build()
         lv_obj_update_layout(lv_screen_active());
         if (!more) {
             lv_timer_create(apply_pending, APPLY_PERIOD_MS, nullptr);
+#if defined(ESP_PLATFORM)
+            // The screen's own beat, renewed each second from its task: stuck,
+            // with LVGL's lock held, it froze the screen and left no trace;
+            // now the watchdog names it and crashes, keeping where it was.
+            static const watchdog::Beat beat = watchdog::add("screen", SCREEN_STUCK_MS);
+            watchdog::busy(beat, "drawing");
+            lv_timer_create([](lv_timer_t *) {
+                watchdog::idle(beat);
+                watchdog::busy(beat, "drawing");
+            }, 1000, nullptr);
+#endif
         }
         lvgl_port_unlock();
         vTaskDelay(BETWEEN_PARTS);
