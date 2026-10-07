@@ -208,10 +208,12 @@ void apply()
     lv_style_set_pad_all(&s_well, space::m);
 
     const lv_opa_t g = glass_opa();
-    style_glass(&s_glass_sm, 20, 28, 6, g);  // the bar's: its shadow ends in the gap above the pages
-    // big glass reads more opaque, so what is on it stays legible over anything
-    style_glass(&s_glass_lg, 40, 80, 28, static_cast<lv_opa_t>(g + (s_pal.glass_solid_opa - g) * 45 / 100));
-    style_glass(&s_glass_dock, 40, 28, 10, static_cast<lv_opa_t>(g + (s_pal.glass_solid_opa - g) * 45 / 100));
+    // big glass reads more opaque, so what is on it stays legible over anything;
+    // the bar's is the dock's, the two being the one frame round the pages
+    const lv_opa_t firm = static_cast<lv_opa_t>(g + (s_pal.glass_solid_opa - g) * 45 / 100);
+    style_glass(&s_glass_sm, 20, 28, 6, firm);  // the bar's: its shadow ends in the gap above the pages
+    style_glass(&s_glass_lg, 40, 80, 28, firm);
+    style_glass(&s_glass_dock, 40, 28, 10, firm);
     // a notice lands over a busy page with nothing frozen behind it to blur
     style_glass(&s_glass_note, 40, 36, 12, LV_OPA_COVER);
     style_glass(&s_glass_clear, 10, 24, 8, static_cast<lv_opa_t>(g * 2 / 3));
@@ -1167,7 +1169,7 @@ void segmented_choose(lv_obj_t *seg, int index, bool animate)
 lv_obj_t *capsule(lv_obj_t *parent)
 {
     lv_obj_t *cap = glass(parent, Glass::Small);
-    lv_obj_set_style_radius(cap, radius::round, 0);
+    lv_obj_set_style_radius(cap, radius::dock, 0);
     lv_obj_set_size(cap, LV_SIZE_CONTENT, size::bar);
     lv_obj_set_style_pad_hor(cap, space::s, 0);
     lv_obj_set_flex_flow(cap, LV_FLEX_FLOW_ROW);

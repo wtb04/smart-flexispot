@@ -129,7 +129,9 @@ void show_volume(Volume &v)
 std::int32_t progress_steps()
 {
     const std::int64_t whole = static_cast<std::int64_t>(media_state().duration_s) * 1000;
-    return whole > 0 ? static_cast<std::int32_t>(detail::media_position_ms_now() * RAIL_SPAN / whole) : 0;
+    // in 64 bits: past three and a half minutes the milliseconds times the steps outgrow 32
+    return whole > 0 ? static_cast<std::int32_t>(static_cast<std::int64_t>(detail::media_position_ms_now()) * RAIL_SPAN / whole)
+                     : 0;
 }
 
 // Its line from x to x + w, level with the words over it: a rail's track stops
@@ -290,7 +292,7 @@ void build(lv_obj_t *)
                                            s_cover->release();
                                        }});
 
-    s_cover = new Cover(root, COVER, COVER, Shape::Rounded, radius::tile);
+    s_cover = new Cover(root, COVER, COVER, Shape::Rounded, 0);
     lv_obj_set_pos(s_cover->obj(), X0, Y0);
     lv_obj_add_flag(s_cover->obj(), LV_OBJ_FLAG_CLICKABLE);  // a tap on the record plays or pauses it
     lv_obj_add_event_cb(s_cover->obj(), [](lv_event_t *) { detail::media_toggle_play(); }, LV_EVENT_CLICKED, nullptr);
@@ -307,9 +309,9 @@ void build(lv_obj_t *)
     lv_obj_set_style_pad_bottom(s_source, space::xs, 0);
 
     s_rail = progress(root, X, RAIL_Y, W);
-    s_elapsed = figures(root, "000:00", LV_TEXT_ALIGN_LEFT);
+    s_elapsed = figures(root, "0:00:00", LV_TEXT_ALIGN_LEFT);
     lv_obj_set_pos(s_elapsed, X, TIMES_Y);
-    s_total = figures(root, "000:00", LV_TEXT_ALIGN_RIGHT);
+    s_total = figures(root, "0:00:00", LV_TEXT_ALIGN_RIGHT);
     lv_obj_set_pos(s_total, X + W - lv_obj_get_style_width(s_total, LV_PART_MAIN), TIMES_Y);
 
     // round fills either side of the one accent capsule, as on the media card
@@ -351,6 +353,7 @@ void build(lv_obj_t *)
 
 namespace cinema {
 constexpr std::int32_t STILL_W = 576, STILL_H = STILL_W * media::kStillH / media::kStillW;
+constexpr std::int32_t CHANNEL = 44;
 constexpr std::int32_t ROW_GAP = 32, ROW_H = 88, SIDE = 80;
 constexpr std::int32_t X0 = 96, Y0 = (size::screen_h - STILL_H - ROW_GAP - ROW_H) / 2;
 constexpr std::int32_t X = X0 + STILL_W + 56, W = size::screen_w - X - X0;
@@ -364,6 +367,9 @@ std::uint32_t  s_stills = UINT32_MAX;
 lv_timer_t    *s_still_retry = nullptr;
 lv_obj_t      *s_skip = nullptr;
 lv_obj_t      *s_series = nullptr, *s_title = nullptr, *s_episode = nullptr;
+Cover         *s_channel = nullptr;  // the channel's or the series' picture, beside its name
+std::uint32_t  s_channels = UINT32_MAX;
+lv_timer_t    *s_channel_retry = nullptr;
 Rail          *s_rail = nullptr;
 lv_obj_t      *s_elapsed = nullptr, *s_total = nullptr, *s_ends = nullptr;
 lv_obj_t      *s_back = nullptr, *s_play = nullptr, *s_on = nullptr, *s_subtitles = nullptr;
@@ -422,6 +428,18 @@ void show_words()
                   static_cast<int>(split != nullptr ? split - media.artist : std::strlen(media.artist)), media.artist);
     set_text_if(s_series, series);
     set_text_if(s_episode, split != nullptr ? split + 1 : "");
+    if (media.covers != s_channels) {
+        const bool none = media.art == nullptr || media.placeholder;
+        if (none) {
+            s_channel->clear(false);
+            s_channels = media.covers;
+        } else if (s_channel->show(Picture{media.art, media.art_width, media::kArtSize, 0}, false)) {
+            s_channels = media.covers;
+        } else {
+            again_soon(s_channel_retry, show_words);
+        }
+        lv_obj_set_hidden(s_channel->obj(), none);
+    }
 }
 
 void show()
@@ -526,17 +544,21 @@ void build(lv_obj_t *)
     lv_obj_set_pos(words, X, Y0);
     lv_obj_set_flex_flow(words, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(words, space::xs, 0);
-    s_series  = line(words, Role::Small, Ink::Secondary, W);
+    lv_obj_t *channel = flow(words, LV_FLEX_FLOW_ROW, space::m);
+    lv_obj_set_flex_align(channel, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_bottom(channel, space::s, 0);
+    s_channel = new Cover(channel, CHANNEL, CHANNEL, Shape::Round);
+    lv_obj_set_hidden(s_channel->obj(), true);
+    s_series  = line(channel, Role::H3, Ink::Secondary, W - CHANNEL - space::m);
     s_title   = line(words, Role::H1, Ink::Primary, W);
     s_episode = line(words, Role::Body, Ink::Secondary, W);
-    lv_obj_set_style_pad_bottom(s_series, space::xs, 0);
 
     s_rail = progress(root, X, RAIL_Y, W);
-    s_elapsed = figures(root, "000:00", LV_TEXT_ALIGN_LEFT);
+    s_elapsed = figures(root, "0:00:00", LV_TEXT_ALIGN_LEFT);
     lv_obj_set_pos(s_elapsed, X, TIMES_Y);
     s_ends = figures(root, "Ends at 00:00", LV_TEXT_ALIGN_CENTER);
     lv_obj_set_pos(s_ends, X + (W - lv_obj_get_style_width(s_ends, LV_PART_MAIN)) / 2, TIMES_Y);
-    s_total = figures(root, "000:00", LV_TEXT_ALIGN_RIGHT);
+    s_total = figures(root, "0:00:00", LV_TEXT_ALIGN_RIGHT);
     lv_obj_set_pos(s_total, X + W - lv_obj_get_style_width(s_total, LV_PART_MAIN), TIMES_Y);
 
     // under the picture, the sound; under the words, the controls
@@ -601,7 +623,7 @@ void build(lv_obj_t *)
     }
     lv_obj_t *track = lv_obj_get_child(s_rail->obj(), 0);
     lv_obj_set_style_bg_color(track, lv_color_hex(0xffffff), 0);
-    lv_obj_set_style_bg_opa(track, 20, 0);
+    lv_obj_set_style_bg_opa(track, 56, 0);  // a track to see on the black, not a hairline lost in it
     paint_black(nullptr);
     on_restyle(root, paint_black, nullptr);  // after the rail's and the slider's own
 }

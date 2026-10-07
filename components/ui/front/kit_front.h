@@ -100,4 +100,8 @@ struct AlbumColours {
 /** From an RGB565 cover; `dark` for the dark look's shades, the light look's paler ones otherwise. */
 AlbumColours album_colours(const std::uint16_t *pixels, int count, bool dark);
 
+/** The speaker the music plays on, as a mask `side` square, for a cover's well
+ *  while nothing plays; nullptr without the memory for it. kit_front_speaker.cpp */
+const lv_image_dsc_t *speaker_mark(std::int32_t side);
+
 }  // namespace ui::kitfront

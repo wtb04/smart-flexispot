@@ -211,6 +211,7 @@ void paint_media_card()
         }
         tint_media_card(m);
     }
+    c->cover->set_mark(m.has_track ? nullptr : speaker_mark(COVER));  // nothing on: the speaker it would play on
 
     const bool timed = m.has_track && m.duration_s > 0;
     const lv_opa_t opa = timed ? LV_OPA_COVER : LV_OPA_TRANSP;  // its room kept, so the card holds still as it comes
@@ -313,7 +314,7 @@ void build_media_card(lv_obj_t *body)
 
     lv_obj_t *head = flow(body, LV_FLEX_FLOW_ROW, space::l);
     lv_obj_set_width(head, LV_PCT(100));
-    c->cover = new Cover(head, COVER, COVER, Shape::Rounded, -1, ic::music_note);
+    c->cover = new Cover(head, COVER, COVER, Shape::Rounded, 0, ic::music_note);
     own(c->cover);
     lv_obj_set_clickable(c->cover->obj(), true);
     on_click(c->cover->obj(), [](lv_event_t *) { full_view(); });
