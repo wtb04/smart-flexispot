@@ -723,8 +723,6 @@ int add_page(lv_obj_t *item, void (*build)(lv_obj_t *page))
 
 int shown_page() { return s_shown; }
 
-lv_obj_t *page_at(int index) { return index >= 0 && index < s_page_count ? s_pages[index].obj : nullptr; }
-
 void on_page_shown(void (*cb)(int index)) { s_told = cb; }
 
 const char *change_report()

@@ -227,7 +227,7 @@ void open_desk(lv_event_t *e)
     static const std::int32_t presets[] = {660, 700, 740, 1120};
     RailSpec rs;
     rs.length = 420, rs.vertical = true, rs.min = 660, rs.max = 1310, rs.ticks = 14, rs.major = 2;
-    rs.notches = presets, rs.notch_count = 4, rs.fill = true;
+    rs.notches = presets, rs.notch_count = 4;
     auto *rail = new Rail(row, rs);
     own(rail->obj(), rail);
     rail->set_value(740, false);
@@ -1018,9 +1018,9 @@ KIT_IN_PSRAM board::FlushTimes s_flush[2][PHASE_COUNT];
 
 struct Config {
     const char *name;
-    bool        blur, shadows;
+    bool        shadows;
 };
-constexpr Config CONFIGS[] = {{"with shadows", true, true}, {"no shadows", true, false}};
+constexpr Config CONFIGS[] = {{"with shadows", true}, {"no shadows", false}};
 
 struct Bench {
     int           config = 0;
@@ -1109,7 +1109,7 @@ void bench_step(lv_timer_t *timer)
             std::printf("%s", kit::pictures_report());
         }
         if (++s_bench.config < static_cast<int>(std::size(CONFIGS))) {
-            set_effects(CONFIGS[s_bench.config].blur, CONFIGS[s_bench.config].shadows);
+            set_effects(CONFIGS[s_bench.config].shadows);
             s_bench.phase = 0;
             PHASES[0].setup();
             s_bench.settling = true;
@@ -1117,7 +1117,7 @@ void bench_step(lv_timer_t *timer)
             return;
         }
         lv_timer_delete(timer);
-        set_effects(true, true);
+        set_effects(true);
         set_pop_glass(s_bench.was);
         pictures_bench_done();
         set_change(s_bench.change);
@@ -1141,7 +1141,7 @@ void run_bench()
     s_bench.change = change();
     s_bench.phase  = 0;
     s_bench.config = 0;
-    set_effects(true, true);
+    set_effects(true);
     std::snprintf(s_report, sizeof s_report, "kit bench, %s, glass %d%%\n", look() == Look::Dark ? "dark" : "light", glass());
     s_frame_lines = 0;
     static bool watching = false;

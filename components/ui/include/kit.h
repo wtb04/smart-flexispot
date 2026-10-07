@@ -41,13 +41,13 @@ struct InPsram {
 enum class Look : std::uint8_t { Dark, Light };
 
 struct Palette {
-    std::uint32_t ground, surface, surface_hi, raised, raised_hi;
+    std::uint32_t ground, surface, surface_hi, raised_hi;
     lv_opa_t      fill_opa;  // a flat area, a track or a dial's arc: the ink, faintly, on whatever is under it
     std::uint32_t ink;
     lv_opa_t      ink2_opa, ink3_opa, hair_opa, tick_opa;
     std::uint32_t hair;  // the colour hairlines and the grid are drawn in, at hair_opa
     std::uint32_t accent, on_accent;
-    std::uint32_t green, amber, red, lamp, on_lamp, blue;
+    std::uint32_t green, amber, red, lamp, on_lamp;
     std::uint32_t shadow;
     lv_opa_t      shadow_opa, edge_opa;
     std::uint32_t glass;
@@ -75,7 +75,6 @@ inline constexpr std::int32_t round  = LV_RADIUS_CIRCLE;
 }  // namespace radius
 
 namespace size {
-inline constexpr std::int32_t touch     = 56;  // the smallest thing a finger is asked to hit
 inline constexpr std::int32_t button    = 56;
 inline constexpr std::int32_t button_lg = 72;
 inline constexpr std::int32_t toggle_w  = 92;  // a switch a thumb lands on, not a fingertip
@@ -118,8 +117,8 @@ void set_look(Look look);
 /** 0 is the clearest glass, 100 nearly solid. */
 void set_glass(int percent);
 void set_accent(std::uint32_t colour);
-/** For measuring what the panel can afford: blur and shadows can each be left out. */
-void set_effects(bool blur, bool shadows);
+/** For measuring what the panel can afford: shadows can be left out. */
+void set_effects(bool shadows);
 Look look();
 int  glass();
 const Palette &colours();
@@ -147,7 +146,7 @@ lv_obj_t *well(lv_obj_t *parent);
 
 // Dock is large glass beside the content: its shadow ends in the gap, as one
 // across a tile's edge comes out a hard step in the panel's 16-bit colour.
-enum class Glass : std::uint8_t { Small, Large, Clear, Dock, Notice };
+enum class Glass : std::uint8_t { Small, Large, Dock, Notice };
 lv_obj_t *glass(lv_obj_t *parent, Glass kind = Glass::Small);
 
 lv_obj_t *text(lv_obj_t *parent, Role role, const char *value, Ink ink = Ink::Primary);
@@ -210,30 +209,20 @@ struct Zone {
     const char  *word = nullptr;  // what a reading in it is: "Good", "Fair", "Poor"
 };
 
+// A bold arc and nothing else: a flat faint track, the value along it in one
+// ink, and in the middle a figure the page writes (`figure()`), with the unit
+// as a quiet line under it. The arc steps without a spring, so a change
+// redraws only the bit of arc it moved.
 struct DialSpec {
     std::int32_t size    = 200;
     std::int32_t min     = 0;
     std::int32_t max     = 100;
     std::int32_t start   = 150;  // degrees clockwise from 3 o'clock, as LVGL counts
     std::int32_t sweep   = 240;
-    std::int32_t ticks   = 31;   // total, minor and major
-    std::int32_t major   = 5;
-    std::int32_t decimals = 0;   // values are in tenths when this is 1
-    bool         needle  = true;
-    bool         fill    = false;  // an accent arc from the minimum to the target
-    bool         target  = false;  // a knob at the target, for a setting
-    bool         ends    = false;  // the range in small figures at the two ends
-    bool         span    = false;  // a setting by ticks alone: those from the reading up to the target lit, the target marked and read out
-    bool         bold    = false;  // heavier ticks, for a dial that is nothing but ticks
+    bool         target  = false;  // a knob at the value, for a setting
     const char  *unit    = nullptr;
-    const Zone  *zones   = nullptr;
-    int          zone_count = 0;
     Role         read    = Role::ReadM;
-    // A bold arc and nothing else: a flat faint track, the value along it in
-    // one ink, and in the middle a figure the page writes (`figure()`), with
-    // the unit as a quiet line under it. The arc steps without a spring, so a
-    // change redraws only the bit of arc it moved. `target` puts a knob at the value.
-    std::int32_t arc     = 0;      // its width; 0 for the scale of ticks above
+    std::int32_t arc     = 0;      // its width
     bool         drag    = false;  // dragged round, it sets the value: LV_EVENT_VALUE_CHANGED as it goes, LV_EVENT_RELEASED when let go
     bool         reverse = false;  // the value as what is left: the arc's start goes round after it, as a timer runs down
     bool         mark    = false;  // a dot on the arc at a second reading: the room's against its setting
@@ -247,14 +236,10 @@ class Dial : public InPsram {
     Dial &operator=(const Dial &) = delete;
     Dial(lv_obj_t *parent, const DialSpec &spec);
     lv_obj_t *obj() const { return m_root; }
-    /** Moves the needle and the readout there on a spring. */
+    /** INT32_MIN shows no value: the track alone. */
     void set_value(std::int32_t value, bool animate = true);
-    void set_target(std::int32_t value, bool animate = true);
-    void set_lit(int ticks);  // the first n ticks in the accent, for a timer
-    void set_caption(const char *caption);  // the small line under the readout
     std::int32_t value() const { return m_value; }
 
-    // An arc dial's own. Its set_value(INT32_MIN) shows no value: the track alone.
     lv_obj_t *figure() const { return m_read; }
     lv_obj_t *caption() const { return m_unit; }
     lv_obj_t *over() const { return m_over; }
@@ -268,45 +253,18 @@ class Dial : public InPsram {
     void set_size(std::int32_t size, std::int32_t arc = 0);
 
   private:
-    static void on_value(void *var, int32_t v);
-    static void on_target(void *var, int32_t v);
     void make_arc();
     void restyle_arc();
     void place_mark();
-    void place_needle(std::int32_t value);
-    void place_line(lv_obj_t *line, lv_point_precise_t *points, std::int32_t value, float r0, float r1);
-    void light_span();
-    void place_target(std::int32_t value);
-    void show_value(std::int32_t value);
-    void light_zone(std::int32_t value);
-    void restyle();
-    void stale_face();
-    void make_face();
     float angle_of(std::int32_t value) const;
 
     DialSpec  m_spec{};
     lv_obj_t *m_root   = nullptr;
-    lv_obj_t *m_scale  = nullptr;
-    lv_obj_t *m_needle = nullptr;
     lv_obj_t *m_arc    = nullptr;
-    lv_obj_t *m_knob   = nullptr;
     lv_obj_t *m_read   = nullptr;
     lv_obj_t *m_unit   = nullptr;
-    lv_obj_t *m_face   = nullptr;  // the scale as a picture, shown in its place
-    lv_draw_buf_t *m_face_buf   = nullptr;
-    lv_timer_t    *m_face_timer = nullptr;
-    lv_obj_t *m_mark   = nullptr;  // the target, on a span dial
-    lv_point_precise_t m_points[2]{}, m_mark_points[2]{};
-    std::int32_t m_span_lo = 0, m_span_hi = -1;
-    lv_scale_section_t *m_zones[6]{};
-    lv_style_t          m_zone_styles[6]{};
-    lv_scale_section_t *m_lit_section = nullptr;
-    lv_style_t          m_lit_style{};
-    char                m_ends[2][12]{};
-    const char         *m_src[72]{};
-    std::int32_t m_value = 0, m_target = 0;
-    std::int32_t m_shown = INT32_MIN, m_lit = -1, m_zone = -1;
-    std::int32_t m_r_tick = 0, m_major_len = 0, m_r_arc = 0;
+    std::int32_t m_value = 0;
+    std::int32_t m_r_arc = 0;
     lv_obj_t    *m_over = nullptr, *m_dot = nullptr;
     std::int32_t m_mark_at = INT32_MIN;
     Ink          m_ink   = Ink::Accent;
@@ -320,7 +278,6 @@ struct RailSpec {
     std::int32_t ticks    = 0;  // 0: a plain track, as sliders and progress are
     std::int32_t major    = 5;
     bool         draggable = false;
-    bool         fill     = true;
     bool         quiet    = false;  // a thin line, its knob only under the finger: a track's progress
     const std::int32_t *notches = nullptr;  // marks for presets
     int          notch_count = 0;
@@ -479,13 +436,9 @@ class Cover : public InPsram {
 };
 
 /**
- * What the music and the cinema views lay behind everything: their picture
- * enlarged to fill, blurred, dithered, and darkened in the dark look or
- * lightened in the light one so their text reads on it. Made off the LVGL task
+ * A picture enlarged to fill, blurred, dithered, and darkened in the dark look
+ * or lightened in the light one so text reads on it. Made off the LVGL task
  * and laid down a band of rows a frame; opaque, so nothing under it is drawn.
- * One the size of the screen is made into the ground's own picture, which
- * nothing shows while it covers the screen, and the ground is painted again
- * when it goes.
  */
 class Backdrop : public InPsram {
   public:
@@ -517,20 +470,10 @@ class Backdrop : public InPsram {
     std::int32_t   m_shown = 0;  // rows that hold a picture, until it is whole
     std::int32_t   m_pass  = 0;  // rows laid down by the picture being made
     bool           m_whole = false;
-    bool           m_on_ground = false;  // made into the ground's picture rather than its own
-    bool           m_lent = false;       // holding the ground's picture now
     bool           m_warned = false;
     Job           *m_job = nullptr;
     lv_timer_t    *m_timer = nullptr;
 };
-
-/**
- * The ground's picture, for a backdrop over the whole screen to be made into:
- * the content under it is hidden meanwhile, so no shadow is painted into it.
- * Null while it is lent already. Given back, it is painted again.
- */
-lv_draw_buf_t *lend_ground();
-void           ground_back();
 
 /** Calls `fn` once, a second and a half from now, as when a picture found no room: asked again, from then. */
 void again_soon(lv_timer_t *&timer, void (*fn)());
@@ -574,7 +517,6 @@ lv_obj_t *dock_item(lv_obj_t *dock, const char *glyph);
 int       add_page(lv_obj_t *item, void (*build)(lv_obj_t *page));
 void      show_page(int index, bool animate = true);
 int       shown_page();
-lv_obj_t *page_at(int index);
 /** No page shows, for a screen with other content of its own; showing one brings them back. */
 void      hide_pages();
 /** Told of each page as it comes to show, before anything of it is drawn. */
@@ -619,7 +561,6 @@ enum class Trail : std::uint8_t { None, Value, Chevron, Toggle, Badge };
 struct RowSpec {
     const char   *glyph  = nullptr;
     Ink           tint   = Ink::Accent;  // the glyph and the square it sits in
-    bool          bare   = false;        // the glyph without its square
     const char   *lead   = nullptr;      // a time or a figure before the rest, `lead_w` wide (0: as it is)
     std::int32_t  lead_w = 0;
     std::uint32_t mark   = 0;            // a bar this colour before the title, as a calendar's; 0 for none
@@ -644,8 +585,6 @@ struct RowSpec {
  */
 lv_obj_t *row(lv_obj_t *parent, const RowSpec &spec);
 void      set_row_value(lv_obj_t *row, const char *value);
-/** The value and its dot's ink, or the badge's text and ink. */
-void      set_row_state(lv_obj_t *row, const char *value, Ink ink);
 void      set_row_detail(lv_obj_t *row, const char *detail);
 /** Its value, toggle or badge. */
 lv_obj_t *row_trail(lv_obj_t *row);
@@ -682,9 +621,6 @@ class Readout : public InPsram {
     lv_obj_t *obj() const { return m_root; }
     /** Counts there on the spring when `animate`. */
     void set_value(std::int32_t value, bool animate = false);
-    /** No reading: a dash, never a made-up figure. */
-    void clear();
-    std::int32_t value() const { return m_value; }
 
   private:
     static void on_count(void *var, int32_t v);
@@ -692,7 +628,7 @@ class Readout : public InPsram {
 
     ReadoutSpec  m_spec{};
     lv_obj_t    *m_root = nullptr, *m_read = nullptr;
-    std::int32_t m_value = 0, m_shown = INT32_MIN;
+    std::int32_t m_shown = INT32_MIN;
 };
 
 struct StepperSpec {
@@ -781,14 +717,12 @@ class Reading : public InPsram {
     /** Fills `parent`, a tile, from top to bottom. */
     Reading(lv_obj_t *parent, const ReadingSpec &spec);
     void set_value(std::int32_t value, bool animate = true);
-    /** No reading: a dash, no word, no dot. */
-    void clear();
 
   private:
     void        show(std::int32_t value);
 
     ReadingSpec m_spec{};
-    lv_obj_t   *m_figure = nullptr, *m_unit = nullptr, *m_word = nullptr;
+    lv_obj_t   *m_figure = nullptr, *m_word = nullptr;
     std::int32_t m_shown = INT32_MIN;
     Scale      *m_scale = nullptr;
     int         m_zone = -2;

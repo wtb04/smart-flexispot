@@ -442,7 +442,7 @@ void pictures_next_track() { next_track(); }
 
 // 0: the kit's cover; 1: an opaque picture, as corners baked into the colour
 // under them would be; 2: alpha all through; 3: LVGL's image radius; 4: a frame
-// that clips its corners, as the old pages do.
+// that clips its corners.
 void pictures_redraw_mode(int mode)
 {
     drop_variant();

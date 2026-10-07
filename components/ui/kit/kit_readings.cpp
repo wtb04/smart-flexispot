@@ -138,8 +138,8 @@ Reading::Reading(lv_obj_t *parent, const ReadingSpec &spec) : m_spec(spec)
     lv_obj_set_style_pad_column(line, space::xs, 0);
     m_figure = text(line, Role::ReadXL, "--");
     if (spec.unit != nullptr) {
-        m_unit = text(line, Role::Body, spec.unit, Ink::Secondary);
-        lv_obj_set_style_pad_bottom(m_unit, space::m, 0);  // on the figures' baseline, near enough
+        lv_obj_t *unit = text(line, Role::Body, spec.unit, Ink::Secondary);
+        lv_obj_set_style_pad_bottom(unit, space::m, 0);  // on the figures' baseline, near enough
     }
     m_word = text(parent, Role::H3, "", Ink::Secondary);
     lv_obj_t *gap = plain(parent);
@@ -195,15 +195,6 @@ void Reading::set_value(std::int32_t value, bool animate)
     const char *word = zone >= 0 && m_spec.zones[zone].word != nullptr ? m_spec.zones[zone].word : "";
     lv_label_set_text(m_word, word);
     set_ink(m_word, zone >= 0 ? m_spec.zones[zone].ink : Ink::Secondary);
-}
-
-void Reading::clear()
-{
-    lv_anim_delete(this, nullptr);
-    m_shown = INT32_MIN;
-    lv_label_set_text(m_figure, "--");
-    lv_label_set_text(m_word, "");
-    m_zone = -2;
 }
 
 }  // namespace ui::kit

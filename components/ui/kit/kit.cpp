@@ -6,8 +6,6 @@
 #include "kit_fonts.h"
 #include "kit_pixels.h"
 
-#include "esp_log.h"
-
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -24,12 +22,11 @@ namespace {
 // blue than of the green.
 constexpr Palette DARK{
     .ground = 0x100c08, .surface = 0x201c18, .surface_hi = 0x282420,
-    .raised = 0x302820, .raised_hi = 0x383028, .fill_opa = 20,
+    .raised_hi = 0x383028, .fill_opa = 20,
     .ink = 0xf6efe7, .ink2_opa = 158, .ink3_opa = 92, .hair_opa = 20, .tick_opa = 72,
     .hair = 0xffffff,
     .accent = 0xff8a3d, .on_accent = 0x1f0e03,
     .green = 0x86d27c, .amber = 0xffbe55, .red = 0xff6b5e, .lamp = 0xffd36b, .on_lamp = 0x2e1f00,
-    .blue = 0x6fb6ff,
     .shadow = 0x000000, .shadow_opa = 110, .edge_opa = 120,
     .glass = 0x484038, .glass_clear_opa = 56, .glass_solid_opa = 214, .rim_opa = 38,
     .glass_edge_opa = 115, .glass_shadow_opa = 170,
@@ -38,12 +35,11 @@ constexpr Palette DARK{
 
 constexpr Palette LIGHT{
     .ground = 0xe9e3db, .surface = 0xfbf8f4, .surface_hi = 0xfffbf5,
-    .raised = 0xf1ebe4, .raised_hi = 0xe8e0d7, .fill_opa = 18,
+    .raised_hi = 0xe8e0d7, .fill_opa = 18,
     .ink = 0x1d1813, .ink2_opa = 158, .ink3_opa = 97, .hair_opa = 20, .tick_opa = 77,
     .hair = 0x1d1813,
     .accent = 0xf2711c, .on_accent = 0xffffff,
     .green = 0x3f9f45, .amber = 0xd68a00, .red = 0xe0483b, .lamp = 0xf4b400, .on_lamp = 0x2e1f00,
-    .blue = 0x2f86e0,
     .shadow = 0x50371e, .shadow_opa = 46, .edge_opa = 22,
     .glass = 0xfcf9f5, .glass_clear_opa = 87, .glass_solid_opa = 224, .rim_opa = 230,
     .glass_edge_opa = 31, .glass_shadow_opa = 85,
@@ -70,13 +66,13 @@ constexpr Glow LIGHT_GLOWS[] = {
 };
 
 Look          s_look   = Look::Dark;
-bool          s_blur = true, s_shadows = true;
+bool          s_shadows = true;
 int           s_glass  = 50;
 std::uint32_t s_accent = 0;  // 0: the look's own
 Palette       s_pal    = DARK;
 
 lv_style_t s_ground, s_tile, s_tile_hi, s_well;
-lv_style_t s_glass_sm, s_glass_lg, s_glass_clear, s_glass_dock, s_glass_note;
+lv_style_t s_glass_sm, s_glass_lg, s_glass_dock, s_glass_note;
 lv_style_t s_role[11];
 lv_style_t s_ink[8], s_dot[8], s_mark;
 lv_style_t s_btn_open;
@@ -103,7 +99,6 @@ int      s_restyler_count = 0;
 
 lv_draw_buf_t *s_ground_buf = nullptr;
 lv_obj_t      *s_ground_img = nullptr;
-bool           s_ground_lent = false;  // a backdrop is made in it: nothing paints the ground there until it comes back
 
 lv_color_t hex(std::uint32_t c) { return lv_color_hex(c); }
 
@@ -143,8 +138,7 @@ void set_shadow(lv_style_t *st, std::int32_t width, std::int32_t y, std::int32_t
     lv_style_set_shadow_opa(st, opa);
 }
 
-void style_glass(lv_style_t *st, std::int32_t blur, std::int32_t shadow_w, std::int32_t shadow_y,
-                 lv_opa_t opa)
+void style_glass(lv_style_t *st, std::int32_t shadow_w, std::int32_t shadow_y, lv_opa_t opa)
 {
     // a flat tint: a sheen this soft and this tall bands on the panel, which LVGL does not dither
     lv_style_set_bg_color(st, hex(s_pal.glass));
@@ -153,7 +147,6 @@ void style_glass(lv_style_t *st, std::int32_t blur, std::int32_t shadow_w, std::
     // no live blur in the shared glass: the chrome sits over the ground, which is
     // soft already, and LVGL re-blurs a whole widget whenever anything near it
     // redraws, which the panel cannot afford; popovers bring their own
-    (void)blur;
     lv_style_set_blur_backdrop(st, false);
     lv_style_set_blur_radius(st, 0);
     lv_style_set_border_width(st, 1);
@@ -211,15 +204,11 @@ void apply()
     // big glass reads more opaque, so what is on it stays legible over anything;
     // the bar's is the dock's, the two being the one frame round the pages
     const lv_opa_t firm = static_cast<lv_opa_t>(g + (s_pal.glass_solid_opa - g) * 45 / 100);
-    style_glass(&s_glass_sm, 20, 28, 6, firm);  // the bar's: its shadow ends in the gap above the pages
-    style_glass(&s_glass_lg, 40, 80, 28, firm);
-    style_glass(&s_glass_dock, 40, 28, 10, firm);
+    style_glass(&s_glass_sm, 28, 6, firm);  // the bar's: its shadow ends in the gap above the pages
+    style_glass(&s_glass_lg, 80, 28, firm);
+    style_glass(&s_glass_dock, 28, 10, firm);
     // a notice lands over a busy page with nothing frozen behind it to blur
-    style_glass(&s_glass_note, 40, 36, 12, LV_OPA_COVER);
-    style_glass(&s_glass_clear, 10, 24, 8, static_cast<lv_opa_t>(g * 2 / 3));
-    lv_style_set_bg_color(&s_glass_clear, hex(0x14100d));
-    lv_style_set_bg_grad_color(&s_glass_clear, hex(0x14100d));
-    lv_style_set_text_color(&s_glass_clear, hex(0xffffff));
+    style_glass(&s_glass_note, 36, 12, LV_OPA_COVER);
 
     for (int i = 0; i < 11; ++i) {
         lv_style_set_text_font(&s_role[i], font_of(static_cast<Role>(i)));
@@ -344,7 +333,7 @@ void apply()
 
 void init_styles()
 {
-    for (lv_style_t *st : {&s_ground, &s_tile, &s_tile_hi, &s_well, &s_glass_sm, &s_glass_lg, &s_glass_clear, &s_glass_dock,
+    for (lv_style_t *st : {&s_ground, &s_tile, &s_tile_hi, &s_well, &s_glass_sm, &s_glass_lg, &s_glass_dock,
                            &s_glass_note, &s_btn, &s_btn_open, &s_btn_pressed, &s_btn_accent, &s_btn_flat, &s_btn_soft, &s_btn_round,
                            &s_btn_flat_pressed, &s_btn_accent_pressed, &s_btn_checked_pressed, &s_lamp_on_pressed,
                            &s_btn_checked, &s_lamp, &s_lamp_on, &s_lamp_on_ink, &s_hair, &s_switch,
@@ -390,7 +379,7 @@ int grain(int x, int y)
 
 void paint_ground_area(const lv_area_t &a)
 {
-    if (s_ground_small == nullptr || s_ground_buf == nullptr || s_ground_lent) {
+    if (s_ground_small == nullptr || s_ground_buf == nullptr) {
         return;
     }
     for (std::int32_t y = a.y1; y <= a.y2; ++y) {
@@ -551,12 +540,11 @@ void set_glass(int percent)
     apply();
 }
 
-void set_effects(bool blur, bool shadows)
+void set_effects(bool shadows)
 {
-    if (blur == s_blur && shadows == s_shadows) {
+    if (shadows == s_shadows) {
         return;
     }
-    s_blur    = blur;
     s_shadows = shadows;
     apply();
 }
@@ -698,32 +686,6 @@ lv_obj_t *layer(Layer which)
     return l != nullptr ? l : lv_screen_active();
 }
 
-lv_draw_buf_t *lend_ground()
-{
-    lv_obj_t *content = s_layers[static_cast<int>(Layer::Content)];
-    if (s_ground_lent || s_ground_buf == nullptr || content == nullptr) {
-        return nullptr;
-    }
-    s_ground_lent = true;
-    lv_obj_set_hidden(content, true);
-    return s_ground_buf;
-}
-
-void ground_back()
-{
-    if (!s_ground_lent) {
-        return;
-    }
-    s_ground_lent = false;
-    const std::uint64_t t0 = perf::now_us();
-    paint_ground_area({0, 0, size::screen_w - 1, size::screen_h - 1});
-    lv_draw_buf_flush_cache(s_ground_buf, nullptr);
-    bake::painted();
-    lv_obj_set_hidden(s_layers[static_cast<int>(Layer::Content)], false);
-    lv_obj_invalidate(s_ground_img);
-    ESP_LOGI("kit", "ground painted again in %u ms", static_cast<unsigned>((perf::now_us() - t0) / 1000));
-}
-
 lv_obj_t *tile(lv_obj_t *parent, Lift lift)
 {
     lv_obj_t *obj = lv_obj_create(parent);
@@ -750,8 +712,7 @@ lv_obj_t *glass(lv_obj_t *parent, Glass kind)
     const lv_style_t *st = kind == Glass::Small   ? &s_glass_sm
                            : kind == Glass::Large ? &s_glass_lg
                            : kind == Glass::Dock  ? &s_glass_dock
-                           : kind == Glass::Notice ? &s_glass_note
-                                                  : &s_glass_clear;
+                                                  : &s_glass_note;
     lv_obj_add_style(obj, st, 0);
     lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
     bake::glass(obj, st);
