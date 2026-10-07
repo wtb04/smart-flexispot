@@ -13,7 +13,7 @@ idf_component_register(
     SRCS ${UI_CORE_SOURCES} ${UI_FRONT_SOURCES} ${UI_FONTS}
     INCLUDE_DIRS "include" "fonts"
     PRIV_INCLUDE_DIRS "." "core" "kit" "front" "classic" "lab"
-    REQUIRES claude esp_app_format esp_driver_ppa lvgl__lvgl espressif__esp_lvgl_port board media radar ical travel deskproto units
+    REQUIRES claude esp_app_format esp_driver_ppa lvgl__lvgl espressif__esp_lvgl_port board media radar ical travel deskproto units watchdog
 )
 
 # The allocator is only referred to by LVGL, which links after this component;
