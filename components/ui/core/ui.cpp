@@ -665,7 +665,6 @@ void apply_pending(lv_timer_t *)
     if (!s_pending.exchange(false, std::memory_order_acquire)) {
         return;
     }
-    front::apply();
     // Settings and presence first: they decide which pages and presets show.
     apply_settings_and_presence();
     apply_desk_updates();

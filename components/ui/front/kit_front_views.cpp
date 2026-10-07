@@ -482,13 +482,9 @@ void show_next_notice()
     s_notice        = kit::notice(spec);
 }
 
-// The next as it comes, once the start-up is out of the way; while one shows,
-// how many wait behind it.
+// The next as it comes; while one shows, how many wait behind it.
 void follow_notices()
 {
-    if (!detail::status_state().splash_gone) {
-        return;
-    }
     if (s_on_show) {
         char side[32];
         aside(side, sizeof side);
@@ -509,7 +505,6 @@ void build_views(lv_obj_t *screen)
         }
     });
     subscribe(Topic::Notices, detail::kNoView, follow_notices);
-    subscribe(Topic::Status, detail::kNoView, follow_notices);
 }
 }  // namespace ui::kitfront
 
