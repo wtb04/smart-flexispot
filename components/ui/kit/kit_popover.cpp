@@ -570,6 +570,7 @@ struct Pop {
     bool      waiting     = false;  // to start once the first frame, the backdrop's, is out
     bool      pictured    = false;  // the card is drawn from its picture
     bool      shadowed    = false;  // its shadow is painted into the backdrop
+    bool      live        = false;  // landed over a dim: the page under it drawn as it changes, not frozen
     lv_opa_t  glass_opa   = 0;
     lv_draw_buf_t *picture = nullptr;  // the card at its place, over its backdrop and without its edge
     lv_area_t      picture_at{};
@@ -879,12 +880,31 @@ void place(std::int32_t p)
     }
 }
 
+// Behind a dim the frozen picture is only for while the card moves: landed,
+// the page under the veil is live again, so a new song or the clock shows,
+// and costs little, as the solid card covers its own area. Its shadow is then
+// its own, lighter than the painted one, as it is drawn again when what is
+// under it changes.
+constexpr std::int32_t LIVE_SHADOW_W = 40, LIVE_SHADOW_Y = 12;
+
+void go_live()
+{
+    if (s_pop.backdrop == nullptr || s_pop.card == nullptr || behind() != Behind::Dim || s_pop.live) {
+        return;
+    }
+    s_pop.live = true;
+    lv_obj_set_hidden(s_pop.backdrop, true);
+    lv_obj_set_style_shadow_width(s_pop.card, LIVE_SHADOW_W, 0);
+    lv_obj_set_style_shadow_offset_y(s_pop.card, LIVE_SHADOW_Y, 0);
+}
+
 void landed(lv_anim_t *)
 {
     show_picture(false);  // from here on what is on it is live
     if (s_pop.card != nullptr) {
         lv_obj_invalidate(s_pop.card);
     }
+    go_live();
 }
 
 void picture_card(void *)
@@ -1293,6 +1313,9 @@ void close_popover(bool animate)
     s_pop.closing = true;
     s_pop.waiting = false;
     stop_frost();
+    if (s_pop.live) {
+        lv_obj_set_style_shadow_width(s_pop.card, 0, 0);  // none of its own while it moves
+    }
     if (s_pop.backdrop != nullptr) {
         shadow_off();  // the shadow goes with the card
         if (paint_picture(span(s_pop.from, s_pop.to))) {
