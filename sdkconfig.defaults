@@ -47,14 +47,9 @@ CONFIG_BSP_LCD_DRAW_BUF_HEIGHT=50
 # invalidation when hunting dropped frames.
 # CONFIG_LV_USE_REFR_DEBUG=y
 
-# Fonts used by components/ui (only _14 is built in by default).
-CONFIG_LV_FONT_MONTSERRAT_16=y
-CONFIG_LV_FONT_MONTSERRAT_18=y
-CONFIG_LV_FONT_MONTSERRAT_20=y
-CONFIG_LV_FONT_MONTSERRAT_22=y
+# The bar's clock, the one Montserrat components/ui draws with (only _14 is
+# built in by default).
 CONFIG_LV_FONT_MONTSERRAT_28=y
-CONFIG_LV_FONT_MONTSERRAT_32=y
-CONFIG_LV_FONT_MONTSERRAT_48=y
 
 # --- Wi-Fi via the ESP32-C6 co-processor -------------------------------------
 # The P4 has no radio. esp_hosted carries the Wi-Fi API to the C6 over SDIO;
