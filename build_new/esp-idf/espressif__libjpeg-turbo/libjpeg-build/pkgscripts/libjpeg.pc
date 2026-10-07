@@ -1,0 +1,10 @@
+prefix=/Users/wtb/dev/tab5-hello-design/build_new/esp-idf/espressif__libjpeg-turbo/libjpeg-build/install
+exec_prefix=/Users/wtb/dev/tab5-hello-design/build_new/esp-idf/espressif__libjpeg-turbo/libjpeg-build/install
+libdir=/Users/wtb/dev/tab5-hello-design/build_new/esp-idf/espressif__libjpeg-turbo/libjpeg-build/install/lib
+includedir=/Users/wtb/dev/tab5-hello-design/build_new/esp-idf/espressif__libjpeg-turbo/libjpeg-build/install/include
+
+Name: libjpeg
+Description: A SIMD-accelerated JPEG codec that provides the libjpeg API
+Version: 3.1.2
+Libs: -L${libdir} -ljpeg
+Cflags: -I${includedir}

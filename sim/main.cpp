@@ -11,7 +11,7 @@
 #include "radar_page.h"
 #include "updates.h"
 #include "ui.h"
-#include "ui_internal.h"
+#include "ui_core.h"
 #include "lab.h"
 
 #include "esp_heap_caps.h"
@@ -20,9 +20,11 @@
 #include <SDL.h>
 #include <zlib.h>
 
+#include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <ctime>
 #include <string>
 #include <vector>
@@ -158,27 +160,25 @@ lv_obj_t *s_help = nullptr;
 
 void build_help()
 {
-    constexpr std::int32_t W = 820, PAD = 32, ROW = 36, KEY_W = 90;
+    namespace kit = ui::kit;
+    constexpr std::int32_t W = 1040, PAD = 32, ROW = 36, KEY_W = 90;
     const std::int32_t     h = PAD * 2 + 56 + ROW * static_cast<std::int32_t>(std::size(KEYS)) + 48;
-    s_help = lv_obj_create(lv_layer_top());
+    s_help = kit::tile(lv_layer_top(), kit::Lift::High);
     lv_obj_set_size(s_help, W, h);
     lv_obj_center(s_help);
-    ui::theme::style_panel(s_help, ui::theme::panel_light, ui::theme::radius::card);
     lv_obj_set_style_pad_all(s_help, PAD, 0);
     lv_obj_set_scrollable(s_help, false);
 
-    lv_obj_t *title = ui::theme::make_eyebrow(s_help, "SIMULATOR KEYS");
+    lv_obj_t *title = kit::text(s_help, kit::Role::Label, "SIMULATOR KEYS", kit::Ink::Secondary);
     lv_obj_set_pos(title, 0, 0);
     std::int32_t y = 56;
     for (const Key &key : KEYS) {
-        lv_obj_t *name = ui::theme::make_label(s_help, key.name, ui::theme::primary, ui::fonts::size_22());
-        lv_obj_set_pos(name, 0, y);
-        lv_obj_t *what = ui::theme::make_label(s_help, key.what, ui::theme::text, ui::fonts::size_22());
-        lv_obj_set_pos(what, KEY_W, y);
+        lv_obj_set_pos(kit::text(s_help, kit::Role::H3, key.name, kit::Ink::Accent), 0, y);
+        lv_obj_set_pos(kit::text(s_help, kit::Role::Body, key.what), KEY_W, y);
         y += ROW;
     }
-    lv_obj_t *send = ui::theme::make_label(s_help, "sim/send.sh notify '<json>' sends any notice Home Assistant could",
-                                           ui::theme::secondary, ui::fonts::size_20());
+    lv_obj_t *send = kit::text(s_help, kit::Role::Small, "sim/send.sh notify '<json>' sends any notice Home Assistant could",
+                               kit::Ink::Secondary);
     lv_obj_set_pos(send, 0, y + 12);
     lv_obj_set_hidden(s_help, true);
 }
@@ -333,30 +333,19 @@ ui::Handlers handlers()
     return h;
 }
 
-// Without --splash, LVGL's clock runs this far ahead of SDL's, which the splash
-// takes for its twelve seconds having gone by.
-constexpr std::uint32_t SPLASH_SKIP_MS  = 13000;
-constexpr std::uint32_t SPLASH_READY_MS = 7000;
-
-std::uint32_t ticks_past_splash()
-{
-    return SDL_GetTicks() + SPLASH_SKIP_MS;
-}
-
 // --page N opens page N; --press KEYS presses those keys, as "am" for Home
 // Assistant answering and music; --tap X,Y taps there, as often as given, and
 // --wait MS waits that long where it stands among them;
 // --swipe X1,Y1,X2,Y2 swipes from one to the other, after the taps;
 // --then KEYS presses those after the taps, as a notice over a view they opened;
 // --shot S saves a screenshot after S seconds and quits, to --out FILE if
-// given; --splash plays the splash the panel boots with. --pick-above FT
+// given. --pick-above FT
 // chooses the nearest aircraft flying at least that high; --out2 FILE saves a
 // second screenshot a few seconds after the first, after the --tap2 taps, so
 // both show the same aircraft.
 struct Options {
     int         page   = -1;
     int         shot_s = -1;
-    bool        splash = false;
     std::string keys;
     struct Step {
         SDL_Point     at{};
@@ -431,8 +420,6 @@ Options options(int argc, char **argv)
         } else if (name == "--out2") {
             o.out2 = value;
             ++i;
-        } else if (name == "--splash") {
-            o.splash = true;
         } else if (name == "--draw-page" && i + 2 < argc) {
             o.draw_page  = std::atoi(argv[i + 1]);
             o.draw_times = std::atoi(argv[i + 2]);
@@ -517,9 +504,7 @@ int main(int argc, char **argv)
     }
 
     ui::set_cards(CARDS, static_cast<int>(std::size(CARDS)));
-    const char *dock = std::getenv("SIM_DOCK");
-    ESP_ERROR_CHECK(ui::init(handlers(), 80, 0, dock == nullptr || std::strcmp(dock, "left") != 0,
-                             ui::Orientation::Normal));
+    ESP_ERROR_CHECK(ui::init(handlers(), 80, 0, ui::Orientation::Normal));
     ESP_ERROR_CHECK(ui::build());
     // SIM_CLOCK=9:41: the top bar shows that rather than the time, for pictures.
     ui::pin_clock(std::getenv("SIM_CLOCK"));
@@ -546,17 +531,6 @@ int main(int argc, char **argv)
         live::start();
     }
     notices::listen();
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("desk"));
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("network"));
-    if (opts.splash) {
-        // About when the panel's Home Assistant answers, so the splash plays as it does there.
-        lv_timer_t *ready = lv_timer_create([](lv_timer_t *) { ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_done()); },
-                                            SPLASH_READY_MS, nullptr);
-        lv_timer_set_repeat_count(ready, 1);
-    } else {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_done());
-        lv_tick_set_cb(ticks_past_splash);
-    }
 
     run_for(2000);  // what start-up set, the presence gate and the phone among it, applied
     const auto press_all = [](const std::string &keys) {

@@ -1124,7 +1124,7 @@ void set_brightness_percent(int percent)
 }
 
 // The first light waits for a frame LVGL drew to be on the panel, and a few
-// refreshes of it, so that what it lights is the splash and not whatever the
+// refreshes of it, so that what it lights is the screen and not whatever the
 // panel had before.
 namespace {
 void wait_for_first_frame()

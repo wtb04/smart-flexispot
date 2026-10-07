@@ -176,7 +176,6 @@ the screen changes, so:
    frames a second. A wipe in bands was tried and dropped. Pages are made once
    and hidden, never rebuilt, and the bar and the dock stay as they are.
 11. **Big buffers once, in PSRAM.** They are made once and freed when done.
-   Free PSRAM is tight while the old UI still runs alongside.
 
 What that buys, measured on the panel:
 

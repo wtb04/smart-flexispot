@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"/Users/wtb/dev/tab5-hello-design/build_new/esp-idf/espressif__libjpeg-turbo/libjpeg-build/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

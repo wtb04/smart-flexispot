@@ -21,8 +21,6 @@ sdkconfig.old
 .font-cache/
 
 # Your own Home Assistant entities and preset names; room_config.example.h and the
-# defaults in ui_internal.h are what everyone else gets.
+# defaults in components/ui/core/ui_core.h are what everyone else gets.
 components/room/room_config.h
 components/ui/ui_presets.h
-build_kit/
-sim/build-kit/

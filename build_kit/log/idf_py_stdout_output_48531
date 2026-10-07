@@ -1,0 +1,37 @@
+Command: ninja all
+[1/28] Performing build step for 'bootloader'
+[1/1] cd /Users/wtb/dev/tab5-hello-design/build_kit/bootloader/esp-idf/esptool_py && /Users/wtb/.espressif/python_env/idf5.5_py3.14_env/bin/python /Users/wtb/esp/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 bootloader 0x2000 /Users/wtb/dev/tab5-hello-design/build_kit/bootloader/bootloader.bin
+Bootloader binary size 0x5ec0 bytes. 0x140 bytes (1%) free.
+[2/28] No install step for 'bootloader'
+[3/28] Building C object esp-idf/esp_app_format/CMakeFiles/__idf_esp_app_format.dir/esp_app_desc.c.obj
+[4/28] Completed 'bootloader'
+[5/28] Linking C static library esp-idf/esp_app_format/libesp_app_format.a
+[6/28] Building CXX object esp-idf/room/CMakeFiles/__idf_room.dir/room_layout.cpp.obj
+[7/28] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/wallclock.cpp.obj
+[8/28] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/claude_feed.cpp.obj
+[9/28] Building CXX object esp-idf/ui/CMakeFiles/__idf_ui.dir/kit_front_desk.cpp.obj
+[10/28] Building CXX object esp-idf/room/CMakeFiles/__idf_room.dir/laptop_player.cpp.obj
+[11/28] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/battery.cpp.obj
+[12/28] Building CXX object esp-idf/room/CMakeFiles/__idf_room.dir/room.cpp.obj
+[13/28] Building CXX object esp-idf/desk/CMakeFiles/__idf_desk.dir/desk.cpp.obj
+[14/28] Linking C static library esp-idf/desk/libdesk.a
+[15/28] Linking C static library esp-idf/ui/libui.a
+[16/28] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/main.cpp.obj
+[17/28] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/network.cpp.obj
+[18/28] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/remote.cpp.obj
+[19/28] Building CXX object esp-idf/room/CMakeFiles/__idf_room.dir/jellyfin_player.cpp.obj
+[20/28] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/diagnostics.cpp.obj
+[21/28] Building CXX object esp-idf/room/CMakeFiles/__idf_room.dir/speaker_player.cpp.obj
+[22/28] Building CXX object esp-idf/room/CMakeFiles/__idf_room.dir/media_card.cpp.obj
+[23/28] Linking C static library esp-idf/room/libroom.a
+[24/28] Linking C static library esp-idf/main/libmain.a
+[25/28] Generating esp-idf/esp_system/ld/sections.ld
+[26/28] Linking CXX executable smart_flexispot.elf
+[27/28] Generating binary image from built executable
+esptool.py v4.12.0
+Creating esp32p4 image...
+Merged 3 ELF sections
+Successfully created esp32p4 image.
+Generated /Users/wtb/dev/tab5-hello-design/build_kit/smart_flexispot.bin
+[28/28] cd /Users/wtb/dev/tab5-hello-design/build_kit/esp-idf/esptool_py && /Users/wtb/.espressif/python_env/idf5.5_py3.14_env/bin/python /Users/wtb/esp/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 partition --type app /Users/wtb/dev/tab5-hello-design/build_kit/partition_table/partition-table.bin /Users/wtb/dev/tab5-hello-design/build_kit/smart_flexispot.bin
+smart_flexispot.bin binary size 0x3c4720 bytes. Smallest app partition is 0x500000 bytes. 0x13b8e0 bytes (25%) free.

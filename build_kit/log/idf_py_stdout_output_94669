@@ -1,0 +1,313 @@
+Command: ninja all
+[1/23] Performing build step for 'bootloader'
+[1/1] cd /Users/wtb/dev/tab5-hello-design/build_kit/bootloader/esp-idf/esptool_py && /Users/wtb/.espressif/python_env/idf5.5_py3.14_env/bin/python /Users/wtb/esp/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 bootloader 0x2000 /Users/wtb/dev/tab5-hello-design/build_kit/bootloader/bootloader.bin
+Bootloader binary size 0x5ec0 bytes. 0x140 bytes (1%) free.
+[2/23] No install step for 'bootloader'
+[3/23] Completed 'bootloader'
+[4/23] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/last_words.cpp.obj
+[5/23] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/orientation.cpp.obj
+[6/23] Building CXX object esp-idf/ui/CMakeFiles/__idf_ui.dir/kit_front_setup.cpp.obj
+/Users/wtb/dev/tab5-hello-design/components/ui/kit_front_setup.cpp: In function 'void ui::kitfront::{anonymous}::open_accents(lv_obj_t*)':
+/Users/wtb/dev/tab5-hello-design/components/ui/kit_front_setup.cpp:150:27: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  150 |         lv_obj_remove_flag(swatch, LV_OBJ_FLAG_SCROLLABLE);
+      |         ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from /Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/lvgl.h:21,
+                 from /Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/lvgl.h:1,
+                 from /Users/wtb/dev/tab5-hello-design/components/ui/include/kit.h:13,
+                 from /Users/wtb/dev/tab5-hello-design/components/ui/kit_front.h:6,
+                 from /Users/wtb/dev/tab5-hello-design/components/ui/kit_front_setup.cpp:6:
+/Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/core/lv_obj.h:248:6: note: declared here
+  248 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+[7/23] Building CXX object esp-idf/board/CMakeFiles/__idf_board.dir/board.cpp.obj
+In file included from /Users/wtb/dev/tab5-hello-design/components/board/board.cpp:21:
+/Users/wtb/esp/esp-idf/components/hal/esp32p4/include/hal/gpio_ll.h: In function 'void gpio_ll_matrix_out_default(gpio_dev_t*, uint32_t)':
+/Users/wtb/esp/esp-idf/components/hal/esp32p4/include/hal/gpio_ll.h:388:5: warning: missing initializer for member 'gpio_func_out_sel_cfg_reg_t::<unnamed struct>::out_inv_sel' [-Wmissing-field-initializers]
+  388 |     };
+      |     ^
+/Users/wtb/esp/esp-idf/components/hal/esp32p4/include/hal/gpio_ll.h:388:5: warning: missing initializer for member 'gpio_func_out_sel_cfg_reg_t::<unnamed struct>::oen_sel' [-Wmissing-field-initializers]
+/Users/wtb/esp/esp-idf/components/hal/esp32p4/include/hal/gpio_ll.h:388:5: warning: missing initializer for member 'gpio_func_out_sel_cfg_reg_t::<unnamed struct>::oen_inv_sel' [-Wmissing-field-initializers]
+/Users/wtb/esp/esp-idf/components/hal/esp32p4/include/hal/gpio_ll.h:388:5: warning: missing initializer for member 'gpio_func_out_sel_cfg_reg_t::<unnamed struct>::reserved_12' [-Wmissing-field-initializers]
+[8/23] Building CXX object esp-idf/ui/CMakeFiles/__idf_ui.dir/kit_popover.cpp.obj
+/Users/wtb/dev/tab5-hello-design/components/ui/kit_popover.cpp: In function 'bool ui::kit::{anonymous}::paint_picture(lv_area_t)':
+/Users/wtb/dev/tab5-hello-design/components/ui/kit_popover.cpp:772:23: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  772 |     lv_obj_remove_flag(s_pop.body, LV_OBJ_FLAG_HIDDEN);
+      |     ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from /Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/lvgl.h:21,
+                 from /Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/lvgl.h:1,
+                 from /Users/wtb/dev/tab5-hello-design/components/ui/include/kit.h:13,
+                 from /Users/wtb/dev/tab5-hello-design/components/ui/kit_popover.cpp:1:
+/Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/core/lv_obj.h:248:6: note: declared here
+  248 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/components/ui/kit_popover.cpp:776:20: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  776 |     lv_obj_add_flag(canvas, LV_OBJ_FLAG_HIDDEN);
+      |     ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/components/ui/kit_popover.cpp: In function 'void ui::kit::{anonymous}::show_picture(bool)':
+/Users/wtb/dev/tab5-hello-design/components/ui/kit_popover.cpp:805:24: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  805 |         lv_obj_add_flag(s_pop.body, LV_OBJ_FLAG_HIDDEN);
+      |         ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/components/ui/kit_popover.cpp:808:27: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  808 |         lv_obj_remove_flag(s_pop.body, LV_OBJ_FLAG_HIDDEN);
+      |         ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/core/lv_obj.h:248:6: note: declared here
+  248 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/components/ui/kit_popover.cpp: In function 'lv_obj_t* ui::kit::popover(lv_obj_t*, int32_t, int32_t, From, bool)':
+/Users/wtb/dev/tab5-hello-design/components/ui/kit_popover.cpp:1193:27: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+ 1193 |         lv_obj_remove_flag(s_pop.backdrop, LV_OBJ_FLAG_CLICKABLE);
+      |         ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/core/lv_obj.h:248:6: note: declared here
+  248 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/components/ui/kit_popover.cpp:1208:20: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+ 1208 |     lv_obj_add_flag(s_pop.scrim, LV_OBJ_FLAG_CLICKABLE);
+      |     ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/components/ui/kit_popover.cpp:1251:20: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+ 1251 |     lv_obj_add_flag(s_pop.card, LV_OBJ_FLAG_CLICKABLE);
+      |     ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/components/ui/kit_popover.cpp:1257:23: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+ 1257 |     lv_obj_remove_flag(s_pop.body, LV_OBJ_FLAG_SCROLLABLE);
+      |     ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/core/lv_obj.h:248:6: note: declared here
+  248 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/components/ui/kit_popover.cpp:1258:20: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+ 1258 |     lv_obj_add_flag(s_pop.body, LV_OBJ_FLAG_IGNORE_LAYOUT);
+      |     ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/components/ui/kit_popover.cpp: In function 'void ui::kit::{anonymous}::leave(lv_obj_t*)':
+/Users/wtb/dev/tab5-hello-design/components/ui/kit_popover.cpp:1312:43: warning: 'bool lv_obj_has_flag(const lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_is_<flag>() functions instead, e.g. lv_obj_is_hidden(obj). [-Wdeprecated-declarations]
+ 1312 |     if (slab == nullptr || lv_obj_has_flag(slab, LV_OBJ_FLAG_USER_4)) {
+      |                            ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/core/lv_obj.h:545:6: note: declared here
+  545 | bool lv_obj_has_flag(const lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/components/ui/kit_popover.cpp:1315:20: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+ 1315 |     lv_obj_add_flag(slab, LV_OBJ_FLAG_USER_4);
+      |     ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/components/ui/kit_popover.cpp: In function 'void ui::kit::{anonymous}::finish(lv_obj_t*)':
+/Users/wtb/dev/tab5-hello-design/components/ui/kit_popover.cpp:1347:43: warning: 'bool lv_obj_has_flag(const lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_is_<flag>() functions instead, e.g. lv_obj_is_hidden(obj). [-Wdeprecated-declarations]
+ 1347 |     if (slab == nullptr || lv_obj_has_flag(slab, LV_OBJ_FLAG_USER_4)) {
+      |                            ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/core/lv_obj.h:545:6: note: declared here
+  545 | bool lv_obj_has_flag(const lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/components/ui/kit_popover.cpp: In function 'lv_obj_t* ui::kit::{anonymous}::bare(lv_obj_t*)':
+/Users/wtb/dev/tab5-hello-design/components/ui/kit_popover.cpp:1362:23: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+ 1362 |     lv_obj_remove_flag(obj, LV_OBJ_FLAG_CLICKABLE);
+      |     ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/core/lv_obj.h:248:6: note: declared here
+  248 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/components/ui/kit_popover.cpp:1363:23: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+ 1363 |     lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
+      |     ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/core/lv_obj.h:248:6: note: declared here
+  248 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/components/ui/kit_popover.cpp: In function 'lv_obj_t* ui::kit::notice(const NoticeSpec&)':
+/Users/wtb/dev/tab5-hello-design/components/ui/kit_popover.cpp:1400:20: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+ 1400 |     lv_obj_add_flag(slab, LV_OBJ_FLAG_CLICKABLE);
+      |     ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/components/ui/kit_popover.cpp:1416:27: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+ 1416 |         lv_obj_remove_flag(mark, LV_OBJ_FLAG_CLICKABLE);  // a tap on it is a tap on the notice
+      |         ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/core/lv_obj.h:248:6: note: declared here
+  248 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/components/ui/kit_popover.cpp: In lambda function:
+/Users/wtb/dev/tab5-hello-design/components/ui/kit_popover.cpp:1462:33: warning: 'bool lv_obj_has_flag(const lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_is_<flag>() functions instead, e.g. lv_obj_is_hidden(obj). [-Wdeprecated-declarations]
+ 1462 |             if (!lv_obj_has_flag(obj, LV_OBJ_FLAG_USER_3)) {
+      |                  ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/core/lv_obj.h:545:6: note: declared here
+  545 | bool lv_obj_has_flag(const lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/components/ui/kit_popover.cpp:1463:32: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+ 1463 |                 lv_obj_add_flag(obj, LV_OBJ_FLAG_USER_3);
+      |                 ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/components/ui/kit_popover.cpp: At global scope:
+/Users/wtb/dev/tab5-hello-design/components/ui/kit_popover.cpp:232:6: warning: 'void ui::kit::{anonymous}::unscratch(void*)' defined but not used [-Wunused-function]
+  232 | void unscratch(void *p)
+      |      ^~~~~~~~~
+[9/23] Linking C static library esp-idf/board/libboard.a
+[10/23] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/main.cpp.obj
+[11/23] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/network.cpp.obj
+[12/23] Building CXX object esp-idf/ui/CMakeFiles/__idf_ui.dir/lab.cpp.obj
+/Users/wtb/dev/tab5-hello-design/components/ui/lab.cpp: In function 'lv_obj_t* ui::lab::{anonymous}::box(lv_obj_t*, lv_flex_flow_t, int32_t)':
+/Users/wtb/dev/tab5-hello-design/components/ui/lab.cpp:64:23: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+   64 |     lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
+      |     ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from /Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/lvgl.h:21,
+                 from /Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/lvgl.h:1,
+                 from /Users/wtb/dev/tab5-hello-design/components/ui/include/kit.h:13,
+                 from /Users/wtb/dev/tab5-hello-design/components/ui/include/lab.h:3,
+                 from /Users/wtb/dev/tab5-hello-design/components/ui/lab.cpp:1:
+/Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/core/lv_obj.h:248:6: note: declared here
+  248 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/components/ui/lab.cpp:65:23: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+   65 |     lv_obj_remove_flag(obj, LV_OBJ_FLAG_CLICKABLE);
+      |     ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/core/lv_obj.h:248:6: note: declared here
+  248 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/components/ui/lab.cpp: In function 'void ui::lab::{anonymous}::choose_sheet(int)':
+/Users/wtb/dev/tab5-hello-design/components/ui/lab.cpp:124:35: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  124 |                 lv_obj_remove_flag(s_sheets[i], LV_OBJ_FLAG_HIDDEN);
+      |                 ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/core/lv_obj.h:248:6: note: declared here
+  248 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/components/ui/lab.cpp:126:32: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  126 |                 lv_obj_add_flag(s_sheets[i], LV_OBJ_FLAG_HIDDEN);
+      |                 ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/components/ui/lab.cpp: In function 'void ui::lab::{anonymous}::build_dock(lv_obj_t*)':
+/Users/wtb/dev/tab5-hello-design/components/ui/lab.cpp:337:20: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  337 |     lv_obj_add_flag(w, LV_OBJ_FLAG_IGNORE_LAYOUT);
+      |     ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/components/ui/lab.cpp:338:20: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  338 |     lv_obj_add_flag(w, LV_OBJ_FLAG_EVENT_BUBBLE);
+      |     ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/components/ui/lab.cpp:345:20: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  345 |     lv_obj_add_flag(rule, LV_OBJ_FLAG_IGNORE_LAYOUT);
+      |     ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/components/ui/lab.cpp:346:23: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  346 |     lv_obj_remove_flag(rule, LV_OBJ_FLAG_CLICKABLE);
+      |     ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/core/lv_obj.h:248:6: note: declared here
+  248 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/components/ui/lab.cpp:358:20: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  358 |     lv_obj_add_flag(mark, LV_OBJ_FLAG_IGNORE_LAYOUT);
+      |     ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/components/ui/lab.cpp:359:23: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  359 |     lv_obj_remove_flag(mark, LV_OBJ_FLAG_CLICKABLE);
+      |     ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/core/lv_obj.h:248:6: note: declared here
+  248 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/components/ui/lab.cpp:375:20: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  375 |     lv_obj_add_flag(read, LV_OBJ_FLAG_EVENT_BUBBLE);
+      |     ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/components/ui/lab.cpp: In function 'void ui::lab::{anonymous}::build_bar(lv_obj_t*)':
+/Users/wtb/dev/tab5-hello-design/components/ui/lab.cpp:426:20: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  426 |     lv_obj_add_flag(media, LV_OBJ_FLAG_CLICKABLE);
+      |     ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/components/ui/lab.cpp:435:23: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  435 |     lv_obj_remove_flag(art, LV_OBJ_FLAG_CLICKABLE);
+      |     ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/core/lv_obj.h:248:6: note: declared here
+  248 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/components/ui/lab.cpp: In function 'void ui::lab::{anonymous}::build_surfaces(lv_obj_t*)':
+/Users/wtb/dev/tab5-hello-design/components/ui/lab.cpp:520:20: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  520 |     lv_obj_add_flag(pane, LV_OBJ_FLAG_IGNORE_LAYOUT);
+      |     ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/components/ui/lab.cpp: In function 'void ui::lab::{anonymous}::build_glass(lv_obj_t*)':
+/Users/wtb/dev/tab5-hello-design/components/ui/lab.cpp:761:20: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  761 |     lv_obj_add_flag(side, LV_OBJ_FLAG_IGNORE_LAYOUT);
+      |     ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/components/ui/lab.cpp:796:20: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  796 |     lv_obj_add_flag(slab, LV_OBJ_FLAG_IGNORE_LAYOUT);
+      |     ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/components/ui/lab.cpp:800:20: warning: 'void lv_obj_add_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, true). [-Wdeprecated-declarations]
+  800 |     lv_obj_add_flag(slab, LV_OBJ_FLAG_CLICKABLE);
+      |     ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/core/lv_obj.h:239:6: note: declared here
+  239 | void lv_obj_add_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~
+[13/23] Building CXX object esp-idf/ui/CMakeFiles/__idf_ui.dir/kit_pages.cpp.obj
+[14/23] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/diagnostics.cpp.obj
+[15/23] Building CXX object esp-idf/main/CMakeFiles/__idf_main.dir/remote.cpp.obj
+[16/23] Building CXX object esp-idf/ui/CMakeFiles/__idf_ui.dir/ui.cpp.obj
+[17/23] Building CXX object esp-idf/ui/CMakeFiles/__idf_ui.dir/kit_front_radar_view.cpp.obj
+/Users/wtb/dev/tab5-hello-design/components/ui/kit_front_radar_view.cpp: In function 'lv_obj_t* ui::look::make_box(lv_obj_t*)':
+/Users/wtb/dev/tab5-hello-design/components/ui/kit_front_radar_view.cpp:120:23: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  120 |     lv_obj_remove_flag(box, LV_OBJ_FLAG_CLICKABLE);
+      |     ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from /Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/lvgl.h:21,
+                 from /Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/lvgl.h:1,
+                 from /Users/wtb/dev/tab5-hello-design/components/ui/radar_page.h:3,
+                 from /Users/wtb/dev/tab5-hello-design/components/ui/kit_front_radar_view.cpp:5:
+/Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/core/lv_obj.h:248:6: note: declared here
+  248 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/components/ui/kit_front_radar_view.cpp:121:23: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  121 |     lv_obj_remove_flag(box, LV_OBJ_FLAG_SCROLLABLE);
+      |     ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/core/lv_obj.h:248:6: note: declared here
+  248 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/components/ui/kit_front_radar_view.cpp: In function 'void ui::look::style_panel(lv_obj_t*, uint32_t, int)':
+/Users/wtb/dev/tab5-hello-design/components/ui/kit_front_radar_view.cpp:132:23: warning: 'void lv_obj_remove_flag(lv_obj_t*, lv_obj_flag_t)' is deprecated: Use the dedicated lv_obj_set_<flag>() setters instead, e.g. lv_obj_set_hidden(obj, false). [-Wdeprecated-declarations]
+  132 |     lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
+      |     ~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/wtb/dev/tab5-hello-design/managed_components/lvgl__lvgl/include/lvgl/core/lv_obj.h:248:6: note: declared here
+  248 | void lv_obj_remove_flag(lv_obj_t * obj, lv_obj_flag_t f);
+      |      ^~~~~~~~~~~~~~~~~~
+[18/23] Linking C static library esp-idf/ui/libui.a
+[19/23] Linking C static library esp-idf/main/libmain.a
+[20/23] Generating esp-idf/esp_system/ld/sections.ld
+[21/23] Linking CXX executable smart_flexispot.elf
+[22/23] Generating binary image from built executable
+esptool.py v4.12.0
+Creating esp32p4 image...
+Merged 3 ELF sections
+Successfully created esp32p4 image.
+Generated /Users/wtb/dev/tab5-hello-design/build_kit/smart_flexispot.bin
+[23/23] cd /Users/wtb/dev/tab5-hello-design/build_kit/esp-idf/esptool_py && /Users/wtb/.espressif/python_env/idf5.5_py3.14_env/bin/python /Users/wtb/esp/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 partition --type app /Users/wtb/dev/tab5-hello-design/build_kit/partition_table/partition-table.bin /Users/wtb/dev/tab5-hello-design/build_kit/smart_flexispot.bin
+smart_flexispot.bin binary size 0x3e11f0 bytes. Smallest app partition is 0x500000 bytes. 0x11ee10 bytes (22%) free.

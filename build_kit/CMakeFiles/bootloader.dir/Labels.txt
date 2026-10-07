@@ -1,0 +1,13 @@
+# Target labels
+ bootloader
+# Source files and their labels
+/Users/wtb/dev/tab5-hello-design/build_kit/CMakeFiles/bootloader
+/Users/wtb/dev/tab5-hello-design/build_kit/CMakeFiles/bootloader.rule
+/Users/wtb/dev/tab5-hello-design/build_kit/CMakeFiles/bootloader-complete.rule
+/Users/wtb/dev/tab5-hello-design/build_kit/bootloader-prefix/src/bootloader-stamp/bootloader-build.rule
+/Users/wtb/dev/tab5-hello-design/build_kit/bootloader-prefix/src/bootloader-stamp/bootloader-configure.rule
+/Users/wtb/dev/tab5-hello-design/build_kit/bootloader-prefix/src/bootloader-stamp/bootloader-download.rule
+/Users/wtb/dev/tab5-hello-design/build_kit/bootloader-prefix/src/bootloader-stamp/bootloader-install.rule
+/Users/wtb/dev/tab5-hello-design/build_kit/bootloader-prefix/src/bootloader-stamp/bootloader-mkdir.rule
+/Users/wtb/dev/tab5-hello-design/build_kit/bootloader-prefix/src/bootloader-stamp/bootloader-patch.rule
+/Users/wtb/dev/tab5-hello-design/build_kit/bootloader-prefix/src/bootloader-stamp/bootloader-update.rule

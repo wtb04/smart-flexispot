@@ -1,0 +1,43 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "/Users/wtb/dev/tab5-hello-design/build_new/esp-idf/espressif__libjpeg-turbo/CMakeFiles/jpegturbo_proj"
+		},
+		{
+			"file" : "/Users/wtb/dev/tab5-hello-design/build_new/esp-idf/espressif__libjpeg-turbo/CMakeFiles/jpegturbo_proj.rule"
+		},
+		{
+			"file" : "/Users/wtb/dev/tab5-hello-design/build_new/esp-idf/espressif__libjpeg-turbo/CMakeFiles/jpegturbo_proj-complete.rule"
+		},
+		{
+			"file" : "/Users/wtb/dev/tab5-hello-design/build_new/esp-idf/espressif__libjpeg-turbo/jpegturbo_proj-prefix/src/jpegturbo_proj-stamp/jpegturbo_proj-build.rule"
+		},
+		{
+			"file" : "/Users/wtb/dev/tab5-hello-design/build_new/esp-idf/espressif__libjpeg-turbo/jpegturbo_proj-prefix/src/jpegturbo_proj-stamp/jpegturbo_proj-configure.rule"
+		},
+		{
+			"file" : "/Users/wtb/dev/tab5-hello-design/build_new/esp-idf/espressif__libjpeg-turbo/jpegturbo_proj-prefix/src/jpegturbo_proj-stamp/jpegturbo_proj-download.rule"
+		},
+		{
+			"file" : "/Users/wtb/dev/tab5-hello-design/build_new/esp-idf/espressif__libjpeg-turbo/jpegturbo_proj-prefix/src/jpegturbo_proj-stamp/jpegturbo_proj-install.rule"
+		},
+		{
+			"file" : "/Users/wtb/dev/tab5-hello-design/build_new/esp-idf/espressif__libjpeg-turbo/jpegturbo_proj-prefix/src/jpegturbo_proj-stamp/jpegturbo_proj-mkdir.rule"
+		},
+		{
+			"file" : "/Users/wtb/dev/tab5-hello-design/build_new/esp-idf/espressif__libjpeg-turbo/jpegturbo_proj-prefix/src/jpegturbo_proj-stamp/jpegturbo_proj-patch.rule"
+		},
+		{
+			"file" : "/Users/wtb/dev/tab5-hello-design/build_new/esp-idf/espressif__libjpeg-turbo/jpegturbo_proj-prefix/src/jpegturbo_proj-stamp/jpegturbo_proj-update.rule"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"jpegturbo_proj"
+		],
+		"name" : "jpegturbo_proj"
+	}
+}

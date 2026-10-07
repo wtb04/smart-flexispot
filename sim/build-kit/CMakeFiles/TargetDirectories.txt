@@ -1,0 +1,7 @@
+/Users/wtb/dev/tab5-hello-design/sim/build-kit/CMakeFiles/sim.dir
+/Users/wtb/dev/tab5-hello-design/sim/build-kit/CMakeFiles/screenshots.dir
+/Users/wtb/dev/tab5-hello-design/sim/build-kit/CMakeFiles/edit_cache.dir
+/Users/wtb/dev/tab5-hello-design/sim/build-kit/CMakeFiles/rebuild_cache.dir
+/Users/wtb/dev/tab5-hello-design/sim/build-kit/lvgl/CMakeFiles/lvgl.dir
+/Users/wtb/dev/tab5-hello-design/sim/build-kit/lvgl/CMakeFiles/edit_cache.dir
+/Users/wtb/dev/tab5-hello-design/sim/build-kit/lvgl/CMakeFiles/rebuild_cache.dir
