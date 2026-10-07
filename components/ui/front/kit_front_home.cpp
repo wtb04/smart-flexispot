@@ -16,8 +16,8 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
-#include <cstdlib>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <strings.h>
 #include <ctime>
@@ -165,6 +165,13 @@ bool split_value(const char *value, char *figure, std::size_t figure_size, char 
         return false;
     }
     std::snprintf(figure, figure_size, "%.*s", static_cast<int>(n), value);
+    // Home Assistant passes on what a sensor reports, 63.15 % among it: a
+    // whole number from ten up, one decimal under it
+    if (char *point = std::strpbrk(figure, ".,")) {
+        *point            = '.';
+        const float level = std::strtof(figure, nullptr);
+        std::snprintf(figure, figure_size, "%.*f", std::fabs(level) >= 10.0f ? 0 : 1, static_cast<double>(level));
+    }
     const char *rest = value + n;
     while (*rest == ' ') {
         ++rest;
