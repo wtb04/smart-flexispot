@@ -672,32 +672,6 @@ Ticket submit(Request request)
     return ticket;
 }
 
-void cancel(Ticket ticket)
-{
-    if (s_lock == nullptr) {
-        return;
-    }
-    Tells tells;
-    {
-        Lock hold;
-        s_core.cancel(ticket, tells);
-    }
-    tell(tells);
-}
-
-void cancel(Host host, const std::string &key)
-{
-    if (s_lock == nullptr) {
-        return;
-    }
-    Tells tells;
-    {
-        Lock hold;
-        s_core.cancel(host, key, tells);
-    }
-    tell(tells);
-}
-
 HostStatus status(Host host)
 {
     if (s_lock == nullptr) {
