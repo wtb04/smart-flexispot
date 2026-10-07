@@ -146,18 +146,6 @@ Rail *progress(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int32_t w)
     return rail;
 }
 
-void show_picture(Cover &cover, Backdrop &backdrop, const void *pixels, std::int32_t w, std::int32_t h, bool animate)
-{
-    if (pixels == nullptr) {
-        cover.clear(animate);
-        backdrop.clear();
-        return;
-    }
-    const Picture picture{pixels, w, h, 0};
-    cover.show(picture, animate);
-    backdrop.show(picture);
-}
-
 // --- music ---------------------------------------------------------------------
 
 namespace music {
@@ -168,11 +156,11 @@ constexpr std::int32_t TRANSPORT_Y = VOLUME_Y - space::xxl - TRANSPORT_H;
 constexpr std::int32_t TIMES_Y = TRANSPORT_Y - space::xxl - 24, RAIL_Y = TIMES_Y - 30;
 
 detail::ViewId s_view = detail::kNoView;
-Backdrop      *s_backdrop = nullptr;
+lv_obj_t      *s_root = nullptr;
 Cover         *s_cover = nullptr;
 std::uint32_t  s_covers = UINT32_MAX;  // the model's counts of covers and large ones when last shown
 std::uint32_t  s_larges = UINT32_MAX;
-std::uint32_t  s_tinted = UINT32_MAX;  // and of covers when the backdrop was last made
+std::uint32_t  s_tinted = UINT32_MAX;  // and of covers when the view was last coloured by one
 lv_timer_t    *s_retry  = nullptr;
 lv_obj_t      *s_source = nullptr, *s_title = nullptr, *s_artist = nullptr;
 Rail          *s_rail = nullptr;
@@ -195,8 +183,28 @@ void glide(lv_timer_t *)
     }
 }
 
+// The view in the cover's colours: behind, its most vivid hue as dark as the
+// pages, or as pale in the light look; the play button and the source in its
+// accent. A cover of greys keeps the pages' own.
+void tint(void *)
+{
+    const MediaState &media = media_state();
+    const void       *small = media.placeholder ? nullptr : media.art;
+    const AlbumColours c    = small != nullptr ? album_colours(static_cast<const std::uint16_t *>(small),
+                                                                media.art_width * media::kArtSize, look() == Look::Dark)
+                                               : AlbumColours{};
+    lv_obj_set_style_bg_color(s_root, c.vivid ? c.back : lv_color_hex(colours().ground), 0);
+    if (c.vivid) {
+        lv_obj_set_style_bg_color(s_play, c.accent, 0);
+        lv_obj_set_style_text_color(s_source, c.ink, 0);
+    } else {
+        lv_obj_remove_local_style_prop(s_play, LV_STYLE_BG_COLOR, 0);
+        lv_obj_remove_local_style_prop(s_source, LV_STYLE_TEXT_COLOR, 0);
+    }
+}
+
 // The large cover, once it follows, takes the small one's place without a
-// fade, and the backdrop it was made from stays: the colours are the same.
+// fade, and the colours it was taken from stay: they are the same.
 // Each is marked shown only once it is, and tried again soon when it found no room.
 void show_cover()
 {
@@ -218,14 +226,8 @@ void show_cover()
         }
     }
     if (s_tinted != media.covers) {
-        if (pixels == nullptr) {
-            s_backdrop->clear();
-            s_tinted = media.covers;
-        } else if (s_backdrop->show(Picture{pixels, w, h, 0})) {
-            s_tinted = media.covers;
-        } else {
-            failed = true;
-        }
+        tint(nullptr);
+        s_tinted = media.covers;
     }
     if (failed) {
         again_soon(s_retry, [] {
@@ -274,7 +276,7 @@ void show()
 void build(lv_obj_t *)
 {
     lv_obj_t *root = fullscreen_root();
-    s_backdrop     = new Backdrop(root, size::screen_w, size::screen_h);
+    s_root         = root;
     s_view         = detail::add_view({"music", detail::ViewKind::Fullscreen, root,
                                        [] {
                                            s_covers  = UINT32_MAX;
@@ -286,7 +288,6 @@ void build(lv_obj_t *)
                                        [] {
                                            lv_timer_pause(s_glide);
                                            s_cover->release();
-                                           s_backdrop->clear();
                                        }});
 
     s_cover = new Cover(root, COVER, COVER, Shape::Rounded, radius::tile);
@@ -338,6 +339,7 @@ void build(lv_obj_t *)
     lv_obj_move_to_index(s_picks, -1);
 
     s_glide = lv_timer_create(glide, 33, nullptr);
+    on_restyle(root, tint, nullptr);  // the look's own shades of the cover's hue
     lv_timer_pause(s_glide);
     detail::subscribe(Topic::Media, s_view, show);
     detail::subscribe(Topic::Picks, s_view, [] { lv_obj_set_hidden(s_picks, detail::media_pick_count() == 0); });

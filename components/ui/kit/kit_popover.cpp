@@ -1124,6 +1124,22 @@ void on_frame(lv_event_t *)
 
 bool popover_open() { return s_pop.card != nullptr && !s_pop.closing; }
 
+void tint_popover(const lv_color_t *colour)
+{
+    if (s_pop.card == nullptr) {
+        return;
+    }
+    if (colour != nullptr) {
+        lv_obj_set_style_bg_color(s_pop.card, *colour, 0);
+    } else {
+        lv_obj_remove_local_style_prop(s_pop.card, LV_STYLE_BG_COLOR, 0);
+    }
+    if (s_pop.pictured) {
+        s_pop.pictured = false;  // its picture painted again in the new colour
+        picture_card(nullptr);
+    }
+}
+
 void set_behind(Behind behind)
 {
     s_behind.store(behind, std::memory_order_relaxed);

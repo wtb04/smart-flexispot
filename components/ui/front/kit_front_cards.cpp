@@ -166,6 +166,8 @@ void glide_media(lv_timer_t *)
 
 lv_timer_t *s_cover_retry = nullptr;
 
+void tint_media_card(const detail::MediaState &m);
+
 void paint_media_card()
 {
     MediaCard *c = s_media;
@@ -197,14 +199,17 @@ void paint_media_card()
     set_hidden_if(c->episode, episode[0] == 0);
 
     if (m.covers != c->covers) {
+        // at once as the card opens, faded in only as the cover changes while it is open
+        const bool opening = c->covers == UINT32_MAX;
         if (!m.has_track || m.art == nullptr || m.placeholder) {
-            c->cover->clear();
+            c->cover->clear(!opening);
             c->covers = m.covers;
-        } else if (c->cover->show(Picture{m.art, m.art_width, media::kArtSize, 0})) {
+        } else if (c->cover->show(Picture{m.art, m.art_width, media::kArtSize, 0}, !opening)) {
             c->covers = m.covers;
         } else {
             again_soon(s_cover_retry, paint_media_card);
         }
+        tint_media_card(m);
     }
 
     const bool timed = m.has_track && m.duration_s > 0;
@@ -254,6 +259,21 @@ void paint_media_card()
     if (shape != c->shape) {
         c->shape = shape;
         fit_popover();
+    }
+}
+
+// The card in its cover's colours: its glass the hue's surface, play in its accent.
+void tint_media_card(const detail::MediaState &m)
+{
+    const bool art = m.has_track && m.art != nullptr && !m.placeholder;
+    const AlbumColours c = art ? album_colours(static_cast<const std::uint16_t *>(m.art), m.art_width * media::kArtSize,
+                                               look() == Look::Dark)
+                               : AlbumColours{};
+    tint_popover(c.vivid ? &c.surface : nullptr);
+    if (c.vivid) {
+        lv_obj_set_style_bg_color(s_media->play, c.accent, 0);
+    } else {
+        lv_obj_remove_local_style_prop(s_media->play, LV_STYLE_BG_COLOR, 0);
     }
 }
 
