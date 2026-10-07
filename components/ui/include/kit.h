@@ -71,6 +71,7 @@ inline constexpr std::int32_t inner  = 20;  // a well or a row inside a tile: ti
 inline constexpr std::int32_t button = LV_RADIUS_CIRCLE;  // capsules and circles, as Apple's are
 inline constexpr std::int32_t pop    = 36;
 inline constexpr std::int32_t dock   = 34;
+inline constexpr std::int32_t bar    = 22;  // the dock's corners for its width, on the bar's height
 inline constexpr std::int32_t round  = LV_RADIUS_CIRCLE;
 }  // namespace radius
 

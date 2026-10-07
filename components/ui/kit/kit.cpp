@@ -1130,7 +1130,7 @@ void segmented_choose(lv_obj_t *seg, int index, bool animate)
 lv_obj_t *capsule(lv_obj_t *parent)
 {
     lv_obj_t *cap = glass(parent, Glass::Small);
-    lv_obj_set_style_radius(cap, radius::dock, 0);
+    lv_obj_set_style_radius(cap, radius::bar, 0);
     lv_obj_set_size(cap, LV_SIZE_CONTENT, size::bar);
     lv_obj_set_style_pad_hor(cap, space::s, 0);
     lv_obj_set_flex_flow(cap, LV_FLEX_FLOW_ROW);
