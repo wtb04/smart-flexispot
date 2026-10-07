@@ -1145,4 +1145,39 @@ void set_soft(lv_obj_t *btn, bool on)
     }
 }
 
+// --- a thick slider ---------------------------------------------------------
+
+namespace {
+void paint_fill_slider(void *ctx)
+{
+    auto *s = static_cast<lv_obj_t *>(ctx);
+    lv_obj_set_style_bg_color(s, colour(Ink::Primary), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s, static_cast<lv_opa_t>(std::min(255, colours().fill_opa * 2)), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s, colour(Ink::Primary), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(s, 235, LV_PART_INDICATOR);
+}
+}  // namespace
+
+lv_obj_t *fill_slider(lv_obj_t *parent, std::int32_t width, const char *glyph, std::int32_t min, std::int32_t max)
+{
+    lv_obj_t *s = lv_slider_create(parent);
+    lv_obj_remove_style_all(s);
+    lv_obj_set_size(s, width, size::button_lg);
+    lv_slider_set_range(s, min, max);
+    for (lv_part_t part : {LV_PART_MAIN, LV_PART_INDICATOR}) {
+        lv_obj_set_style_radius(s, radius::round, part);
+    }
+    lv_obj_set_style_opa(s, LV_OPA_TRANSP, LV_PART_KNOB);
+    lv_obj_set_style_pad_all(s, 0, LV_PART_KNOB);
+    paint_fill_slider(s);
+    on_restyle(s, paint_fill_slider, s);
+    if (glyph != nullptr) {
+        // a solid grey, which reads both on the fill and past it
+        lv_obj_t *mark = icon(s, glyph, 28, true);
+        lv_obj_set_style_text_color(mark, lv_color_hex(0x8e8e93), 0);
+        lv_obj_align(mark, LV_ALIGN_LEFT_MID, space::xl, 0);
+    }
+    return s;
+}
+
 }  // namespace ui::kit

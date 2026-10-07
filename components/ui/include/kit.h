@@ -66,10 +66,10 @@ inline constexpr std::int32_t xxl = 24;
 }  // namespace space
 
 namespace radius {
-inline constexpr std::int32_t tile   = 26;
-inline constexpr std::int32_t inner  = 16;  // a well or a row inside a tile: tile minus its padding, rounded
-inline constexpr std::int32_t button = 16;
-inline constexpr std::int32_t pop    = 30;
+inline constexpr std::int32_t tile   = 32;
+inline constexpr std::int32_t inner  = 20;  // a well or a row inside a tile: tile minus its padding, rounded
+inline constexpr std::int32_t button = LV_RADIUS_CIRCLE;  // capsules and circles, as Apple's are
+inline constexpr std::int32_t pop    = 36;
 inline constexpr std::int32_t dock   = 34;
 inline constexpr std::int32_t round  = LV_RADIUS_CIRCLE;
 }  // namespace radius
@@ -810,5 +810,15 @@ lv_obj_t *notice(const NoticeSpec &spec);
 void      set_notice_aside(lv_obj_t *notice, const char *aside);
 /** The notice on show leaves. */
 void      dismiss_notice();
+
+// --- a thick slider ---------------------------------------------------------
+
+/**
+ * A level as Control Center sets one: a capsule as tall as a big button, the
+ * part up to the level filled, the glyph in it. Sends LV_EVENT_VALUE_CHANGED;
+ * lv_slider_get_value / lv_slider_set_value read and set it.
+ */
+lv_obj_t *fill_slider(lv_obj_t *parent, std::int32_t width, const char *glyph, std::int32_t min = 0,
+                      std::int32_t max = 100);
 
 }  // namespace ui::kit
