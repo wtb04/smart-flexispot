@@ -33,9 +33,4 @@ void diagnostics_take_row(int card, int row, const char *value, Level level)
     tell(s_diagnostics.rows[card][row], value, level);
 }
 
-void diagnostics_take_glance(int index, const char *value)
-{
-    tell(s_diagnostics.glances[index], value, Level::Neutral);
-}
-
 }  // namespace ui::detail
