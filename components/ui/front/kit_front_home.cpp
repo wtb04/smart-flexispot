@@ -276,7 +276,7 @@ void place_air()
     const std::int32_t w = lv_obj_get_content_width(s_air_body), h = lv_obj_get_content_height(s_air_body);
     const bool         row = w > h * 5 / 2;  // across the page, away
     const int          across = row ? kPillCount : 2;
-    const std::int32_t gap_x = row ? space::xl : space::xl, gap_y = space::l;
+    const std::int32_t gap_x = space::xl, gap_y = space::l;
     const std::int32_t cell_w = (w - (across - 1) * gap_x) / across;
     const std::int32_t cell_h = row ? h : (h - gap_y) / 2;
     for (int i = 0; i < kPillCount; ++i) {

@@ -525,7 +525,7 @@ struct HeatCard : InPsram {
 };
 HeatCard *s_heat = nullptr;
 
-// In tenths of a degree, so steps add up without drifting.
+// In tenths of a degree.
 int        s_held     = NONE;  // the target as tapped, until the thermostat has it
 std::uint32_t s_held_ms = 0;
 lv_timer_t *s_send    = nullptr;
