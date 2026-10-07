@@ -10,8 +10,8 @@ namespace ui {
  *  column beside it. kit_front_radar_view.cpp */
 void build_radar_page(lv_obj_t *page, std::int32_t width, std::int32_t height);
 
-/** As a page is chosen: the radar laid out for it, following the nearest
- *  aircraft again unless one was chosen. */
+/** As a page is chosen: the radar brought up to date for its own, following
+ *  the nearest aircraft again unless one was chosen. */
 void radar_page_opened();
 
 /** Runs with the LVGL lock held. */

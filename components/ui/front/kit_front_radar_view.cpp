@@ -95,13 +95,6 @@ void set_text_color(lv_obj_t *obj, std::uint32_t colour)
     }
 }
 
-void set_bg_color(lv_obj_t *obj, std::uint32_t colour)
-{
-    if (obj != nullptr && !has_local_color(obj, LV_STYLE_BG_COLOR, 0, lv_color_hex(colour))) {
-        lv_obj_set_style_bg_color(obj, lv_color_hex(colour), 0);
-    }
-}
-
 lv_obj_t *make_label(lv_obj_t *parent, const char *value, std::uint32_t colour, const lv_font_t *font)
 {
     lv_obj_t *label = lv_label_create(parent);
@@ -180,8 +173,6 @@ constexpr int           BITS_PER_CHANNEL = 8;
 constexpr int           RED_SHIFT        = 2 * BITS_PER_CHANNEL;
 constexpr std::uint32_t CHANNEL_MASK     = 0xff;
 
-// LVGL stores RGB565A8 as an RGB565 plane followed by a separate alpha plane,
-// not interleaved.
 constexpr std::size_t RGB565_BYTES_PER_PX = sizeof(std::uint16_t);
 constexpr std::size_t ALPHA_BYTES_PER_PX  = 1;
 
@@ -202,8 +193,6 @@ constexpr std::int32_t COMPASS_GAP       = 10;
 constexpr std::int32_t HOME_SIZE         = 8;
 constexpr std::int32_t MARKER_SIZE       = 34;
 constexpr std::int32_t MARKER_STROKE     = 2;
-constexpr int          RIM_DOTS          = 14;
-constexpr int          RIM_SIZE          = 6;
 constexpr std::int32_t TAP_REACH_DIVISOR = 10;
 
 constexpr int          DRAWN_MAX          = radar::kMaxAircraft;
@@ -239,10 +228,6 @@ constexpr std::uint8_t  PROVINCE_ALPHA = 0x38;
 constexpr int RANGES[]           = {20, 40, 60, 80, 100, 120, 140, 160};
 constexpr int RANGE_COUNT        = static_cast<int>(std::size(RANGES));
 constexpr int INITIAL_RANGE_STEP = 3;  // 80 km
-// The scope sits in a card the way the thermostat dial does, and the card's
-// corners -- the room a circle leaves in a square -- carry the instrument's own
-// controls and scale, set into the bezel like the distances are set on the rings.
-constexpr std::int32_t BEZEL     = 20;
 constexpr std::int32_t CORNER    = 88;
 constexpr std::int32_t ZOOM_D    = look::chip::size;
 constexpr std::int32_t EDGE      = look::chip::inset;  // as in every other card
@@ -256,7 +241,6 @@ constexpr float KEY_LABEL_GAP_DEG       = 2.0f;
 constexpr std::int32_t SUMMARY_PAST_CORNER = 60;
 constexpr std::int32_t SUMMARY_W           = CORNER + SUMMARY_PAST_CORNER;
 
-constexpr std::uint32_t ZOOM_MS            = 260;
 // A frame of the map takes about 175 ms while zooming, so an eased 260 ms
 // showed one frame nearly at the end: longer and even, it shows three or four.
 constexpr std::uint32_t ZOOM_FULL_MS       = 600;
@@ -366,21 +350,15 @@ struct Plot {
 
 enum class Picture : std::uint8_t { Idle, Looking, Loading, Missing, Shown };
 
-// Every reading redraws the whole scope, a 290 KB clear and every blip; not
-// while neither Home nor the radar page is up. Opening either catches up.
-bool s_radar_stale = false;
-
 lv_obj_t          *s_scope                      = nullptr;
 lv_obj_t          *s_marker                     = nullptr;
 lv_obj_t          *s_rings[RINGS]               = {};
-lv_obj_t          *s_rim[RIM_DOTS]              = {};
 lv_obj_t          *s_legend[LEGEND_STEPS]       = {};
-// Home, where the rings are centred; on the page the middle of a disc, and
-// as the map the middle of the space beside the column, with the map past them.
+// Home, where the rings are centred: the middle of the space beside the
+// column, with the map past them.
 std::int32_t       s_cx                         = 0;
 std::int32_t       s_cy                         = 0;
 std::int32_t       s_radius                     = 0;
-bool               s_to_edges                   = false;  // the map and air run past the rings
 
 float     s_shown_range = 0.0f;
 int       s_zoom_from   = 0;
@@ -394,7 +372,6 @@ lv_obj_t    *s_column    = nullptr;
 lv_obj_t    *s_map_page      = nullptr;  // the radar page, which the map fills
 std::int32_t s_map_w    = 0;
 std::int32_t s_map_h    = 0;
-lv_obj_t    *s_map_chip = nullptr;  // on Home, to the radar page
 lv_obj_t    *s_track      = nullptr;  // following on its own, or how near it is to again
 lv_obj_t    *s_track_mark = nullptr;
 lv_obj_t    *s_track_ring = nullptr;
@@ -830,21 +807,6 @@ std::uint16_t blend565(std::uint16_t under, std::uint16_t over, std::uint8_t opa
     return static_cast<std::uint16_t>(channel(RED, FIVE_BITS) | channel(GREEN, SIX_BITS) | channel(0, FIVE_BITS));
 }
 
-// Along row y of a circle `radius` round cx, cy; false where it misses the row.
-bool circle_span(std::int32_t y, std::int32_t cx, std::int32_t cy, float radius, std::int32_t &from,
-                 std::int32_t &to)
-{
-    const float dy   = static_cast<float>(y - cy) + 0.5f;
-    const float span = radius * radius - dy * dy;
-    if (span < 0.0f) {
-        return false;
-    }
-    const auto half = static_cast<std::int32_t>(std::sqrt(span));
-    from            = std::max<std::int32_t>(cx - half, 0);
-    to              = std::min<std::int32_t>(cx + half, s_ground_w - 1);
-    return from <= to;
-}
-
 // Along row y of the whole picture less its rounded corners.
 void rounded_span(std::int32_t y, std::int32_t &from, std::int32_t &to)
 {
@@ -862,13 +824,9 @@ void rounded_span(std::int32_t y, std::int32_t &from, std::int32_t &to)
     }
 }
 
-// Where the map reaches along row y: inside the last ring on the page, and
-// as the map the whole picture but its corners.
+// Where the map reaches along row y: the whole picture but its corners.
 bool reach_of(std::int32_t y, std::int32_t &from, std::int32_t &to)
 {
-    if (!s_to_edges) {
-        return circle_span(y, s_cx, s_cy, static_cast<float>(s_radius), from, to);
-    }
     rounded_span(y, from, to);
     return from <= to;
 }
@@ -894,18 +852,6 @@ bool map_span(std::int32_t y, std::int32_t &from, std::int32_t &to)
     from = s_row_from[y];
     to   = s_row_to[y];
     return from <= to;
-}
-
-// Where planes may be drawn: anywhere on the page's square, which only plots
-// those inside the last ring, and as the map where the map is.
-bool air_span(std::int32_t y, std::int32_t &from, std::int32_t &to)
-{
-    if (s_to_edges) {
-        return map_span(y, from, to);
-    }
-    from = 0;
-    to   = s_ground_w - 1;
-    return y >= 0 && y < s_ground_h;
 }
 
 bool within_scope(std::int32_t x, std::int32_t y)
@@ -1143,8 +1089,7 @@ bool is_water_body(radar::MapLayer layer)
     return layer == radar::MapLayer::Ocean || layer == radar::MapLayer::Lake;
 }
 
-// What the map lies on, the cards' darker surface: on the page the scope's
-// disc in the card, and as the map a panel rounded as the cards are.
+// What the map lies on, the cards' darker surface, a panel rounded as the cards are.
 std::uint16_t land_colour()
 {
     return rgb565(look::panel());
@@ -1153,20 +1098,14 @@ std::uint16_t land_colour()
 void paint_base()
 {
     const std::uint16_t land   = land_colour();
-    const std::uint16_t around = rgb565(s_to_edges ? look::background() : look::panel_light());
-    const std::uint16_t disc   = land;
+    const std::uint16_t around = rgb565(look::background());
     // Each pixel written once: the whole picture twice over took 30 ms.
     for (std::int32_t y = 0; y < s_ground_h; ++y) {
         std::uint16_t *row  = s_ground + static_cast<std::size_t>(y) * s_ground_w;
         std::int32_t   from = 0, to = 0;
-        if (s_to_edges) {
-            rounded_span(y, from, to);
-        } else if (!circle_span(y, s_cx, s_cy, static_cast<float>(s_ground_w) / 2.0f, from, to)) {
-            std::fill(row, row + s_ground_w, around);
-            continue;
-        }
+        rounded_span(y, from, to);
         std::fill(row, row + from, around);
-        std::fill(row + from, row + to + 1, disc);
+        std::fill(row + from, row + to + 1, land);
         std::fill(row + to + 1, row + s_ground_w, around);
     }
 }
@@ -1450,7 +1389,6 @@ int  s_fast_from    = 0;    // the ranges it goes between
 int  s_fast_to      = 0;
 int  s_fast_picture = 0;    // the range of the picture magnified
 int  s_fast_frames  = 0;    // for the bench
-std::int32_t s_fast_shown = -1;  // the magnification last shown, in sixteenths
 
 // The rings and spokes out of the picture, where no air was drawn over them:
 // a zoom draws them where they stay, over the map it magnifies.
@@ -1468,7 +1406,6 @@ void take_rings_out()
 
 void show_magnified(std::int32_t steps)
 {
-    s_fast_shown = steps;
     lv_area_t picture;
     lv_obj_get_coords(s_canvas, &picture);
     lv_area_t to = picture;
@@ -1538,7 +1475,7 @@ bool start_fast_zoom(int from_km)
         from_km = s_fast_to;
     }
     const int to_km = RANGES[s_range_step];
-    if (!s_to_edges || !map_located() || s_canvas == nullptr || s_frame == nullptr || from_km == to_km) {
+    if (!map_located() || s_canvas == nullptr || s_frame == nullptr || from_km == to_km) {
         return false;
     }
     lv_anim_delete(s_scope, nullptr);
@@ -1547,7 +1484,7 @@ bool start_fast_zoom(int from_km)
     // ones, and the compass's letters, are kept as they are now.
     lv_area_t keep[16];
     int       kept = 0;
-    for (lv_obj_t *control : {s_zoom_out, s_zoom_in, s_map_chip, s_rings[0], s_rings[1], s_rings[2], s_rings[3],
+    for (lv_obj_t *control : {s_zoom_out, s_zoom_in, s_rings[0], s_rings[1], s_rings[2], s_rings[3],
                               s_compass[0], s_compass[1], s_compass[2], s_compass[3]}) {
         if (control != nullptr && !lv_obj_is_hidden(control) && kept < 16) {
             lv_obj_get_coords(control, &keep[kept++]);
@@ -1559,7 +1496,6 @@ bool start_fast_zoom(int from_km)
 
     s_fast_from   = from_km;
     s_fast_to     = to_km;
-    s_fast_shown  = -1;
     s_fast_frames = 0;
     if (to_km > from_km) {
         // Out: the wider picture first, planes and all, unseen till the zoom shows it.
@@ -1604,10 +1540,10 @@ void start_zoom(int from_km)
     lv_anim_init(&anim);
     lv_anim_set_var(&anim, s_scope);
     lv_anim_set_values(&anim, 0, ZOOM_PROGRESS_FULL);
-    lv_anim_set_duration(&anim, s_to_edges ? ZOOM_FULL_MS : ZOOM_MS);
+    lv_anim_set_duration(&anim, ZOOM_FULL_MS);
     lv_anim_set_exec_cb(&anim, zoom_step);
     lv_anim_set_completed_cb(&anim, zoom_done);
-    lv_anim_set_path_cb(&anim, s_to_edges ? lv_anim_path_linear : lv_anim_path_ease_out);
+    lv_anim_set_path_cb(&anim, lv_anim_path_linear);
     lv_anim_start(&anim);
 }
 
@@ -1641,9 +1577,8 @@ void range_clicked(lv_event_t *event)
     }
 }
 
-// Round chips in the card's corners, the same as the heating card's: a dot of
-// the darker surface on the lighter card is what makes it read as something to
-// press. The hit area reaches past the dot, so a finger does not have to find it.
+// Round chips in the map's corners. The hit area reaches past the dot, so a
+// finger does not have to find it.
 lv_obj_t *round_chip(lv_obj_t *bezel, const char *glyph)
 {
     lv_obj_t *chip = kit::button(bezel, kit::Button::Raised, glyph, nullptr, true);
@@ -1659,8 +1594,6 @@ lv_obj_t *zoom_chip(lv_obj_t *bezel, const char *glyph, int step)
                         reinterpret_cast<void *>(static_cast<std::intptr_t>(step)));
     return chip;
 }
-
-void map_clicked(lv_event_t *);
 
 constexpr std::uint32_t TRACK_TICK_MS = 500;
 constexpr std::int32_t  TRACK_RING_W  = 3;
@@ -1755,27 +1688,18 @@ lv_obj_t *build_track(lv_obj_t *bezel)
     return chip;
 }
 
-// Zoom along the bottom, where the thumbs rest; on Home the way to the radar
-// page at the top right, as the cards of the control bar have it; whether it
-// follows on its own in the last corner.
+// Zoom along the bottom, where the thumbs rest; whether it follows on its own
+// at the top.
 void build_corners(lv_obj_t *bezel)
 {
     s_zoom_out  = zoom_chip(bezel, kit::glyph::remove, 1);
     s_zoom_in   = zoom_chip(bezel, kit::glyph::add, -1);
     s_track     = build_track(bezel);
-    s_map_chip  = round_chip(bezel, kit::glyph::open_in_full);
-    lv_obj_set_ext_click_area(s_map_chip, (CORNER - ZOOM_D) / 2);
-    lv_obj_add_event_cb(s_map_chip, map_clicked, LV_EVENT_CLICKED, nullptr);
 }
-
-// On Home the chips are the darker surface on the lighter card; on the radar
-// page the map is that surface, so they take the black of the margin.
-void paint_chips(bool) {}
 
 void place_corners(std::int32_t w, std::int32_t h)
 {
     lv_obj_set_pos(s_track, EDGE, EDGE);
-    lv_obj_set_pos(s_map_chip, w - ZOOM_D - EDGE, EDGE);
     lv_obj_set_pos(s_zoom_out, EDGE, h - ZOOM_D - EDGE);
     lv_obj_set_pos(s_zoom_in, w - ZOOM_D - EDGE, h - ZOOM_D - EDGE);
 }
@@ -1862,20 +1786,6 @@ void build_marker(lv_obj_t *scope)
     quiet(s_marker);
 }
 
-void build_rim(lv_obj_t *scope)
-{
-    for (lv_obj_t *&dot : s_rim) {
-        dot = lv_obj_create(scope);
-        lv_obj_set_size(dot, RIM_SIZE, RIM_SIZE);
-        lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_border_width(dot, 0, 0);
-        lv_obj_set_style_pad_all(dot, 0, 0);
-        lv_obj_set_style_bg_opa(dot, LV_OPA_50, 0);
-        lv_obj_set_hidden(dot, true);
-        quiet(dot);
-    }
-}
-
 void build_blip_labels(lv_obj_t *scope)
 {
     for (int i = 0; i < LABEL_MAX; ++i) {
@@ -1885,11 +1795,10 @@ void build_blip_labels(lv_obj_t *scope)
     }
 }
 
-// A disc `side` across on Home; as the map `w` by `h`, the rings round
-// cx, cy and the map and air past them to every edge.
+// The map `w` by `h`, the rings round cx, cy and the map and air past them to
+// every edge.
 struct Frame {
     std::int32_t w, h, cx, cy, radius;
-    bool         to_edges;
     std::int32_t corner;  // of the picture, as the map
 };
 
@@ -1898,14 +1807,12 @@ void build_scope(lv_obj_t *parent, const Frame &frame, int range_km)
     s_cx       = frame.cx;
     s_cy       = frame.cy;
     s_radius   = frame.radius;
-    s_to_edges = frame.to_edges;
     s_corner   = frame.corner;
-    const std::int32_t side = frame.w;
 
     lv_obj_t *scope = lv_obj_create(parent);
     lv_obj_set_pos(scope, 0, 0);
     lv_obj_set_size(scope, frame.w, frame.h);
-    look::style_panel(scope, look::background(), frame.to_edges ? 0 : side / 2);
+    look::style_panel(scope, look::background(), 0);
     lv_obj_set_style_bg_opa(scope, LV_OPA_TRANSP, 0);  // the picture covers it, corners and all
     lv_obj_set_scrollable(scope, false);
     lv_obj_add_event_cb(scope, scope_clicked, LV_EVENT_CLICKED, nullptr);
@@ -1918,7 +1825,6 @@ void build_scope(lv_obj_t *parent, const Frame &frame, int range_km)
     compass(scope, "W", 'W');
     build_home(scope);
     build_marker(scope);
-    build_rim(scope);
     build_blip_labels(scope);
 
     s_scope = scope;
@@ -2240,7 +2146,7 @@ void mark_air(std::int32_t from, std::int32_t to, std::int32_t y)
 void air_pixels(std::int32_t y, std::int32_t from, std::int32_t to, std::uint16_t ink)
 {
     std::int32_t low = 0, high = 0;
-    if (!air_span(y, low, high)) {
+    if (!map_span(y, low, high)) {
         return;
     }
     from = std::max(from, low);
@@ -2348,18 +2254,6 @@ void draw_label(Blip &blip, const Plot &plot)
     look::set_text_color(blip.label, shout ? look::red() : look::secondary());
     lv_obj_set_pos(blip.label, plot.label_x, plot.y - LABEL_RISE);
     lv_obj_set_hidden(blip.label, false);
-}
-
-void draw_rim(lv_obj_t *dot, const radar::Aircraft &aircraft)
-{
-    const float radians = aircraft.bearing_deg * DEG;
-    const auto  reach   = static_cast<float>(s_radius);
-    const auto  x = static_cast<std::int32_t>(std::lround(s_cx + std::sin(radians) * reach));
-    const auto  y = static_cast<std::int32_t>(std::lround(s_cy - std::cos(radians) * reach));
-
-    lv_obj_set_pos(dot, x - RIM_SIZE / 2, y - RIM_SIZE / 2);
-    look::set_bg_color(dot, altitude_ink(aircraft.altitude_ft));
-    lv_obj_set_hidden(dot, false);
 }
 
 // Each reading as wide as its value or its name, the three spread across the
@@ -2649,11 +2543,10 @@ void redraw_map_if_moved(float range_km)
     }
 }
 
-// Those in range become plots, nearest first; those beyond it wait on the rim.
+// Those on the map become plots, nearest first.
 void plot_traffic(float range_km)
 {
-    s_shown      = 0;
-    int rim_used = 0;
+    s_shown = 0;
     for (int i = 0; i < s_last->count && s_shown < DRAWN_MAX; ++i) {
         const radar::Aircraft &aircraft = s_last->list[i];
         if (aircraft.on_ground) {
@@ -2664,27 +2557,16 @@ void plot_traffic(float range_km)
         // the more.
         float east_km = 0.0f, north_km = 0.0f;
         flat_km(aircraft.lat, aircraft.lon, east_km, north_km);
-        const float away_km = std::hypot(east_km, north_km);
-        if (s_to_edges) {
-            const float scale = static_cast<float>(s_radius) / range_km;
-            const auto  x     = static_cast<std::int32_t>(std::lround(static_cast<float>(s_cx) + east_km * scale));
-            const auto  y     = static_cast<std::int32_t>(std::lround(static_cast<float>(s_cy) - north_km * scale));
-            if (!within_scope(x, y)) {
-                continue;
-            }
-        } else if (away_km > range_km) {
-            if (rim_used < RIM_DOTS) {
-                draw_rim(s_rim[rim_used++], aircraft);
-            }
+        const float scale = static_cast<float>(s_radius) / range_km;
+        const auto  x     = static_cast<std::int32_t>(std::lround(static_cast<float>(s_cx) + east_km * scale));
+        const auto  y     = static_cast<std::int32_t>(std::lround(static_cast<float>(s_cy) - north_km * scale));
+        if (!within_scope(x, y)) {
             continue;
         }
         s_plots[s_shown].aircraft = &s_last->list[i];
         s_plots[s_shown].east_km  = east_km;
         s_plots[s_shown].north_km = north_km;
         ++s_shown;
-    }
-    for (int i = rim_used; i < RIM_DOTS; ++i) {
-        lv_obj_set_hidden(s_rim[i], true);
     }
 
     std::sort(s_plots, s_plots + s_shown, [](const Plot &a, const Plot &b) {
@@ -2743,7 +2625,7 @@ int most_notable(int *out, int max)
 }
 
 // Followed by turns: the most notable in view first, and every few minutes the
-// next of the few most notable, so Home shows other flights than the one. One
+// next of the few most notable, so the page shows other flights than the one. One
 // that leaves the view or falls out of the few is let go at once, and an
 // emergency is turned to at once.
 void follow_nearest()
@@ -3193,8 +3075,6 @@ const radar::Aircraft *draw_traffic(const bool *named)
     return chosen;
 }
 
-// Each frame of a trail growing: the air drawn again over the map, which
-// stays. A zoom under way draws every frame itself.
 // A frame of the chosen aircraft's trail growing: only the way changes, so
 // only where it was and is now is put back and drawn again, with the planes
 // over it. A trail drawn where a plane is stays under it: the plane's pixels
@@ -3247,28 +3127,9 @@ void grow_tick(lv_timer_t *timer)
     }
 }
 
-// Everything in the scope is laid out for one frame, so a view of another
-// size builds it again, and draws the map again to fit.
 void build_scope_in(const Frame &frame, std::int32_t x, std::int32_t y)
 {
     const Timed timed{"scope built"};
-    if (s_scope != nullptr) {
-        lv_anim_delete(s_scope, nullptr);  // a zoom under way ends where it was going
-        lv_obj_delete(s_scope);
-        for (void *buffer : {static_cast<void *>(s_ground), static_cast<void *>(s_frame),
-                             static_cast<void *>(s_land_mask), static_cast<void *>(s_air_opa),
-                             static_cast<void *>(s_map_points), static_cast<void *>(s_row_from),
-                             static_cast<void *>(s_row_to), static_cast<void *>(s_crossings),
-                             static_cast<void *>(s_crossing_count)}) {
-            heap_caps_free(buffer);
-        }
-        s_ground = s_frame = nullptr;
-        s_land_mask = s_air_opa = s_crossing_count = nullptr;
-        s_row_from = s_row_to = nullptr;
-        s_crossings = nullptr;
-        s_map_points            = nullptr;
-        s_canvas                = nullptr;
-    }
     s_shown_range = static_cast<float>(RANGES[s_range_step]);
     build_scope(s_bezel, frame, RANGES[s_range_step]);
     lv_obj_move_to_index(s_scope, 0);  // under the corners and the summary
@@ -3277,11 +3138,8 @@ void build_scope_in(const Frame &frame, std::int32_t x, std::int32_t y)
     if (map_located()) {
         draw_map(s_map_lat, s_map_lon, static_cast<float>(RANGES[s_range_step]));
     }
-    // A reading shown next, as both layouts do, puts all of the map into the
-    // frame with the planes; copying it here as well cost the map 20 ms.
-    if (s_frame != nullptr && (s_last == nullptr || s_fast_zooming)) {
-        std::memcpy(s_frame, s_ground, ground_pixels() * RGB565_BYTES_PER_PX);
-    }
+    // A reading shown next puts all of the map into the frame with the planes:
+    // copying it here as well cost the map 20 ms.
 }
 
 // On the radar page the column floats over the map, on a darkened patch of it.
@@ -3302,34 +3160,19 @@ void lay_out_map()
     const std::int32_t w      = s_map_w;
     const std::int32_t h      = s_map_h;
     const std::int32_t area_w = w - COLUMN_W - look::space::m;  // the map beside the column
-    lv_obj_set_parent(s_bezel, s_map_page);
     lv_obj_set_style_bg_opa(s_bezel, LV_OPA_TRANSP, 0);
     lv_obj_set_pos(s_bezel, 0, 0);
     lv_obj_set_size(s_bezel, w, h);
-    build_scope_in({w, h, area_w / 2, h / 2, h / 2 - RIM_BAND, true, look::radius::card}, 0, 0);
+    build_scope_in({w, h, area_w / 2, h / 2, h / 2 - RIM_BAND, look::radius::card}, 0, 0);
     place_corners(area_w, h);
-    paint_chips(true);
-    lv_obj_set_hidden(s_map_chip, true);  // the dock's tabs go back
     place_summary(area_w, h);
 
-    lv_obj_set_parent(s_column, s_map_page);
     lv_obj_set_pos(s_column, area_w, look::space::m);
     lv_obj_set_size(s_column, COLUMN_W, h - 2 * look::space::m);
     lv_obj_set_style_bg_color(s_column, lv_color_hex(look::background()), 0);
     lv_obj_set_style_bg_opa(s_column, FLOATING_COLUMN_OPA, 0);
     place_readings_at(h - 2 * look::space::m);
     show_radar(*s_last);
-}
-
-// Laid out by radar_page_opened as the page is chosen.
-void open_map()
-{
-    detail::select_page(detail::RADAR_PAGE);
-}
-
-void map_clicked(lv_event_t *)
-{
-    open_map();
 }
 
 // A photo still awaited is asked for again: once soon, past radar's own
@@ -3520,10 +3363,8 @@ void refresh_radar()
         return;
     }
     if (detail::s_page != detail::RADAR_PAGE) {  // nothing of it on Home: drawn when its page opens
-        s_radar_stale = true;
         return;
     }
-    s_radar_stale = false;
     radar::snapshot(*s_last);
     show_radar(*s_last);
 }
@@ -3586,6 +3427,12 @@ void show_radar_details(const char *hex, const radar::Details &details)
 
 #if REMOTE_ENABLED
 namespace {
+// Laid out by radar_page_opened as the page is chosen.
+void open_map()
+{
+    detail::select_page(detail::RADAR_PAGE);
+}
+
 // One frame drawn and handed over now, in milliseconds.
 int timed_frame()
 {
@@ -3684,8 +3531,8 @@ void bench_put_back()
     s_bench_left.held = false;
 }
 
-// Home shown, its radar cards too with the phone away, so the feed runs; ready
-// once the feed has answered and the map is drawn.
+// Home shown, with the gate lifted, so the feed runs; ready once the feed has
+// answered and the map is drawn.
 bool bench_ready()
 {
     if (!s_bench_left.held) {
