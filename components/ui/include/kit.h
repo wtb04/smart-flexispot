@@ -229,6 +229,15 @@ struct DialSpec {
     const Zone  *zones   = nullptr;
     int          zone_count = 0;
     Role         read    = Role::ReadM;
+    // A bold arc and nothing else: a flat faint track, the value along it in
+    // one ink, and in the middle a figure the page writes (`figure()`), with
+    // the unit as a quiet line under it. The arc steps without a spring, so a
+    // change redraws only the bit of arc it moved. `target` puts a knob at the value.
+    std::int32_t arc     = 0;      // its width; 0 for the scale of ticks above
+    bool         drag    = false;  // dragged round, it sets the value: LV_EVENT_VALUE_CHANGED as it goes, LV_EVENT_RELEASED when let go
+    bool         reverse = false;  // the value as what is left: the arc's start goes round after it, as a timer runs down
+    bool         mark    = false;  // a dot on the arc at a second reading: the room's against its setting
+    bool         over    = false;  // a quiet line over the figure
 };
 
 class Dial : public InPsram {
@@ -245,9 +254,25 @@ class Dial : public InPsram {
     void set_caption(const char *caption);  // the small line under the readout
     std::int32_t value() const { return m_value; }
 
+    // An arc dial's own. Its set_value(INT32_MIN) shows no value: the track alone.
+    lv_obj_t *figure() const { return m_read; }
+    lv_obj_t *caption() const { return m_unit; }
+    lv_obj_t *over() const { return m_over; }
+    void set_ink(Ink ink);
+    /** The value's arc at 40%, as something paused is. */
+    void set_faded(bool faded);
+    void set_range(std::int32_t min, std::int32_t max);
+    /** The dot at `value`; INT32_MIN for none. */
+    void set_mark(std::int32_t value);
+    /** As big again, for a page laid out anew; its arc keeps its width. */
+    void set_size(std::int32_t size);
+
   private:
     static void on_value(void *var, int32_t v);
     static void on_target(void *var, int32_t v);
+    void make_arc();
+    void restyle_arc();
+    void place_mark();
     void place_needle(std::int32_t value);
     void place_line(lv_obj_t *line, lv_point_precise_t *points, std::int32_t value, float r0, float r1);
     void light_span();
@@ -282,6 +307,10 @@ class Dial : public InPsram {
     std::int32_t m_value = 0, m_target = 0;
     std::int32_t m_shown = INT32_MIN, m_lit = -1, m_zone = -1;
     std::int32_t m_r_tick = 0, m_major_len = 0, m_r_arc = 0;
+    lv_obj_t    *m_over = nullptr, *m_dot = nullptr;
+    std::int32_t m_mark_at = INT32_MIN;
+    Ink          m_ink   = Ink::Accent;
+    bool         m_faded = false, m_none = false;
 };
 
 struct RailSpec {
