@@ -35,19 +35,8 @@ target_link_libraries(lvgl PUBLIC PkgConfig::SDL2)
 target_compile_definitions(lvgl PUBLIC LV_INV_BUF_SIZE=64)  # as the firmware's CMakeLists.txt
 
 set(UI_DIR ${ROOT}/components/ui)
-file(GLOB UI_SOURCES ${UI_DIR}/core/*.cpp ${UI_DIR}/kit/*.cpp ${UI_DIR}/lab/*.cpp ${UI_DIR}/classic/*.cpp
-     ${UI_DIR}/front/*.cpp ${UI_DIR}/fonts/*.c ${UI_DIR}/fonts/*.cpp)
-# One of the two screens, as the firmware's CONFIG_UI_KIT picks: -DSIM_UI_KIT=ON for the design kit's.
-option(SIM_UI_KIT "the screen the design kit draws, in place of the one the panel has had" OFF)
-include(${ROOT}/components/ui/fronts.cmake)
-if(SIM_UI_KIT)
-    set(UI_LEFT_OUT ${UI_CLASSIC_SOURCES})
-else()
-    set(UI_LEFT_OUT ${UI_KIT_SOURCES})
-endif()
-foreach(source ${UI_LEFT_OUT})
-    list(REMOVE_ITEM UI_SOURCES ${ROOT}/components/ui/${source})
-endforeach()
+file(GLOB UI_SOURCES ${UI_DIR}/core/*.cpp ${UI_DIR}/kit/*.cpp ${UI_DIR}/lab/*.cpp ${UI_DIR}/front/*.cpp
+     ${UI_DIR}/fonts/*.c ${UI_DIR}/fonts/*.cpp)
 file(GLOB SIM_SOURCES ${CMAKE_CURRENT_LIST_DIR}/*.cpp ${CMAKE_CURRENT_LIST_DIR}/stubs/*.cpp
      ${CMAKE_CURRENT_LIST_DIR}/live/*.cpp)
 # What the home page holds, from the room component that fills it on the panel.
@@ -76,13 +65,9 @@ set(PARSERS ${ROOT}/components/ical/ical_parse.cpp ${ROOT}/components/travel/tra
     ${ROOT}/components/claude/claude.cpp ${ROOT}/components/claude/claude_sessions.cpp)
 
 add_executable(sim ${SIM_SOURCES} ${UI_SOURCES} ${ROOM_LAYOUT} ${PARSERS} ${NET_CORE})
-if(SIM_UI_KIT)
-    target_compile_definitions(sim PRIVATE CONFIG_UI_KIT=1)
-endif()
 target_include_directories(sim PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/shim
-    ${UI_DIR} ${UI_DIR}/include ${UI_DIR}/fonts ${UI_DIR}/core ${UI_DIR}/kit ${UI_DIR}/front ${UI_DIR}/classic
-    ${UI_DIR}/lab
+    ${UI_DIR} ${UI_DIR}/include ${UI_DIR}/fonts ${UI_DIR}/core ${UI_DIR}/kit ${UI_DIR}/front ${UI_DIR}/lab
     ${ROOT}/components/board/include
     ${ROOT}/components/claude/include
     ${ROOT}/components/deskproto/include
@@ -104,17 +89,15 @@ endif()
 
 # `cmake --build sim/build --target screenshots`: the main views, offline and
 # the same each time, into sim/build/screenshots, as CI keeps them.
-# With the dock at the left, as the README's pictures have it.
 set(SCENES
     "home|--press amm --shot 2"
     "radar|--page 1 --shot 2"
     "calendar|--page 2 --shot 2"
-    "focus|--press amm --tap 72,656 --shot 2"
+    "focus|--press amm --tap 70,653 --shot 2"
     "setup|--page 3 --shot 3"
-    "diagnostics|--page 3 --tap 704,400 --shot 3"
-    "cinema|--press amm --tap 870,46 --tap 1210,152 --shot 3"
-    "notice|--press amm --then n --shot 4"
-    "splash|--splash --shot 5")
+    "diagnostics|--page 3 --tap 987,265 --shot 3"
+    "cinema|--press amm --tap 1040,51 --tap 872,187 --shot 3"
+    "notice|--press amm --then n --shot 4")
 set(SHOTS ${CMAKE_BINARY_DIR}/screenshots)
 set(SHOT_COMMANDS COMMAND ${CMAKE_COMMAND} -E make_directory ${SHOTS})
 foreach(scene IN LISTS SCENES)
@@ -122,7 +105,7 @@ foreach(scene IN LISTS SCENES)
     list(GET parts 0 name)
     list(GET parts 1 args)
     separate_arguments(args UNIX_COMMAND "${args}")
-    list(APPEND SHOT_COMMANDS COMMAND ${CMAKE_COMMAND} -E env SIM_OFFLINE=1 SIM_DOCK=left SIM_CLOCK=9:41
+    list(APPEND SHOT_COMMANDS COMMAND ${CMAKE_COMMAND} -E env SIM_OFFLINE=1 SIM_CLOCK=9:41
          $<TARGET_FILE:sim> ${args} --out ${SHOTS}/${name}.png)
 endforeach()
 add_custom_target(screenshots ${SHOT_COMMANDS}

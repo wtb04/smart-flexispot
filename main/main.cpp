@@ -146,11 +146,6 @@ void on_screen(bool on)
     }
 }
 
-void on_dock_side(bool right)
-{
-    settings::set(settings::Key::DockSide, right);
-}
-
 void on_radar_zoom(int km)
 {
     settings::set(settings::Key::RadarRange, km);
@@ -423,7 +418,6 @@ extern "C" void app_main(void)
         .radar       = on_radar_page,
         .log         = diagnostics::logs,
         .primary     = on_primary,
-        .dock_side   = on_dock_side,
         .orientation = on_orientation,
         .screen      = on_screen,
         .details     = on_details,
@@ -439,7 +433,6 @@ extern "C" void app_main(void)
     ui::set_cards(diagnostics::cards(), diagnostics::card_count());
     ESP_ERROR_CHECK(ui::init(handlers, brightness,
                              static_cast<std::uint32_t>(settings::get(settings::Key::Accent)),
-                             settings::enabled(settings::Key::DockSide),
                              settings::enabled(settings::Key::OrientAuto) ? ui::Orientation::Auto
                              : flipped                                    ? ui::Orientation::Flipped
                                                                           : ui::Orientation::Normal));
@@ -481,7 +474,6 @@ extern "C" void app_main(void)
     ESP_ERROR_CHECK_WITHOUT_ABORT(focus::start(on_focus_change));
     focus::set_plan(stored_plan());  // which shows it too
     focus::restore(kept_focus);
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("desk"));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ota::start({
         .busy    = desk_moving,
         .status  = show_update,
@@ -493,7 +485,6 @@ extern "C" void app_main(void)
     media::set_fetcher(laptop::kCoverScheme, laptop::fetch_cover);
     ESP_ERROR_CHECK_WITHOUT_ABORT(remote::start());
     ESP_ERROR_CHECK(wallclock::start());
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("network"));
     ESP_ERROR_CHECK_WITHOUT_ABORT(network::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(diagnostics::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(ical::start(on_calendar));

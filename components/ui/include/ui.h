@@ -79,7 +79,7 @@ enum class Setting : std::uint8_t {
     PresenceGate,
     DeskBluetooth,
     Screen,
-    Light,  // the design kit's screen in its light look
+    Light,  // the screen in its light look
     Count,
 };
 
@@ -99,8 +99,6 @@ using PrimaryHandler = void (*)(std::uint32_t colour);
  *  only asks; what that means for the backlight is the board's business. */
 using ScreenHandler = void (*)(bool on);
 
-/** True while the dock is against the right edge. */
-using DockSideHandler = void (*)(bool right);
 using RadarZoomHandler = void (*)(int km);  // the radar zoomed to, to keep
 
 /** True while the panel is hung the other way up. */
@@ -310,7 +308,6 @@ struct Handlers {
     RadarHandler       radar;
     LogHandler         log;
     PrimaryHandler     primary;
-    DockSideHandler    dock_side;
     OrientationHandler orientation;
     ScreenHandler      screen;
     DetailsHandler     details;
@@ -324,11 +321,10 @@ struct Handlers {
 };
 
 /** Requires the LVGL port to be running. A zero accent keeps the built-in
- *  colour; dock_right puts the dock against the right edge instead of the left.
- *  orientation only tells the page which choice to show; board::init() has
- *  already turned the display, and turns it again as the choice asks. */
+ *  colour. orientation only tells the page which choice to show; board::init()
+ *  has already turned the display, and turns it again as the choice asks. */
 esp_err_t init(const Handlers &handlers, int initial_brightness, std::uint32_t accent,
-               bool dock_right, Orientation orientation);
+               Orientation orientation);
 
 /** The radar's range as it was last left, in km, the nearest of its steps;
  *  between init() and build(). */
@@ -338,15 +334,9 @@ void set_radar_range(int km);
  *  for the time again. Only the clock: everything else keeps the real time. */
 void pin_clock(const char *text);
 
-/** After init() has put up the splash and the screen is lit: everything else,
- *  built behind the splash a part at a time so that it keeps moving. Nothing
- *  set before this returns is drawn until it has. */
+/** After init() and the screen is lit: the screen, built a part at a time with
+ *  frames drawn between. Nothing set before this returns is drawn until it has. */
 esp_err_t build();
-
-/** A part of the boot has finished: "desk" or "network". */
-esp_err_t splash_step(const char *label);
-
-esp_err_t splash_done();
 
 /** Height in millimetres, or negative for "unknown". */
 esp_err_t set_height(int height_mm);
@@ -440,11 +430,6 @@ int bench_radar_open(char *out, std::size_t size);
  *  following the nearest aircraft; or, with `open` false, the screen put back
  *  as it was before. */
 int bench_radar_map(char *out, std::size_t size, bool open);
-/** A development build's: what each frame of the desk's card unfolding costs. */
-int bench_desk_card(char *out, std::size_t size);
-/** A development build's: each page switched to in turn, what the switch, its
- *  frame and what follows cost. With the LVGL lock. */
-int bench_pages(char *out, std::size_t size);
 
 /** A development build's: preset `index` tapped, as a finger on its button. With the LVGL lock. */
 void desk_tap(int index);
