@@ -398,27 +398,6 @@ bool buffers()
 }
 
 // From the half-size picture on: no LVGL in it, so the panel's other core can do it.
-// The page as it is, only dimmed: the frozen picture taken whole and sharp.
-void dim_frozen()
-{
-    const std::uint32_t tint = colours().scrim;
-    const int a = colours().scrim_opa, keep = 256 - a;
-    const int tr = static_cast<int>((tint >> 19) & 0x1f) * a, tg = static_cast<int>((tint >> 10) & 0x3f) * a,
-              tb = static_cast<int>((tint >> 3) & 0x1f) * a;
-    for (int y = 0; y < FH; ++y) {
-        auto *row = reinterpret_cast<std::uint16_t *>(s_frozen->data + y * s_frozen->header.stride);
-        for (int x = 0; x < FW; ++x) {
-            const int px = row[x];
-            const int r = ((px >> 11) * keep + tr) >> 8, g = (((px >> 5) & 0x3f) * keep + tg) >> 8,
-                      b = ((px & 0x1f) * keep + tb) >> 8;
-            row[x] = static_cast<std::uint16_t>((r << 11) | (g << 5) | b);
-        }
-    }
-#if defined(ESP_PLATFORM)
-    esp_cache_msync(s_frozen->data, s_frozen->data_size, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
-#endif
-}
-
 bool finish_picture(std::uint64_t t0, std::uint64_t t1)
 {
     // halvings rather than one eighth: a bilinear halving is an average of each
@@ -470,8 +449,7 @@ bool picture_from_shown()
             return false;
         }
         esp_cache_msync(s_frozen->data, s_frozen->data_size, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
-        dim_frozen();
-        std::snprintf(s_freeze_report, sizeof s_freeze_report, "  freezing for a popover: dimmed whole, %.1f ms\n",
+        std::snprintf(s_freeze_report, sizeof s_freeze_report, "  freezing for a popover: taken whole, %.1f ms\n",
                       static_cast<double>(perf::now_us() - t0) / 1000.0);
     } else {
         if (s_half == nullptr || board::shrink_shown(s_half->data, s_half->data_size, FW / 2, FH / 2) != ESP_OK) {
@@ -560,7 +538,6 @@ void freeze()
     }
     if (s_behind.load(std::memory_order_relaxed) == Behind::Dim) {
         std::memcpy(s_frozen->data, s_shot->data, std::min(s_frozen->data_size, s_shot->data_size));
-        dim_frozen();
         return;
     }
     if (s_half == nullptr) {
@@ -577,6 +554,9 @@ constexpr std::int32_t RISE  = 16;  // how far a rising card comes up
 // sweep, where a few thick ones came as so many steps.
 constexpr int          WAVES = 8;
 constexpr int          FROST_WAVES = 6;
+// A dim comes and goes at once; only a blur spreads out from the source.
+int frost_waves() { return s_behind.load(std::memory_order_relaxed) == Behind::Dim ? 1 : FROST_WAVES; }
+int back_waves() { return s_behind.load(std::memory_order_relaxed) == Behind::Dim ? 1 : WAVES; }
 
 struct Pop {
     lv_obj_t *scrim    = nullptr;
@@ -922,7 +902,7 @@ void finish_close()
 {
     // all given back: the full-screen objects go without drawing the screen again
     lv_display_t *disp = lv_display_get_default();
-    const bool quiet = s_pop.backdrop != nullptr && s_pop.wave >= WAVES && lv_display_is_invalidation_enabled(disp);
+    const bool quiet = s_pop.backdrop != nullptr && s_pop.wave >= back_waves() && lv_display_is_invalidation_enabled(disp);
     if (quiet) {
         lv_display_enable_invalidation(disp, false);
     }
@@ -958,9 +938,9 @@ void finish_close()
 void give_back()
 {
     const std::int32_t length = s_pop.rows ? size::screen_h : size::screen_w;
-    const std::int32_t d  = s_pop.reach * (WAVES - ++s_pop.wave) / WAVES;
+    const std::int32_t d  = s_pop.reach * (back_waves() - ++s_pop.wave) / back_waves();
     std::int32_t       lo = std::max<std::int32_t>(0, s_pop.centre - d), hi = std::min<std::int32_t>(length - 1, s_pop.centre + d);
-    if (s_pop.wave >= WAVES) {
+    if (s_pop.wave >= back_waves()) {
         lo = 1;
         hi = 0;
     }
@@ -991,6 +971,27 @@ void give_back()
 // frame: the frozen picture costs a copy where the live screen it covers
 // would cost drawing, so its bands are cheap, and nothing waits for a whole
 // screen of it in one frame.
+// Behind a dim, a veil over the page's sharp picture, darkening in a few
+// steps: each a whole screen to draw again, so a few, not one a frame.
+constexpr int VEIL_STEPS = 3;
+
+void veil(int from, int to, std::uint32_t ms)
+{
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, s_pop.scrim);
+    lv_anim_set_values(&a, from, to);
+    lv_anim_set_duration(&a, ms);
+    lv_anim_set_exec_cb(&a, [](void *obj, int32_t step) {
+        auto          *scrim = static_cast<lv_obj_t *>(obj);
+        const lv_opa_t opa   = static_cast<lv_opa_t>(colours().scrim_opa * step / VEIL_STEPS);
+        if (lv_obj_get_style_bg_opa(scrim, LV_PART_MAIN) != opa) {
+            lv_obj_set_style_bg_opa(scrim, opa, 0);
+        }
+    });
+    lv_anim_start(&a);
+}
+
 void frost_band(std::int32_t a, std::int32_t b)
 {
     if (a > b) {
@@ -1023,7 +1024,7 @@ void stop_frost()
 void frost()
 {
     const std::int32_t length = s_pop.rows ? size::screen_h : size::screen_w;
-    const std::int32_t r  = s_pop.reach * ++s_pop.f_wave / FROST_WAVES;
+    const std::int32_t r  = s_pop.reach * ++s_pop.f_wave / frost_waves();
     const std::int32_t lo = std::max<std::int32_t>(0, s_pop.centre - r), hi = std::min<std::int32_t>(length - 1, s_pop.centre + r);
     if (s_pop.f_lo > s_pop.f_hi) {
         frost_band(lo, hi);
@@ -1035,7 +1036,7 @@ void frost()
     s_pop.f_hi    = hi;
     s_pop.f_frame = s_frames;
     s_pop.f_ms    = lv_tick_get();
-    if (s_pop.f_wave >= FROST_WAVES) {
+    if (s_pop.f_wave >= frost_waves()) {
         stop_frost();
     }
 }
@@ -1063,7 +1064,7 @@ void back_in_source(lv_anim_t *)
             if (s_frames == s_pop.wave_frame && lv_tick_elaps(s_pop.wave_ms) < 150) {
                 return;
             }
-            if (s_pop.wave >= WAVES) {
+            if (s_pop.wave >= back_waves()) {
                 finish_close();
             } else {
                 give_back();
@@ -1214,6 +1215,11 @@ lv_obj_t *popover(lv_obj_t *source, std::int32_t w, std::int32_t h, From from, b
             lv_obj_set_style_blur_radius(s_pop.scrim, 6, 0);
         }
     }
+    if (s_pop.backdrop != nullptr && behind() == Behind::Dim) {
+        lv_obj_set_style_bg_color(s_pop.scrim, lv_color_hex(colours().scrim), 0);
+        lv_obj_set_style_bg_opa(s_pop.scrim, LV_OPA_TRANSP, 0);
+        veil(0, VEIL_STEPS, motion::pop_ms / 2);
+    }
     lv_obj_add_flag(s_pop.scrim, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(s_pop.scrim, [](lv_event_t *) { close_popover(true); }, LV_EVENT_CLICKED, nullptr);
     if (quiet) {
@@ -1293,6 +1299,9 @@ void close_popover(bool animate)
             show_picture(true);
         }
         place(s_pop.p);
+    }
+    if (s_pop.backdrop != nullptr && behind() == Behind::Dim && s_pop.scrim != nullptr) {
+        veil(VEIL_STEPS, 0, motion::close_ms);
     }
     // quick, and into the source without passing it
     run(s_pop.p, 0, motion::close_ms, motion::settle, back_in_source);

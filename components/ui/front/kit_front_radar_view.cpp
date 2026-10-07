@@ -402,7 +402,6 @@ lv_obj_t    *s_column    = nullptr;
 lv_obj_t    *s_map_page      = nullptr;  // the radar page, which the map fills
 std::int32_t s_map_w    = 0;
 std::int32_t s_map_h    = 0;
-bool         s_mapped    = false;    // laid out as the map, on the radar page
 lv_obj_t    *s_map_chip = nullptr;  // on Home, to the radar page
 lv_obj_t    *s_track      = nullptr;  // following on its own, or how near it is to again
 lv_obj_t    *s_track_mark = nullptr;
@@ -1800,6 +1799,21 @@ void build_picture(lv_obj_t *scope, std::int32_t w, std::int32_t h)
         sizeof(lv_point_precise_t) * MAP_POINTS, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     if (s_ground == nullptr || s_frame == nullptr || s_land_mask == nullptr || s_air_opa == nullptr ||
         s_row_from == nullptr || s_row_to == nullptr || s_crossings == nullptr || s_crossing_count == nullptr) {
+        // all or nothing: a part made is a part something draws into
+        ESP_LOGW("radar_page", "no room for the radar's picture, %u KB free",
+                 static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
+        for (void *buffer : {static_cast<void *>(s_ground), static_cast<void *>(s_frame),
+                             static_cast<void *>(s_land_mask), static_cast<void *>(s_air_opa),
+                             static_cast<void *>(s_map_points), static_cast<void *>(s_row_from),
+                             static_cast<void *>(s_row_to), static_cast<void *>(s_crossings),
+                             static_cast<void *>(s_crossing_count)}) {
+            heap_caps_free(buffer);
+        }
+        s_ground = s_frame = nullptr;
+        s_land_mask = s_air_opa = s_crossing_count = nullptr;
+        s_row_from = s_row_to = nullptr;
+        s_crossings  = nullptr;
+        s_map_points = nullptr;
         return;
     }
     s_tiles_w = (w + AIR_TILE - 1) / AIR_TILE;
@@ -2306,6 +2320,9 @@ void turn_outline(const Outline &outline, const Plot &plot, lv_point_precise_t *
 
 void raster_blip(const Plot &plot)
 {
+    if (s_frame == nullptr || s_air_opa == nullptr) {
+        return;  // no picture to draw into: there was no room for it
+    }
     const Outline      outline = outline_for(plot.aircraft->category);
     lv_point_precise_t shape[OUTLINE_MAX_POINTS];
     turn_outline(outline, plot, shape);
@@ -2433,7 +2450,17 @@ void show_nearby()
     lv_obj_set_hidden(s_nearby, s_shown == 0);
 }
 
-void show_summary(const radar::Snapshot &snapshot)
+// How the feed is, by the zoom: on every update, an aircraft chosen or not,
+// so it never keeps what the first, empty one said.
+void show_feed_state(const radar::Snapshot &snapshot)
+{
+    look::set_text(s_summary, snapshot.age_s < 0 ? "waiting for a fix"
+                               : !snapshot.ok    ? "feed unreachable"
+                                                 : "");
+    look::set_text_color(s_summary, look::amber());
+}
+
+void show_summary(const radar::Snapshot &)
 {
     show_summary_heading();
     show_summary_readings();
@@ -2441,11 +2468,6 @@ void show_summary(const radar::Snapshot &snapshot)
 
     s_picture = Picture::Idle;
     show_picture();
-
-    look::set_text(s_summary, snapshot.age_s < 0 ? "waiting for a fix"
-                               : !snapshot.ok    ? "feed unreachable"
-                                                 : "");
-    look::set_text_color(s_summary, look::amber());
 }
 
 const char *operator_name(bool mine)
@@ -3270,32 +3292,6 @@ void place_summary(std::int32_t area_w, std::int32_t height)
                    height - EDGE - (ZOOM_D - line) / 2 - line);
 }
 
-// The scope's card and the column beside it, as Home has them.
-void lay_out_cards()
-{
-    const std::int32_t area_w = s_home_w - COLUMN_W - COLUMN_GAP;
-    const std::int32_t disc   = std::min(area_w, s_home_h) - 2 * BEZEL;
-    lv_obj_set_parent(s_bezel, s_home_area);
-    lv_obj_set_style_bg_opa(s_bezel, LV_OPA_COVER, 0);
-    lv_obj_set_pos(s_bezel, 0, 0);
-    lv_obj_set_size(s_bezel, area_w, s_home_h);
-    build_scope_in({disc, disc, disc / 2, disc / 2, disc / 2 - RIM_BAND, false, 0}, (area_w - disc) / 2,
-                   (s_home_h - disc) / 2);
-    place_corners(area_w, s_home_h);
-    paint_chips(false);
-    place_summary(area_w, s_home_h);
-
-    lv_obj_set_parent(s_column, s_home_area);
-    lv_obj_set_pos(s_column, area_w + COLUMN_GAP, 0);
-    lv_obj_set_size(s_column, COLUMN_W, s_home_h);
-    lv_obj_set_style_bg_color(s_column, lv_color_hex(look::panel_light()), 0);
-    lv_obj_set_style_bg_opa(s_column, LV_OPA_COVER, 0);
-    place_readings_at(s_home_h);
-    lv_obj_set_hidden(s_map_chip, false);
-    s_mapped = false;
-    show_radar(*s_last);
-}
-
 // On the radar page there are no cards: the map is one rounded panel over the
 // whole page, the planes to its every edge, the rings at its height beside the
 // column, and the column floating over it on a darkened patch.
@@ -3320,7 +3316,6 @@ void lay_out_map()
     lv_obj_set_style_bg_color(s_column, lv_color_hex(look::background()), 0);
     lv_obj_set_style_bg_opa(s_column, FLOATING_COLUMN_OPA, 0);
     place_readings_at(h - 2 * detail::GAP);
-    s_mapped = true;
     show_radar(*s_last);
 }
 
@@ -3368,7 +3363,9 @@ void build_radar_page(lv_obj_t *page, std::int32_t width, std::int32_t height)
     quiet(s_summary);
     paint_range_buttons();
     build_column(page, 0, height);
-    lay_out_cards();
+    // The map from the start and for good: there is no radar on Home, and
+    // laying it out again each time the page opened drew it all twice.
+    lay_out_map();
     s_grow_timer = lv_timer_create(grow_tick, TRAIL_FRAME_MS, nullptr);
     lv_timer_pause(s_grow_timer);
     detail::subscribe(detail::Topic::Radar, detail::kNoView, refresh_radar);
@@ -3391,26 +3388,15 @@ void build_radar_page(lv_obj_t *page, std::int32_t width, std::int32_t height)
 
 // Keeps what was on show: asking again only blanked the photograph while it
 // was fetched anew.
-// The radar follows the page: the cards on Home, the map on the radar page,
-// and where it was while another page is up.
+// Laid out as the map once and for good; opening its page only brings it up to date.
 void radar_page_opened()
 {
     if (s_chosen[0] == '\0') {
         s_following = true;
     }
-    const bool moves = (detail::s_page == detail::RADAR_PAGE) != s_mapped &&
-                       (detail::s_page == detail::RADAR_PAGE || detail::s_page == detail::HOME_PAGE);
-    if (!moves) {
-        if (s_radar_stale) {
-            refresh_radar();
-        }
-        return;
+    if (detail::s_page == detail::RADAR_PAGE) {
+        refresh_radar();  // what the feed holds now, whatever came while the page was away
     }
-    if (s_radar_stale && s_last != nullptr) {
-        radar::snapshot(*s_last);  // laid out, it draws this once
-        s_radar_stale = false;
-    }
-    s_mapped ? lay_out_cards() : lay_out_map();
 }
 
 void show_radar(const radar::Snapshot &snapshot)
@@ -3418,6 +3404,7 @@ void show_radar(const radar::Snapshot &snapshot)
     if (s_scope == nullptr || s_last == nullptr || s_blips == nullptr) {
         return;
     }
+    show_feed_state(snapshot);
     if (&snapshot != s_last) {
         *s_last = snapshot;
     }
@@ -3459,7 +3446,7 @@ void refresh_radar()
     if (s_last == nullptr) {
         return;
     }
-    if (detail::s_page != detail::RADAR_PAGE && detail::s_page != detail::HOME_PAGE) {
+    if (detail::s_page != detail::RADAR_PAGE) {  // nothing of it on Home: drawn when its page opens
         s_radar_stale = true;
         return;
     }

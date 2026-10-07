@@ -61,7 +61,6 @@ constexpr float WORKDAY_LAST_HOUR  = 18.0f;
 constexpr int HOURLY_MARKS_MAX = 12;
 
 constexpr std::int64_t SHOW_WAYS_WITHIN = 3 * units::kSecondsPerHour;  // hours off is nothing to act on yet, beyond a line of when
-constexpr std::int64_t LONG_EVENT       = 4 * units::kSecondsPerHour;  // said with its end, as a day at work
 
 constexpr std::int32_t W = inset::width, H = inset::height;
 constexpr std::int32_t LIST_W   = 480;
@@ -229,19 +228,13 @@ void short_place(const char *place, char *out, std::size_t size)
     }
 }
 
-// An event's line in a list: its course, and for a long one, until when.
+// An event's line in a list: its course.
 void list_title(const ical::Event &event, char *out, std::size_t size)
 {
     char course[ical::kSummaryMax];
     char session[ical::kSummaryMax];
     split_title(event.summary, course, sizeof(course), session, sizeof(session));
-    if (event.end - event.start >= LONG_EVENT) {
-        char until[16];
-        event_clock(event.end, until, sizeof(until));
-        std::snprintf(out, size, "%s, until %s", course, until);
-    } else {
-        std::snprintf(out, size, "%s", course);
-    }
+    std::snprintf(out, size, "%s", course);
 }
 
 // And under it, the session and the place.

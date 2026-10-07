@@ -368,6 +368,11 @@ constexpr int GROUND_SW = size::screen_w / 8 + 1, GROUND_SH = size::screen_h / 8
 // The ground at an eighth, kept so any part of it can be painted again where a
 // shadow was, rather than kept whole a second time: in 64ths of a level.
 std::uint16_t (*s_ground_small)[GROUND_SW][3] = nullptr;
+// Under the pages the glows are gone and the ground is its one colour, laid
+// as a dither pattern with no grain: what a shadow taken back is painted over
+// with most, and there it costs no more than a copy.
+std::int32_t  s_flat_x = 0, s_flat_y = 0;
+std::uint16_t s_flat[4][4]{};
 
 // The grain by where it falls, so a part painted again matches what is round it.
 int grain(int x, int y)
@@ -387,7 +392,15 @@ void paint_ground_area(const lv_area_t &a)
     for (std::int32_t y = a.y1; y <= a.y2; ++y) {
         auto     *row = reinterpret_cast<std::uint16_t *>(s_ground_buf->data + y * s_ground_buf->header.stride);
         const int y0 = y >> 3, y1 = std::min(y0 + 1, GROUND_SH - 1), ty = y & 7;
-        for (std::int32_t x = a.x1; x <= a.x2; ++x) {
+        std::int32_t last = a.x2;
+        if (y >= s_flat_y) {
+            const std::uint16_t *flat = s_flat[y & 3];
+            for (std::int32_t x = std::max(a.x1, s_flat_x); x <= a.x2; ++x) {
+                row[x] = flat[x & 3];
+            }
+            last = std::min(a.x2, s_flat_x - 1);
+        }
+        for (std::int32_t x = a.x1; x <= last; ++x) {
             const int x0 = x >> 3, x1 = std::min(x0 + 1, GROUND_SW - 1), tx = x & 7;
             const int noise = grain(x, y);
             int       out[3];
@@ -458,6 +471,15 @@ void paint_ground()
         }
     }
     lv_free(small);
+    // from the first column and row of the small ground wholly under the pages, where its stretch is flat too
+    s_flat_x = static_cast<std::int32_t>(std::ceil(PAGE_X / 8.0f)) * 8;
+    s_flat_y = static_cast<std::int32_t>(std::ceil(PAGE_Y / 8.0f)) * 8;
+    for (int y = 0; y < 4; ++y) {
+        for (int x = 0; x < 4; ++x) {
+            s_flat[y][x] = pixels::dither(static_cast<int>(base[0] + 0.5f), static_cast<int>(base[1] + 0.5f),
+                                          static_cast<int>(base[2] + 0.5f), x, y);
+        }
+    }
     paint_ground_area({0, 0, W - 1, H - 1});
     lv_draw_buf_flush_cache(s_ground_buf, nullptr);
     bake::painted();

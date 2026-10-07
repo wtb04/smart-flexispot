@@ -31,6 +31,8 @@
 #include <cstdio>
 #include <cstring>
 
+extern "C" void lvgl_port_ppa_delete(void *handle);  // in the port, not in its public headers
+
 namespace board {
 namespace {
 constexpr char TAG[] = "board";
@@ -546,19 +548,36 @@ void set_drawing(bool on)
     lvgl_port_unlock();
 }
 
-// esp_lvgl_port 2.9 keeps the panel only in its display context, whose first
-// fields are these. The version is pinned in dependencies.lock.
+// esp_lvgl_port 2.9 keeps the panel only in its display context, laid out as
+// this. The version is pinned in dependencies.lock.
 struct PortDisplayHead {
     int                       type;
     esp_lcd_panel_io_handle_t io;
     esp_lcd_panel_handle_t    panel;
+    esp_lcd_panel_handle_t    control;
+    lvgl_port_rotation_cfg_t  rotation;
+    lv_color_t               *draw_buffs[3];
+    std::uint8_t             *oled_buffer;
+    lv_display_t             *disp;
+    lv_display_rotation_t     current_rotation;
+    SemaphoreHandle_t         trans_sem;
+    lvgl_port_rounder_cb_t    rounder_cb;
+    void                     *ppa;  // its rotation, with a whole frame of its own to turn into
 };
 
 esp_err_t flush_straight_to_panel(lv_display_t *disp)
 {
-    const auto *port = static_cast<const PortDisplayHead *>(lv_display_get_driver_data(disp));
+    auto *port = static_cast<PortDisplayHead *>(lv_display_get_driver_data(disp));
     ESP_RETURN_ON_FALSE(port != nullptr && port->panel != nullptr, ESP_ERR_INVALID_STATE, TAG, "no panel");
     s_panel = port->panel;
+    // The flush below turns each area straight onto the panel, so the port's
+    // own rotation and its frame are never used: 1.8 MB of PSRAM back. Only
+    // when the context reads as laid out, its display where it should be.
+    if (port->disp == disp && port->ppa != nullptr) {
+        lvgl_port_ppa_delete(port->ppa);
+        port->ppa = nullptr;
+        ESP_LOGI(TAG, "the port's rotation frame given back");
+    }
     void *fb0 = nullptr;
     void *fb1 = nullptr;
     void *fb2 = nullptr;
