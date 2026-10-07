@@ -124,7 +124,7 @@ void media_touched(lv_event_t *e)
     }
 }
 
-// All the lights on a tap, as the old bar had them; held, each of them.
+// All the lights on a tap; held, each of them.
 void lights_touched(lv_event_t *e)
 {
     if (lv_event_get_code(e) == LV_EVENT_LONG_PRESSED) {

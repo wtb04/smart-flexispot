@@ -41,7 +41,7 @@ I am not affiliated with, or endorsed by, any of the products or services named 
 - A live radar of the planes overhead: who is flying, where to, their photo and their trail.
 - The next lecture, a countdown, and when to leave to get there on time.
 - Desk Link, a menu bar app that connects my Mac to the panel: what plays there shows on the panel and is steered from it, and Claude Code's sessions come through it.
-- A pill in the control bar while a Claude Code session on a laptop works, amber when one waits on you.
+- A pill in the bar while a Claude Code session on a laptop works, amber when one waits on you.
 - A focus timer, a presence sensor from your phone, and diagnostics for every part, on the panel itself.
 - A simulator that runs the real UI on a Mac, and host tests with coverage in CI.
 
@@ -57,7 +57,7 @@ Once the screen was there, the extra features kept coming, each one making it a 
 
 ![The home page with music on the speaker](docs/screenshots/home-music.png)
 
-What the panel shows most of the day. The dock at the side holds the desk: its height, one button for Stand and Sit, Home in the middle, and from its foot the focus timer, Radar and Calendar. The control bar along the top holds what gets touched every day: what is playing, the heating, the lights and the status, each dropping a card when tapped. Home itself is for looking at: the air, the sky overhead and what comes next.
+What the panel shows most of the day. The dock at the side holds the desk: its height and one button for Stand and Sit, then Home, Calendar and Radar, and the focus timer at its foot. The bar along the top holds what gets touched every day: the time with the Wi-Fi and the phone, the lights and the heating, and what is playing, each opening a card when tapped. Home itself is for looking at: the air, what comes next, the aircraft overhead, the desk and the focus timer.
 
 ### The room
 
@@ -73,7 +73,7 @@ One button goes between Stand and Sit, showing which way while the desk moves, a
 
 ![The cinema view](docs/screenshots/cinema.png)
 
-When something plays on Jellyfin the control bar follows it, and holding it there sends the desk to its viewing height. The cinema view has the episode's still, when it ends, skip intro, next episode, ten seconds back and on, subtitles and volume, with the lights and the desk within reach. A swipe across the picture goes to the episode before or after. Only what the player playing would act on is shown.
+When something plays on Jellyfin the bar follows it, and holding it there sends the desk to its viewing height. The cinema view has the episode's still, when it ends, skip intro, next episode, ten seconds back and on, subtitles and volume, with the lights and the desk within reach. A swipe across the picture goes to the episode before or after. Only what the player playing would act on is shown.
 
 ### The laptop
 
@@ -87,7 +87,7 @@ When something plays on Jellyfin the control bar follows it, and holding it ther
 
 | On Home | The radar page |
 |---|---|
-| ![The radar on Home](docs/screenshots/radar.png) | ![The radar page](docs/screenshots/radar-full.png) |
+| ![The aircraft overhead on Home](docs/screenshots/radar.png) | ![The radar page](docs/screenshots/radar-full.png) |
 
 Purely because it's fun: everything flying within 20 to 160 km on a map of the coast, each plane coloured by its height, with its airline, route, photo and trail. Left alone it follows the most notable aircraft in view, an A380 over a 737, taking turns every few minutes. Positions come from [adsb.lol](https://adsb.lol) and [adsb.fi](https://adsb.fi), aircraft and routes from [adsbdb](https://www.adsbdb.com) and [hexdb.io](https://hexdb.io), photos from [Planespotters](https://www.planespotters.net). adsb.fi's data is for personal, non-commercial use only, and so is anything built on it here.
 
@@ -111,7 +111,7 @@ A focus timer in rounds, 25 minutes on and 5 off by default, from its button at 
 |---|---|
 | ![The Claude Code card](docs/screenshots/claude.png) | ![A session waiting on you](docs/screenshots/claude-waiting.png) |
 
-While a Claude Code session on one of my laptops works, a pill in the control bar shows it, turning amber with a chime when one waits for me to allow something; tapped, it shows each session's project, steps and what it did last. The laptops tell the panel through Claude Code's hooks and Desk Link, sealed, and only names leave them, never a prompt, a reply or a file's contents.
+While a Claude Code session on one of my laptops works, a pill in the bar shows it, turning amber with a chime when one waits for me to allow something; tapped, it shows each session's project, steps and what it did last. The laptops tell the panel through Claude Code's hooks and Desk Link, sealed, and only names leave them, never a prompt, a reply or a file's contents.
 
 ### Away from the desk
 
@@ -123,7 +123,7 @@ The panel knows my phone over Bluetooth. While it is away, the personal pages ar
 |---|---|
 | ![Setup](docs/screenshots/setup.png) | ![Diagnostics](docs/screenshots/diagnostics.png) |
 
-Brightness, accent colour, which side the dock is on, the focus lengths, and a card for every part with a log, so when something is off you can see why without a laptop.
+Brightness, the dark or light look, the accent colour, the focus lengths, which way up the panel hangs, and a card for every part with a log, so when something is off you can see why without a laptop.
 
 ## Will it work with my desk?
 

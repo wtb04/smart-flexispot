@@ -119,7 +119,7 @@ idf.py -p /dev/cu.usbmodem* flash monitor
 
 Ctrl-] leaves the monitor. If the port does not show up, hold BOOT while plugging in.
 
-It boots into a splash that shows the desk, the network and Home Assistant coming up, and is on the home page in about ten seconds.
+It boots straight onto the home page, which fills in as the desk, the network and Home Assistant come up.
 
 Every [release](https://github.com/wtb04/smart-flexispot/releases) has a `smart_flexispot-<version>-full.bin` that can be written at 0x0 without building anything:
 
