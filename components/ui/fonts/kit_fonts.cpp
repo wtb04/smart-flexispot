@@ -57,11 +57,7 @@ const lv_font_t *h1()
     return &font;
 }
 
-const lv_font_t *read_s()
-{
-    static const lv_font_t font = with_fallback(lv_font_kit_read_s, lv_font_units_28);
-    return &font;
-}
+const lv_font_t *read_s() { return h2(); }
 
 const lv_font_t *read_m() { return &lv_font_kit_read_m; }
 const lv_font_t *read_l() { return &lv_font_kit_read_l; }
