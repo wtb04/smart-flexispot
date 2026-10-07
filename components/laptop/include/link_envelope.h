@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <string>
 
 // Desk Link's envelope: every message between the panel and a laptop, each
@@ -27,6 +28,17 @@ public:
     virtual bool seal(const Nonce &nonce, const std::string &aad, const std::string &plain, std::string &sealed) = 0;
     /** False when the tag does not hold: the wrong key, or bytes changed on the way. */
     virtual bool open(const Nonce &nonce, const std::string &aad, const std::string &sealed, std::string &plain) = 0;
+    /** The same where `sealed` lies, its first length - kTagLen bytes becoming
+     *  the plain. This one copies; a cipher that can open in place does. */
+    virtual bool open_in_place(const Nonce &nonce, const std::string &aad, char *sealed, std::size_t length)
+    {
+        std::string plain;
+        if (!open(nonce, aad, std::string(sealed, length), plain)) {
+            return false;
+        }
+        std::memcpy(sealed, plain.data(), plain.size());
+        return true;
+    }
 };
 
 std::string seal(Cipher &cipher, const Nonce &nonce, const std::string &path, const std::string &plain);
@@ -34,6 +46,11 @@ std::string seal(Cipher &cipher, const Nonce &nonce, const std::string &path, co
 enum class Opened { Ok, Malformed, Forged };
 Opened open(Cipher &cipher, const std::string &path, const char *body, std::size_t length, std::string &plain,
             Nonce &nonce);
+
+/** The same opened where it lies, as a cover is, too big to copy on the
+ *  panel: the plain moved to the start of `body`, `plain_length` long. */
+Opened open_in_place(Cipher &cipher, const std::string &path, char *body, std::size_t length,
+                     std::size_t &plain_length, Nonce &nonce);
 
 /** Refuses what is stale, as an old message replayed would be, and what has
  *  come before, as one replayed at once would. */

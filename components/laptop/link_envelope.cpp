@@ -50,6 +50,23 @@ Opened open(Cipher &cipher, const std::string &path, const char *body, std::size
     return cipher.open(nonce, aad_for(path), sealed, plain) ? Opened::Ok : Opened::Forged;
 }
 
+Opened open_in_place(Cipher &cipher, const std::string &path, char *body, std::size_t length,
+                     std::size_t &plain_length, Nonce &nonce)
+{
+    constexpr std::size_t HEAD = MAGIC_LEN + kNonceLen;
+    plain_length               = 0;
+    if (length < HEAD + kTagLen || std::memcmp(body, MAGIC, MAGIC_LEN) != 0) {
+        return Opened::Malformed;
+    }
+    std::memcpy(nonce.data(), body + MAGIC_LEN, kNonceLen);
+    if (!cipher.open_in_place(nonce, aad_for(path), body + HEAD, length - HEAD)) {
+        return Opened::Forged;
+    }
+    plain_length = length - HEAD - kTagLen;
+    std::memmove(body, body + HEAD, plain_length);
+    return Opened::Ok;
+}
+
 bool Fresh::take(const Nonce &nonce, std::int64_t at_ms, std::int64_t now_ms)
 {
     const std::int64_t off = at_ms - now_ms;

@@ -23,6 +23,7 @@
 
 #include <sys/time.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -93,6 +94,19 @@ public:
                                         reinterpret_cast<const unsigned char *>(aad.data()), aad.size(),
                                         in + length, link::kTagLen, in,
                                         reinterpret_cast<unsigned char *>(plain.data())) == 0;
+    }
+
+    bool open_in_place(const link::Nonce &nonce, const std::string &aad, char *sealed, std::size_t length) override
+    {
+        if (!ready_ || length < link::kTagLen) {
+            return false;
+        }
+        std::lock_guard<std::mutex> hold(lock_);
+        const std::size_t plain = length - link::kTagLen;
+        auto             *bytes = reinterpret_cast<unsigned char *>(sealed);
+        return mbedtls_gcm_auth_decrypt(&context_, plain, nonce.data(), nonce.size(),
+                                        reinterpret_cast<const unsigned char *>(aad.data()), aad.size(),
+                                        bytes + plain, link::kTagLen, bytes, bytes) == 0;
     }
 
 private:
@@ -448,37 +462,36 @@ std::size_t fetch_cover(const char *url, std::uint8_t *into, std::size_t size)
         std::lock_guard<std::mutex> hold(s_lock);
         origin = s_origin;
     }
-    if (origin.empty()) {
+    if (origin.empty() || size == 0) {
         return 0;
     }
-    // Sealed, it is a little more than the picture: a buffer of its own.
-    static char *answer = static_cast<char *>(heap_caps_malloc(COVER_MAX, MALLOC_CAP_SPIRAM));
-    if (answer == nullptr) {
-        return 0;
-    }
+    // Sealed, it comes into `into` and is opened there: a picture is too big
+    // to keep twice. One that fills it was cut short, and will not open.
     net::Request request;
     request.host     = host_of(origin);
     request.path     = COVER;
     request.method   = net::Method::Post;
     request.body     = sealed(COVER, cover_body(url + scheme, now_ms()));
     request.priority = net::Priority::Now;
-    request.max_body = COVER_MAX - 1;
+    request.max_body = std::min(size, COVER_MAX) - 1;
     request.what     = "laptop cover";
     const std::int64_t asked = esp_timer_get_time();
-    const net::Fetched got   = net::fetch(std::move(request), answer, COVER_MAX);
+    const net::Fetched got   = net::fetch(std::move(request), reinterpret_cast<char *>(into), size);
     if (!got.ok() || got.truncated) {
         ESP_LOGW(TAG, "cover not had: http %d", got.status);
         return 0;
     }
     ESP_LOGI(TAG, "cover of %u KB in %d ms, %d of them on the wire", static_cast<unsigned>(got.length / 1024),
              static_cast<int>((esp_timer_get_time() - asked) / units::kUsPerMs), got.ms);
-    const std::string picture = opened(COVER, answer, got.length, nullptr);
-    if (picture.empty() || picture.size() > size) {
-        ESP_LOGW(TAG, "cover %s", picture.empty() ? "would not open" : "too large");
+    std::size_t length = 0;
+    link::Nonce nonce{};
+    if (link::open_in_place(s_gcm, std::string(COVER) + REPLY, reinterpret_cast<char *>(into), got.length, length,
+                            nonce) != link::Opened::Ok ||
+        length == 0) {
+        ESP_LOGW(TAG, "cover would not open");
         return 0;
     }
-    std::memcpy(into, picture.data(), picture.size());
     reached(origin, true);
-    return picture.size();
+    return length;
 }
 }  // namespace laptop
