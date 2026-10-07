@@ -305,6 +305,7 @@ void send_once(const HostConfig &config, Connection &connection, const Request &
     }
     if (connection.client == nullptr) {
         out.error = ESP_ERR_NO_MEM;
+        out.ours  = true;
         return;
     }
     esp_http_client_set_url(connection.client, url.c_str());
@@ -351,6 +352,7 @@ void no_room(const HostConfig &config, const Running &running, std::size_t wante
              static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) / units::kBytesPerKiB));
     exchange.error  = ESP_ERR_NO_MEM;
     exchange.status = 0;
+    exchange.ours   = true;
 }
 
 Exchange send(const HostConfig &config, Connection &connection, const Running &running, Worker &worker)

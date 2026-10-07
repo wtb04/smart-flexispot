@@ -20,6 +20,7 @@ struct Exchange {
     bool        timed_out      = false;
     int         ms             = 0;
     int         retry_after_ms = 0;   // from a Retry-After header, 0 for none
+    bool        ours           = false;  // it failed here, as for want of memory: not held against the host
     const char *body           = "";
     std::size_t length         = 0;
 };
