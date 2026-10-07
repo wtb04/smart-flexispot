@@ -210,11 +210,6 @@ jobs::Result poll()
 
 }  // namespace
 
-const char *feed_name(std::uint8_t feed)
-{
-    return feed < kFeedCount ? FEEDS[feed].name : "";
-}
-
 esp_err_t start(UpdateHandler on_update)
 {
     ESP_RETURN_ON_FALSE(s_job == jobs::kNoJob, ESP_ERR_INVALID_STATE, TAG, "already started");
@@ -279,11 +274,6 @@ int between(std::int64_t from, std::int64_t to, Event *out, int capacity)
     }
     xSemaphoreGive(s_lock);
     return written;
-}
-
-void refresh()
-{
-    jobs::poke(s_job);
 }
 
 }  // namespace ical
