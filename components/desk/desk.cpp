@@ -7,6 +7,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
+#include "lesson.h"
 #include "loctek.h"
 #include "settings.h"
 #include "transport.h"
@@ -143,8 +144,9 @@ StaticTask_t s_task_ctrl;
 StackType_t  s_task_stack[TASK_STACK];
 
 struct PresetCommand {
-    int  index;
-    bool store;
+    int           index;
+    bool          store;
+    std::uint32_t asked;  // the commands counted with this one
 };
 
 constexpr UBaseType_t PRESET_QUEUE_LEN = 4;
@@ -169,6 +171,17 @@ std::atomic<TickType_t> s_network_hold_until{0};  // zero when no such hold is l
 int  s_preset_mm[deskproto::kPresetCount] = {-1, -1, -1, -1, -1, -1};
 bool s_presets_dirty                      = false;
 std::atomic<int> s_active_preset{-1};
+
+// Every command to the desk, from whichever task: a lesson ends at the next.
+std::atomic<std::uint32_t> s_asked{0};
+std::uint32_t note_asked() { return s_asked.fetch_add(1, std::memory_order_relaxed) + 1; }
+std::uint32_t asked_so_far() { return s_asked.load(std::memory_order_relaxed); }
+
+detail::Lesson s_lesson;  // the supervisor's alone
+TickType_t     s_moved_at = 0;  // when the height last changed
+constexpr int  LEARNED_NOTICE_MS = 3000;
+
+std::uint32_t ms_of(TickType_t ticks) { return static_cast<std::uint32_t>(ticks * portTICK_PERIOD_MS); }
 
 using Presets = std::array<int, deskproto::kPresetCount>;
 
@@ -285,6 +298,12 @@ void let_go()
 void run_preset(const PresetCommand &cmd)
 {
     detail::trace(cmd.store ? "asked store" : "asked preset", cmd.index + 1);
+    const bool lesson_running = s_lesson.active();
+    if (lesson_running) {
+        const int index = s_lesson.index();
+        s_lesson.end("something else was asked of the desk");
+        detail::trace("lesson ended", index + 1);
+    }
     if (cmd.index < 0 || cmd.index >= deskproto::kPresetCount) {
         return;
     }
@@ -319,6 +338,11 @@ void run_preset(const PresetCommand &cmd)
     } else {
         detail::trace("sent preset", cmd.index + 1);
         s_link->preset(cmd.index);
+        // Only from a desk at rest: a tap while the box runs a preset stops it,
+        // and where it stops is not the preset's.
+        if (!lesson_running && ms_of(now - s_moved_at) >= detail::Lesson::SETTLE_MS) {
+            s_lesson.start(cmd.index, height, cmd.asked, ms_of(now));
+        }
     }
     clear_active();
     s_commanded_from = height;
@@ -373,7 +397,30 @@ void note_settling(Watch &watch, int height, TickType_t now)
     if (height != watch.settled_at) {
         watch.settled_at    = height;
         watch.settled_since = now;
+        s_moved_at          = now;
     }
+}
+
+// Where the run of a box preset came to rest, once, and then nothing more.
+void follow_lesson(const Watch &watch, int height, TickType_t now)
+{
+    if (!s_lesson.active()) {
+        return;
+    }
+    const int index   = s_lesson.index();
+    const int learned = s_lesson.step(height, asked_so_far(), ms_of(now), ms_of(now - watch.settled_since));
+    if (s_lesson.active()) {
+        return;
+    }
+    ESP_LOGI(TAG, "preset %d: %s%s", index + 1, s_lesson.why(), learned >= 0 ? "" : ", nothing learned");
+    detail::trace(learned >= 0 ? "learned" : "lesson ended", index + 1, learned);
+    if (learned < 0 || !loctek::in_range(learned) || s_preset_mm[index] == learned) {
+        return;
+    }
+    remember_preset(index, learned);
+    char text[48];
+    std::snprintf(text, sizeof text, "Height learned, %d.%d cm", learned / 10, learned % 10);
+    show_notice(text, Tone::Done, LEARNED_NOTICE_MS);
 }
 
 void save_presets_if_changed()
@@ -421,6 +468,7 @@ void show_status(Watch &watch, const char *status)
     show_height(linked ? s_height_mm.load(std::memory_order_relaxed) : -1);
     ESP_LOGI(TAG, "%s", status);
     if (status == kAsleep) {
+        note_asked();  // a step up of its own
         s_link->nudge();
     }
 }
@@ -452,6 +500,7 @@ void wake_if_never_heard(Watch &watch, const char *status, TickType_t now)
         const bool       link_up = status == kConnected;
 
         note_settling(watch, height, now);
+        follow_lesson(watch, height, now);
         save_presets_if_changed();
         let_go_of_stale_network_hold(now);
         const bool moving = command_in_flight(height, now) || motion_now() != 0 ||
@@ -501,7 +550,7 @@ void on_preset(int index, bool store)
     if (s_preset_queue == nullptr) {
         return;
     }
-    const PresetCommand cmd{index, store};
+    const PresetCommand cmd{index, store, note_asked()};
     xQueueSend(s_preset_queue, &cmd, 0);
 }
 
@@ -542,6 +591,7 @@ const char *motion()
 void on_move(Move direction)
 {
     detail::trace("asked move", static_cast<int>(direction));
+    note_asked();
     if (s_link == nullptr) {
         return;  // a touch before the desk has started
     }

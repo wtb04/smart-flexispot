@@ -178,7 +178,11 @@ since nobody's finger is on it.
 Presets 1 to 4 are the box's own: a tap sends the desk there, and the box runs
 the move itself and ignores a plain stop while it does, so tapping the same
 preset again is what cancels it. A long press stores the current height there,
-as the M key followed by the preset key. Presets 5 and 6 are the panel's own: a
+as the M key followed by the preset key. The box keeps its presets' heights to
+itself, so the panel learns each from one clean run: a tap from a desk at rest,
+the desk leaving within 4 s, going one way, and asked nothing else on the way.
+The lesson ends at the first rest, learned or not, so nothing the desk does
+afterwards is taken for the preset. Presets 5 and 6 are the panel's own: a
 tap has the desk driven there by whichever board holds the wire, with one
 steering decision per height the box reports rather than on a clock. The desk
 runs on after the last key frame, so the keys are let go early by a run-on
