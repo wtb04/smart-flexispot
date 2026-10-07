@@ -13,9 +13,13 @@
 #include "topics.h"
 #include "units.h"
 
+#include <algorithm>
 #include <cctype>
+#include <cmath>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
+#include <strings.h>
 #include <ctime>
 #include <utility>
 
@@ -89,12 +93,45 @@ void sentence_case(const char *from, char *out, std::size_t size)
 
 // --- air ---------------------------------------------------------------------
 
+// Each reading on a small gauge, its arc in the ink of the level Home Assistant
+// gives it. Laid out from the widget's size: two by two, each gauge with its
+// name and word beside it; away, with the widget across the page, four in a
+// row, each name over its gauge and the word in the gauge's open foot.
 struct Air {
-    lv_obj_t *cell = nullptr, *caption = nullptr, *figure = nullptr, *words = nullptr, *unit = nullptr,
-             *word = nullptr;
+    lv_obj_t *cell = nullptr, *caption = nullptr, *word = nullptr;
+    Dial     *gauge = nullptr;
+    bool      row = false;  // laid out four in a row
 };
 Air       s_air[kPillCount];
 lv_obj_t *s_air_none = nullptr;
+
+// How far round a reading goes, in tenths, by its name or else its unit: only
+// the gauge's ends; how good it is comes from Home Assistant.
+struct AirScale {
+    const char  *name, *unit;
+    std::int32_t min, max;
+};
+constexpr AirScale AIR_SCALES[] = {
+    {"CO2", "ppm", 4000, 20000},
+    {"VOC", "ppb", 0, 15000},
+    {"Humidity", "%", 0, 1000},
+    {"PM2.5", "\xc2\xb5g/m\xc2\xb3", 0, 750},
+};
+
+const AirScale *scale_of(const char *caption, const char *unit)
+{
+    for (const AirScale &scale : AIR_SCALES) {
+        if (strcasecmp(caption, scale.name) == 0) {
+            return &scale;
+        }
+    }
+    for (const AirScale &scale : AIR_SCALES) {
+        if (unit[0] != '\0' && std::strcmp(unit, scale.unit) == 0) {
+            return &scale;
+        }
+    }
+    return nullptr;
+}
 
 void word_of(Level level, const char *&word, Ink &ink)
 {
@@ -144,7 +181,9 @@ void paint_air()
         Air                     &air   = s_air[i];
         const detail::PillState &state = home.pills[i];
         const bool               here  = state.label[0] != '\0';
-        lv_obj_set_hidden(air.cell, !here);
+        if (lv_obj_is_hidden(air.cell) == here) {
+            lv_obj_set_hidden(air.cell, !here);
+        }
         if (!here) {
             continue;
         }
@@ -155,40 +194,86 @@ void paint_air()
         char       figure[sizeof(state.value)];
         char       unit[sizeof(state.value)];
         const bool number = split_value(state.value, figure, sizeof(figure), unit, sizeof(unit));
-        lv_obj_set_hidden(air.figure, !number);
-        lv_obj_set_hidden(air.unit, !number || unit[0] == '\0');
-        lv_obj_set_hidden(air.words, number);
-        if (number) {
-            set_text_if(air.figure, figure);
-            ink_if(air.figure, std::strcmp(figure, "--") == 0 ? Ink::Tertiary : Ink::Primary);
-            set_text_if(air.unit, unit);
-            lv_obj_set_x(air.unit, widest(Role::ReadXL, {figure}) + space::xs);
-            lv_obj_set_width(air.unit, widest(Role::Body, {unit}));
-        } else {
-            set_text_if(air.words, state.value);
-        }
+        const bool none   = !number || std::strcmp(figure, "--") == 0;
+        set_text_if(air.gauge->figure(), number ? figure : "--");
+        ink_if(air.gauge->figure(), none ? Ink::Tertiary : Ink::Primary);
+        // what is not a figure, "unavailable", in words under the dash
+        set_text_if(air.gauge->caption(), number ? unit : state.value);
+
         const char *word = "";
         Ink         ink  = Ink::Secondary;
         word_of(state.level, word, ink);
         set_text_if(air.word, word);
         ink_if(air.word, ink);
+
+        const AirScale *scale = scale_of(caption, unit);
+        if (none || scale == nullptr) {
+            air.gauge->set_value(INT32_MIN);
+            continue;
+        }
+        char dotted[sizeof(figure)];
+        std::snprintf(dotted, sizeof(dotted), "%s", figure);
+        for (char *c = dotted; *c != '\0'; ++c) {
+            *c = *c == ',' ? '.' : *c;
+        }
+        air.gauge->set_range(scale->min, scale->max);
+        air.gauge->set_value(static_cast<std::int32_t>(std::lround(std::strtof(dotted, nullptr) * 10.0f)));
+        air.gauge->set_ink(state.level == Level::Neutral ? Ink::Primary : ink);
+        air.gauge->set_faded(state.level == Level::Neutral);
     }
     lv_obj_set_hidden(s_air_none, shown > 0);
 }
 
 lv_obj_t *s_air_body = nullptr;
 
+void place_cell(Air &air, std::int32_t w, std::int32_t h, bool row)
+{
+    const std::int32_t cap_h = fonts::small()->line_height, word_h = fonts::h3()->line_height;
+    if (row) {
+        // the name over the gauge, the word in its open foot
+        const std::int32_t d = std::min(w, h - cap_h - space::s);
+        air.gauge->set_size(d, d / 11);
+        lv_obj_set_pos(air.gauge->obj(), (w - d) / 2, cap_h + space::s);
+        lv_obj_set_pos(air.caption, 0, 0);
+        lv_obj_set_pos(air.word, 0, cap_h + space::s + d - word_h);
+        for (lv_obj_t *label : {air.caption, air.word}) {
+            lv_obj_set_width(label, w);
+            lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+        }
+    } else {
+        // the name and the word beside the gauge, level with its middle
+        const std::int32_t text_w = std::max(widest(Role::Small, {"Humidity"}), widest(Role::H3, {"Good", "Fair", "Poor"}));
+        const std::int32_t d      = std::min(h, w - space::m - text_w);
+        air.gauge->set_size(d, d / 11);
+        lv_obj_set_pos(air.gauge->obj(), 0, (h - d) / 2);
+        const std::int32_t x = d + space::m, top = (h - cap_h - word_h) / 2;
+        lv_obj_set_pos(air.caption, x, top);
+        lv_obj_set_pos(air.word, x, top + cap_h);
+        for (lv_obj_t *label : {air.caption, air.word}) {
+            lv_obj_set_width(label, w - x);
+            lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_LEFT, 0);
+        }
+    }
+    if (air.row != row) {
+        air.row = row;
+        lv_obj_set_style_text_font(air.gauge->figure(), row ? fonts::read_l() : fonts::read_m(), 0);
+        lv_obj_set_width(air.gauge->figure(), widest(row ? Role::ReadL : Role::ReadM, {"8888.8"}));
+    }
+}
+
 void place_air()
 {
     const std::int32_t w = lv_obj_get_content_width(s_air_body), h = lv_obj_get_content_height(s_air_body);
-    const std::int32_t cell_w = (w - space::xl) / 2, cell_h = (h - space::l) / 2;
+    const bool         row = w > h * 5 / 2;  // across the page, away
+    const int          across = row ? kPillCount : 2;
+    const std::int32_t gap_x = row ? space::xl : space::xl, gap_y = space::l;
+    const std::int32_t cell_w = (w - (across - 1) * gap_x) / across;
+    const std::int32_t cell_h = row ? h : (h - gap_y) / 2;
     for (int i = 0; i < kPillCount; ++i) {
         Air &air = s_air[i];
         lv_obj_set_size(air.cell, cell_w, cell_h);
-        lv_obj_set_pos(air.cell, (i % 2) * (cell_w + space::xl), (i / 2) * (cell_h + space::l));
-        for (lv_obj_t *wide : {air.caption, air.words, air.word}) {
-            lv_obj_set_width(wide, cell_w);
-        }
+        lv_obj_set_pos(air.cell, (i % across) * (cell_w + gap_x), (i / across) * (cell_h + gap_y));
+        place_cell(air, cell_w, cell_h, row);
     }
     lv_obj_set_size(s_air_none, w, h);
 }
@@ -196,20 +281,23 @@ void place_air()
 void build_air(lv_obj_t *grid)
 {
     s_air_body = widget(grid, Span::Big, "Air");
-    const std::int32_t cap_h = fonts::small()->line_height;
-    const std::int32_t fig_h = fonts::read_xl()->line_height;
     for (int i = 0; i < kPillCount; ++i) {
         Air &air = s_air[i];
-        air.cell    = plain(s_air_body);
+        air.cell = plain(s_air_body);
+        DialSpec spec;
+        spec.size  = 120;
+        spec.arc   = 12;
+        spec.start = 135;
+        spec.sweep = 270;
+        spec.read  = Role::ReadM;
+        spec.unit  = "";
+        air.gauge  = new Dial(air.cell, spec);
+        lv_obj_set_width(air.gauge->figure(), widest(Role::ReadM, {"8888.8"}));
+        lv_obj_set_width(air.gauge->caption(), widest(Role::Small, {"\xc2\xb5g/m\xc2\xb3", "Unavailable"}));
+        lv_label_set_long_mode(air.gauge->caption(), LV_LABEL_LONG_MODE_DOTS);
+        lv_obj_set_style_margin_top(air.gauge->caption(), -space::xs, 0);
         air.caption = line(air.cell, Role::Small, Ink::Secondary, 1);
-        air.figure  = line(air.cell, Role::ReadXL, Ink::Primary, widest(Role::ReadXL, {"-8888.8"}));
-        lv_obj_set_y(air.figure, cap_h);
-        air.unit = line(air.cell, Role::Body, Ink::Secondary, 1);
-        lv_obj_set_y(air.unit, cap_h + baseline_y(Role::ReadXL, Role::Body));
-        air.words = line(air.cell, Role::H1, Ink::Primary, 1);
-        lv_obj_set_y(air.words, cap_h + (fig_h - fonts::h1()->line_height) / 2);
-        air.word = line(air.cell, Role::H3, Ink::Secondary, 1);
-        lv_obj_set_y(air.word, cap_h + fig_h);
+        air.word    = line(air.cell, Role::H3, Ink::Secondary, 1);
         lv_obj_set_hidden(air.cell, true);
     }
     s_air_none = empty(s_air_body, ic::air, "No readings from Home Assistant");

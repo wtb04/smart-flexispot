@@ -264,8 +264,8 @@ class Dial : public InPsram {
     void set_range(std::int32_t min, std::int32_t max);
     /** The dot at `value`; INT32_MIN for none. */
     void set_mark(std::int32_t value);
-    /** As big again, for a page laid out anew; its arc keeps its width. */
-    void set_size(std::int32_t size);
+    /** As big again, for a page laid out anew; `arc` its new width, 0 to keep it. */
+    void set_size(std::int32_t size, std::int32_t arc = 0);
 
   private:
     static void on_value(void *var, int32_t v);
