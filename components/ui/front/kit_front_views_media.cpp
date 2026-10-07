@@ -1,6 +1,6 @@
 // Music and the cinema over the whole screen, as Apple's Now Playing has them:
-// the picture large over a blurred backdrop of itself, what plays, how far,
-// round fills either side of the accent capsule and a thick volume slider.
+// the picture large, what plays, how far, round fills either side of the
+// accent capsule and a thick volume slider.
 // Each closes itself when what plays is no longer its own, and gives its
 // pictures' memory back on closing.
 

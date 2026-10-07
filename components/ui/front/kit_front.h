@@ -36,7 +36,7 @@ struct DockItems {
 void open_desk(lv_obj_t *source);
 /** The desk's card following the desk from the start, so it knows where each preset was seen. kit_front_desk.cpp */
 void follow_desk();
-/** The focus timer's card, from the dock's button. kit_front_views.cpp */
+/** The focus timer's card, from the dock's button. kit_front_views_focus.cpp */
 void open_focus(lv_obj_t *source);
 
 /** The bar's cards, each out of what opened it, and the Claude Code sessions'
@@ -45,10 +45,6 @@ void open_media(lv_obj_t *source);
 void open_lights(lv_obj_t *source);
 void open_heating(lv_obj_t *source);
 void build_claude(lv_obj_t *bar);
-/** What plays, fullscreen: the music view, or the cinema's for a video. kit_front_views.cpp */
-void open_now_playing();
-/** The favourites, to start one of them. kit_front_views.cpp */
-void open_favourites();
 
 // Each part's own, in kit_front_<part>.cpp.
 DockItems build_dock(lv_obj_t *chrome);  // the dock, its desk and focus, and the items that choose the pages
@@ -78,12 +74,10 @@ void event_place(const ical::Event &event, char *out, std::size_t size);
 void event_clock(std::int64_t at, char *out, std::size_t size);
 
 // The fullscreen views and the favourites, from the bar's cards. kit_front_views.cpp
-// Each with its source or without, as the caller has one to hand: without, it is
-// what the finger is on.
 /** The music view, or the cinema for a video; nothing while nothing plays. */
 void open_now_playing();
-void open_now_playing(lv_obj_t *source);
-/** The favourites to start, as a sheet; nothing while there are none. */
+/** The favourites to start, as a sheet, out of its source or else what the
+ *  finger is on; nothing while there are none. */
 void open_favourites();
 void open_favourites(lv_obj_t *source);
 
