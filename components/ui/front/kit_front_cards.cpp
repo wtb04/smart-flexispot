@@ -307,7 +307,7 @@ void build_media_card(lv_obj_t *body)
 
     lv_obj_t *head = flow(body, LV_FLEX_FLOW_ROW, space::l);
     lv_obj_set_width(head, LV_PCT(100));
-    c->cover = new Cover(head, COVER, COVER, Shape::Rounded, 0, ic::music_note);
+    c->cover = new Cover(head, COVER, COVER, Shape::Rounded, album_radius(COVER), ic::music_note);
     own(c->cover);
     lv_obj_set_clickable(c->cover->obj(), true);
     on_click(c->cover->obj(), [](lv_event_t *) { full_view(); });

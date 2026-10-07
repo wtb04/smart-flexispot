@@ -292,7 +292,7 @@ void build(lv_obj_t *)
                                            s_cover->release();
                                        }});
 
-    s_cover = new Cover(root, COVER, COVER, Shape::Rounded, 0);
+    s_cover = new Cover(root, COVER, COVER, Shape::Rounded, album_radius(COVER));
     lv_obj_set_pos(s_cover->obj(), X0, Y0);
     lv_obj_add_flag(s_cover->obj(), LV_OBJ_FLAG_CLICKABLE);  // a tap on the record plays or pauses it
     lv_obj_add_event_cb(s_cover->obj(), [](lv_event_t *) { detail::media_toggle_play(); }, LV_EVENT_CLICKED, nullptr);
