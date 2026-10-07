@@ -1093,8 +1093,15 @@ esp_err_t build()
 {
     constexpr TickType_t BETWEEN_PARTS = pdMS_TO_TICKS(20);
     const std::uint32_t  from          = lv_tick_get();
+    // The screen's first frames are drawn between the parts, and on the panel
+    // one can hold the lock for longer than any later frame does.
+    constexpr std::uint32_t BUILD_LOCK_MS = 5000;
     for (bool more = true; more;) {
-        ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
+        const std::uint32_t asked = lv_tick_get();
+        ESP_RETURN_ON_FALSE(lvgl_port_lock(BUILD_LOCK_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
+        if (lv_tick_elaps(asked) > 100) {
+            ESP_LOGW(TAG, "build waited %u ms for the screen", static_cast<unsigned>(lv_tick_elaps(asked)));
+        }
         more = front::build_next_part();
         lv_obj_update_layout(lv_screen_active());
         if (!more) {
