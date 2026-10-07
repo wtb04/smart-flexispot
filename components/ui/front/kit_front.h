@@ -85,6 +85,9 @@ void open_favourites(lv_obj_t *source);
 /** As Home's Overhead opens the radar page: that aircraft chosen, and on the scope. */
 void radar_opens_on(const char *hex);
 
+/** Album art is square, its corners only eased: a few pixels, a little more on a big one. */
+constexpr std::int32_t album_radius(std::int32_t side) { return 4 + side / 40; }
+
 // What plays, in its cover's colours, in kit_front_album.cpp.
 struct AlbumColours {
     bool       vivid = false;  // false: a cover of greys, which keeps the page's colours

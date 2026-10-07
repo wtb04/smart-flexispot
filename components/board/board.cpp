@@ -197,6 +197,54 @@ IRAM_ATTR bool frame_done(esp_lcd_panel_handle_t, esp_lcd_dpi_panel_event_data_t
     return woken == pdTRUE;
 }
 
+// The SRM keeps its macro-blocks in order when a block's last one is bigger
+// than the 2D-DMA's FIFO, and kept so it can stall for good while the panel
+// is scanned out (esp-idf #19023 and #19096, DIG-734): the screen froze on a
+// rotation that never ended. Such a block goes as stripes of rows, each with
+// a last macro-block of one row, which the driver always lets out of order.
+constexpr std::uint32_t SRM_MB      = 16;  // a v1 P4's only macro-block size
+constexpr std::uint32_t SRM_W_UNIT  = 64;  // pixels of RGB565 the SRM takes across at a time
+constexpr std::uint32_t SRM_FIFO    = 12 * 128;  // bits
+constexpr std::uint32_t RGB565_BITS = 16;
+
+bool srm_keeps_order(std::uint32_t w, std::uint32_t h)
+{
+    const std::uint32_t w_left = w % SRM_W_UNIT == 0 ? SRM_W_UNIT : w % SRM_W_UNIT;
+    const std::uint32_t h_left = h % SRM_MB == 0 ? SRM_MB : h % SRM_MB;
+    return (w > SRM_W_UNIT || h > SRM_MB) && w_left * h_left * RGB565_BITS >= SRM_FIFO;
+}
+
+/** An unscaled SRM, in stripes where it would stall whole. */
+esp_err_t srm_unscaled(ppa_client_handle_t client, const ppa_srm_oper_config_t &whole)
+{
+    const std::uint32_t w = whole.in.block_w, h = whole.in.block_h;
+    ppa_srm_oper_config_t op = whole;
+    if (!srm_keeps_order(w, h)) {
+        return ppa_do_scale_rotate_mirror(client, &op);
+    }
+    for (std::uint32_t done = 0; done < h;) {
+        std::uint32_t rows = h - done;
+        if (srm_keeps_order(w, rows)) {
+            rows = (rows - 1) / SRM_MB * SRM_MB + 1;
+        }
+        op.in.block_offset_y  = whole.in.block_offset_y + done;
+        op.in.block_h         = rows;
+        op.out.block_offset_x = whole.out.block_offset_x;
+        op.out.block_offset_y = whole.out.block_offset_y;
+        // where these rows of the block land, turned anticlockwise as the PPA turns
+        switch (whole.rotation_angle) {
+            case PPA_SRM_ROTATION_ANGLE_0:   op.out.block_offset_y += done; break;
+            case PPA_SRM_ROTATION_ANGLE_90:  op.out.block_offset_x += done; break;
+            case PPA_SRM_ROTATION_ANGLE_180: op.out.block_offset_y += h - done - rows; break;
+            case PPA_SRM_ROTATION_ANGLE_270: op.out.block_offset_x += h - done - rows; break;
+            default: break;
+        }
+        ESP_RETURN_ON_ERROR(ppa_do_scale_rotate_mirror(client, &op), TAG, "srm stripe");
+        done += rows;
+    }
+    return ESP_OK;
+}
+
 esp_err_t copy_rect(const std::uint8_t *from, std::uint8_t *to, const Rect &r,
                     ppa_srm_rotation_angle_t angle, std::uint32_t in_w, std::uint32_t in_h,
                     std::uint32_t in_x, std::uint32_t in_y, std::uint32_t out_x, std::uint32_t out_y)
@@ -221,7 +269,7 @@ esp_err_t copy_rect(const std::uint8_t *from, std::uint8_t *to, const Rect &r,
     op.scale_x            = 1.0f;
     op.scale_y            = 1.0f;
     op.mode               = PPA_TRANS_MODE_BLOCKING;
-    return ppa_do_scale_rotate_mirror(s_ppa, &op);
+    return srm_unscaled(s_ppa, op);
 }
 
 std::uint64_t area_of(const Rect &r) { return static_cast<std::uint64_t>(r.w) * r.h; }

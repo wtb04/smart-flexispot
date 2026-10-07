@@ -169,7 +169,7 @@ void build_media(lv_obj_t *bar)
     lv_obj_set_style_bg_opa(s_media, colours().glass_solid_opa, LV_STATE_PRESSED);  // the glass firms up under the finger
     // square, as album art is meant, and as far in as from the top: its corners clear the round end
     lv_obj_set_style_pad_left(s_media, (size::bar - ART) / 2, 0);
-    s_cover = new Cover(s_media, ART, ART, Shape::Rounded, 0, ic::music_note);
+    s_cover = new Cover(s_media, ART, ART, Shape::Rounded, album_radius(ART), ic::music_note);
     lv_obj_remove_flag(s_cover->obj(), LV_OBJ_FLAG_CLICKABLE);
     lv_obj_t *col = flow(s_media, LV_FLEX_FLOW_COLUMN, 0);
     lv_obj_set_flex_grow(col, 1);

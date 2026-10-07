@@ -321,7 +321,7 @@ void build_pick(lv_obj_t *grid, int i)
     lv_obj_set_style_bg_opa(b, LV_OPA_TRANSP, LV_STATE_PRESSED);  // it gives under the finger, without a fill round it
     lv_obj_add_event_cb(b, pick_tapped, LV_EVENT_CLICKED, reinterpret_cast<void *>(static_cast<std::intptr_t>(i)));
 
-    auto *cover = new Cover(b, ART, ART, Shape::Rounded, 0);
+    auto *cover = new Cover(b, ART, ART, Shape::Rounded, album_radius(ART));
     s_tiles[i]  = {cover, UINT32_MAX};
     lv_obj_add_event_cb(
         cover->obj(),
