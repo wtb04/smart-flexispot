@@ -4,15 +4,18 @@
 #include "kit_pixels.h"
 #include "lvgl_private.h"  // a layer's clip area, to lay down parts of one picture, and the cover check's
 
+#include "esp_heap_caps.h"
+#include "esp_log.h"
+
 #include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <utility>
 
 #if defined(ESP_PLATFORM)
 #include "driver/ppa.h"
-#include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #else
@@ -44,6 +47,10 @@ constexpr std::int32_t STEP       = 8;    // the backdrop is worked out at an ei
 constexpr std::int32_t ZOOM_PCT   = 135;  // closer in than filling, so it reads as colour rather than as the cover
 constexpr std::int32_t BLUR_R     = 4;    // at the eighth, three passes: about 40 pixels on the screen
 constexpr int          BLUR_PASSES = 3;
+// What the PPA may take beside the picture it scales into: a big picture is
+// scaled in software rather than have a second one's worth of memory found for it.
+constexpr std::size_t   PPA_SCRATCH_MAX = 128 * 1024;
+constexpr std::uint32_t RETRY_MS        = 1500;
 
 char s_cover_report[128] = "no cover made yet\n";
 char s_backdrop_report[192] = "no backdrop made yet";
@@ -82,14 +89,21 @@ std::uint16_t *row_of(std::uint16_t *out, std::int32_t stride, std::int32_t y)
 }
 
 // Shrinking, a few points of each pixel's share of the picture averaged: near
-// a box filter's look at a fraction of its reads. Growing, bilinear.
-void scale_soft(const Picture &p, Crop c, std::uint16_t *out, std::int32_t w, std::int32_t h, std::int32_t stride)
+// a box filter's look at a fraction of its reads. Growing, bilinear. False,
+// with nothing written, when there is no room for its table of columns.
+bool scale_soft(const Picture &p, Crop c, std::uint16_t *out, std::int32_t w, std::int32_t h, std::int32_t stride)
 {
+    if (c.w == w && c.h == h) {
+        for (std::int32_t y = 0; y < h; ++y) {
+            std::memcpy(row_of(out, stride, y), row_of(p, c.y + y) + c.x, static_cast<std::size_t>(w) * 2);
+        }
+        return true;
+    }
     if (c.w >= w && c.h >= h) {
         const int n = std::clamp<int>(std::max((c.w + w - 1) / w, (c.h + h - 1) / h), 1, 4);
         auto *xs = static_cast<std::int32_t *>(lv_malloc(sizeof(std::int32_t) * w * n));
         if (xs == nullptr) {
-            return;
+            return false;
         }
         for (std::int32_t i = 0; i < w * n; ++i) {
             xs[i] = c.x + static_cast<std::int32_t>((2LL * i + 1) * c.w / (2LL * w * n));
@@ -115,7 +129,7 @@ void scale_soft(const Picture &p, Crop c, std::uint16_t *out, std::int32_t w, st
             }
         }
         lv_free(xs);
-        return;
+        return true;
     }
     for (std::int32_t y = 0; y < h; ++y) {
         const std::int32_t fy  = std::max<std::int32_t>(0, static_cast<std::int32_t>(((2LL * y + 1) * c.h * 128) / h) - 128);
@@ -136,6 +150,7 @@ void scale_soft(const Picture &p, Crop c, std::uint16_t *out, std::int32_t w, st
             o[x] = static_cast<std::uint16_t>(mix(11, 0x1f) << 11 | mix(5, 0x3f) << 5 | mix(0, 0x1f));
         }
     }
+    return true;
 }
 
 #if defined(ESP_PLATFORM)
@@ -161,6 +176,9 @@ bool scale_ppa(const Picture &p, Crop c, std::uint16_t *out, std::int32_t w, std
         return false;
     }
     const std::size_t bytes = (static_cast<std::size_t>(ow) * oh * 2 + 127) / 128 * 128;
+    if (bytes > PPA_SCRATCH_MAX) {
+        return false;
+    }
     auto *scratch = static_cast<std::uint16_t *>(heap_caps_aligned_calloc(128, 1, bytes, MALLOC_CAP_SPIRAM));
     if (scratch == nullptr) {
         return false;
@@ -195,25 +213,30 @@ bool scale_ppa(const Picture &p, Crop c, std::uint16_t *out, std::int32_t w, std
 }
 #endif
 
-/** The middle of `p` scaled to fill w by h: the PPA on the panel, and software where there is none or it refuses. */
-bool scale(const Picture &p, Crop c, std::uint16_t *out, std::int32_t w, std::int32_t h, std::int32_t stride)
+/**
+ * The middle of `p` scaled to fill w by h: the PPA on the panel, and software
+ * where there is none, it refuses, or it would need too much beside. False,
+ * with nothing written, when neither could; `hw` says the PPA did it.
+ */
+bool scale(const Picture &p, Crop c, std::uint16_t *out, std::int32_t w, std::int32_t h, std::int32_t stride, bool &hw)
 {
+    hw = false;
 #if defined(ESP_PLATFORM)
-    if (scale_ppa(p, c, out, w, h, stride)) {
+    if ((c.w != w || c.h != h) && scale_ppa(p, c, out, w, h, stride)) {
+        hw = true;
         return true;
     }
 #endif
-    scale_soft(p, c, out, w, h, stride);
-    return false;
+    return scale_soft(p, c, out, w, h, stride);
 }
 
-lv_opa_t coverage(std::int32_t x, std::int32_t y, std::int32_t w, std::int32_t h, std::int32_t r)
+lv_opa_t coverage(std::int32_t x, std::int32_t y, float w, float h, float r)
 {
     const float px = static_cast<float>(x) + 0.5f, py = static_cast<float>(y) + 0.5f;
-    const float cx = std::clamp(px, static_cast<float>(r), static_cast<float>(w - r));
-    const float cy = std::clamp(py, static_cast<float>(r), static_cast<float>(h - r));
+    const float cx = std::clamp(px, r, w - r);
+    const float cy = std::clamp(py, r, h - r);
     const float d  = std::sqrt((px - cx) * (px - cx) + (py - cy) * (py - cy));
-    return static_cast<lv_opa_t>(std::lround(std::clamp(static_cast<float>(r) - d + 0.5f, 0.0f, 1.0f) * 255.0f));
+    return static_cast<lv_opa_t>(std::lround(std::clamp(r - d + 0.5f, 0.0f, 1.0f) * 255.0f));
 }
 
 bool all_corner(std::int32_t w, std::int32_t h, std::int32_t r) { return r > 0 && 2 * r >= std::min(w, h) - 2; }
@@ -235,6 +258,23 @@ void destroy(Made &m)
     for (lv_draw_buf_t *&c : m.corner) {
         destroy(c);
     }
+}
+
+// What allocate() asks for, near enough to tell in a log.
+std::size_t bytes_for(std::int32_t w, std::int32_t h, std::int32_t r)
+{
+    const std::size_t px = static_cast<std::size_t>(w) * h;
+    return all_corner(w, h, r) ? px * 3 : px * 2 + 4 * static_cast<std::size_t>(r) * r * 3;
+}
+
+void no_room(bool &warned, const char *what, std::int32_t w, std::int32_t h, std::size_t asked)
+{
+    if (std::exchange(warned, true)) {
+        return;
+    }
+    ESP_LOGW("kit", "no room for a %dx%d %s: %u bytes asked, the largest free PSRAM block %u", static_cast<int>(w),
+             static_cast<int>(h), what, static_cast<unsigned>(asked),
+             static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)));
 }
 
 std::size_t bytes_of(const Made &m)
@@ -344,6 +384,38 @@ void draw(const Made &m, lv_layer_t *layer, const lv_area_t &c, std::int32_t r, 
             lay(layer, m.corner[k], a, p, opa);
         }
     }
+}
+
+// The copy of the picture a new one fades in over: whole for a small one, at a
+// half or a quarter for bigger ones, which only show it blurred and going.
+std::int32_t ghost_step(std::int32_t w, std::int32_t h)
+{
+    const std::int32_t side = std::max(w, h);
+    return side <= 64 ? 1 : side <= 200 ? 2 : 4;
+}
+
+void lay_ghost(lv_layer_t *layer, lv_draw_buf_t *ghost, const lv_area_t &c)
+{
+    lv_area_t clip;
+    if (!lv_area_intersect(&clip, &c, &layer->_clip_area)) {
+        return;
+    }
+    const std::int32_t bw = ghost->header.w, bh = ghost->header.h, w = lv_area_get_width(&c), h = lv_area_get_height(&c);
+    lv_draw_image_dsc_t dsc;
+    lv_draw_image_dsc_init(&dsc);
+    dsc.src = ghost;
+    if (bw != w || bh != h) {
+        const std::int32_t gw = bw - 1, gh = bh - 1;  // without the edge kept once more
+        dsc.scale_x   = (w * LV_SCALE_NONE + gw / 2) / gw;
+        dsc.scale_y   = (h * LV_SCALE_NONE + gh / 2) / gh;
+        dsc.pivot     = {0, 0};
+        dsc.antialias = 1;
+    }
+    const lv_area_t at{c.x1, c.y1, c.x1 + bw - 1, c.y1 + bh - 1};
+    const lv_area_t was = layer->_clip_area;
+    layer->_clip_area   = clip;
+    lv_draw_image(layer, &dsc, &at);
+    layer->_clip_area = was;
 }
 
 // What surely lies inside the shape, so whatever is under it is not drawn
@@ -600,27 +672,38 @@ Cover::Cover(lv_obj_t *parent, std::int32_t w, std::int32_t h, Shape shape, std:
             auto *c = static_cast<Cover *>(lv_event_get_user_data(e));
             lv_anim_delete(c, on_mix);
             destroy(c->m_cur);
-            destroy(c->m_prev);
+            destroy(c->m_ghost);
             c->m_root = c->m_well = c->m_pic = nullptr;
         },
         LV_EVENT_DELETE, this);
 }
 
-std::size_t Cover::bytes() const { return bytes_of(m_cur) + bytes_of(m_prev); }
+std::size_t Cover::bytes() const { return bytes_of(m_cur) + (m_ghost != nullptr ? m_ghost->data_size : 0); }
 
 void Cover::on_draw(lv_event_t *e)
 {
     auto *c = static_cast<Cover *>(lv_event_get_user_data(e));
-    const bool opaque = c->m_cur.main != nullptr && (c->m_mix == 255 || c->m_prev.main != nullptr);
     if (lv_event_get_code(e) == LV_EVENT_COVER_CHECK) {
-        cover_check(e, c->m_r, opaque);
+        cover_check(e, c->m_r, c->m_has && c->m_fade == Fade::None);
         return;
     }
     lv_area_t at;
     lv_obj_get_coords(c->m_pic, &at);
-    lv_layer_t *layer = lv_event_get_layer(e);
-    draw(c->m_prev, layer, at, c->m_r, static_cast<lv_opa_t>(c->m_cur.main != nullptr ? 255 : 255 - c->m_mix), c->m_h);
-    draw(c->m_cur, layer, at, c->m_r, static_cast<lv_opa_t>(c->m_mix), c->m_h);
+    lv_layer_t   *layer = lv_event_get_layer(e);
+    const auto    mix   = static_cast<lv_opa_t>(c->m_mix);
+    switch (c->m_fade) {
+    case Fade::None:
+        if (c->m_has) {
+            draw(c->m_cur, layer, at, c->m_r, LV_OPA_COVER, c->m_h);
+        }
+        break;
+    case Fade::Over:
+        lay_ghost(layer, c->m_ghost, at);
+        draw(c->m_cur, layer, at, c->m_r, mix, c->m_h);
+        break;
+    case Fade::In: draw(c->m_cur, layer, at, c->m_r, mix, c->m_h); break;
+    case Fade::Out: draw(c->m_cur, layer, at, c->m_r, static_cast<lv_opa_t>(255 - mix), c->m_h); break;
+    }
 }
 
 void Cover::on_mix(void *var, int32_t v)
@@ -634,21 +717,22 @@ void Cover::on_mix(void *var, int32_t v)
 
 void Cover::settle()
 {
-    destroy(m_prev);
-    m_mix = 255;
-    lv_obj_set_hidden(m_well, m_cur.main != nullptr);
+    m_fade = Fade::None;
+    m_mix  = 255;
+    lv_obj_set_hidden(m_well, m_has);
     invalidate(m_pic, m_r);
 }
 
-void Cover::fade(bool animate)
+void Cover::fade(Fade kind)
 {
     lv_anim_delete(this, on_mix);
-    if (!animate || (m_prev.main == nullptr && m_cur.main == nullptr)) {
+    if (kind == Fade::None) {
         settle();
         return;
     }
-    m_mix = 0;
-    lv_obj_set_hidden(m_well, m_cur.main != nullptr && m_prev.main != nullptr);
+    m_fade = kind;
+    m_mix  = 0;
+    lv_obj_set_hidden(m_well, kind == Fade::Over);
     invalidate(m_pic, m_r);
     lv_anim_t a;
     lv_anim_init(&a);
@@ -661,6 +745,47 @@ void Cover::fade(bool animate)
     lv_anim_start(&a);
 }
 
+// What is shown now, shrunk into the ghost, for the next one to fade in over:
+// the picture itself is written over in its place. A shrunk ghost has its last
+// column and row once more, as stretching it fades its far edges into what
+// lies beyond them.
+bool Cover::keep_ghost()
+{
+    const std::int32_t step = ghost_step(m_w, m_h), gw = (m_w + step - 1) / step, gh = (m_h + step - 1) / step;
+    const std::int32_t pad = step > 1 ? 1 : 0, bw = gw + pad, bh = gh + pad;
+    if (m_ghost == nullptr) {
+        m_ghost = lv_draw_buf_create(bw, bh, m_r > 0 ? LV_COLOR_FORMAT_RGB565A8 : LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO);
+        if (m_ghost == nullptr) {
+            return false;
+        }
+        if (m_r > 0) {
+            lv_opa_t          *a  = alpha_of(m_ghost);
+            const std::int32_t as = m_ghost->header.stride / 2;
+            const float        r  = static_cast<float>(m_r) * gw / m_w;
+            for (std::int32_t y = 0; y < bh; ++y) {
+                for (std::int32_t x = 0; x < bw; ++x) {
+                    a[y * as + x] = coverage(std::min(x, gw - 1), std::min(y, gh - 1), gw, gh, r);
+                }
+            }
+        }
+    }
+    const std::int32_t stride = static_cast<std::int32_t>(m_ghost->header.stride);
+    auto              *out    = reinterpret_cast<std::uint16_t *>(m_ghost->data);
+    const Picture      shown{m_cur.main->data, m_w, m_h, static_cast<std::int32_t>(m_cur.main->header.stride)};
+    if (!scale_soft(shown, {0, 0, m_w, m_h}, out, gw, gh, stride)) {
+        return false;
+    }
+    if (pad > 0) {
+        for (std::int32_t y = 0; y < gh; ++y) {
+            row_of(out, stride, y)[gw] = row_of(out, stride, y)[gw - 1];
+        }
+        std::memcpy(row_of(out, stride, gh), row_of(out, stride, gh - 1), static_cast<std::size_t>(bw) * 2);
+    }
+    lv_draw_buf_flush_cache(m_ghost, nullptr);
+    lv_image_cache_drop(m_ghost);
+    return true;
+}
+
 bool Cover::show(const Picture &picture, bool animate)
 {
     if (m_root == nullptr || picture.pixels == nullptr || picture.w <= 0 || picture.h <= 0) {
@@ -668,39 +793,57 @@ bool Cover::show(const Picture &picture, bool animate)
     }
     const std::uint64_t t0 = perf::now_us();
     lv_anim_delete(this, on_mix);
-    destroy(m_prev);  // one fading out at most: three of them would not fit
-    Made made{};
-    if (!allocate(made, m_w, m_h, m_r)) {
-        destroy(m_cur);  // an old cover under a new track would be wrong: none, rather
-        animate = false;
-        if (!allocate(made, m_w, m_h, m_r)) {
-            fade(false);
-            return false;
+    settle();
+    if (m_cur.main == nullptr && !allocate(m_cur, m_w, m_h, m_r)) {
+        no_room(m_warned, "picture", m_w, m_h, bytes_for(m_w, m_h, m_r));
+        return false;
+    }
+    const bool over = animate && m_has && keep_ghost();
+    bool       hw   = false;
+    if (!scale(picture, middle(picture, m_w, m_h, 100), reinterpret_cast<std::uint16_t *>(m_cur.main->data), m_w, m_h,
+               static_cast<std::int32_t>(m_cur.main->header.stride), hw)) {
+        no_room(m_warned, "picture's scaling", m_w, m_h, sizeof(std::int32_t) * 4 * m_w);
+        return false;
+    }
+    corners_from_main(m_cur, m_w, m_h, m_r, 0, m_h);
+    lv_draw_buf_flush_cache(m_cur.main, nullptr);
+    lv_image_cache_drop(m_cur.main);
+    for (lv_draw_buf_t *c : m_cur.corner) {
+        if (c != nullptr) {
+            lv_image_cache_drop(c);
         }
     }
-    const bool hw = scale(picture, middle(picture, m_w, m_h, 100), reinterpret_cast<std::uint16_t *>(made.main->data), m_w,
-                          m_h, static_cast<std::int32_t>(made.main->header.stride));
-    corners_from_main(made, m_w, m_h, m_r, 0, m_h);
-    lv_draw_buf_flush_cache(made.main, nullptr);
-    m_prev = m_cur;
-    m_cur  = made;
-    fade(animate);
+    const Fade kind = !animate ? Fade::None : over ? Fade::Over : m_has ? Fade::None : Fade::In;
+    m_has    = true;
+    m_warned = false;
+    fade(kind);
     std::snprintf(s_cover_report, sizeof s_cover_report, "cover %dx%d%s: %.1f KB, made in %.2f ms%s\n",
                   static_cast<int>(m_w), static_cast<int>(m_h), all_corner(m_w, m_h, m_r) ? " round" : "",
-                  kb(bytes_of(made)), ms(perf::now_us() - t0), hw ? " (PPA)" : "");
+                  kb(bytes()), ms(perf::now_us() - t0), hw ? " (PPA)" : "");
     return true;
 }
 
 void Cover::clear(bool animate)
 {
-    if (m_root == nullptr || m_cur.main == nullptr) {
+    if (m_root == nullptr || !m_has) {
         return;
     }
     lv_anim_delete(this, on_mix);
-    destroy(m_prev);
-    m_prev = m_cur;
-    m_cur  = Made{};
-    fade(animate);
+    settle();
+    m_has = false;
+    fade(animate ? Fade::Out : Fade::None);
+}
+
+void Cover::release()
+{
+    if (m_root == nullptr) {
+        return;
+    }
+    lv_anim_delete(this, on_mix);
+    destroy(m_cur);
+    destroy(m_ghost);
+    m_has = false;
+    settle();
 }
 
 // --- backdrop -------------------------------------------------------------
@@ -708,6 +851,7 @@ void Cover::clear(bool animate)
 Backdrop::Backdrop(lv_obj_t *parent, std::int32_t w, std::int32_t h, std::int32_t radius)
     : m_w(w), m_h(h), m_r(std::min(radius, std::min(w, h) / 2))
 {
+    m_on_ground = w == size::screen_w && h == size::screen_h && m_r == 0;
     m_sw   = (w - 1) / STEP + 2;
     m_sh   = (h - 1) / STEP + 2;
     m_root = lv_obj_create(parent);
@@ -724,7 +868,7 @@ Backdrop::Backdrop(lv_obj_t *parent, std::int32_t w, std::int32_t h, std::int32_
         [](lv_event_t *e) {
             auto *b = static_cast<Backdrop *>(lv_event_get_user_data(e));
             b->stop();
-            destroy(b->m_made);
+            b->give_back();
             lv_free(b->m_small);
             b->m_small = nullptr;
             b->m_root  = nullptr;
@@ -736,7 +880,7 @@ Backdrop::Backdrop(lv_obj_t *parent, std::int32_t w, std::int32_t h, std::int32_
 
 std::size_t Backdrop::bytes() const
 {
-    std::size_t n = bytes_of(m_made) + (m_small != nullptr ? sizeof(std::uint16_t) * 3 * m_sw * m_sh : 0);
+    std::size_t n = (m_lent ? 0 : bytes_of(m_made)) + (m_small != nullptr ? sizeof(std::uint16_t) * 3 * m_sw * m_sh : 0);
     return n + (m_job != nullptr ? sizeof(std::uint16_t) * 3 * m_sw * m_sh : 0);
 }
 
@@ -777,13 +921,15 @@ bool Backdrop::show(const Picture &picture)
     }
     auto *shrunk = static_cast<std::uint16_t *>(lv_malloc(sizeof(std::uint16_t) * n));
     auto *line   = static_cast<std::uint16_t *>(lv_malloc(sizeof(std::uint16_t) * std::max(m_sw, m_sh)));
-    if (m_small == nullptr || shrunk == nullptr || line == nullptr) {
+    bool hw = false;
+    if (m_small == nullptr || shrunk == nullptr || line == nullptr ||
+        !scale(picture, middle(picture, m_w, m_h, ZOOM_PCT), shrunk, m_sw, m_sh, m_sw * 2, hw)) {
         lv_free(shrunk);
         lv_free(line);
+        no_room(m_warned, "backdrop's small picture", m_sw, m_sh, sizeof(std::uint16_t) * 4 * n);
         clear();
         return false;
     }
-    const bool hw = scale(picture, middle(picture, m_w, m_h, ZOOM_PCT), shrunk, m_sw, m_sh, m_sw * 2);
     for (std::int32_t i = 0; i < n; ++i) {
         const std::uint16_t v = shrunk[i];
         m_small[i]         = static_cast<std::uint16_t>((v >> 11) * 65535 / 31);
@@ -797,17 +943,41 @@ bool Backdrop::show(const Picture &picture)
     if (!start()) {
         return false;
     }
+    m_warned = false;
     std::snprintf(s_backdrop_report, sizeof s_backdrop_report,
-                  "backdrop %dx%d: %.1f KB, %.1f KB of it kept to remake it in another look; shrunk and blurred in %.2f ms%s",
-                  static_cast<int>(m_w), static_cast<int>(m_h), kb(bytes()), kb(sizeof(std::uint16_t) * 3 * n), ms(small_us),
-                  hw ? " (PPA)" : "");
+                  "backdrop %dx%d%s: %.1f KB, %.1f KB of it kept to remake it in another look; shrunk and blurred in %.2f ms%s",
+                  static_cast<int>(m_w), static_cast<int>(m_h), m_lent ? " in the ground's picture" : "", kb(bytes()),
+                  kb(sizeof(std::uint16_t) * 3 * n), ms(small_us), hw ? " (PPA)" : "");
     return true;
 }
 
+void Backdrop::give_back()
+{
+    if (m_lent) {
+        m_made.main = nullptr;
+        m_lent      = false;
+        ground_back();
+    } else {
+        destroy(m_made);
+    }
+}
+
+// False, and the plain ground, when there is nothing to make it into or no
+// room to make it, so the caller tries again later.
 bool Backdrop::start()
 {
     stop();
-    if (m_made.main == nullptr && !allocate(m_made, m_w, m_h, m_r)) {
+    if (m_made.main == nullptr) {
+        if (m_on_ground) {
+            m_made.main = lend_ground();
+            m_lent      = m_made.main != nullptr;
+        } else {
+            allocate(m_made, m_w, m_h, m_r);
+        }
+    }
+    if (m_made.main == nullptr) {
+        no_room(m_warned, m_on_ground ? "backdrop, the ground's picture lent already," : "backdrop", m_w, m_h,
+                m_on_ground ? 0 : bytes_for(m_w, m_h, m_r));
         clear();
         return false;
     }
@@ -818,6 +988,8 @@ bool Backdrop::start()
     job->bgr           = static_cast<std::uint8_t *>(lv_malloc(static_cast<std::size_t>(m_w) * 3 + 16));
     if (job->tinted == nullptr || job->cols == nullptr || job->bgr == nullptr) {
         free_job(job);
+        no_room(m_warned, "backdrop's tinting", m_sw, m_sh, sizeof(std::uint16_t) * 3 * n);
+        clear();
         return false;
     }
     tint(m_small, job->tinted, n);
@@ -832,6 +1004,7 @@ bool Backdrop::start()
     if (xTaskCreatePinnedToCore(stretch_task, "backdrop", 4096, job, tskIDLE_PRIORITY + 2, nullptr, 0) != pdPASS) {
         m_job = nullptr;
         free_job(job);
+        clear();
         return false;
     }
 #else
@@ -897,13 +1070,28 @@ void Backdrop::clear()
         return;
     }
     stop();
-    destroy(m_made);
+    give_back();
     lv_free(m_small);
     m_small = nullptr;
     m_whole = false;
     m_shown = 0;
     lv_obj_set_style_bg_opa(m_root, LV_OPA_COVER, 0);
     lv_obj_invalidate(m_root);
+}
+
+void again_soon(lv_timer_t *&timer, void (*fn)())
+{
+    if (timer != nullptr) {
+        lv_timer_reset(timer);
+        lv_timer_resume(timer);
+        return;
+    }
+    timer = lv_timer_create(
+        [](lv_timer_t *t) {
+            lv_timer_pause(t);
+            reinterpret_cast<void (*)()>(lv_timer_get_user_data(t))();
+        },
+        RETRY_MS, reinterpret_cast<void *>(fn));
 }
 
 }  // namespace ui::kit
