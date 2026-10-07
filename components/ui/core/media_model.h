@@ -20,7 +20,6 @@ struct MediaState {
     char artist[128] = "";  // for a video, the series, a newline, and its season and episode
     char state[24]   = "";  // what the player is, shown where the title goes while nothing plays
     bool has_track    = false;
-    bool controllable = false;  // a player there is to steer; holding the card does nothing without one
     bool playing      = false;  // as shown: a pause shows once it has settled
     bool remote       = true;   // takes play, pause, skip and seek from here
     bool pause_settles   = true;
@@ -62,7 +61,7 @@ const MediaState &media_state();
 
 // ---- Updates, from ui.cpp's intake. Each publishes Topic::Media. ----
 void media_take_track(const char *source, const char *title, const char *artist, const char *state,
-                      bool playing, bool controllable);
+                      bool playing);
 void media_take_cover(const void *pixels, bool placeholder, int width);
 void media_take_large_cover(const void *pixels);
 void media_take_progress(int position_s, int duration_s, bool playing);

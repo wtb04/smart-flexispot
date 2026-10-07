@@ -50,9 +50,9 @@ void show()
     int on = 0;
     for (int i = 0; i < room::LIGHT_COUNT; ++i) {
         on += s_light[i] ? 1 : 0;
-        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_light(i, room::LIGHTS[i].name, s_light[i] ? "On" : "Off", s_light[i]));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_light(i, room::LIGHTS[i].name, s_light[i]));
     }
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_lights("LIGHTS", on > 0 ? "On" : "Off", on > 0));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_lights(on > 0));
     for (int i = 0; i < room::TOGGLE_COUNT; ++i) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(
             ui::set_dial_toggle(i, room::toggle_label(room::TOGGLES[i], s_toggle[i]), s_toggle[i]));

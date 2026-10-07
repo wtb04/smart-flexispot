@@ -165,16 +165,16 @@ void show_text()
     const char *state = s_playing ? "PLAYING" : "PAUSED";
     if (s_scene == Scene::Music) {
         const Track &t = TRACKS[s_item];
-        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media("SPOTIFY", t.title, t.artist, state, s_playing, true));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media("SPOTIFY", t.title, t.artist, state, s_playing));
     } else if (laptop()) {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media("SAFARI, LAPTOP", CLIP.title, CLIP.channel, state, s_playing, true));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media("SAFARI, LAPTOP", CLIP.title, CLIP.channel, state, s_playing));
     } else if (video()) {
         const Episode &e = EPISODES[s_item];
         char           line[96];
         std::snprintf(line, sizeof(line), "%s\nSeason %d, episode %d", SERIES, SEASON, e.number);
-        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media("JELLYFIN", e.title, line, state, s_playing, true));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media("JELLYFIN", e.title, line, state, s_playing));
     } else {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media("OFFICE SPEAKER", "", "", "OFF", false, false));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media("OFFICE SPEAKER", "", "", "OFF", false));
     }
 }
 
@@ -250,7 +250,7 @@ void go_on_to(int item)
     }
     s_between_item  = item;
     s_between_until = now_ms() + BETWEEN_MS;
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media("OFFICE SPEAKER", "", "", "OFF", false, false));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media("OFFICE SPEAKER", "", "", "OFF", false));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_seeks(false));
     // And its pictures go blank, as the panel's media lets them go with nothing to fetch.
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_album_art(nullptr, false));

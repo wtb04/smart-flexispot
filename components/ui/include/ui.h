@@ -188,12 +188,11 @@ struct LogLine {
 using LogHandler = int (*)(int card, bool warnings, LogLine *out, int max);
 
 /** An empty title means nothing is playing; the card then shows the state.
- *  `controllable` is whether holding the card has anything to act on. Strings
- *  are copied. */
+ *  Strings are copied. */
 /** With art_coming the text waits for the cover asked for with it, so the two
  *  change together, though never for long. */
 esp_err_t set_media(const char *source, const char *title, const char *artist, const char *state,
-                    bool playing, bool controllable, bool art_coming = false);
+                    bool playing, bool art_coming = false);
 
 /** What holding the media card does: -1 opens the media panel, as for the
  *  speaker; a preset index sends the desk there instead, as for Jellyfin. */
@@ -273,10 +272,10 @@ esp_err_t set_pick_art(int index, const void *pixels);
 esp_err_t set_pill(int index, const char *label, const char *value, Level level);
 
 /** The bulbs drawn on the button come from set_light(), so both have to be pushed. */
-esp_err_t set_lights(const char *label, const char *state, bool on);
+esp_err_t set_lights(bool on);
 
 /** An empty name hides that button, so fewer lights than slots is fine. */
-esp_err_t set_light(int index, const char *name, const char *state, bool on);
+esp_err_t set_light(int index, const char *name, bool on);
 
 /** The big light or the light scene on: someone is in the room, so the screen
  *  stays lit. Not the bed light, which is on for sleeping too. */
@@ -352,11 +351,11 @@ esp_err_t set_time(const char *text);
 
 esp_err_t set_links(bool wifi);
 
-/** Once the phone has been recognised at least once, this also gates which pages appear. */
-esp_err_t set_presence(bool has_key, bool present, bool ever_seen);
+/** The owner's phone here or not, which also gates which pages appear. */
+esp_err_t set_presence(bool has_key, bool present);
 
-/** The pack: there, how full, charging, and whether the panel runs on it, unplugged. */
-esp_err_t set_battery(bool present, int percent, bool charging, bool on_battery);
+/** The pack: there, how full, and whether the panel runs on it, unplugged. */
+esp_err_t set_battery(bool present, int percent, bool on_battery);
 
 /** Before init(): the diagnostics view's cards, in order, kept by pointer. */
 void set_cards(const Card *cards, int count);

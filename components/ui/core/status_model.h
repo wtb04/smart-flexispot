@@ -12,14 +12,12 @@ struct StatusState {
     char time[16]  = "";     // HH:MM as the clock gives it, empty until it is set
     // The pack, and whether the panel runs on it: unplugged, on the desk, rather
     // than bolted at its edge on the mains.
-    bool battery_present = false;
     int  battery_percent = 0;
-    bool charging        = false;
     bool on_battery      = false;
 };
 
 StatusState &status_state();
 
-void status_take_battery(bool present, int percent, bool charging, bool on_battery);
+void status_take_battery(bool present, int percent, bool on_battery);
 
 }  // namespace ui::detail

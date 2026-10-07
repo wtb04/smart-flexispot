@@ -107,7 +107,7 @@ void show_text(const std::string &source, const std::string &title, const std::s
     if (shown != s_shown) {
         s_shown = shown;
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media(source.c_str(), title.c_str(), artist.c_str(), state.c_str(),
-                                                    playing, state != "OFF" && state != "--", art_coming));
+                                                    playing, art_coming));
     }
 }
 
@@ -250,7 +250,7 @@ void show()
         return;
     }
     if (!view.known) {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media("SPEAKER", "", "", "--", false, false));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media("SPEAKER", "", "", "--", false));
         media::set_art_path("");
         return;
     }

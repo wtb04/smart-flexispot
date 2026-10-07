@@ -148,7 +148,6 @@ struct MediaArgs {
     Text<128> artist;
     Text<24>  state;
     bool      playing;
-    bool      controllable;
     bool      art_coming;
 };
 struct ProgressArgs {
@@ -159,7 +158,6 @@ struct ProgressArgs {
 struct BatteryArgs {
     bool present;
     int  percent;
-    bool charging;
     bool on_battery;
 };
 struct ArtArgs {
@@ -172,14 +170,8 @@ struct PillArgs {
     Text<40> value;
     Level    level;
 };
-struct LightsArgs {
-    Text<40> label;
-    Text<32> state;
-    bool     on;
-};
 struct LightArgs {
     Text<48> name;
-    Text<32> state;
     bool     on;
 };
 struct ToggleArgs {
@@ -201,7 +193,6 @@ using TimeText = Text<16>;
 struct PresenceArgs {
     bool has_key;
     bool present;
-    bool ever_seen;
 };
 struct InfoArgs {
     Text<64> value;
@@ -247,7 +238,7 @@ Slot<const void *>   p_art_large;
 Slot<std::uint8_t>   p_neighbours;  // bit 0 one before, bit 1 one after, bit 2 they are episodes
 Slot<std::uint8_t>   p_tracks;      // bit 0 a track back, bit 1 one on
 Slot<PillArgs>       p_pill[kPillCount];
-Slot<LightsArgs>     p_lights;
+Slot<bool>           p_lights;
 Slot<bool>           p_room_lit;
 Slot<LightArgs>      p_light[kLightCount];
 Slot<ToggleArgs>     p_toggle[kDialToggleCount];
@@ -307,7 +298,7 @@ void apply_desk_available(bool available)
 void apply_media_args(const MediaArgs &media)
 {
     media_take_track(media.source.get(), media.title.get(), media.artist.get(), media.state.get(),
-                     media.playing, media.controllable);
+                     media.playing);
 }
 
 // A new track's text waits here for its cover, or for this long when that is slow.
@@ -370,14 +361,14 @@ void apply_pill(int index, const char *label, const char *value, Level level)
     publish(Topic::Home);
 }
 
-void apply_lights(const char *label, const char *state, bool on)
+void apply_lights(bool on)
 {
-    lights_take(label, state, on);
+    lights_take(on);
 }
 
-void apply_light(int index, const char *name, const char *state, bool on)
+void apply_light(int index, const char *name, bool on)
 {
-    lights_take_light(index, name, state, on);
+    lights_take_light(index, name, on);
 }
 
 void apply_dial_toggle(int index, const char *label, bool on)
@@ -409,11 +400,8 @@ void apply_thermostat(float current_c, float target_c, const char *mode, Hvac st
     publish(Topic::Home);
 }
 
-void apply_presence(bool has_key, bool present, bool ever_seen)
+void apply_presence(bool has_key, bool present)
 {
-    // A phone never seen is not here: the owner's pages stay hidden and the
-    // guest presets show until it is.
-    (void)ever_seen;
     status_state().present = has_key && present;
     publish(Topic::Status);
 }
@@ -445,13 +433,13 @@ void apply_settings_and_presence()
         }
     }
     if (PresenceArgs presence{}; take(p_presence, presence)) {
-        apply_presence(presence.has_key, presence.present, presence.ever_seen);
+        apply_presence(presence.has_key, presence.present);
     }
     if (bool screen = false; take(p_screen, screen)) {
         apply_screen(screen);
     }
     if (BatteryArgs battery{}; take(p_battery, battery)) {
-        status_take_battery(battery.present, battery.percent, battery.charging, battery.on_battery);
+        status_take_battery(battery.present, battery.percent, battery.on_battery);
     }
 }
 
@@ -557,15 +545,15 @@ void apply_home_updates()
             apply_pill(i, pill.label.get(), pill.value.get(), pill.level);
         }
     }
-    if (LightsArgs lights{}; take(p_lights, lights)) {
-        apply_lights(lights.label.get(), lights.state.get(), lights.on);
+    if (bool lights = false; take(p_lights, lights)) {
+        apply_lights(lights);
     }
     if (bool lit = false; take(p_room_lit, lit)) {
         lights_take_room(lit);
     }
     for (int i = 0; i < kLightCount; ++i) {
         if (LightArgs light{}; take(p_light[i], light)) {
-            apply_light(i, light.name.get(), light.state.get(), light.on);
+            apply_light(i, light.name.get(), light.on);
         }
     }
     for (int i = 0; i < kDialToggleCount; ++i) {
@@ -696,7 +684,7 @@ esp_err_t set_preset_height(int index, int height_mm)
 }
 
 esp_err_t set_media(const char *source, const char *title, const char *artist, const char *state,
-                    bool playing, bool controllable, bool art_coming)
+                    bool playing, bool art_coming)
 {
     static MediaArgs args;  // too large to build on a caller's stack
     portENTER_CRITICAL(&s_pending_lock);
@@ -705,7 +693,6 @@ esp_err_t set_media(const char *source, const char *title, const char *artist, c
     args.artist.set(artist);
     args.state.set(state);
     args.playing      = playing;
-    args.controllable = controllable;
     args.art_coming   = art_coming;
     p_media.value     = args;
     p_media.dirty = true;
@@ -827,23 +814,18 @@ esp_err_t set_pill(int index, const char *label, const char *value, Level level)
     return ESP_OK;
 }
 
-esp_err_t set_lights(const char *label, const char *state, bool on)
+esp_err_t set_lights(bool on)
 {
-    LightsArgs args{};
-    args.label.set(label);
-    args.state.set(state);
-    args.on = on;
-    put(p_lights, args);
+    put(p_lights, on);
     return ESP_OK;
 }
 
-esp_err_t set_light(int index, const char *name, const char *state, bool on)
+esp_err_t set_light(int index, const char *name, bool on)
 {
     ESP_RETURN_ON_FALSE(index >= 0 && index < kLightCount, ESP_ERR_INVALID_ARG, TAG, "light %d",
                         index);
     LightArgs args{};
     args.name.set(name);
-    args.state.set(state);
     args.on = on;
     put(p_light[index], args);
     return ESP_OK;
@@ -883,9 +865,9 @@ esp_err_t set_thermostat(float current_c, float target_c, const char *mode, Hvac
     return ESP_OK;
 }
 
-esp_err_t set_presence(bool has_key, bool present, bool ever_seen)
+esp_err_t set_presence(bool has_key, bool present)
 {
-    put(p_presence, PresenceArgs{has_key, present, ever_seen});
+    put(p_presence, PresenceArgs{has_key, present});
     return ESP_OK;
 }
 
@@ -903,9 +885,9 @@ esp_err_t set_links(bool wifi)
     return ESP_OK;
 }
 
-esp_err_t set_battery(bool present, int percent, bool charging, bool on_battery)
+esp_err_t set_battery(bool present, int percent, bool on_battery)
 {
-    put(p_battery, BatteryArgs{present, percent, charging, on_battery});
+    put(p_battery, BatteryArgs{present, percent, on_battery});
     return ESP_OK;
 }
 

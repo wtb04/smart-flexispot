@@ -91,7 +91,7 @@ Source source_of(const power::State &state)
 
 void tell_screen(const power::State &state)
 {
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_battery(state.present, state.percent, state.charging, state.on_battery));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_battery(state.present, state.percent, state.on_battery));
     s_shown    = source_of(state);
     s_agreeing = 0;
 }

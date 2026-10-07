@@ -9,10 +9,10 @@ void show_unknown()
     for (int i = 0; i < TOGGLE_COUNT; ++i) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_dial_toggle(i, toggle_label(TOGGLES[i], false), false));
     }
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_lights("LIGHTS", "--", false));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_lights(false));
     for (int i = 0; i < LIGHT_COUNT; ++i) {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_light(i, LIGHTS[i].name, "--", false));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_light(i, LIGHTS[i].name, false));
     }
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media("SPEAKER", "", "", "--", false, false));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media("SPEAKER", "", "", "--", false));
 }
 }  // namespace room

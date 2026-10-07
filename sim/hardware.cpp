@@ -142,8 +142,8 @@ void start()
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_height(s_height_mm));
     show_presets();
     const Battery &b = BATTERIES[s_battery];
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_battery(b.present, b.percent, b.charging, b.on_battery));
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_presence(true, s_phone, true));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_battery(b.present, b.percent, b.on_battery));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_presence(true, s_phone));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_links(s_wifi));
     show_focus();
 }
@@ -247,13 +247,13 @@ void next_battery()
 {
     s_battery = (s_battery + 1) % static_cast<int>(std::size(BATTERIES));
     const Battery &b = BATTERIES[s_battery];
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_battery(b.present, b.percent, b.charging, b.on_battery));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_battery(b.present, b.percent, b.on_battery));
 }
 
 void toggle_phone()
 {
     s_phone = !s_phone;
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_presence(true, s_phone, true));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_presence(true, s_phone));
 }
 
 void toggle_wifi()
