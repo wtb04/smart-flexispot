@@ -1,7 +1,8 @@
 // Music and the cinema over the whole screen, as Apple's Now Playing has them:
 // the picture large over a blurred backdrop of itself, what plays, how far,
-// plain white transport glyphs and the volume. Each closes itself when what
-// plays is no longer its own, and gives its pictures' memory back on closing.
+// round fills either side of the accent capsule and a thick volume slider.
+// Each closes itself when what plays is no longer its own, and gives its
+// pictures' memory back on closing.
 
 #include "kit_front_views.h"
 
@@ -27,15 +28,6 @@ using detail::MediaState;
 
 constexpr std::int32_t RAIL_SPAN = 10000;  // a progress rail's steps: finer than its pixels
 constexpr time_t       CLOCK_SET = 1'700'000'000;  // any earlier and the clock is not set yet
-
-lv_obj_t *glyph_button(lv_obj_t *parent, const char *glyph, std::int32_t side, lv_event_cb_t on_click)
-{
-    lv_obj_t *b = button(parent, Button::Flat, nullptr, nullptr, true);
-    lv_obj_set_size(b, side, side);
-    icon(b, glyph, 34, true);
-    lv_obj_add_event_cb(b, on_click, LV_EVENT_CLICKED, nullptr);
-    return b;
-}
 
 lv_obj_t *bare(lv_obj_t *parent, std::int32_t w, std::int32_t h)
 {
@@ -69,11 +61,10 @@ void set_title(lv_obj_t *label, const char *value)
     lv_label_set_text(label, value);
 }
 
-// --- the volume, a rail between its two ends, or the ends alone where it only steps ---
+// --- the volume: a thick slider, or down and up where it only steps ---
 
 struct Volume : InPsram {
-    lv_obj_t *root = nullptr, *down = nullptr, *up = nullptr, *word = nullptr;
-    Rail     *rail = nullptr;
+    lv_obj_t *root = nullptr, *slider = nullptr, *down = nullptr, *up = nullptr;
     bool      held = false;
 };
 
@@ -90,40 +81,33 @@ void volume_step(lv_event_t *e)
 
 Volume *volume(lv_obj_t *parent, std::int32_t w)
 {
-    constexpr std::int32_t END = 48;
     auto *v = new Volume;
-    v->root = flow(parent, LV_FLEX_FLOW_ROW, space::s);
-    lv_obj_set_size(v->root, w, size::button);
-    lv_obj_set_flex_align(v->root, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    v->down = button(v->root, Button::Flat, ic::volume_down, nullptr, true);
-    lv_obj_add_event_cb(v->down, volume_step, LV_EVENT_CLICKED, nullptr);
-    RailSpec spec;
-    spec.length    = w - 2 * END - 2 * space::s;
-    spec.max       = 100;
-    spec.draggable = true;
-    spec.quiet     = true;
-    v->rail = new Rail(v->root, spec);
-    lv_obj_set_gesture_bubble(v->rail->obj(), false);  // dragged a little down, it is still the volume
+    v->root = flow(parent, LV_FLEX_FLOW_ROW, space::m);
+    lv_obj_set_size(v->root, w, size::button_lg);
+    lv_obj_set_flex_grow(v->root, 1);  // the room of a neighbour left out too
+    lv_obj_set_flex_align(v->root, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    v->slider = fill_slider(v->root, w, ic::volume_up);
+    lv_obj_set_width(v->slider, LV_PCT(100));
+    lv_obj_set_gesture_bubble(v->slider, false);  // dragged a little down, it is still the volume
     lv_obj_add_event_cb(
-        v->rail->obj(),
+        v->slider,
         [](lv_event_t *e) {
             auto *vol = static_cast<Volume *>(lv_event_get_user_data(e));
             switch (lv_event_get_code(e)) {
                 case LV_EVENT_PRESSED: vol->held = true; break;
                 case LV_EVENT_RELEASED:
                 case LV_EVENT_PRESS_LOST: vol->held = false; break;
-                case LV_EVENT_VALUE_CHANGED: detail::media_set_volume(vol->rail->value()); break;
+                case LV_EVENT_VALUE_CHANGED: detail::media_set_volume(lv_slider_get_value(vol->slider)); break;
                 default: break;
             }
         },
         LV_EVENT_ALL, v);
-    v->word = text(v->root, Role::Small, "Volume", Ink::Secondary);
-    lv_obj_set_width(v->word, spec.length);
-    lv_obj_set_style_text_align(v->word, LV_TEXT_ALIGN_CENTER, 0);
-    v->up = button(v->root, Button::Flat, ic::volume_up, nullptr, true);
-    lv_obj_add_event_cb(v->up, volume_step, LV_EVENT_CLICKED, v);
-    for (lv_obj_t *end : {v->down, v->up}) {
-        lv_obj_set_size(end, END, END);
+    for (bool up : {false, true}) {
+        lv_obj_t *b = button(v->root, Button::Raised, up ? ic::volume_up : ic::volume_down, nullptr);
+        lv_obj_set_height(b, size::button_lg);
+        lv_obj_set_flex_grow(b, 1);
+        lv_obj_add_event_cb(b, volume_step, LV_EVENT_CLICKED, up ? v : nullptr);
+        (up ? v->up : v->down) = b;
     }
     return v;
 }
@@ -133,10 +117,11 @@ void show_volume(Volume &v)
     const MediaState &media = media_state();
     lv_obj_set_hidden(v.root, !detail::media_shows_volume());
     set_usable(v.root, media.volume >= 0 || media.steps_volume);
-    lv_obj_set_hidden(v.rail->obj(), media.steps_volume);
-    lv_obj_set_hidden(v.word, !media.steps_volume);
-    if (media.volume >= 0 && !v.held) {
-        v.rail->set_value(media.volume);
+    lv_obj_set_hidden(v.slider, media.steps_volume);
+    lv_obj_set_hidden(v.down, !media.steps_volume);
+    lv_obj_set_hidden(v.up, !media.steps_volume);
+    if (media.volume >= 0 && !v.held && lv_slider_get_value(v.slider) != media.volume) {
+        lv_slider_set_value(v.slider, media.volume, LV_ANIM_OFF);
     }
 }
 
@@ -178,9 +163,9 @@ void show_picture(Cover &cover, Backdrop &backdrop, const void *pixels, std::int
 namespace music {
 constexpr std::int32_t COVER = media::kLargeArtSize, X0 = 96, Y0 = (size::screen_h - COVER) / 2;
 constexpr std::int32_t X = X0 + COVER + 72, W = size::screen_w - X - X0;
-constexpr std::int32_t VOLUME_Y = Y0 + COVER - size::button, TRANSPORT_H = 96;
-constexpr std::int32_t TRANSPORT_Y = VOLUME_Y - space::xl - TRANSPORT_H;
-constexpr std::int32_t TIMES_Y = TRANSPORT_Y - space::xl - 20, RAIL_Y = TIMES_Y - 30;
+constexpr std::int32_t VOLUME_Y = Y0 + COVER - size::button_lg, TRANSPORT_H = 88, SIDE = 80;
+constexpr std::int32_t TRANSPORT_Y = VOLUME_Y - space::xxl - TRANSPORT_H;
+constexpr std::int32_t TIMES_Y = TRANSPORT_Y - space::xxl - 24, RAIL_Y = TIMES_Y - 30;
 
 detail::ViewId s_view = detail::kNoView;
 Backdrop      *s_backdrop = nullptr;
@@ -295,32 +280,37 @@ void build(lv_obj_t *)
     s_total = figures(root, "000:00", LV_TEXT_ALIGN_RIGHT);
     lv_obj_set_pos(s_total, X + W - lv_obj_get_style_width(s_total, LV_PART_MAIN), TIMES_Y);
 
-    lv_obj_t *transport = flow(root, LV_FLEX_FLOW_ROW, 40);
+    // round fills either side of the one accent capsule, as on the media card
+    lv_obj_t *transport = flow(root, LV_FLEX_FLOW_ROW, space::l);
     lv_obj_set_size(transport, W, TRANSPORT_H);
     lv_obj_set_pos(transport, X, TRANSPORT_Y);
     lv_obj_set_flex_align(transport, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    s_prev = glyph_button(transport, ic::skip_previous, 80, [](lv_event_t *) { detail::media_action(MediaAction::Previous); });
-    s_play = glyph_button(transport, ic::play_arrow, TRANSPORT_H, [](lv_event_t *) { detail::media_toggle_play(); });
-    s_next = glyph_button(transport, ic::skip_next, 80, [](lv_event_t *) { detail::media_action(MediaAction::Next); });
+    s_prev = fill_button(transport, ic::skip_previous, SIDE, 40);
+    s_play = primary(transport, ic::play_arrow, 200, TRANSPORT_H);
+    s_next = fill_button(transport, ic::skip_next, SIDE, 40);
+    lv_obj_add_event_cb(s_prev, [](lv_event_t *) { detail::media_action(MediaAction::Previous); }, LV_EVENT_CLICKED, nullptr);
+    lv_obj_add_event_cb(s_play, [](lv_event_t *) { detail::media_toggle_play(); }, LV_EVENT_CLICKED, nullptr);
+    lv_obj_add_event_cb(s_next, [](lv_event_t *) { detail::media_action(MediaAction::Next); }, LV_EVENT_CLICKED, nullptr);
 
-    lv_obj_t *bottom = flow(root, LV_FLEX_FLOW_ROW, space::l);
-    lv_obj_set_size(bottom, W, size::button);
+    lv_obj_t *bottom = flow(root, LV_FLEX_FLOW_ROW, space::m);
+    lv_obj_set_size(bottom, W, size::button_lg);
     lv_obj_set_pos(bottom, X, VOLUME_Y);
     lv_obj_set_flex_align(bottom, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     // the favourites, to play another instead
-    s_picks = button(bottom, Button::Flat, nullptr, "Favourites");
+    s_picks = button(bottom, Button::Raised, ic::music_note, "Favourites");
+    lv_obj_set_height(s_picks, size::button_lg);
     lv_obj_add_event_cb(s_picks, [](lv_event_t *e) { open_favourites(lv_event_get_current_target_obj(e)); },
                         LV_EVENT_CLICKED, nullptr);
     popover_source(s_picks);
     lv_obj_update_layout(s_picks);
-    s_volume = volume(bottom, W - lv_obj_get_width(s_picks) - space::l);
+    s_volume = volume(bottom, W - lv_obj_get_width(s_picks) - space::m);
     lv_obj_move_to_index(s_picks, -1);
 
     s_glide = lv_timer_create(glide, 33, nullptr);
     lv_timer_pause(s_glide);
     detail::subscribe(Topic::Media, s_view, show);
     detail::subscribe(Topic::Picks, s_view, [] { lv_obj_set_hidden(s_picks, detail::media_pick_count() == 0); });
-    chrome(s_view, root, true);
+    chrome(s_view, root);
 }
 }  // namespace music
 
@@ -328,7 +318,7 @@ void build(lv_obj_t *)
 
 namespace cinema {
 constexpr std::int32_t STILL_W = 576, STILL_H = STILL_W * media::kStillH / media::kStillW;
-constexpr std::int32_t ROW_GAP = 32, ROW_H = 72;
+constexpr std::int32_t ROW_GAP = 32, ROW_H = 88, SIDE = 80;
 constexpr std::int32_t X0 = 96, Y0 = (size::screen_h - STILL_H - ROW_GAP - ROW_H) / 2;
 constexpr std::int32_t X = X0 + STILL_W + 56, W = size::screen_w - X - X0;
 constexpr std::int32_t ROW_Y = Y0 + STILL_H + ROW_GAP, TIMES_Y = Y0 + STILL_H - 20, RAIL_Y = TIMES_Y - 30;
@@ -336,7 +326,6 @@ constexpr int          SEEK_S = 10;
 constexpr std::int64_t DARK_AFTER_MS = 15 * 1000;
 
 detail::ViewId s_view = detail::kNoView;
-Backdrop      *s_backdrop = nullptr;
 Cover         *s_still = nullptr;
 std::uint32_t  s_stills = UINT32_MAX;
 lv_obj_t      *s_skip = nullptr;
@@ -410,8 +399,12 @@ void show()
     }
     show_words();
     if (std::exchange(s_stills, media.stills) != media.stills) {
-        show_picture(*s_still, *s_backdrop, media.still, media::kStillW, media::kStillH,
-                     lv_obj_is_visible(s_still->obj()));
+        const bool animate = lv_obj_is_visible(s_still->obj());
+        if (media.still != nullptr) {
+            s_still->show(Picture{media.still, media::kStillW, media::kStillH, 0}, animate);
+        } else {
+            s_still->clear(animate);
+        }
     }
     tick(nullptr);
     set_icon(lv_obj_get_child(s_play, 0), media.playing ? ic::pause : ic::play_arrow, true);
@@ -448,10 +441,20 @@ void still_touched(lv_event_t *e)
     }
 }
 
+// What the kit paints again on each restyle, kept as on black.
+void paint_black(void *)
+{
+    lv_obj_set_style_bg_color(lv_obj_get_child(lv_obj_get_child(s_rail->obj(), 0), 0), lv_color_hex(ON_BLACK), 0);
+    lv_obj_t *slider = s_volume->slider;
+    lv_obj_set_style_bg_color(slider, lv_color_hex(0xffffff), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(slider, 40, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(slider, lv_color_hex(ON_BLACK), LV_PART_INDICATOR);
+}
+
 void build(lv_obj_t *)
 {
-    lv_obj_t *root = fullscreen_root();
-    s_backdrop     = new Backdrop(root, size::screen_w, size::screen_h);
+    // black in either look, as a cinema is, with what is on it in the dark look's inks
+    lv_obj_t *root = fullscreen_root(true);
     s_view         = detail::add_view({"cinema", detail::ViewKind::Fullscreen, root,
                                        [] {
                                            s_stills = UINT32_MAX;
@@ -460,7 +463,6 @@ void build(lv_obj_t *)
                                        [] {
                                            lv_timer_pause(s_tick);
                                            s_still->clear(false);
-                                           s_backdrop->clear();
                                        }});
 
     s_still = new Cover(root, STILL_W, STILL_H, Shape::Rounded, 20, ic::aspect_ratio);
@@ -472,7 +474,8 @@ void build(lv_obj_t *)
     lv_obj_set_gesture_bubble(still, false);
     // an intro to skip, or an episode to go on to, in the picture's corner
     s_skip = button(still, Button::Raised, nullptr, "Next episode");
-    lv_obj_set_width(s_skip, widest(Role::H3, {"Skip intro", "Next episode", "Next video"}) + 2 * space::xl);
+    lv_obj_set_size(s_skip, widest(Role::H3, {"Skip intro", "Next episode", "Next video"}) + 2 * space::xxl,
+                    size::button_lg);
     lv_obj_align(s_skip, LV_ALIGN_BOTTOM_RIGHT, -space::l, -space::l);
     lv_obj_add_event_cb(s_skip, [](lv_event_t *) { detail::media_skip(); }, LV_EVENT_CLICKED, nullptr);
     lv_obj_set_hidden(s_skip, true);
@@ -499,28 +502,30 @@ void build(lv_obj_t *)
     lv_obj_set_size(sound, STILL_W, ROW_H);
     lv_obj_set_pos(sound, X0, ROW_Y);
     lv_obj_set_flex_align(sound, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    s_volume    = volume(sound, STILL_W - size::button - space::l);
-    s_subtitles = button(sound, Button::Flat, ic::subtitles, nullptr, true);
-    lv_obj_set_size(s_subtitles, size::button, size::button);
+    s_volume    = volume(sound, STILL_W - SIDE - space::l);
+    s_subtitles = fill_button(sound, ic::subtitles, SIDE, 34);
     lv_obj_add_event_cb(s_subtitles, [](lv_event_t *) { detail::media_toggle_subtitles(); }, LV_EVENT_CLICKED, nullptr);
 
-    lv_obj_t *transport = flow(root, LV_FLEX_FLOW_ROW, 40);
+    lv_obj_t *transport = flow(root, LV_FLEX_FLOW_ROW, space::l);
     lv_obj_set_size(transport, W, ROW_H);
     lv_obj_set_pos(transport, X, ROW_Y);
-    lv_obj_set_flex_align(transport, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    s_back = glyph_button(transport, ic::replay_10, 64, [](lv_event_t *) { detail::media_seek_by(-SEEK_S); });
-    s_play = glyph_button(transport, ic::play_arrow, ROW_H, [](lv_event_t *) { detail::media_toggle_play(); });
-    s_on   = glyph_button(transport, ic::forward_10, 64, [](lv_event_t *) { detail::media_seek_by(SEEK_S); });
+    lv_obj_set_flex_align(transport, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    s_back = fill_button(transport, ic::replay_10, SIDE, 40);
+    s_play = primary(transport, ic::play_arrow, 200, ROW_H);
+    s_on   = fill_button(transport, ic::forward_10, SIDE, 40);
+    lv_obj_add_event_cb(s_back, [](lv_event_t *) { detail::media_seek_by(-SEEK_S); }, LV_EVENT_CLICKED, nullptr);
+    lv_obj_add_event_cb(s_play, [](lv_event_t *) { detail::media_toggle_play(); }, LV_EVENT_CLICKED, nullptr);
+    lv_obj_add_event_cb(s_on, [](lv_event_t *) { detail::media_seek_by(SEEK_S); }, LV_EVENT_CLICKED, nullptr);
 
     s_tick = lv_timer_create(tick, 500, nullptr);
     lv_timer_pause(s_tick);
     detail::subscribe(Topic::Media, s_view, show);
 
     const Chrome over = chrome(s_view, root, true);
-    s_low = quick_action(over, ic::desk, "Ultra low");
+    s_low = desk_chip(over.left, ic::desk, ic::arrow_downward);
     lv_obj_add_event_cb(s_low, [](lv_event_t *) { detail::desk_go_to(detail::ULTRA_LOW_PRESET); }, LV_EVENT_CLICKED,
                         nullptr);
-    s_lights = quick_action(over, ic::lightbulb, "Lights");
+    s_lights = quick_action(over, ic::lightbulb);
     lv_obj_add_event_cb(
         s_lights,
         [](lv_event_t *) {
@@ -529,7 +534,7 @@ void build(lv_obj_t *)
             }
         },
         LV_EVENT_CLICKED, nullptr);
-    s_timer = quick_action(over, ic::bedtime, "Screen timer");
+    s_timer = quick_action(over, ic::bedtime);
     lv_obj_add_event_cb(
         s_timer,
         [](lv_event_t *) {
@@ -542,6 +547,21 @@ void build(lv_obj_t *)
         set_usable(s_low, detail::desk_state().available);
     });
     detail::subscribe(Topic::Lights, s_view, [] { light(s_lights, detail::lights_state().on); });
+
+    for (lv_obj_t *b : {s_skip, s_subtitles, s_back, s_on, s_volume->down, s_volume->up, s_low, s_lights, s_timer}) {
+        on_black(b);
+    }
+    for (lv_obj_t *label : {s_title}) {
+        ink_on_black(label, Ink::Primary);
+    }
+    for (lv_obj_t *label : {s_series, s_episode, s_elapsed, s_ends, s_total}) {
+        ink_on_black(label, Ink::Secondary);
+    }
+    lv_obj_t *track = lv_obj_get_child(s_rail->obj(), 0);
+    lv_obj_set_style_bg_color(track, lv_color_hex(0xffffff), 0);
+    lv_obj_set_style_bg_opa(track, 20, 0);
+    paint_black(nullptr);
+    on_restyle(root, paint_black, nullptr);  // after the rail's and the slider's own
 }
 }  // namespace cinema
 }  // namespace
