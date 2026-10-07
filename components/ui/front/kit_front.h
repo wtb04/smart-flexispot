@@ -87,4 +87,8 @@ void open_now_playing(lv_obj_t *source);
 void open_favourites();
 void open_favourites(lv_obj_t *source);
 
+// The radar's own, in kit_front_radar.cpp.
+/** As Home's Overhead opens the radar page: that aircraft chosen, and on the scope. */
+void radar_opens_on(const char *hex);
+
 }  // namespace ui::kitfront
