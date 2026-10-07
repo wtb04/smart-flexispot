@@ -174,7 +174,7 @@ namespace {
 // --- rows -----------------------------------------------------------------
 
 struct Row : InPsram {
-    lv_obj_t   *title = nullptr, *detail = nullptr, *value = nullptr, *trail = nullptr, *dot = nullptr;
+    lv_obj_t   *title = nullptr, *detail = nullptr, *value = nullptr, *trail = nullptr;
     lv_timer_t *timer = nullptr;
     std::int32_t inset = 0;   // where its hairline starts
     bool grouped  = false;    // edge to edge in a group's tile, so its ends are the tile's corners
@@ -456,10 +456,7 @@ lv_obj_t *row(lv_obj_t *parent, const RowSpec &spec)
 
     const std::int32_t gap = lv_obj_get_style_pad_column(obj, LV_PART_MAIN);
     std::int32_t       x   = lv_obj_get_style_pad_left(obj, LV_PART_MAIN);
-    if (spec.glyph != nullptr && spec.bare) {
-        icon(obj, spec.glyph, 28, false, spec.tint);
-        x += 28 + gap;
-    } else if (spec.glyph != nullptr) {
+    if (spec.glyph != nullptr) {
         lv_obj_t *sq = bare_box(obj);
         lv_obj_add_style(sq, &s_square, 0);
         lv_obj_add_style(sq, &tint(spec.tint), 0);
@@ -506,8 +503,7 @@ lv_obj_t *row(lv_obj_t *parent, const RowSpec &spec)
     }
 
     if (spec.dot && spec.trail != Trail::Badge) {
-        data->dot = dot(obj, spec.ink, 10);
-        lv_obj_set_style_margin_right(data->dot, -6, 0);
+        lv_obj_set_style_margin_right(dot(obj, spec.ink, 10), -6, 0);
     }
     if (spec.value != nullptr && spec.trail != Trail::Badge) {
         const std::int32_t w = spec.value_w > 0 ? spec.value_w : widest(Role::Body, {spec.value});
@@ -537,21 +533,6 @@ void set_row_value(lv_obj_t *obj, const char *value)
     if (Row *row = row_of(obj)) {
         set_text_if(row->value, value);
     }
-}
-
-void set_row_state(lv_obj_t *obj, const char *value, Ink ink)
-{
-    Row *row = row_of(obj);
-    if (row == nullptr) {
-        return;
-    }
-    if (row->dot != nullptr) {
-        set_dot(row->dot, ink);
-    } else if (row->trail != nullptr && row->value == nullptr) {
-        set_badge(row->trail, value, ink);
-        return;
-    }
-    set_text_if(row->value, value);
 }
 
 void set_row_detail(lv_obj_t *obj, const char *detail)
@@ -706,7 +687,6 @@ void Readout::set_value(std::int32_t value, bool animate)
 {
     const bool was_clear = m_shown == INT32_MIN;
     const std::int32_t from = was_clear ? value : m_shown;
-    m_value = value;
     lv_anim_delete(this, on_count);
     if (!animate || was_clear || from == value) {
         show(value);
@@ -720,13 +700,6 @@ void Readout::set_value(std::int32_t value, bool animate)
     lv_anim_set_duration(&a, motion::move_ms);
     lv_anim_set_path_cb(&a, motion::spring);
     lv_anim_start(&a);
-}
-
-void Readout::clear()
-{
-    lv_anim_delete(this, on_count);
-    m_shown = INT32_MIN;
-    set_text_if(m_read, "--");
 }
 
 // --- steppers -------------------------------------------------------------
