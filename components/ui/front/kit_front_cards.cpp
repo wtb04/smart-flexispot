@@ -496,10 +496,10 @@ constexpr int           NONE         = INT_MIN;
 constexpr std::int32_t  HEAT_DIAL    = 320;
 constexpr std::int32_t  HEAT_ARC     = 30;
 constexpr std::int32_t  HEAT_FOOT    = 50;  // the bottom of the dial's box the arc leaves open
-constexpr std::int32_t  HEAT_H       = 2 * space::xxl + 40 + HEAT_DIAL - space::s - HEAT_FOOT + 60 + size::button + 2 * space::m;
+constexpr std::int32_t  HEAT_H       = 2 * space::xxl + size::button + HEAT_DIAL - space::s - HEAT_FOOT + 60 + space::m;
 
 struct HeatCard : InPsram {
-    lv_obj_t *state = nullptr, *mode = nullptr;
+    lv_obj_t *mode = nullptr;
     Dial     *dial  = nullptr;
     lv_obj_t *toggles[kDialToggleCount]{};
     unsigned  shape = UINT_MAX;
@@ -572,9 +572,6 @@ void paint_heat_card()
     const detail::HomeState       &home = detail::home_state();
     const detail::ThermostatState &t    = home.thermostat;
     char buf[40] = "";
-    set_hidden_if(c->state, !t.known);
-    set_badge(c->state, t.state == Hvac::Heating ? "Heating" : t.state == Hvac::Idle ? "Warm enough" : "Off", heat_ink(t));
-
     const Range r = range();
     c->dial->set_range(r.min, r.max);
     const bool room = t.known && t.current_c >= 0.0f;
@@ -670,9 +667,21 @@ void build_heat_card(lv_obj_t *body)
     lv_obj_set_flex_flow(body, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(body, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_row(body, space::m, 0);
+    // What it is doing reads from the arc's ink; the head's right is the toggles'.
     lv_obj_t *head = heading(body, "Heating", nullptr);
-    c->state = badge(head, "Off", Ink::Tertiary, nullptr,
-                     widest(Role::Small, {"Heating", "Warm enough", "Off"}) + 2 * space::m + 14, true);
+    // A toggle's label is what it is set to ("1" or "2" for which radiator, say),
+    // not what it does, so it is a small button showing it, lit when on.
+    for (int i = 0; i < kDialToggleCount; ++i) {
+        lv_obj_t *toggle = button(head, Button::Raised, nullptr, " ", false, true);
+        lv_obj_set_style_min_width(toggle, size::button, 0);
+        lv_obj_set_style_pad_hor(toggle, space::l, 0);
+        lv_obj_add_event_cb(toggle, [](lv_event_t *e) {
+            if (detail::s_handlers.dial_toggle != nullptr) {
+                detail::s_handlers.dial_toggle(index_of(e));
+            }
+        }, LV_EVENT_CLICKED, index_data(i));
+        c->toggles[i] = toggle;
+    }
 
     DialSpec spec;
     spec.size   = HEAT_DIAL;
@@ -706,21 +715,6 @@ void build_heat_card(lv_obj_t *body)
             detail::s_handlers.mode();
         }
     }, LV_EVENT_VALUE_CHANGED, nullptr);
-
-    // A toggle's label is what it is set to ("1" or "2" for which radiator, say),
-    // not what it does, so it is a button showing it, lit when on.
-    lv_obj_t *pair = flow(body, LV_FLEX_FLOW_ROW, space::m);
-    lv_obj_set_width(pair, HEAT_INNER);
-    for (int i = 0; i < kDialToggleCount; ++i) {
-        lv_obj_t *toggle = button(pair, Button::Raised, nullptr, " ", false, true);
-        lv_obj_set_flex_grow(toggle, 1);
-        lv_obj_add_event_cb(toggle, [](lv_event_t *e) {
-            if (detail::s_handlers.dial_toggle != nullptr) {
-                detail::s_handlers.dial_toggle(index_of(e));
-            }
-        }, LV_EVENT_CLICKED, index_data(i));
-        c->toggles[i] = toggle;
-    }
     lv_obj_add_event_cb(body, [](lv_event_t *) {
         delete s_heat;
         s_heat = nullptr;
