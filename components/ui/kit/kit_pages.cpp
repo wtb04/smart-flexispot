@@ -497,7 +497,8 @@ void place_mark(lv_anim_t *, int32_t p)
 constexpr std::uint32_t MARK_MS      = 180;  // the dock's mark from one item to another
 constexpr std::uint32_t MARK_LEAD_MS = MARK_MS + 20;  // there before the page is drawn, which holds everything up
 
-int s_mark_target = -1;  // where the mark is, or is on its way to: ahead of the page shown, after a tap
+int  s_mark_target = -1;  // where the mark is, or is on its way to: ahead of the page shown, after a tap
+bool s_placing     = false;  // in mark(), whose laying out the dock answers, and must not move it ahead of time
 
 void mark(int index, bool animate)
 {
@@ -505,6 +506,10 @@ void mark(int index, bool animate)
         return;  // already on its way there, as the press sent it
     }
     s_mark_target = index;
+    struct Placing {
+        Placing() { s_placing = true; }
+        ~Placing() { s_placing = false; }
+    } placing;
     lv_obj_t *item = index >= 0 ? s_pages[index].item : nullptr;
     if (s_mark == nullptr || item == nullptr || lv_obj_get_parent(item) != lv_obj_get_parent(s_mark)) {
         if (s_mark != nullptr) {
@@ -671,7 +676,7 @@ lv_obj_t *dock_item(lv_obj_t *dock, const char *glyph)
             dock,
             [](lv_event_t *) {
                 const int at = s_mark_target >= 0 ? s_mark_target : s_shown;
-                if (at >= 0 && !lv_anim_get(s_mark, nullptr)) {
+                if (at >= 0 && !s_placing && !lv_anim_get(s_mark, nullptr)) {
                     mark(at, false);
                 }
             },
