@@ -159,7 +159,6 @@ void open_card(int card, lv_obj_t *source)
     if (rows == 0) {
         empty(body, ic::info, "Nothing to read");
     }
-    centre_rows(body);
     lv_obj_add_event_cb(
         body,
         [](lv_event_t *) {
@@ -376,7 +375,6 @@ void build_setup_diagnostics(lv_obj_t *column, std::int32_t w)
     if (detail::s_card_count == 0) {
         empty(list, ic::monitor_heart, "Nothing reported");
     }
-    centre_rows(list);
     subscribe(Topic::Diagnostics, detail::kNoView, paint);
 }
 }  // namespace ui::kitfront
