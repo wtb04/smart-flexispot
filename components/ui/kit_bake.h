@@ -9,8 +9,11 @@
 // shadow while its shape holds, and lays that down wherever it goes.
 namespace ui::kit::bake {
 
-/** The ground's picture, drawn as the background of `ground`, with `content` the plane above it. */
-void begin(lv_obj_t *ground, lv_obj_t *content, lv_draw_buf_t *picture);
+/**
+ * The ground's picture, drawn as the background of `ground`, with `content` the plane above it.
+ * `repaint` paints the bare ground back into an area of the picture, where a shadow was.
+ */
+void begin(lv_obj_t *ground, lv_obj_t *content, lv_draw_buf_t *picture, void (*repaint)(const lv_area_t &area));
 /** The picture was painted afresh: every painted shadow is gone from it. */
 void painted();
 /** The look changed: shadows go back to being live, to be painted again as they now look. */
