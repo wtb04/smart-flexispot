@@ -210,30 +210,20 @@ struct Zone {
     const char  *word = nullptr;  // what a reading in it is: "Good", "Fair", "Poor"
 };
 
+// A bold arc and nothing else: a flat faint track, the value along it in one
+// ink, and in the middle a figure the page writes (`figure()`), with the unit
+// as a quiet line under it. The arc steps without a spring, so a change
+// redraws only the bit of arc it moved.
 struct DialSpec {
     std::int32_t size    = 200;
     std::int32_t min     = 0;
     std::int32_t max     = 100;
     std::int32_t start   = 150;  // degrees clockwise from 3 o'clock, as LVGL counts
     std::int32_t sweep   = 240;
-    std::int32_t ticks   = 31;   // total, minor and major
-    std::int32_t major   = 5;
-    std::int32_t decimals = 0;   // values are in tenths when this is 1
-    bool         needle  = true;
-    bool         fill    = false;  // an accent arc from the minimum to the target
-    bool         target  = false;  // a knob at the target, for a setting
-    bool         ends    = false;  // the range in small figures at the two ends
-    bool         span    = false;  // a setting by ticks alone: those from the reading up to the target lit, the target marked and read out
-    bool         bold    = false;  // heavier ticks, for a dial that is nothing but ticks
+    bool         target  = false;  // a knob at the value, for a setting
     const char  *unit    = nullptr;
-    const Zone  *zones   = nullptr;
-    int          zone_count = 0;
     Role         read    = Role::ReadM;
-    // A bold arc and nothing else: a flat faint track, the value along it in
-    // one ink, and in the middle a figure the page writes (`figure()`), with
-    // the unit as a quiet line under it. The arc steps without a spring, so a
-    // change redraws only the bit of arc it moved. `target` puts a knob at the value.
-    std::int32_t arc     = 0;      // its width; 0 for the scale of ticks above
+    std::int32_t arc     = 0;      // its width
     bool         drag    = false;  // dragged round, it sets the value: LV_EVENT_VALUE_CHANGED as it goes, LV_EVENT_RELEASED when let go
     bool         reverse = false;  // the value as what is left: the arc's start goes round after it, as a timer runs down
     bool         mark    = false;  // a dot on the arc at a second reading: the room's against its setting
@@ -247,14 +237,10 @@ class Dial : public InPsram {
     Dial &operator=(const Dial &) = delete;
     Dial(lv_obj_t *parent, const DialSpec &spec);
     lv_obj_t *obj() const { return m_root; }
-    /** Moves the needle and the readout there on a spring. */
+    /** INT32_MIN shows no value: the track alone. */
     void set_value(std::int32_t value, bool animate = true);
-    void set_target(std::int32_t value, bool animate = true);
-    void set_lit(int ticks);  // the first n ticks in the accent, for a timer
-    void set_caption(const char *caption);  // the small line under the readout
     std::int32_t value() const { return m_value; }
 
-    // An arc dial's own. Its set_value(INT32_MIN) shows no value: the track alone.
     lv_obj_t *figure() const { return m_read; }
     lv_obj_t *caption() const { return m_unit; }
     lv_obj_t *over() const { return m_over; }
@@ -268,45 +254,18 @@ class Dial : public InPsram {
     void set_size(std::int32_t size, std::int32_t arc = 0);
 
   private:
-    static void on_value(void *var, int32_t v);
-    static void on_target(void *var, int32_t v);
     void make_arc();
     void restyle_arc();
     void place_mark();
-    void place_needle(std::int32_t value);
-    void place_line(lv_obj_t *line, lv_point_precise_t *points, std::int32_t value, float r0, float r1);
-    void light_span();
-    void place_target(std::int32_t value);
-    void show_value(std::int32_t value);
-    void light_zone(std::int32_t value);
-    void restyle();
-    void stale_face();
-    void make_face();
     float angle_of(std::int32_t value) const;
 
     DialSpec  m_spec{};
     lv_obj_t *m_root   = nullptr;
-    lv_obj_t *m_scale  = nullptr;
-    lv_obj_t *m_needle = nullptr;
     lv_obj_t *m_arc    = nullptr;
-    lv_obj_t *m_knob   = nullptr;
     lv_obj_t *m_read   = nullptr;
     lv_obj_t *m_unit   = nullptr;
-    lv_obj_t *m_face   = nullptr;  // the scale as a picture, shown in its place
-    lv_draw_buf_t *m_face_buf   = nullptr;
-    lv_timer_t    *m_face_timer = nullptr;
-    lv_obj_t *m_mark   = nullptr;  // the target, on a span dial
-    lv_point_precise_t m_points[2]{}, m_mark_points[2]{};
-    std::int32_t m_span_lo = 0, m_span_hi = -1;
-    lv_scale_section_t *m_zones[6]{};
-    lv_style_t          m_zone_styles[6]{};
-    lv_scale_section_t *m_lit_section = nullptr;
-    lv_style_t          m_lit_style{};
-    char                m_ends[2][12]{};
-    const char         *m_src[72]{};
-    std::int32_t m_value = 0, m_target = 0;
-    std::int32_t m_shown = INT32_MIN, m_lit = -1, m_zone = -1;
-    std::int32_t m_r_tick = 0, m_major_len = 0, m_r_arc = 0;
+    std::int32_t m_value = 0;
+    std::int32_t m_r_arc = 0;
     lv_obj_t    *m_over = nullptr, *m_dot = nullptr;
     std::int32_t m_mark_at = INT32_MIN;
     Ink          m_ink   = Ink::Accent;
@@ -320,7 +279,6 @@ struct RailSpec {
     std::int32_t ticks    = 0;  // 0: a plain track, as sliders and progress are
     std::int32_t major    = 5;
     bool         draggable = false;
-    bool         fill     = true;
     bool         quiet    = false;  // a thin line, its knob only under the finger: a track's progress
     const std::int32_t *notches = nullptr;  // marks for presets
     int          notch_count = 0;

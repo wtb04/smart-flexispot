@@ -227,7 +227,7 @@ void open_desk(lv_event_t *e)
     static const std::int32_t presets[] = {660, 700, 740, 1120};
     RailSpec rs;
     rs.length = 420, rs.vertical = true, rs.min = 660, rs.max = 1310, rs.ticks = 14, rs.major = 2;
-    rs.notches = presets, rs.notch_count = 4, rs.fill = true;
+    rs.notches = presets, rs.notch_count = 4;
     auto *rail = new Rail(row, rs);
     own(rail->obj(), rail);
     rail->set_value(740, false);
