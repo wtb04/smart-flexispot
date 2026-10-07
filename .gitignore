@@ -4,7 +4,7 @@ build_remote/
 build_test/
 build_tests/
 __pycache__/
-managed_components/
+managed_components
 sdkconfig
 sdkconfig.old
 .vscode/

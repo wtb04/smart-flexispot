@@ -701,7 +701,7 @@ class Scale : public InPsram {
 };
 
 struct ReadingSpec {
-    const char  *caption = nullptr;  // in sentence case: "CO₂", "Humidity"
+    const char  *caption = nullptr;  // in sentence case: "CO2", "Humidity"
     const char  *unit    = nullptr;
     std::int32_t min = 0, max = 100;  // the scale's ends; the figure's width is that of the widest of these
     const Zone  *zones = nullptr;
