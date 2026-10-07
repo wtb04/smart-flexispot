@@ -52,7 +52,10 @@ void paint_desk()
 {
     const detail::DeskState &desk = detail::desk_state();
     char buf[24] = "--";
-    if (desk.height_mm >= 0) {
+    // whole centimetres from a metre up, where a fourth figure ran out of the dock
+    if (desk.height_mm >= 1000) {
+        std::snprintf(buf, sizeof buf, "%d", (desk.height_mm + 5) / 10);
+    } else if (desk.height_mm >= 0) {
         std::snprintf(buf, sizeof buf, "%d.%d", desk.height_mm / 10, desk.height_mm % 10);
     }
     if (std::strcmp(lv_label_get_text(s_height_read), buf) != 0) {
