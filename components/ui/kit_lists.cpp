@@ -10,7 +10,7 @@
 namespace ui::kit {
 namespace {
 
-constexpr std::int32_t ROW_H = 64, GROUP_PAD = space::xl, LIST_PAD = space::m;
+constexpr std::int32_t ROW_H = 64, ROW_PAD = 6, GROUP_PAD = space::xl, LIST_PAD = space::m;
 constexpr std::int32_t SQUARE = 36, SQUARE_RADIUS = 10, MARK_W = 4, BADGE_H = 32, BADGE_PAD = space::m;
 constexpr std::uint32_t LATE_MS  = 80;  // how long a finger rests on a row under a scroll before it lights
 constexpr std::uint32_t FLASH_MS = 90;  // a tap quicker than that still shows
@@ -83,8 +83,7 @@ void init_styles()
     lv_style_transition_dsc_init(&s_lit_tr, FILL_PROPS, lv_anim_path_linear, motion::press_ms, 0, nullptr);
     lv_style_transition_dsc_init(&s_unlit_tr, FILL_PROPS, motion::spring, motion::release_ms, 0, nullptr);
 
-    lv_style_set_min_height(&s_row, ROW_H);
-    lv_style_set_pad_ver(&s_row, 6);
+    lv_style_set_pad_ver(&s_row, ROW_PAD);
     lv_style_set_pad_column(&s_row, 14);
     lv_style_set_pad_hor(&s_row_group, GROUP_PAD);
     lv_style_set_pad_hor(&s_row_list, LIST_PAD);
@@ -490,6 +489,10 @@ lv_obj_t *row(lv_obj_t *parent, const RowSpec &spec)
     lv_obj_set_size(col, 0, LV_SIZE_CONTENT);
     lv_obj_set_flex_grow(col, 1);
     lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
+    // the least height on the words, not the row: flex puts what is in a row
+    // as tall as its contents at its top, which held taller sat everything high
+    lv_obj_set_flex_align(col, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_set_style_min_height(col, ROW_H - 2 * ROW_PAD, 0);
     if (data->toggles) {
         // beside a switch the title wraps rather than shortening, so all of it is read before it is set
         data->title = text(col, Role::Body, spec.title);
@@ -986,7 +989,7 @@ lv_obj_t *sheet_row(lv_obj_t *body, const char *label, const char *value)
     spec.trail = Trail::Value;
     spec.value = value;
     lv_obj_t *r = row(body, spec);
-    lv_obj_set_style_min_height(r, 52, 0);
+    row_height(r, 52);
     lv_obj_t *v = row_trail(r);
     lv_obj_set_width(v, LV_PCT(55));  // its share of the line rather than its text's width: nothing moves as it changes
     return v;
@@ -1018,18 +1021,6 @@ void set_row_glyph(lv_obj_t *obj, const char *glyph)
     lv_obj_t *g = square ? lv_obj_get_child(sq, 0) : nullptr;
     if (g != nullptr && std::strcmp(lv_label_get_text(g), glyph) != 0) {
         lv_label_set_text(g, glyph);
-    }
-}
-
-void centre_rows(lv_obj_t *parent)
-{
-    lv_obj_update_layout(parent);
-    for (std::uint32_t i = 0; i < lv_obj_get_child_count(parent); ++i) {
-        lv_obj_t *obj = lv_obj_get_child(parent, static_cast<std::int32_t>(i));
-        const std::int32_t h = lv_obj_get_height(obj);
-        if (row_of(obj) != nullptr && h <= lv_obj_get_style_min_height(obj, LV_PART_MAIN)) {
-            lv_obj_set_height(obj, h);
-        }
     }
 }
 
@@ -1084,6 +1075,16 @@ void set_row_mark(lv_obj_t *obj, std::uint32_t colour)
     lv_obj_t *m = row_part(obj, true);
     if (m != nullptr && !lv_color_eq(lv_obj_get_style_bg_color(m, LV_PART_MAIN), lv_color_hex(colour))) {
         lv_obj_set_style_bg_color(m, lv_color_hex(colour), 0);
+    }
+}
+
+// --- rows, calmer ------------------------------------------------------------
+
+void row_height(lv_obj_t *obj, std::int32_t h)
+{
+    if (const Row *row = row_of(obj)) {
+        const std::int32_t pad = lv_obj_get_style_pad_top(obj, LV_PART_MAIN) + lv_obj_get_style_pad_bottom(obj, LV_PART_MAIN);
+        lv_obj_set_style_min_height(lv_obj_get_parent(row->title), h - pad, 0);
     }
 }
 
