@@ -49,7 +49,6 @@ ROLES = {
     "h3": (600, 25, TEXT),
     "h2": (600, 30, TEXT),
     "h1": (600, 36, TEXT),
-    "read_s": (600, 30, TEXT),
     "read_m": (600, 40, READOUT),
     "read_l": (600, 52, READOUT),
     "read_xl": (600, 64, READOUT),
