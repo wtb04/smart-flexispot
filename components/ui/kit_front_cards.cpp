@@ -115,8 +115,6 @@ void write_clock(char *out, std::size_t size, int s)
 constexpr std::int32_t  MEDIA_W     = 480;
 constexpr std::int32_t  MEDIA_INNER = MEDIA_W - 2 * space::xxl;
 constexpr std::int32_t  COVER       = 128;
-constexpr std::int32_t  STEP_D      = 72;
-constexpr std::int32_t  PLAY_D      = 88;
 constexpr int           SEEK_S      = 10;
 constexpr std::uint32_t GLIDE_MS    = 250;
 constexpr std::int32_t  PERMILLE    = 1000;
@@ -131,7 +129,7 @@ struct MediaCard : InPsram {
     int       at_s = -1, length_s = -1;
     lv_obj_t *transport = nullptr, *prev = nullptr, *play = nullptr, *next = nullptr;
     lv_obj_t *sound = nullptr, *speaker = nullptr, *down = nullptr, *up = nullptr;
-    Rail     *volume = nullptr;
+    lv_obj_t *volume = nullptr;
     bool      volume_held = false;
     lv_obj_t *favourites = nullptr, *subtitles = nullptr;
     lv_timer_t *glide = nullptr;
@@ -234,13 +232,13 @@ void paint_media_card()
     const bool volume = detail::media_shows_volume();
     const bool subs   = m.video && detail::media_shows_subtitles();
     set_hidden_if(c->sound, !volume && m.video && !subs);
-    set_hidden_if(c->speaker, !volume);
-    set_hidden_if(c->volume->obj(), !volume || m.steps_volume);
+    set_hidden_if(c->speaker, !volume || !m.steps_volume);  // the slider carries its own
+    set_hidden_if(c->volume, !volume || m.steps_volume);
     set_hidden_if(c->down, !volume || !m.steps_volume);
     set_hidden_if(c->up, !volume || !m.steps_volume);
-    set_usable(c->volume->obj(), m.volume >= 0);
-    if (m.volume >= 0 && !c->volume_held && c->volume->value() != m.volume) {
-        c->volume->set_value(m.volume, false);
+    set_usable(c->volume, m.volume >= 0);
+    if (m.volume >= 0 && !c->volume_held && lv_slider_get_value(c->volume) != m.volume) {
+        lv_slider_set_value(c->volume, m.volume, LV_ANIM_OFF);
     }
     set_hidden_if(c->favourites, m.video);
     set_hidden_if(c->subtitles, !subs);
@@ -265,11 +263,17 @@ void step_clicked(lv_event_t *e)
     }
 }
 
-lv_obj_t *transport_button(lv_obj_t *parent, const char *glyph, std::int32_t d, int glyph_px)
+// Round fills either side, the one tinted capsule between them, as Apple's
+// media card has its controls.
+lv_obj_t *transport_button(lv_obj_t *parent, const char *glyph, bool main)
 {
-    lv_obj_t *b = button(parent, Button::Flat, nullptr, nullptr, true);
-    lv_obj_set_size(b, d, d);
-    icon(b, glyph, glyph_px, true);
+    lv_obj_t *b = button(parent, main ? Button::Accent : Button::Raised, nullptr, nullptr, !main);
+    lv_obj_set_size(b, size::button_lg, size::button_lg);
+    lv_obj_set_style_radius(b, radius::round, 0);
+    if (main) {
+        lv_obj_set_flex_grow(b, 1);
+    }
+    lv_obj_center(icon(b, glyph, 34, true, main ? Ink::OnAccent : Ink::Primary));
     return b;
 }
 
@@ -315,12 +319,12 @@ void build_media_card(lv_obj_t *body)
     c->length = line(times, Role::Small, Ink::Secondary, clock_w);
     lv_obj_set_style_text_align(c->length, LV_TEXT_ALIGN_RIGHT, 0);
 
-    c->transport = flow(body, LV_FLEX_FLOW_ROW, space::xxl);
+    c->transport = flow(body, LV_FLEX_FLOW_ROW, space::m);
     lv_obj_set_width(c->transport, LV_PCT(100));
     lv_obj_set_flex_align(c->transport, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    c->prev = transport_button(c->transport, ic::skip_previous, STEP_D, 34);
-    c->play = transport_button(c->transport, ic::play_arrow, PLAY_D, 34);
-    c->next = transport_button(c->transport, ic::skip_next, STEP_D, 34);
+    c->prev = transport_button(c->transport, ic::skip_previous, false);
+    c->play = transport_button(c->transport, ic::play_arrow, true);
+    c->next = transport_button(c->transport, ic::skip_next, false);
     on_click(c->prev, step_clicked, index_data(-1));
     on_click(c->next, step_clicked, index_data(1));
     on_click(c->play, [](lv_event_t *) { detail::media_toggle_play(); });
@@ -330,21 +334,17 @@ void build_media_card(lv_obj_t *body)
     lv_obj_set_flex_align(c->sound, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     c->speaker = icon(c->sound, ic::volume_up, 28, false, Ink::Secondary);
     const std::int32_t fav_w = widest(Role::H3, {"Favourites"}) + 2 * space::xl;
-    const std::int32_t vol_w = MEDIA_INNER - 28 - fav_w - 2 * space::m;
-    RailSpec vs;
-    vs.length    = vol_w;
-    vs.draggable = true;
-    c->volume = new Rail(c->sound, vs);
-    own(c->volume);
-    lv_obj_add_event_cb(c->volume->obj(), [](lv_event_t *) { detail::media_set_volume(s_media->volume->value()); },
+    c->volume = fill_slider(c->sound, MEDIA_INNER - fav_w - space::m, ic::volume_up);
+    lv_obj_add_event_cb(c->volume, [](lv_event_t *) { detail::media_set_volume(lv_slider_get_value(s_media->volume)); },
                         LV_EVENT_VALUE_CHANGED, nullptr);
-    lv_obj_add_event_cb(c->volume->obj(), [](lv_event_t *) { s_media->volume_held = true; }, LV_EVENT_PRESSED, nullptr);
+    lv_obj_add_event_cb(c->volume, [](lv_event_t *) { s_media->volume_held = true; }, LV_EVENT_PRESSED, nullptr);
     for (lv_event_code_t code : {LV_EVENT_RELEASED, LV_EVENT_PRESS_LOST}) {
-        lv_obj_add_event_cb(c->volume->obj(), [](lv_event_t *) { s_media->volume_held = false; }, code, nullptr);
+        lv_obj_add_event_cb(c->volume, [](lv_event_t *) { s_media->volume_held = false; }, code, nullptr);
     }
     // A player whose volume only steps, as a display's does: down and up, with no level to show.
     for (int dir : {-1, 1}) {
         lv_obj_t *b = button(c->sound, Button::Raised, dir < 0 ? ic::remove : ic::add, nullptr);
+        lv_obj_set_height(b, size::button_lg);
         lv_obj_set_flex_grow(b, 1);
         on_click(b, [](lv_event_t *e) {
             detail::media_action(index_of(e) < 0 ? MediaAction::VolumeDown : MediaAction::VolumeUp);
@@ -352,13 +352,13 @@ void build_media_card(lv_obj_t *body)
         (dir < 0 ? c->down : c->up) = b;
     }
     c->favourites = button(c->sound, Button::Raised, nullptr, "Favourites");
-    lv_obj_set_width(c->favourites, fav_w);
+    lv_obj_set_size(c->favourites, fav_w, size::button_lg);
     on_click(c->favourites, [](lv_event_t *) {
         close_popover(false);
         open_favourites();
     });
     c->subtitles = button(c->sound, Button::Raised, ic::subtitles, nullptr, false, true);
-    lv_obj_set_width(c->subtitles, fav_w);
+    lv_obj_set_size(c->subtitles, fav_w, size::button_lg);
     on_click(c->subtitles, [](lv_event_t *) { detail::media_toggle_subtitles(); });
 
     c->glide = lv_timer_create(glide_media, GLIDE_MS, nullptr);
@@ -493,10 +493,8 @@ constexpr std::uint32_t SEND_AFTER_MS = 600;   // the taps stopped: the target g
 constexpr std::uint32_t HOLD_MS      = 5000;  // ours shown until the thermostat says it has it, or this long
 constexpr int           NONE         = INT_MIN;
 
-constexpr std::int32_t  HEAT_DIAL    = 320;
+constexpr std::int32_t  HEAT_DIAL    = 280;
 constexpr std::int32_t  HEAT_ARC     = 28;
-constexpr std::int32_t  HEAT_STEP_D  = size::button;
-constexpr std::int32_t  HEAT_STEP_X  = 40;  // either side of the middle, in the dial's open foot
 
 struct HeatCard : InPsram {
     lv_obj_t *state = nullptr, *less = nullptr, *more = nullptr, *mode = nullptr;
@@ -711,11 +709,14 @@ void build_heat_card(lv_obj_t *body)
     lv_obj_add_event_cb(dial, [](lv_event_t *e) { delete static_cast<Dial *>(lv_event_get_user_data(e)); },
                         LV_EVENT_DELETE, c->dial);
 
-    // In the dial's open foot, as a thermostat's buttons are.
+    // Two wide capsules under the dial, clear of its arc.
+    lv_obj_t *steps = flow(body, LV_FLEX_FLOW_ROW, space::m);
+    lv_obj_set_width(steps, HEAT_INNER);
+    lv_obj_set_style_margin_top(steps, -HEAT_DIAL / 5, 0);  // up into the dial's open foot
     for (int dir : {-1, 1}) {
-        lv_obj_t *b = button(dial, Button::Raised, dir < 0 ? ic::remove : ic::add, nullptr, true);
-        lv_obj_set_size(b, HEAT_STEP_D, HEAT_STEP_D);
-        lv_obj_align(b, LV_ALIGN_BOTTOM_MID, dir * HEAT_STEP_X, 0);
+        lv_obj_t *b = button(steps, Button::Raised, dir < 0 ? ic::remove : ic::add, nullptr);
+        lv_obj_set_height(b, size::button_lg);
+        lv_obj_set_flex_grow(b, 1);
         on_click(b, [](lv_event_t *e) { step_target(index_of(e)); }, index_data(dir));
         (dir < 0 ? c->less : c->more) = b;
     }
