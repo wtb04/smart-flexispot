@@ -1489,6 +1489,9 @@ void show_magnified(std::int32_t steps)
     frame.ring_opa   = s_ring_opa;
     frame.ring_count = s_ring_count;
     frame.ring_ink   = rgb565(look::secondary());
+    frame.row_from   = s_row_from;
+    frame.row_to     = s_row_to;
+    frame.around     = rgb565(look::background());
     board::zoom_frame(frame);
     ++s_fast_frames;
 }
