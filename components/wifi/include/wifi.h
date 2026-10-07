@@ -19,8 +19,6 @@ void on_radio_stuck(void (*restart_cold)());
 /** True once an IP address has been assigned. */
 bool connected();
 
-bool wait_for_ip(int timeout_ms);
-
 /** What the Wi-Fi task last read off the radio, refreshed every few seconds.
  *  Reading it costs nothing; asking the radio directly is a round trip to the
  *  C6. Empty strings for anything not known. */

@@ -1,5 +1,4 @@
-// The clock, delays and version ESP-IDF gives the firmware.
-#include "esp_app_desc.h"
+// The clock and delays ESP-IDF gives the firmware.
 #include "esp_timer.h"
 #include "freertos/task.h"
 
@@ -24,10 +23,4 @@ TickType_t xTaskGetTickCount()
 void vTaskDelay(TickType_t ticks)
 {
     std::this_thread::sleep_for(std::chrono::milliseconds(ticks));
-}
-
-const esp_app_desc_t *esp_app_get_description()
-{
-    static const esp_app_desc_t desc = {"sim", "smart_flexispot", __TIME__, __DATE__, "desktop"};
-    return &desc;
 }

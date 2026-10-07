@@ -15,7 +15,6 @@ enum class Key : std::uint8_t {
     PresenceGate,
     DeskBluetooth,
     Accent,
-    DockSide,
     Flipped,
     OrientAuto,  // follow the IMU rather than Flipped
     OrientSign,  // which way along the IMU's x gravity points with the screen upright, -1 or 1

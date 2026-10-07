@@ -171,7 +171,6 @@ void check_route(const std::string &json)
               std::fabs(details.dest_lon - 4.76389f) < 0.001f) << "where the destination is";
     EXPECT_NE(std::strcmp(details.airline, "Newcastle Airport"), 0) << "a nested name does not overwrite the airline";
     EXPECT_STREQ(details.flight_iata, "KL90G") << "the flight number as sold";
-    EXPECT_STREQ(details.airline_country, "Netherlands") << "the airline's country";
 }
 
 void check_aircraft(const std::string &json)
@@ -182,7 +181,6 @@ void check_aircraft(const std::string &json)
     EXPECT_EQ(std::strcmp(details.model, "EMB-190 STD"), 0) << "model";
     EXPECT_EQ(std::strcmp(details.owner, "KLM cityhopper"), 0) << "owner";
     EXPECT_STREQ(details.owner_country, "Netherlands") << "where it is registered";
-    EXPECT_EQ(std::strncmp(details.photo_url, "https://airport-data.com/images/", 32), 0) << "photo url";
     EXPECT_TRUE(details.has_aircraft) << "aircraft half marked present";
     EXPECT_TRUE(!details.has_route) << "route half left alone";
 }

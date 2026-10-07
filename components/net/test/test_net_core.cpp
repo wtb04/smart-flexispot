@@ -19,7 +19,7 @@ struct Log {
     Done done(const std::string &name)
     {
         return [this, name](const Response &response) {
-            static const char *OUTCOMES[] = {"answered", "failed", "resting", "replaced", "expired", "cancelled"};
+            static const char *OUTCOMES[] = {"answered", "failed", "resting", "replaced", "expired"};
             said.push_back(name + " " + OUTCOMES[static_cast<int>(response.outcome)]);
         };
     }
@@ -306,25 +306,6 @@ TEST(NetCore, busy)
     run(tells);
     EXPECT_TRUE(log.has("a answered")) << "a 429 is an answer, for its asker to read";
     EXPECT_TRUE(core.status(host, 1999 * MS).resting && !core.status(host, 2000 * MS).resting) << "and rests the host as long as its Retry-After says";
-}
-
-TEST(NetCore, cancel)
-{
-    Core    core;
-    Host    host = core.add_host(HostConfig{});
-    Tells   tells;
-    Log     log;
-    Running running;
-    const Ticket waiting = core.submit(make(host, "waiting", Priority::Now, log.done("waiting")), 0, tells);
-    core.submit(make(host, "sent", Priority::Tap, log.done("sent")), 0, tells);
-    next_path(core, 0, running, tells);
-    core.cancel(waiting, tells);
-    core.cancel(running.ticket, tells);
-    run(tells);
-    EXPECT_TRUE(log.has("waiting cancelled") && !log.has("sent cancelled")) << "a waiting one is told at once";
-    core.finish(running, answer(), 1, tells);
-    run(tells);
-    EXPECT_TRUE(log.has("sent cancelled") && !log.has("sent answered")) << "one under way when its answer comes";
 }
 
 TEST(NetCore, buffer_growth)

@@ -245,12 +245,6 @@ esp_err_t start()
     return ESP_OK;
 }
 
-Host add_host(const HostConfig &config)
-{
-    std::lock_guard<std::mutex> hold(s_lock);
-    return s_core.add_host(config);
-}
-
 Host host_for(const std::string &url, const HostConfig &like)
 {
     const std::string origin = origin_of(url);
@@ -322,46 +316,10 @@ Fetched wait_for(Request request, char *into, std::size_t size, std::string *tex
 }
 }  // namespace
 
-Fetched fetch(Request request, char *into, std::size_t size)
-{
-    return wait_for(std::move(request), into, size, nullptr);
-}
-
 Fetched fetch(Request request, std::string &into)
 {
     into.clear();
     return wait_for(std::move(request), nullptr, 0, &into);
-}
-
-void cancel(Ticket ticket)
-{
-    Tells tells;
-    {
-        std::lock_guard<std::mutex> hold(s_lock);
-        s_core.cancel(ticket, tells);
-    }
-    tell(tells);
-}
-
-void cancel(Host host, const std::string &key)
-{
-    Tells tells;
-    {
-        std::lock_guard<std::mutex> hold(s_lock);
-        s_core.cancel(host, key, tells);
-    }
-    tell(tells);
-}
-
-HostStatus status(Host host)
-{
-    std::lock_guard<std::mutex> hold(s_lock);
-    return s_core.status(host, now_us());
-}
-
-bool resting(Host host)
-{
-    return status(host).resting;
 }
 
 }  // namespace net
