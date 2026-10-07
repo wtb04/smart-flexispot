@@ -19,7 +19,7 @@ namespace {
 namespace ic = kit::glyph;
 using namespace kit;
 
-constexpr std::int32_t MEDIA_W = 452, ART = 48, ART_R = 10, ART_IN = 16;
+constexpr std::int32_t MEDIA_W = 452, ART = 48;
 
 Status     s_status;
 lv_obj_t  *s_lights = nullptr, *s_lights_count = nullptr;
@@ -74,20 +74,21 @@ void paint_heat()
 void paint_media()
 {
     const detail::MediaState &m = detail::media_state();
-    set_text_if(s_title, m.has_track ? m.title : m.state[0] != 0 ? m.state : "Nothing playing");
+    set_text_if(s_title, m.has_track ? m.title : "Nothing playing");
     char artist[128];
     std::snprintf(artist, sizeof artist, "%s", m.has_track ? m.artist : "");
     if (char *nl = std::strchr(artist, '\n')) {
         *nl = 0;  // a video's series: its season and episode are for the card
     }
     set_text_if(s_artist, artist);
-    // one line alone, "OFF" or a title with no artist, sits in the middle
+    // one line alone, nothing playing or a title with no artist, sits in the middle
     if (lv_obj_is_hidden(s_artist) != (artist[0] == '\0')) {
         lv_obj_set_hidden(s_artist, artist[0] == '\0');
     }
     // With nothing playing, play offers the favourites; a player only followed has none.
     lv_obj_set_hidden(s_play, m.has_track && !m.remote);
     set_icon(lv_obj_get_child(s_play, 0), m.has_track && m.playing ? ic::pause : ic::play_arrow, true);
+    s_cover->set_mark(m.has_track ? nullptr : speaker_mark(ART));  // nothing on: the speaker it would play on
     if (m.covers != s_covers) {
         if (m.art == nullptr || m.placeholder) {
             s_cover->clear();
@@ -164,10 +165,11 @@ void build_media(lv_obj_t *bar)
     s_media = capsule(bar);
     lv_obj_set_width(s_media, MEDIA_W);
     lv_obj_set_style_pad_column(s_media, space::m, 0);
-    lv_obj_set_style_pad_left(s_media, ART_IN, 0);  // further in than from the top, clear of the capsule's round end
     lv_obj_add_flag(s_media, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_style_bg_opa(s_media, colours().glass_solid_opa, LV_STATE_PRESSED);  // the glass firms up under the finger
-    s_cover = new Cover(s_media, ART, ART, Shape::Rounded, ART_R, ic::music_note);
+    // square, as album art is meant, and as far in as from the top: its corners clear the round end
+    lv_obj_set_style_pad_left(s_media, (size::bar - ART) / 2, 0);
+    s_cover = new Cover(s_media, ART, ART, Shape::Rounded, 0, ic::music_note);
     lv_obj_remove_flag(s_cover->obj(), LV_OBJ_FLAG_CLICKABLE);
     lv_obj_t *col = flow(s_media, LV_FLEX_FLOW_COLUMN, 0);
     lv_obj_set_flex_grow(col, 1);

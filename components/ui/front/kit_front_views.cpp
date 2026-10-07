@@ -112,7 +112,11 @@ void write_clock(lv_obj_t *label, int seconds)
 {
     seconds = std::max(seconds, 0);
     char buf[16];
-    std::snprintf(buf, sizeof buf, "%d:%02d", seconds / 60, seconds % 60);
+    if (seconds >= 3600) {
+        std::snprintf(buf, sizeof buf, "%d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60);
+    } else {
+        std::snprintf(buf, sizeof buf, "%d:%02d", seconds / 60, seconds % 60);
+    }
     set_text_if(label, buf);
 }
 
@@ -212,8 +216,10 @@ Chrome chrome(detail::ViewId view, lv_obj_t *root, bool black)
     lv_obj_align(right, LV_ALIGN_TOP_RIGHT, -EDGE, TOP);
     o->power = flow(right, LV_FLEX_FLOW_ROW, space::xs);
     lv_obj_set_flex_align(o->power, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    o->cell    = icon(o->power, ic::battery_full, 24);
-    o->percent = figures(o->power, "100%", LV_TEXT_ALIGN_LEFT);
+    // as big as the clock beside it
+    o->cell    = icon(o->power, ic::battery_full, 34);
+    o->percent = text(o->power, Role::H3, "", Ink::Secondary);
+    lv_obj_set_width(o->percent, widest(Role::H3, {"100%"}));
     lv_obj_set_hidden(o->power, true);
     o->clock = text(right, Role::H3, "");
     lv_obj_set_width(o->clock, widest(Role::H3, {"00:00"}));
@@ -315,7 +321,7 @@ void build_pick(lv_obj_t *grid, int i)
     lv_obj_set_style_bg_opa(b, LV_OPA_TRANSP, LV_STATE_PRESSED);  // it gives under the finger, without a fill round it
     lv_obj_add_event_cb(b, pick_tapped, LV_EVENT_CLICKED, reinterpret_cast<void *>(static_cast<std::intptr_t>(i)));
 
-    auto *cover = new Cover(b, ART, ART, Shape::Rounded, radius::inner);
+    auto *cover = new Cover(b, ART, ART, Shape::Rounded, 0);
     s_tiles[i]  = {cover, UINT32_MAX};
     lv_obj_add_event_cb(
         cover->obj(),

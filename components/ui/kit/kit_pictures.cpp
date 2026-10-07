@@ -655,9 +655,9 @@ Cover::Cover(lv_obj_t *parent, std::int32_t w, std::int32_t h, Shape shape, std:
     lv_obj_set_style_radius(m_well, shape == Shape::Round ? LV_RADIUS_CIRCLE : m_r, 0);
     lv_obj_set_style_pad_all(m_well, 0, 0);
     lv_obj_remove_flag(m_well, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_t *mark = icon(m_well, glyph != nullptr ? glyph : glyph::music_note, side >= 96 ? 34 : side >= 56 ? 28 : 24, false,
-                          Ink::Tertiary);
-    lv_obj_center(mark);
+    m_glyph = icon(m_well, glyph != nullptr ? glyph : glyph::music_note, side >= 96 ? 34 : side >= 56 ? 28 : 24, false,
+                   Ink::Tertiary);
+    lv_obj_center(m_glyph);
 
     m_pic = lv_obj_create(m_root);
     lv_obj_remove_style_all(m_pic);
@@ -673,9 +673,33 @@ Cover::Cover(lv_obj_t *parent, std::int32_t w, std::int32_t h, Shape shape, std:
             lv_anim_delete(c, on_mix);
             destroy(c->m_cur);
             destroy(c->m_ghost);
-            c->m_root = c->m_well = c->m_pic = nullptr;
+            c->m_root = c->m_well = c->m_pic = c->m_glyph = c->m_mark = nullptr;
         },
         LV_EVENT_DELETE, this);
+}
+
+void Cover::set_mark(const lv_image_dsc_t *picture)
+{
+    if (m_well == nullptr) {
+        return;
+    }
+    if (picture != nullptr && m_mark == nullptr) {
+        m_mark = lv_image_create(m_well);
+        lv_obj_set_style_image_recolor_opa(m_mark, LV_OPA_COVER, 0);
+        const auto paint = [](void *mark) {
+            lv_obj_set_style_image_recolor(static_cast<lv_obj_t *>(mark), colour(Ink::Tertiary), 0);
+        };
+        paint(m_mark);
+        on_restyle(m_mark, paint, m_mark);
+    }
+    if (m_mark != nullptr) {
+        if (picture != nullptr && lv_image_get_src(m_mark) != picture) {
+            lv_image_set_src(m_mark, picture);
+            lv_obj_center(m_mark);
+        }
+        lv_obj_set_hidden(m_mark, picture == nullptr);
+    }
+    lv_obj_set_hidden(m_glyph, picture != nullptr);
 }
 
 std::size_t Cover::bytes() const { return bytes_of(m_cur) + (m_ghost != nullptr ? m_ghost->data_size : 0); }

@@ -33,6 +33,7 @@ using namespace kit;
 constexpr std::uint32_t REFRESH_MS = 30 * units::kMsPerSecond;
 constexpr int           AFTER_ROWS = 4;
 constexpr float         KM_PER_NM  = 1.852f;
+constexpr float         DEG        = 3.14159265f / 180.0f;
 constexpr float         OVERHEAD_KM = 80.0f;  // as far as the radar's page looks at first
 constexpr std::uint32_t LOOKUP_EVERY_MS = 30 * units::kMsPerSecond;
 constexpr std::int32_t  DOT = 10;
@@ -455,16 +456,14 @@ lv_obj_t    *s_type = nullptr, *s_alt = nullptr, *s_alt_unit = nullptr;
 // callsign in their place while the route is not known
 lv_obj_t    *s_from = nullptr, *s_to = nullptr, *s_track = nullptr, *s_track_fill = nullptr, *s_track_plane = nullptr;
 lv_obj_t    *s_call = nullptr;
-// which way it flies: a plane turned to its track, and the word
-lv_obj_t    *s_heading = nullptr, *s_heading_word = nullptr;
+// where it is and which way it flies, as a rose with the house in the middle:
+// the plane on its ring where it is seen from here, turned to its track
+lv_obj_t    *s_rose = nullptr, *s_rose_ring = nullptr, *s_rose_house = nullptr, *s_heading = nullptr;
+lv_obj_t    *s_distance = nullptr;
+lv_obj_t    *s_rose_ticks[4]{};
 std::int32_t s_track_x = 0, s_track_w = 0, s_track_y = 0;
-
-const char *compass(float bearing)
-{
-    static const char *const POINTS[] = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
-    const int at = static_cast<int>((bearing + 22.5f) / 45.0f);
-    return POINTS[((at % 8) + 8) % 8];
-}
+std::int32_t s_rose_d = 0, s_rose_r = 0;
+constexpr std::int32_t ROSE_PLANE = 22;  // the plane on the rose, smaller than the route's so the ring has room
 
 // The closest aircraft in the air.
 const radar::Aircraft *pick_overhead()
@@ -578,15 +577,20 @@ void paint_overhead()
     }
     set_text_if(s_alt, text);
     lv_obj_set_x(s_alt_unit, lv_obj_get_x(s_alt) + widest(Role::ReadS, {text}) + space::xs);
-    // turned in steps of five degrees, so a plane holding its course draws once
+    // turned and placed in steps of five degrees, so a plane holding its course draws once
     const std::int32_t turn = static_cast<std::int32_t>(std::lround(a->track_deg / 5.0f)) * 50 % 3600;
     if (lv_image_get_rotation(s_heading) != turn) {
         lv_image_set_rotation(s_heading, turn);
     }
-    // the plane its course, the words where it is from here
-    std::snprintf(text, sizeof(text), "%d km %s", static_cast<int>(a->distance_nm * KM_PER_NM + 0.5f),
-                  compass(a->bearing_deg));
-    set_text_if(s_heading_word, text);
+    const float        at   = std::lround(a->bearing_deg / 5.0f) * 5.0f * DEG;
+    const std::int32_t half = static_cast<std::int32_t>(icons::plane_icon.header.w) / 2;
+    const std::int32_t px   = s_rose_d / 2 + static_cast<std::int32_t>(std::lround(std::sin(at) * s_rose_r)) - half;
+    const std::int32_t py   = s_rose_d / 2 - static_cast<std::int32_t>(std::lround(std::cos(at) * s_rose_r)) - half;
+    if (lv_obj_get_x(s_heading) != px || lv_obj_get_y(s_heading) != py) {
+        lv_obj_set_pos(s_heading, px, py);
+    }
+    std::snprintf(text, sizeof(text), "%d km", static_cast<int>(a->distance_nm * KM_PER_NM + 0.5f));
+    set_text_if(s_distance, text);
 
     if (std::strcmp(s_photo_of, a->hex) != 0 && s_plane->has_picture()) {
         clear_plane_photo();  // another's photo, until this one's comes
@@ -619,7 +623,13 @@ void paint_sky_inks(void *)
     lv_obj_set_style_bg_opa(s_track, colours().ink3_opa, 0);
     lv_obj_set_style_bg_color(s_track_fill, colour(Ink::Accent), 0);
     lv_obj_set_style_image_recolor(s_track_plane, colour(Ink::Accent), 0);
-    lv_obj_set_style_image_recolor(s_heading, colour(Ink::Primary), 0);
+    lv_obj_set_style_image_recolor(s_heading, colour(Ink::Accent), 0);
+    lv_obj_set_style_border_color(s_rose_ring, colour(Ink::Primary), 0);
+    lv_obj_set_style_border_opa(s_rose_ring, colours().ink3_opa, 0);
+    for (lv_obj_t *tick : s_rose_ticks) {
+        lv_obj_set_style_bg_color(tick, colour(Ink::Primary), 0);
+        lv_obj_set_style_bg_opa(tick, colours().ink3_opa, 0);
+    }
 }
 
 void build_overhead(lv_obj_t *grid)
@@ -631,12 +641,16 @@ void build_overhead(lv_obj_t *grid)
 
     s_sky_some = plain(body);
     lv_obj_set_size(s_sky_some, w, h);
-    // its photo at the left, as tall as the widget, and what it is beside it
-    const std::int32_t photo_w = h * 16 / 9;
+    // its photo at the left, as tall as the widget, what it is beside it, and
+    // the rose at the right with how far under it
+    const std::int32_t photo_w = h * 3 / 2;
     s_plane = new Cover(s_sky_some, photo_w, h, Shape::Rounded, radius::inner, ic::flight);
     lv_obj_set_pos(s_plane->obj(), 0, 0);
-    const std::int32_t x0 = photo_w + space::l, text_w = w - x0;
-    // what it is, then where it flies from and to, then how high and which way
+    s_rose_d                  = h - fonts::small()->line_height - space::xs;
+    s_rose_r                  = s_rose_d / 2 - ROSE_PLANE / 2;
+    const std::int32_t x0     = photo_w + space::l;
+    const std::int32_t text_w = w - x0 - s_rose_d - space::l;
+    // what it is, then where it flies from and to, then how high
     s_type = line(s_sky_some, Role::H3, Ink::Primary, text_w);
     lv_obj_set_pos(s_type, x0, 0);
     const std::int32_t route_y = fonts::h3()->line_height + space::xs;
@@ -673,17 +687,36 @@ void build_overhead(lv_obj_t *grid)
     lv_label_set_text(s_alt_unit, "ft");
     lv_obj_set_pos(s_alt, x0, foot);
     lv_obj_set_pos(s_alt_unit, x0, foot + baseline_y(Role::ReadS, Role::Body));
-    const std::int32_t word_w = widest(Role::Small, {"888 km NW"});
-    s_heading_word = line(s_sky_some, Role::Small, Ink::Secondary, word_w);
-    const std::int32_t word_y = foot + baseline_y(Role::ReadS, Role::Small);
-    lv_obj_set_pos(s_heading_word, x0 + text_w - word_w, word_y);
-    s_heading = lv_image_create(s_sky_some);
+    s_rose = plain(s_sky_some);
+    lv_obj_set_size(s_rose, s_rose_d, s_rose_d);
+    lv_obj_set_pos(s_rose, w - s_rose_d, 0);
+    s_distance = line(s_sky_some, Role::Small, Ink::Secondary, s_rose_d);
+    lv_obj_set_style_text_align(s_distance, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_pos(s_distance, w - s_rose_d, h - fonts::small()->line_height);
+    s_rose_ring = plain(s_rose);
+    lv_obj_set_size(s_rose_ring, 2 * s_rose_r, 2 * s_rose_r);
+    lv_obj_center(s_rose_ring);
+    lv_obj_set_style_radius(s_rose_ring, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_border_width(s_rose_ring, 2, 0);
+    // the four points, inside the ring, north the longest
+    for (int i = 0; i < 4; ++i) {
+        const std::int32_t len = i == 0 ? 8 : 5;
+        lv_obj_t          *tick = plain(s_rose);
+        lv_obj_set_size(tick, i % 2 == 0 ? 2 : len, i % 2 == 0 ? len : 2);
+        lv_obj_set_style_radius(tick, 1, 0);
+        const std::int32_t c = s_rose_d / 2, in = s_rose_r - 2 - len / 2;
+        const std::int32_t cx = c + (i == 1 ? in : i == 3 ? -in : 0), cy = c + (i == 0 ? -in : i == 2 ? in : 0);
+        lv_obj_set_pos(tick, cx - lv_obj_get_style_width(tick, LV_PART_MAIN) / 2, cy - lv_obj_get_style_height(tick, LV_PART_MAIN) / 2);
+        s_rose_ticks[i] = tick;
+    }
+    s_rose_house = icon(s_rose, ic::home, 24, true, Ink::Secondary);
+    lv_obj_center(s_rose_house);
+    s_heading = lv_image_create(s_rose);
     lv_image_set_src(s_heading, &icons::plane_icon);
+    lv_image_set_scale(s_heading, LV_SCALE_NONE * ROSE_PLANE / static_cast<std::int32_t>(icons::plane_icon.header.w));
     lv_obj_set_style_image_recolor_opa(s_heading, LV_OPA_COVER, 0);
     paint_sky_inks(nullptr);
     on_restyle(s_sky_some, paint_sky_inks, nullptr);
-    lv_obj_set_pos(s_heading, x0 + text_w - word_w - space::s - static_cast<std::int32_t>(icons::plane_icon.header.w),
-                   word_y + (fonts::small()->line_height - static_cast<std::int32_t>(icons::plane_icon.header.h)) / 2);
 
     s_sky_none = empty(body, ic::flight, "");
     lv_obj_set_size(s_sky_none, w, h);
