@@ -81,6 +81,10 @@ void paint_media()
         *nl = 0;  // a video's series: its season and episode are for the card
     }
     set_text_if(s_artist, artist);
+    // one line alone, "OFF" or a title with no artist, sits in the middle
+    if (lv_obj_is_hidden(s_artist) != (artist[0] == '\0')) {
+        lv_obj_set_hidden(s_artist, artist[0] == '\0');
+    }
     // With nothing playing, play offers the favourites; a player only followed has none.
     lv_obj_set_hidden(s_play, m.has_track && !m.remote);
     set_icon(lv_obj_get_child(s_play, 0), m.has_track && m.playing ? ic::pause : ic::play_arrow, true);
@@ -103,7 +107,7 @@ void check_skip(lv_timer_t *)
     if (lv_obj_is_hidden(s_skip) == offered) {
         lv_obj_set_hidden(s_skip, !offered);
         lv_obj_set_hidden(s_title, offered);
-        lv_obj_set_hidden(s_artist, offered);
+        lv_obj_set_hidden(s_artist, offered || lv_label_get_text(s_artist)[0] == '\0');
     }
     if (offered) {
         set_text_if(lv_obj_get_child(s_skip, 0), offer.text);
