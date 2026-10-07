@@ -326,7 +326,6 @@ constexpr int          SEEK_S = 10;
 constexpr std::int64_t DARK_AFTER_MS = 15 * 1000;
 
 detail::ViewId s_view = detail::kNoView;
-Backdrop      *s_backdrop = nullptr;
 Cover         *s_still = nullptr;
 std::uint32_t  s_stills = UINT32_MAX;
 lv_obj_t      *s_skip = nullptr;
@@ -400,8 +399,12 @@ void show()
     }
     show_words();
     if (std::exchange(s_stills, media.stills) != media.stills) {
-        show_picture(*s_still, *s_backdrop, media.still, media::kStillW, media::kStillH,
-                     lv_obj_is_visible(s_still->obj()));
+        const bool animate = lv_obj_is_visible(s_still->obj());
+        if (media.still != nullptr) {
+            s_still->show(Picture{media.still, media::kStillW, media::kStillH, 0}, animate);
+        } else {
+            s_still->clear(animate);
+        }
     }
     tick(nullptr);
     set_icon(lv_obj_get_child(s_play, 0), media.playing ? ic::pause : ic::play_arrow, true);
@@ -438,10 +441,20 @@ void still_touched(lv_event_t *e)
     }
 }
 
+// What the kit paints again on each restyle, kept as on black.
+void paint_black(void *)
+{
+    lv_obj_set_style_bg_color(lv_obj_get_child(lv_obj_get_child(s_rail->obj(), 0), 0), lv_color_hex(ON_BLACK), 0);
+    lv_obj_t *slider = s_volume->slider;
+    lv_obj_set_style_bg_color(slider, lv_color_hex(0xffffff), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(slider, 40, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(slider, lv_color_hex(ON_BLACK), LV_PART_INDICATOR);
+}
+
 void build(lv_obj_t *)
 {
-    lv_obj_t *root = fullscreen_root();
-    s_backdrop     = new Backdrop(root, size::screen_w, size::screen_h);
+    // black in either look, as a cinema is, with what is on it in the dark look's inks
+    lv_obj_t *root = fullscreen_root(true);
     s_view         = detail::add_view({"cinema", detail::ViewKind::Fullscreen, root,
                                        [] {
                                            s_stills = UINT32_MAX;
@@ -450,7 +463,6 @@ void build(lv_obj_t *)
                                        [] {
                                            lv_timer_pause(s_tick);
                                            s_still->clear(false);
-                                           s_backdrop->clear();
                                        }});
 
     s_still = new Cover(root, STILL_W, STILL_H, Shape::Rounded, 20, ic::aspect_ratio);
@@ -509,7 +521,7 @@ void build(lv_obj_t *)
     lv_timer_pause(s_tick);
     detail::subscribe(Topic::Media, s_view, show);
 
-    const Chrome over = chrome(s_view, root);
+    const Chrome over = chrome(s_view, root, true);
     s_low = desk_chip(over.left, ic::desk, ic::arrow_downward);
     lv_obj_add_event_cb(s_low, [](lv_event_t *) { detail::desk_go_to(detail::ULTRA_LOW_PRESET); }, LV_EVENT_CLICKED,
                         nullptr);
@@ -535,6 +547,21 @@ void build(lv_obj_t *)
         set_usable(s_low, detail::desk_state().available);
     });
     detail::subscribe(Topic::Lights, s_view, [] { light(s_lights, detail::lights_state().on); });
+
+    for (lv_obj_t *b : {s_skip, s_subtitles, s_back, s_on, s_volume->down, s_volume->up, s_low, s_lights, s_timer}) {
+        on_black(b);
+    }
+    for (lv_obj_t *label : {s_title}) {
+        ink_on_black(label, Ink::Primary);
+    }
+    for (lv_obj_t *label : {s_series, s_episode, s_elapsed, s_ends, s_total}) {
+        ink_on_black(label, Ink::Secondary);
+    }
+    lv_obj_t *track = lv_obj_get_child(s_rail->obj(), 0);
+    lv_obj_set_style_bg_color(track, lv_color_hex(0xffffff), 0);
+    lv_obj_set_style_bg_opa(track, 20, 0);
+    paint_black(nullptr);
+    on_restyle(root, paint_black, nullptr);  // after the rail's and the slider's own
 }
 }  // namespace cinema
 }  // namespace
