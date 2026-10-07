@@ -462,8 +462,8 @@ void Dial::set_lit(int ticks)
 void Dial::make_arc()
 {
     lv_obj_remove_style_all(m_root);
-    lv_obj_remove_flag(m_root, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_remove_flag(m_root, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_scrollable(m_root, false);
+    lv_obj_set_clickable(m_root, false);
     const std::int32_t W = m_spec.arc;
     m_arc = lv_arc_create(m_root);
     lv_obj_remove_style_all(m_arc);
@@ -485,7 +485,7 @@ void Dial::make_arc()
         lv_obj_set_style_pad_all(m_arc, knob, LV_PART_KNOB);
     }
     if (m_spec.drag) {
-        lv_obj_add_flag(m_arc, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_clickable(m_arc, true);
         lv_obj_set_ext_click_area(m_arc, W);
         lv_obj_add_event_cb(
             m_arc,
@@ -504,7 +504,7 @@ void Dial::make_arc()
                 code, this);
         }
     } else {
-        lv_obj_remove_flag(m_arc, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_clickable(m_arc, false);
     }
     if (m_spec.mark) {
         m_dot = lv_obj_create(m_root);
@@ -513,8 +513,8 @@ void Dial::make_arc()
         lv_obj_set_size(m_dot, d, d);
         lv_obj_set_style_radius(m_dot, LV_RADIUS_CIRCLE, 0);
         lv_obj_set_style_bg_opa(m_dot, LV_OPA_COVER, 0);
-        lv_obj_add_flag(m_dot, LV_OBJ_FLAG_IGNORE_LAYOUT);
-        lv_obj_remove_flag(m_dot, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_ignore_layout(m_dot, true);
+        lv_obj_set_clickable(m_dot, false);
         lv_obj_set_hidden(m_dot, true);
     }
 
@@ -523,8 +523,8 @@ void Dial::make_arc()
     lv_obj_set_size(mid, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(mid, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(mid, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_remove_flag(mid, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_remove_flag(mid, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_clickable(mid, false);
+    lv_obj_set_scrollable(mid, false);
     lv_obj_center(mid);
     if (m_spec.over) {
         m_over = text(mid, Role::Small, "", Ink::Secondary);
