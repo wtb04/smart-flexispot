@@ -49,7 +49,6 @@ constexpr std::int64_t PING_EVERY_US = 60 * units::kUsPerSecond;
 constexpr std::int64_t CLOCK_SET_MS = 1'750'000'000'000;
 
 constexpr int COMMAND_DEADLINE_MS = 5 * units::kMsPerSecond;
-constexpr int COMMAND_TIMEOUT_MS  = 2 * units::kMsPerSecond;
 constexpr int COVER_TIMEOUT_MS    = 5 * units::kMsPerSecond;
 
 // AES-256-GCM over the shared key; the server's task and net's workers seal

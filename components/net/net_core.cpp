@@ -47,10 +47,9 @@ Core::Job *Core::find(Ticket ticket)
 void Core::tell(Job &job, Outcome outcome, Tells &tells, int error)
 {
     Tell told;
-    told.done              = std::move(job.done);
-    told.response.outcome  = outcome;
-    told.response.error    = error;
-    told.response.attempts = job.attempt;
+    told.done             = std::move(job.done);
+    told.response.outcome = outcome;
+    told.response.error   = error;
     tells.push_back(std::move(told));
 }
 
