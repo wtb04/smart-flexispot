@@ -458,11 +458,12 @@ void light(Page &p, bool on)
     if (p.item == nullptr || p.lit == on) {
         return;
     }
-    p.lit       = on;
-    lv_obj_t *g = lv_obj_get_child(p.item, 0);
+    // the outlined glyph and the filled one both there, one shown: a font
+    // changed under the moving mark laid the dock out again, a slow frame
+    p.lit = on;
     lv_obj_set_style_text_color(p.item, on ? colour(Ink::OnAccent) : colour(Ink::Primary), 0);
-    lv_obj_set_style_text_opa(p.item, on ? static_cast<lv_opa_t>(LV_OPA_COVER) : colours().ink2_opa, 0);
-    lv_obj_set_style_text_font(g, fonts::icon(34, on), 0);
+    lv_obj_set_style_text_opa(lv_obj_get_child(p.item, 0), on ? LV_OPA_TRANSP : colours().ink2_opa, 0);
+    lv_obj_set_style_text_opa(lv_obj_get_child(p.item, 1), on ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
 }
 
 struct Slot {
@@ -689,8 +690,15 @@ lv_obj_t *dock_item(lv_obj_t *dock, const char *glyph)
     lv_obj_set_style_transform_scale_x(item, LV_SCALE_NONE, LV_STATE_PRESSED);
     lv_obj_set_style_transform_scale_y(item, LV_SCALE_NONE, LV_STATE_PRESSED);
     lv_obj_set_style_radius(item, 24, 0);
-    lv_obj_set_style_text_opa(item, colours().ink2_opa, 0);
-    lv_obj_set_style_text_font(lv_obj_get_child(item, 0), fonts::icon(34, false), 0);
+    lv_obj_t *outlined = lv_obj_get_child(item, 0);
+    lv_obj_set_style_text_font(outlined, fonts::icon(34, false), 0);
+    lv_obj_set_style_text_opa(outlined, colours().ink2_opa, 0);
+    lv_obj_t *filled = icon(item, glyph, 34, true);
+    lv_obj_set_style_text_opa(filled, LV_OPA_TRANSP, 0);
+    for (lv_obj_t *g : {outlined, filled}) {
+        lv_obj_set_ignore_layout(g, true);
+        lv_obj_center(g);
+    }
     return item;
 }
 
