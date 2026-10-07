@@ -6,6 +6,7 @@
 
 #include "focus_model.h"
 #include "home_model.h"
+#include "icons.h"
 #include "ical.h"
 #include "kit_fonts.h"
 #include "radar.h"
@@ -449,18 +450,22 @@ char         s_photo_of[radar::kHexLen] = "";  // whose photo the widget shows
 std::uint32_t s_photo_stamp = 0;
 Cover       *s_plane = nullptr;
 lv_obj_t    *s_sky_tile = nullptr, *s_sky_some = nullptr, *s_sky_none = nullptr, *s_sky_why = nullptr;
-lv_obj_t    *s_call = nullptr, *s_type = nullptr, *s_alt = nullptr, *s_alt_unit = nullptr;
+lv_obj_t    *s_type = nullptr, *s_alt = nullptr, *s_alt_unit = nullptr;
+// where it flies from and to, a line between with the plane along it; its
+// callsign in their place while the route is not known
+lv_obj_t    *s_from = nullptr, *s_to = nullptr, *s_track = nullptr, *s_track_fill = nullptr, *s_track_plane = nullptr;
+lv_obj_t    *s_call = nullptr;
+// which way it flies: a plane turned to its track, and the word
+lv_obj_t    *s_heading = nullptr, *s_heading_word = nullptr;
+std::int32_t s_track_x = 0, s_track_w = 0, s_track_y = 0;
 
 const char *compass(float bearing)
 {
-    static const char *const POINTS[] = {"north", "north-east", "east", "south-east",
-                                         "south", "south-west", "west", "north-west"};
+    static const char *const POINTS[] = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
     const int at = static_cast<int>((bearing + 22.5f) / 45.0f);
     return POINTS[((at % 8) + 8) % 8];
 }
 
-// The most notable in range, a heavy cruising over a 737 climbing out, the
-// nearer of two alike; the one shown stays while it is as notable as any.
 // The closest aircraft in the air.
 const radar::Aircraft *pick_overhead()
 {
@@ -493,6 +498,47 @@ void show_plane_photo()
     }
 }
 
+// From and to, as the radar's column has them, once the lookup for it is in.
+void paint_route(const radar::Aircraft &a)
+{
+    const detail::RadarLookup &lookup = detail::radar_lookup();
+    const radar::Details      &d      = lookup.details;
+    const bool known = std::strcmp(lookup.details_hex, a.hex) == 0 && d.has_route && d.origin_code[0] != '\0' &&
+                       d.dest_code[0] != '\0';
+    for (lv_obj_t *part : {s_from, s_to, s_track}) {
+        if (lv_obj_is_hidden(part) == known) {
+            lv_obj_set_hidden(part, !known);
+        }
+    }
+    if (lv_obj_is_hidden(s_call) != known) {
+        lv_obj_set_hidden(s_call, known);
+    }
+    if (!known) {
+        char call[48];
+        if (std::strcmp(lookup.details_hex, a.hex) == 0 && d.airline[0] != '\0') {
+            std::snprintf(call, sizeof(call), "%s, %s", a.flight[0] != '\0' ? a.flight : a.hex, d.airline);
+        } else {
+            std::snprintf(call, sizeof(call), "%s", a.flight[0] != '\0' ? a.flight : a.hex);
+        }
+        set_text_if(s_call, call);
+        lv_obj_set_hidden(s_track_plane, true);
+        return;
+    }
+    set_text_if(s_from, d.origin_code);
+    set_text_if(s_to, d.dest_code);
+    float share = 0.0f, left_km = 0.0f;
+    const bool along = radar::route_progress(d, a.lat, a.lon, share, left_km);
+    const std::int32_t at = along ? static_cast<std::int32_t>(std::lround(share * s_track_w)) : 0;
+    if (lv_obj_get_width(s_track_fill) != at) {
+        lv_obj_set_width(s_track_fill, at);
+    }
+    lv_obj_set_hidden(s_track_plane, !along);
+    if (along) {
+        lv_obj_set_pos(s_track_plane, s_track_x + at - icons::plane_icon.header.w / 2,
+                       s_track_y - static_cast<std::int32_t>(icons::plane_icon.header.h) / 2);
+    }
+}
+
 void paint_overhead()
 {
     lv_obj_set_hidden(s_sky_tile, owner_away());
@@ -508,13 +554,10 @@ void paint_overhead()
         set_text_if(s_sky_why, why);
         return;
     }
-    set_text_if(s_call, a->flight[0] != '\0' ? a->flight : a->hex);
     char text[96];
-    char what[48];
-    sentence_case(a->desc[0] != '\0' ? a->desc : a->type, what, sizeof(what));
-    std::snprintf(text, sizeof(text), "%s, %d km %s", what, static_cast<int>(a->distance_nm * KM_PER_NM + 0.5f),
-                  compass(a->bearing_deg));
+    sentence_case(a->desc[0] != '\0' ? a->desc : a->type[0] != '\0' ? a->type : "Aircraft", text, sizeof(text));
     set_text_if(s_type, text);
+    paint_route(*a);
     const int ft = a->altitude_ft;
     if (ft >= 1000) {
         std::snprintf(text, sizeof(text), "%d,%03d", ft / 1000, ft % 1000);
@@ -523,6 +566,14 @@ void paint_overhead()
     }
     set_text_if(s_alt, text);
     lv_obj_set_x(s_alt_unit, lv_obj_get_x(s_alt) + widest(Role::ReadM, {text}) + space::xs);
+    // turned in steps of five degrees, so a plane holding its course draws once
+    const std::int32_t turn = static_cast<std::int32_t>(std::lround(a->track_deg / 5.0f)) * 50 % 3600;
+    if (lv_image_get_rotation(s_heading) != turn) {
+        lv_image_set_rotation(s_heading, turn);
+    }
+    std::snprintf(text, sizeof(text), "%s, %d km", compass(a->track_deg),
+                  static_cast<int>(a->distance_nm * KM_PER_NM + 0.5f));
+    set_text_if(s_heading_word, text);
 
     if (std::strcmp(s_photo_of, a->hex) != 0 && s_plane->has_picture()) {
         s_plane->clear(false);  // another's photo, until this one's comes
@@ -545,6 +596,15 @@ void paint_overhead()
     show_plane_photo();
 }
 
+void paint_sky_inks(void *)
+{
+    lv_obj_set_style_bg_color(s_track, colour(Ink::Primary), 0);
+    lv_obj_set_style_bg_opa(s_track, colours().ink3_opa, 0);
+    lv_obj_set_style_bg_color(s_track_fill, colour(Ink::Accent), 0);
+    lv_obj_set_style_image_recolor(s_track_plane, colour(Ink::Accent), 0);
+    lv_obj_set_style_image_recolor(s_heading, colour(Ink::Primary), 0);
+}
+
 void build_overhead(lv_obj_t *grid)
 {
     lv_obj_t *body = widget(grid, Span::Wide, "Overhead");
@@ -559,10 +619,35 @@ void build_overhead(lv_obj_t *grid)
     s_plane = new Cover(s_sky_some, photo_w, h, Shape::Rounded, radius::inner, ic::flight);
     lv_obj_set_pos(s_plane->obj(), 0, 0);
     const std::int32_t x0 = photo_w + space::l, text_w = w - x0;
-    s_call = line(s_sky_some, Role::H2, Ink::Primary, text_w);
-    s_type = line(s_sky_some, Role::Small, Ink::Secondary, text_w);
-    lv_obj_set_pos(s_call, x0, 0);
-    lv_obj_set_pos(s_type, x0, fonts::h2()->line_height);
+    // what it is, then where it flies from and to, then how high and which way
+    s_type = line(s_sky_some, Role::H3, Ink::Primary, text_w);
+    lv_obj_set_pos(s_type, x0, 0);
+    const std::int32_t route_y = fonts::h3()->line_height + space::xs;
+    const std::int32_t code_w  = widest(Role::Body, {"WWW"});
+    s_from = line(s_sky_some, Role::Body, Ink::Primary, code_w);
+    s_to   = line(s_sky_some, Role::Body, Ink::Primary, code_w);
+    lv_obj_set_style_text_align(s_to, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_pos(s_from, x0, route_y);
+    lv_obj_set_pos(s_to, x0 + text_w - code_w, route_y);
+    s_track_x = x0 + code_w + space::m;
+    s_track_w = text_w - 2 * (code_w + space::m);
+    s_track_y = route_y + fonts::body()->line_height / 2;
+    s_track   = plain(s_sky_some);
+    lv_obj_set_pos(s_track, s_track_x, s_track_y - 1);
+    lv_obj_set_size(s_track, s_track_w, 2);
+    lv_obj_set_style_radius(s_track, 1, 0);
+    s_track_fill = plain(s_track);
+    lv_obj_set_size(s_track_fill, 0, 2);
+    lv_obj_set_style_radius(s_track_fill, 1, 0);
+    lv_obj_set_style_bg_opa(s_track_fill, LV_OPA_COVER, 0);
+    s_track_plane = lv_image_create(s_sky_some);
+    lv_image_set_src(s_track_plane, &icons::plane_icon);
+    lv_image_set_rotation(s_track_plane, 900);  // along the line, to the right
+    lv_obj_set_style_image_recolor_opa(s_track_plane, LV_OPA_COVER, 0);
+    lv_obj_set_hidden(s_track_plane, true);
+    s_call = line(s_sky_some, Role::Small, Ink::Secondary, text_w);
+    lv_obj_set_pos(s_call, x0, route_y + (fonts::body()->line_height - fonts::small()->line_height) / 2);
+
     // at the foot, as the desk's and the focus timer's figures are
     const std::int32_t foot   = h - fonts::read_m()->line_height;
     const std::int32_t unit_w = widest(Role::Body, {"ft"});
@@ -571,6 +656,17 @@ void build_overhead(lv_obj_t *grid)
     lv_label_set_text(s_alt_unit, "ft");
     lv_obj_set_pos(s_alt, x0, foot);
     lv_obj_set_pos(s_alt_unit, x0, foot + baseline_y(Role::ReadM, Role::Body));
+    const std::int32_t word_w = widest(Role::Small, {"NW, 888 km"});
+    s_heading_word = line(s_sky_some, Role::Small, Ink::Secondary, word_w);
+    const std::int32_t word_y = foot + baseline_y(Role::ReadM, Role::Small);
+    lv_obj_set_pos(s_heading_word, x0 + text_w - word_w, word_y);
+    s_heading = lv_image_create(s_sky_some);
+    lv_image_set_src(s_heading, &icons::plane_icon);
+    lv_obj_set_style_image_recolor_opa(s_heading, LV_OPA_COVER, 0);
+    paint_sky_inks(nullptr);
+    on_restyle(s_sky_some, paint_sky_inks, nullptr);
+    lv_obj_set_pos(s_heading, x0 + text_w - word_w - space::s - static_cast<std::int32_t>(icons::plane_icon.header.w),
+                   word_y + (fonts::small()->line_height - static_cast<std::int32_t>(icons::plane_icon.header.h)) / 2);
 
     s_sky_none = empty(body, ic::flight, "");
     lv_obj_set_size(s_sky_none, w, h);
@@ -758,11 +854,7 @@ void build_home(lv_obj_t *page)
         }
         paint_all();
     });
-    subscribe(Topic::Lookup, detail::kNoView, [] {
-        if (on_home() && !owner_away()) {
-            show_plane_photo();
-        }
-    });
+    subscribe(Topic::Lookup, detail::kNoView, paint_overhead);  // its route and its photo, as they come
     lv_timer_create([](lv_timer_t *) { paint_next(); }, REFRESH_MS, nullptr);
 }
 

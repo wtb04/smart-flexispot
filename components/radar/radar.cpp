@@ -910,10 +910,13 @@ int               s_next_feed = 0;
 
 void feed_failed()
 {
+    int kept = 0;
     {
         Lock hold;
         s_ok = false;
+        kept = s_count;
     }
+    ESP_LOGW(TAG, "both feeds failed; the last %d aircraft kept", kept);
     s_feed_out.store(false);
     publish();
 }
@@ -933,6 +936,21 @@ void take_feed(const net::Response &answer, int feed, int tried, float lat, floa
         return;
     }
     int count = parse(answer.body, answer.length, s_scratch, kMaxAircraft);
+    // An empty sky is a reading gone wrong, a refusal sent as a success: it
+    // emptied the radar, as the few seconds a missing aircraft is kept ran out
+    // across a few of them. The other is asked, and what was seen stays.
+    if (count == 0) {
+        ESP_LOGW(TAG, "%s: no aircraft in %u bytes: %.*s", s_feeds[feed].name, static_cast<unsigned>(answer.length),
+                 answer.body != nullptr ? static_cast<int>(std::min<std::size_t>(answer.length, 80)) : 0,
+                 answer.body != nullptr ? answer.body : "");
+        const int other = (feed + 1) % FEED_COUNT;
+        if ((tried & (1 << other)) == 0) {
+            ask_feed(other, tried, lat, lon);
+        } else {
+            feed_failed();
+        }
+        return;
+    }
     {
         Lock hold;
         count = merge_reading(s_scratch, count, kMaxAircraft, s_list, s_count, esp_timer_get_time(), KEEP_UNSEEN_US);

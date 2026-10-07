@@ -882,6 +882,11 @@ void show_page(int index, bool animate)
     }
     s_run.bake_us = perf::now_us() - t;
     mark(index, animate);
+    // The dock drawn again with the page: the buffer the page goes into could
+    // still hold the mark where it set off from, and it showed there for a frame.
+    if (s_mark != nullptr) {
+        lv_obj_invalidate(lv_obj_get_parent(s_mark));
+    }
     edge_follows(to.obj);
 
     if (whole(how)) {
