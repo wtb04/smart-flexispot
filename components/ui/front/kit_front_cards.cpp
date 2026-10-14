@@ -228,6 +228,7 @@ void paint_media_card()
     set_icon(lv_obj_get_child(c->prev, 0), m.video ? ic::replay_10 : ic::skip_previous, true);
     set_icon(lv_obj_get_child(c->next, 0), m.video ? ic::forward_10 : ic::skip_next, true);
     set_icon(lv_obj_get_child(c->play, 0), m.has_track && m.playing ? ic::pause : ic::play_arrow, true);
+    c->cover->set_paused(m.has_track && !m.playing);
     for (lv_obj_t *b : {c->prev, c->play, c->next}) {
         set_usable(b, m.has_track);
     }

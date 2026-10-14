@@ -673,9 +673,44 @@ Cover::Cover(lv_obj_t *parent, std::int32_t w, std::int32_t h, Shape shape, std:
             lv_anim_delete(c, on_mix);
             destroy(c->m_cur);
             destroy(c->m_ghost);
-            c->m_root = c->m_well = c->m_pic = c->m_glyph = c->m_mark = nullptr;
+            c->m_root = c->m_well = c->m_pic = c->m_glyph = c->m_mark = c->m_hush = nullptr;
         },
         LV_EVENT_DELETE, this);
+}
+
+void Cover::set_paused(bool paused)
+{
+    if (m_root == nullptr) {
+        return;
+    }
+    const bool show = paused && m_has;
+    if (show && m_hush == nullptr) {
+        // over the picture, its own shape: a dim, and in its middle a round mark with play in it
+        m_hush = lv_obj_create(m_root);
+        lv_obj_remove_style_all(m_hush);
+        lv_obj_set_size(m_hush, m_w, m_h);
+        lv_obj_set_style_radius(m_hush, m_r, 0);
+        lv_obj_set_style_bg_color(m_hush, lv_color_black(), 0);
+        lv_obj_set_style_bg_opa(m_hush, LV_OPA_40, 0);
+        lv_obj_remove_flag(m_hush, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_remove_flag(m_hush, LV_OBJ_FLAG_SCROLLABLE);
+        const std::int32_t side = std::min(m_w, m_h);
+        const std::int32_t d    = std::clamp<std::int32_t>(side / 4, 48, 104);
+        lv_obj_t *disc = lv_obj_create(m_hush);
+        lv_obj_remove_style_all(disc);
+        lv_obj_set_size(disc, d, d);
+        lv_obj_set_style_radius(disc, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_bg_color(disc, lv_color_black(), 0);
+        lv_obj_set_style_bg_opa(disc, LV_OPA_50, 0);
+        lv_obj_remove_flag(disc, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_center(disc);
+        lv_obj_t *play = icon(disc, glyph::play_arrow, d >= 80 ? 34 : 28, true);
+        lv_obj_set_style_text_color(play, lv_color_white(), 0);
+        lv_obj_center(play);
+    }
+    if (m_hush != nullptr && lv_obj_is_hidden(m_hush) == show) {
+        lv_obj_set_hidden(m_hush, !show);
+    }
 }
 
 void Cover::set_mark(const lv_image_dsc_t *picture)
