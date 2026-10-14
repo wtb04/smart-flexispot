@@ -14,6 +14,7 @@ from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
 from gi.repository import Gtk4LayerShell as Layer  # noqa: E402
 
 CSS = """
+window.desklink-dropdown { background: transparent; box-shadow: none; }
 .desklink-card { background: alpha(#131419, 0.97); border: 2px solid #e0821f; border-radius: 18px; padding: 14px; }
 .desklink-now { background: alpha(#ffffff, 0.04); border-radius: 12px; padding: 10px; }
 .desklink-cover { border-radius: 8px; }
@@ -70,7 +71,7 @@ class Dropdown:
         self._app = app
         self._link = app.link
         _style()
-        self.window = Gtk.Window(application=app)
+        self.window = Gtk.Window(application=app, css_classes=["desklink-dropdown"])
         Layer.init_for_window(self.window)
         Layer.set_namespace(self.window, "desklink")
         Layer.set_layer(self.window, Layer.Layer.TOP)
