@@ -68,6 +68,15 @@ for g in sch.globalLabels:
                                      (x-w, x, y-h/2, y+h/2) if a == 180 else
                                      (x-h/2, x+h/2, y-w, y) if a == 90 else
                                      (x-h/2, x+h/2, y, y+w))))
+# A net label's text stands on its anchor, running away from the wire it ends;
+# the 0.3 mm gap keeps the wire it labels from counting as an overlap.
+for g in sch.labels:
+    w, h = len(g.text)*1.27*ADV, 1.4
+    x, y, a = g.position.X, g.position.Y, g.position.angle or 0
+    texts.append(("label", g.text, *((x+0.3, x+0.3+w, y-h-0.2, y-0.2) if a == 0 else
+                                     (x-0.3-w, x-0.3, y-h-0.2, y-0.2) if a == 180 else
+                                     (x-h-0.2, x-0.2, y-0.3-w, y-0.3) if a == 90 else
+                                     (x-h-0.2, x-0.2, y+0.3, y+0.3+w))))
 for inst in sch.schematicSymbols:
     for pr in inst.properties:
         if pr.key not in ("Reference", "Value") or not pr.value: continue
@@ -75,9 +84,12 @@ for inst in sch.schematicSymbols:
         if pr.value.startswith("#"): continue
         sz = pr.effects.font.height
         w, h = len(pr.value)*sz*ADV, sz*LINE
-        if (pr.position.angle or 0) in (90, 270): w, h = h, w
-        texts.append(("field", pr.value, pr.position.X-w/2, pr.position.X+w/2,
-                      pr.position.Y-h/2, pr.position.Y+h/2))
+        # a field turns with its symbol, so what reads on the sheet is the sum
+        if ((pr.position.angle or 0) + (inst.position.angle or 0)) % 180 == 90: w, h = h, w
+        j = pr.effects.justify.horizontally if pr.effects.justify else None
+        x = pr.position.X
+        x0, x1 = (x, x+w) if j == "left" else (x-w, x) if j == "right" else (x-w/2, x+w/2)
+        texts.append(("field", pr.value, x0, x1, pr.position.Y-h/2, pr.position.Y+h/2))
 
 def ov(a0, a1, b0, b1): return not (a1 <= b0 or b1 <= a0)
 hits = []

@@ -23,7 +23,7 @@ LIB = os.environ.get("KICAD9_FOOTPRINT_DIR", "/Applications/KiCad/KiCad.app/Cont
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "tab5-desk-ctrl.kicad_pcb")
 
-W, H = 70.0, 35.2
+W, H = 80.0, 35.2
 PINS_PER_ROW = 15          # measured: 30-pin board, 2x15
 PITCH = 2.54
 ROW_SPACING = 25.4        # 1.0 in -- confirmed: on a breadboard the module
@@ -33,17 +33,18 @@ ROW_SPACING = 25.4        # 1.0 in -- confirmed: on a breadboard the module
 # inboard, so that pin 15 -- the USB end -- reaches the RIGHT board edge and stays
 # accessible. Headers are at rot 90, so pin n sits at PIN1_X + (n-1)*PITCH.
 # The RF cost of this is real and accepted.
-# rev2 moved the module 10 mm further from the jack: on rev1 the DevKit's end
+# rev2 moved the module 20 mm further from the jack: on rev1 the DevKit's end
 # sat right over the jack and left no room to get an iron in. The space it
-# frees takes the 5 V input, F1, D1 and the bulk capacitor C3.
-PIN1_X = 31.5
+# frees takes the 5 V input, F1, D1 and the bulk capacitor C3, with room to
+# spare for however far the DevKit reaches past its first pin.
+PIN1_X = 41.5
 # Row inset is set by MOUNTING, not by the silk. The RJ45's courtyard reaches
 # +/- 10.70 about the module axis and an M3 needs 3.45 of courtyard plus a
 # margin, so the pocket above the jack only becomes usable once the axis sits at
 # y >= 18.4 -- which is what puts the rows here and makes H 35.2.
 ROW_A_Y = 4.9
 ROW_B_Y = ROW_A_Y + ROW_SPACING          # 30.3, module centred on y = 17.6
-PINEND_X = PIN1_X + (PINS_PER_ROW - 1) * PITCH  # 67.06, USB end at the right edge
+PINEND_X = PIN1_X + (PINS_PER_ROW - 1) * PITCH  # 77.06, USB end at the right edge
 HDR = f"PinSocket_1x{PINS_PER_ROW}_P{PITCH}mm_Vertical"   # female: the devboard slots in
 
 # RJ45_1 faces out of the LEFT board edge, on the module's centreline.
@@ -61,7 +62,7 @@ RJ_X, RJ_Y = 7.92, 21.17
 
 # The antenna now sits over the board, so this keepout is load-bearing rather
 # than belt-and-braces: it holds copper out from under the antenna end.
-KEEPOUT = (29.5, 7.1, 43.0, 28.4)
+KEEPOUT = (39.5, 7.1, 53.0, 28.4)
 
 NETS = ["", "GND", "+5V", "DESK_5V", "D5V_F", "DESK_TX", "LED_BT", "LED_BT_A",
         "LED_DESK", "LED_DESK_A",
@@ -121,16 +122,16 @@ PARTS = [
     # 22uF, not the 100uF inherited from revA: at 5V across it a 10V-rated
     # X5R derates to a fraction of nominal anyway, the devkit carries its own
     # input bulk, and 100uF/1206 is a pricey non-stocked part for no benefit.
-    ("C1", "Capacitor_SMD", "C_1206_3216Metric", 62.0, 19.2, 0, "22uF 25V", {"1": "+5V", "2": "GND"}),
-    ("C2", "Capacitor_SMD", "C_0805_2012Metric", 58.0, 20.9, 0, "100nF 50V", {"1": "+5V", "2": "GND"}),
+    ("C1", "Capacitor_SMD", "C_1206_3216Metric", 72.0, 19.2, 0, "22uF 25V", {"1": "+5V", "2": "GND"}),
+    ("C2", "Capacitor_SMD", "C_0805_2012Metric", 68.0, 20.9, 0, "100nF 50V", {"1": "+5V", "2": "GND"}),
     # signal passives under the module, ordered to match their row B pins
-    ("R4", "Resistor_SMD", "R_0805_2012Metric", 46.0, 10.9, 0, "220R",
+    ("R4", "Resistor_SMD", "R_0805_2012Metric", 56.0, 10.9, 0, "220R",
      {"1": "ESP_P20", "2": "PIN20"}),
-    ("R3", "Resistor_SMD", "R_0805_2012Metric", 57.0, 10.9, 0, "220R",
+    ("R3", "Resistor_SMD", "R_0805_2012Metric", 67.0, 10.9, 0, "220R",
      {"1": "ESP_TX", "2": "DESK_RX"}),
-    ("R1", "Resistor_SMD", "R_0805_2012Metric", 52.0, 10.9, 0, "10k",
+    ("R1", "Resistor_SMD", "R_0805_2012Metric", 62.0, 10.9, 0, "10k",
      {"1": "DESK_TX", "2": "RX_DIV"}),
-    ("R2", "Resistor_SMD", "R_0805_2012Metric", 52.0, 14.9, 0, "15k",
+    ("R2", "Resistor_SMD", "R_0805_2012Metric", 62.0, 14.9, 0, "15k",
      {"1": "RX_DIV", "2": "GND"}),
     # LED series limits. The LEDs live inside the jack; these sit near the module
     # so the GPIO runs stay short.
@@ -138,11 +139,11 @@ PARTS = [
      {"1": "LED_BT", "2": "LED_BT_A"}),
     ("R6", "Resistor_SMD", "R_0805_2012Metric", 18.2, 22.9, 90, "220R",
      {"1": "LED_DESK", "2": "LED_DESK_A"}),
-    ("D2", "Package_TO_SOT_SMD", "SOT-23", 58.0, 14.9, 0, "BAT54S",
+    ("D2", "Package_TO_SOT_SMD", "SOT-23", 68.0, 14.9, 0, "BAT54S",
      {"1": "GND", "2": "+3V3", "3": "RX_DIV"}),
     ("U1A", "Connector_PinSocket_2.54mm", HDR, PIN1_X, ROW_A_Y, 90, "Socket 1x15 2.54mm", U1A_NETS),
     ("U1B", "Connector_PinSocket_2.54mm", HDR, PIN1_X, ROW_B_Y, 90, "Socket 1x15 2.54mm", U1B_NETS),
-    # Four M3, spanning 61.8 x 28.8 -- this board screws to the underside of a desk
+    # Four M3, spanning 71.8 x 28.8 -- this board screws to the underside of a desk
 # and carries its own load, so the mounting pattern drives the outline rather
 # than the other way round. H1/H2 are true corners, in the pockets the jack
 # leaves once the test pads move off the left flank. H3/H4 are as far apart as
@@ -151,8 +152,8 @@ PARTS = [
 # and standoff under the antenna would detune it far worse than copper.
     ("H1", "MountingHole", "MountingHole_3.2mm_M3",  4.2,  3.2, 0, "M3", {}),
     ("H2", "MountingHole", "MountingHole_3.2mm_M3",  4.2, 32.0, 0, "M3", {}),
-    ("H3", "MountingHole", "MountingHole_3.2mm_M3", 66.0, 10.7, 0, "M3", {}),
-    ("H4", "MountingHole", "MountingHole_3.2mm_M3", 66.0, 24.7, 0, "M3", {}),
+    ("H3", "MountingHole", "MountingHole_3.2mm_M3", 76.0, 10.7, 0, "M3", {}),
+    ("H4", "MountingHole", "MountingHole_3.2mm_M3", 76.0, 24.7, 0, "M3", {}),
 ]
 
 # all six probe points in one row along the bottom edge, in signal order
@@ -337,22 +338,26 @@ JACK_TOP, JACK_BOT = RJ_Y - 11.88, RJ_Y + 4.99
 SILK = [("BT",   18.2, JACK_TOP + 0.4, "F.SilkS", 0.8, 0),   # 0.4 = half text height
         ("LINK", 18.2, JACK_BOT - 0.4, "F.SilkS", 0.8, 0),
         ("DESK", 17.2, 17.6, "F.SilkS", 0.8, 90),
-        ("ANTENNA", 36.25, 16.5, "F.SilkS", 1.1, 0),
-        ("KEEP CLEAR", 36.25, 19.3, "F.SilkS", 0.8, 0),
+        ("ANTENNA", 46.25, 16.5, "F.SilkS", 1.1, 0),
+        ("KEEP CLEAR", 46.25, 19.3, "F.SilkS", 0.8, 0),
         # identity block on the back, where the module does not cover it
-        ("FlexiSpot / LoctekMotion", 46.0, 10.0, "B.SilkS", 1.0, 0),
-        ("BLE desk companion", 46.0, 14.5, "B.SilkS", 1.4, 0),
-        ("woutertenbrinke.nl", 46.0, 19.0, "B.SilkS", 1.0, 0),
-        ("ESP32 DevKit V1 30-pin", 46.0, 23.5, "B.SilkS", 0.9, 0),
+        ("FlexiSpot / LoctekMotion", 56.0, 10.0, "B.SilkS", 1.0, 0),
+        ("BLE desk companion", 56.0, 14.5, "B.SilkS", 1.4, 0),
+        ("woutertenbrinke.nl", 56.0, 19.0, "B.SilkS", 1.0, 0),
+        ("ESP32 DevKit V1 30-pin", 56.0, 23.5, "B.SilkS", 0.9, 0),
         # B.SilkS mirrors, so the item at the HIGHER x appears on the left when
         # you look at the back -- swap them to read "name ... rev" the normal way.
-        ("Wouter ten Brinke", 55.0, 27.0, "B.SilkS", 1.0, 0),
-        ("rev2", 38.5, 27.0, "B.SilkS", 1.0, 0),
+        ("Wouter ten Brinke", 65.0, 27.0, "B.SilkS", 1.0, 0),
+        ("rev2", 48.5, 27.0, "B.SilkS", 1.0, 0),
         # what each jack pin is, read where you hold the probe: from the back,
         # with the jack on the right
         ("8 5V   7 GND", 22.5, 27.6, "B.SilkS", 0.8, 0),
         ("6 box RX   5 box TX", 22.5, 29.4, "B.SilkS", 0.8, 0),
-        ("4 wake", 22.5, 31.2, "B.SilkS", 0.8, 0)]
+        ("4 wake", 22.5, 31.2, "B.SilkS", 0.8, 0),
+        # beside the jack's LED pads and C3's + pad, read from the back too
+        ("BT", 16.7, 11.9, "B.SilkS", 0.8, 0),
+        ("LINK", 17.4, 23.3, "B.SilkS", 0.8, 0),
+        ("+", 25.25, 15.6, "B.SilkS", 1.0, 0)]
 
 # The jack's pin numbers beside its pads on the back, odd pins to one side of
 # their row and even pins to the other, so each number sits clear of the pads.
@@ -362,10 +367,12 @@ for n in range(1, 9):
     SILK.append((str(n), x - 1.45 if n % 2 else x + 1.45, y, "B.SilkS", 0.8, 0))
 
 
-for n, nm in enumerate(ROW_A_NAMES):
-    SILK.append((nm, PIN1_X + n * PITCH, 2.75, "F.SilkS", 0.8, 0))
-for n, nm in enumerate(ROW_B_NAMES):
-    SILK.append((nm, PIN1_X + n * PITCH, 32.45, "F.SilkS", 0.8, 0))
+# On both sides: on the back they are what you read with a probe on the joints.
+for side in ("F.SilkS", "B.SilkS"):
+    for n, nm in enumerate(ROW_A_NAMES):
+        SILK.append((nm, PIN1_X + n * PITCH, 2.75, side, 0.8, 0))
+    for n, nm in enumerate(ROW_B_NAMES):
+        SILK.append((nm, PIN1_X + n * PITCH, 32.45, side, 0.8, 0))
 
 for txt, x, y, layer, size, ang in SILK:
     t = GrText(text=txt, position=Position(x, y, ang), layer=layer)

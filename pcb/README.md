@@ -8,7 +8,7 @@ A carrier for an ESP32 DevKit V1 (30-pin) that plugs into a LoctekMotion / Flexi
 | ![3d](img/board-3d.png) | ![schematic](img/schematic.png) |
 | ![the jack](img/board-front.png) | ![from behind](img/board-back.png) |
 
-Rev2, 70 × 35.2 mm, two layers, 4 × M3. The schematic is also a [PDF](fab/tab5-desk-ctrl-schematic.pdf).
+Rev2, 80 × 35.2 mm, two layers, 4 × M3. The schematic is also a [PDF](fab/tab5-desk-ctrl-schematic.pdf).
 
 ## Wiring
 
@@ -22,7 +22,7 @@ Rev2, 70 × 35.2 mm, two layers, 4 × M3. The schematic is also a [PDF](fab/tab5
 | 12 / 11 | LED | 220 Ω | GPIO32, `BT` |
 | 10 / 9 | LED | 220 Ω | GPIO33, `LINK` |
 
-This is how my control box uses pins 4 to 8: it sends on pin 5 and listens on pin 6, as the published LoctekMotion tables have it. Measure yours before plugging it in. The pin numbers are printed beside the jack's pads on the back of the board.
+This is how my control box uses pins 4 to 8: it sends on pin 5 and listens on pin 6, as the published LoctekMotion tables have it. Measure yours before plugging it in. The back of the board names what you probe there: the jack's pin numbers beside its pads with what each carries, `BT` and `LINK` by the LED pads, C3's + side, and the DevKit's pin names along both sockets, as on the top.
 
 The companion firmware's defaults are this board's: TX on GPIO17, RX on GPIO16, wake on GPIO23.
 

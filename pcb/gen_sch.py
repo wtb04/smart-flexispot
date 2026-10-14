@@ -30,57 +30,101 @@ PRJSYM = os.path.join(HERE, "symbols")
 OUT = os.path.join(HERE, "tab5-desk-ctrl.kicad_sch")
 
 # A4 landscape, 297 x 210. The title block takes roughly x>177, y>164, so every
-# block stays clear of that corner. Three columns, butted up on a common grid:
-#   left    15.24 ..  88.90   desk side
-#   middle  96.52 .. 172.72   signal conditioning
-#   right  180.34 .. 287.02   module, probes, mounting
+# block stays clear of that corner. Signals run left to right, desk to module:
+#   left    15.24 ..  83.82   the jack and its LEDs
+#   middle  91.44 .. 190.50   5 V input and the signal conditioning
+#   right  198.12 .. 287.02   the module's sockets, mounting
+# Every net label stands at the far end of its stub and runs on away from the
+# wire; power is drawn as power symbols, named, never as labels.
 
 # ref: (lib, symbol, x, y, angle, mirror, value, footprint)
+# A two-pin part turned 90 has pin 1 on the left, turned 270 pin 1 on the right.
 PLACE = {
  # 8P8C_LED_Shielded: signal pins 1-8 on the right, LED pins 9-12 on the left,
  # shield at the bottom -- matches the Ckmtw jack's pin numbering exactly
- "RJ45_1": ("Connector","8P8C_LED_Shielded", 52.07, 55.88, 0,None,"RJ45 8P8C 2xLED",
+ "RJ45_1": ("Connector","8P8C_LED_Shielded", 48.26, 53.34, 0,None,"RJ45 8P8C 2xLED",
             "Connector_RJ:RJ45_Connfly_DS1128-09-S8xx-S_Horizontal"),
- "R5": ("Device","R", 48.26,125.73,270,None,"220R","Resistor_SMD:R_0805_2012Metric"),
- "R6": ("Device","R", 48.26,144.78,270,None,"220R","Resistor_SMD:R_0805_2012Metric"),
- "F1": ("Device","Polyfuse",   123.19, 33.02, 90,None,"PTC 500mA","Resistor_SMD:R_1206_3216Metric"),
- "D1": ("Device","D_Schottky", 146.05, 33.02,  0,"y","SS14","Diode_SMD:D_SMA"),
- "C1": ("Device","C",          152.40, 43.18,  0,None,"22uF 25V","Capacitor_SMD:C_1206_3216Metric"),
- "C2": ("Device","C",          168.91, 43.18,  0,None,"100nF 50V","Capacitor_SMD:C_0805_2012Metric"),
+ "R5": ("Device","R",           49.53,110.49,270,None,"220R","Resistor_SMD:R_0805_2012Metric"),
+ "R6": ("Device","R",           49.53,121.92,270,None,"220R","Resistor_SMD:R_0805_2012Metric"),
+ "F1": ("Device","Polyfuse",   116.84, 35.56, 90,None,"PTC 500mA","Resistor_SMD:R_1206_3216Metric"),
+ "D1": ("Device","D_Schottky", 139.70, 35.56,  0,"y","SS14","Diode_SMD:D_SMA"),
  # the bulk capacitor that carries the radio's start-up surge on desk power
- "C3": ("Device","C_Polarized",109.22, 45.72,  0,None,"1000uF 6.3V","Capacitor_THT:CP_Radial_D8.0mm_P3.50mm"),
- "R1": ("Device","R",          123.19, 83.82, 90,None,"10k","Resistor_SMD:R_0805_2012Metric"),
- "R2": ("Device","R",          137.16, 96.52,  0,None,"15k","Resistor_SMD:R_0805_2012Metric"),
- "D2": ("Diode","BAT54S",      152.40,102.87,  0,"x","BAT54S","Package_TO_SOT_SMD:SOT-23"),
- "R3": ("Device","R",          123.19,140.97,270,None,"220R","Resistor_SMD:R_0805_2012Metric"),
- "R4": ("Device","R",          123.19,160.02,270,None,"220R","Resistor_SMD:R_0805_2012Metric"),
- "U1A": ("tab5-desk-ctrl","ESP32_DevKitV1_RowA", 264.16, 50.80, 0,None,"Socket 1x15 2.54mm",
+ "C3": ("Device","C_Polarized",147.32, 45.72,  0,None,"1000uF 6.3V","Capacitor_THT:CP_Radial_D8.0mm_P3.50mm"),
+ "C1": ("Device","C",          152.40, 45.72,  0,None,"22uF 25V","Capacitor_SMD:C_1206_3216Metric"),
+ "C2": ("Device","C",          170.18, 45.72,  0,None,"100nF 50V","Capacitor_SMD:C_0805_2012Metric"),
+ "R1": ("Device","R",          113.03, 81.28, 90,None,"10k","Resistor_SMD:R_0805_2012Metric"),
+ "R2": ("Device","R",          127.00, 91.44,  0,None,"15k","Resistor_SMD:R_0805_2012Metric"),
+ "D2": ("Diode","BAT54S",      147.32, 91.44,  0,"x","BAT54S","Package_TO_SOT_SMD:SOT-23"),
+ "R3": ("Device","R",          124.46,139.70,270,None,"220R","Resistor_SMD:R_0805_2012Metric"),
+ "R4": ("Device","R",          124.46,152.40,270,None,"220R","Resistor_SMD:R_0805_2012Metric"),
+ "U1A": ("tab5-desk-ctrl","ESP32_DevKitV1_RowA", 274.32, 55.88, 0,None,"Socket 1x15 2.54mm",
          "Connector_PinSocket_2.54mm:PinSocket_1x15_P2.54mm_Vertical"),
- "U1B": ("tab5-desk-ctrl","ESP32_DevKitV1_RowB", 215.90, 50.80, 0,None,"Socket 1x15 2.54mm",
+ "U1B": ("tab5-desk-ctrl","ESP32_DevKitV1_RowB", 231.14, 55.88, 0,None,"Socket 1x15 2.54mm",
          "Connector_PinSocket_2.54mm:PinSocket_1x15_P2.54mm_Vertical"),
- "H1": ("Mechanical","MountingHole", 195.58, 97.79, 0,None,"M3","MountingHole:MountingHole_3.2mm_M3"),
- "H2": ("Mechanical","MountingHole", 218.44, 97.79, 0,None,"M3","MountingHole:MountingHole_3.2mm_M3"),
- "H3": ("Mechanical","MountingHole", 241.30, 97.79, 0,None,"M3","MountingHole:MountingHole_3.2mm_M3"),
- "H4": ("Mechanical","MountingHole", 264.16, 97.79, 0,None,"M3","MountingHole:MountingHole_3.2mm_M3"),
+ "H1": ("Mechanical","MountingHole", 208.28,123.19, 0,None,"M3","MountingHole:MountingHole_3.2mm_M3"),
+ "H2": ("Mechanical","MountingHole", 228.60,123.19, 0,None,"M3","MountingHole:MountingHole_3.2mm_M3"),
+ "H3": ("Mechanical","MountingHole", 248.92,123.19, 0,None,"M3","MountingHole:MountingHole_3.2mm_M3"),
+ "H4": ("Mechanical","MountingHole", 269.24,123.19, 0,None,"M3","MountingHole:MountingHole_3.2mm_M3"),
 }
-# power symbols, each with its PWR_FLAG alongside rather than in a block of their own
-for ref,(sym,x,y) in {"#PWR08":("GND", 19.05, 83.82), "#PWR09":("GND", 52.07, 83.82),
-                      "#PWR10":("GND", 68.58, 83.82), "#PWR02":("GND",152.40, 52.07),
-                      "#PWR03":("GND",168.91, 52.07), "#PWR04":("GND",137.16,107.95),
-                      "#PWR05":("GND",144.78,110.49),
-                      "#PWR07":("+5V",109.22, 39.37), "#PWR11":("GND",109.22, 52.07),
-                      "#PWR01":("+5V",158.75, 27.94), "#PWR06":("+3V3",160.02, 92.71),
-                      "#FLG01":("PWR_FLAG",163.83, 27.94),   # +5V rail
-                      "#FLG02":("PWR_FLAG", 80.01, 48.26),   # GND at the desk connector
-                      "#FLG03":("PWR_FLAG",170.18,102.87),   # +3V3 off the module
-                      }.items():
+# power symbols: (symbol, x, y, angle). A GND turned 90 points right, 270 left;
+# a +5V or +3V3 turned 90 points left.
+POWER_SYMS = {
+ "#PWR01": ("GND",   60.96, 45.72, 90),    # jack pin 7
+ "#PWR02": ("GND",   35.56, 43.18,270),    # LED cathode, pin 9
+ "#PWR03": ("GND",   35.56, 58.42,270),    # LED cathode, pin 11
+ "#PWR04": ("GND",   48.26, 71.12,  0),    # shield
+ "#PWR05": ("+5V",  157.48, 30.48,  0),
+ "#PWR06": ("GND",  147.32, 52.07,  0),
+ "#PWR07": ("GND",  152.40, 52.07,  0),
+ "#PWR08": ("GND",  170.18, 52.07,  0),
+ "#PWR09": ("GND",  127.00, 97.79,  0),
+ "#PWR10": ("GND",  139.70, 96.52,  0),
+ "#PWR11": ("+3V3", 160.02, 91.44,  0),
+ "#PWR12": ("GND",  218.44, 71.12,270),    # U1B GND
+ "#PWR13": ("+5V",  218.44, 73.66, 90),    # U1B VIN
+ "#PWR14": ("GND",  261.62, 71.12,270),    # U1A GND
+ "#PWR15": ("+3V3", 261.62, 73.66, 90),    # U1A 3V3
+ "#FLG01": ("PWR_FLAG", 162.56, 30.48, 0), # +5V rail
+ "#FLG02": ("PWR_FLAG",  53.34, 68.58, 0), # GND at the desk connector
+ "#FLG03": ("PWR_FLAG", 165.10, 91.44, 0), # +3V3 off the module
+}
+for ref,(sym,x,y,a) in POWER_SYMS.items():
     # GND uses the project's own symbol: the three-bar earth glyph, but with
     # Value "GND" so the net keeps its name. power:Earth / power:GNDREF have the
     # right drawing and the wrong name -- a power symbol's Value IS the net.
     if sym == "GND":
-        PLACE[ref] = ("tab5-desk-ctrl","GND_EARTH",x,y,0,None,"GND","")
+        PLACE[ref] = ("tab5-desk-ctrl","GND_EARTH",x,y,a,None,"GND","")
     else:
-        PLACE[ref] = ("power",sym,x,y,0,None,sym,"")
+        PLACE[ref] = ("power",sym,x,y,a,None,sym,"")
+
+# where each visible field goes: ref -> ((ref x, y), (value x, y), justify)
+FIELDS = {
+ "RJ45_1": ((48.26, 33.02), (48.26, 35.56), "center"),
+ "R5": ((49.53,107.95), (49.53,113.03), "center"),
+ "R6": ((49.53,119.38), (49.53,124.46), "center"),
+ "F1": ((116.84, 31.75), (116.84, 39.37), "center"),
+ "D1": ((139.70, 31.75), (139.70, 39.37), "center"),
+ "C3": ((144.78, 44.45), (144.78, 46.99), "right"),
+ "C1": ((154.94, 44.45), (154.94, 46.99), "left"),
+ "C2": ((172.72, 44.45), (172.72, 46.99), "left"),
+ "R1": ((113.03, 78.74), (113.03, 83.82), "center"),
+ "R2": ((129.54, 90.17), (129.54, 92.71), "left"),
+ "D2": ((147.32, 96.52), (147.32, 99.06), "center"),
+ "R3": ((124.46,137.16), (124.46,142.24), "center"),
+ "R4": ((124.46,149.86), (124.46,154.94), "center"),
+ "U1A": ((274.32, 31.75), (274.32, 34.29), "center"),
+ "U1B": ((231.14, 31.75), (231.14, 34.29), "center"),
+}
+for h in ("H1","H2","H3","H4"):
+    x, y = PLACE[h][2], PLACE[h][3]
+    FIELDS[h] = ((x+3.81, y-1.27), (x+3.81, y+1.27), "left")
+# the names of the +5V and +3V3 symbols; GND's glyph says it, PWR_FLAG needs none
+POWER_NAMES = {"#PWR05": (157.48, 26.67), "#PWR11": (160.02, 86.36),
+               "#PWR13": (213.36, 73.66), "#PWR15": (256.54, 73.66)}
+
+# pins drawn without their numbers: every two-pin part, the clamp and the rails
+HIDE_PIN_NUMBERS = {"R", "C", "C_Polarized", "Polyfuse", "D_Schottky", "BAT54S",
+                    "GND", "+5V", "+3V3", "PWR_FLAG", "GND_EARTH"}
 
 libs, protos = {}, {}
 def proto(lib,name):
@@ -112,94 +156,90 @@ def seg(*pts): return [tuple(p) for p in pts]
 # ---- wires: each entry is a polyline of absolute points ----
 WIRES = []
 def w(*pts): WIRES.append(seg(*pts))
+LABELS = []   # (net, x, y, angle): 0 reads on to the right, 180 to the left
+def stub(ref, pin_, x, net=None, angle=0):
+    """A straight wire from a pin out to x, labelled at its far end."""
+    a = P(ref, pin_)
+    w(a, (x, a[1]))
+    if net:
+        LABELS.append((net, x, a[1], angle))
 
-# --- DESK CONNECTOR: signals right, LEDs left, grounds down ---------------
-for p in ("4","5","6","8"):
-    w(P("RJ45_1",p), (72.39, P("RJ45_1",p)[1]))
-w(P("RJ45_1","7"), (68.58, P("RJ45_1","7")[1]))
-w((68.58, P("RJ45_1","7")[1]), (68.58, 83.82))                 # GND symbol
-w((68.58, P("RJ45_1","7")[1]), (80.01, P("RJ45_1","7")[1]))    # PWR_FLAG
+# --- DESK CONNECTOR: signals right, LEDs left, grounds at the pin ---------
+for p, net in (("8","DESK_5V"), ("6","DESK_RX"), ("5","DESK_TX"), ("4","PIN20")):
+    stub("RJ45_1", p, 63.50, net)
+stub("RJ45_1", "7", 60.96)                                     # GND, pointing right
 # Datasheet (both the PC-board-layout and the bottom view) marks the four LED
 # pads "+ - + -" left to right with pin 1 on the right. KiCad's footprint draws
 # the part rotated 180 deg (pin 1 on the left), so in its numbering the anodes
 # are pads 10 and 12, not 9 and 11.
-for p in ("10","12"):
-    w(P("RJ45_1",p), (35.56, P("RJ45_1",p)[1]))
-w(P("RJ45_1","9"),  (19.05, P("RJ45_1","9")[1]))               # LED cathodes
-w(P("RJ45_1","11"), (19.05, P("RJ45_1","11")[1]))
-w((19.05, P("RJ45_1","9")[1]), (19.05, 83.82))
-w(P("RJ45_1","SH"), (52.07, 83.82))                            # shield to GND
+stub("RJ45_1", "10", 33.02, "LED_DESK_A", 180)
+stub("RJ45_1", "12", 33.02, "LED_BT_A", 180)
+stub("RJ45_1", "9", 35.56)                                     # cathodes to GND
+stub("RJ45_1", "11", 35.56)
+w(P("RJ45_1","SH"), (48.26, 71.12))                            # shield to GND
+w((48.26, 68.58), (53.34, 68.58))                              # and its PWR_FLAG
 
 # --- LED INDICATORS -------------------------------------------------------
-w((31.75,125.73), P("R5","2"));  w(P("R5","1"), (67.31,125.73))
-w((31.75,144.78), P("R6","2"));  w(P("R6","1"), (67.31,144.78))
+for r, anode, gpio in (("R5","LED_BT_A","LED_BT"), ("R6","LED_DESK_A","LED_DESK")):
+    stub(r, "2", 30.48, anode, 180)
+    stub(r, "1", 68.58, gpio)
 
 # --- 5 V INPUT ------------------------------------------------------------
-w((109.22,33.02), P("F1","1"))
-w(P("F1","2"), (130.81,33.02));  w((130.81,33.02), P("D1","2"))
-w((130.81,33.02), (130.81,41.91))                              # D5V_F label stub
-w(P("D1","1"), (168.91,33.02))                                 # +5V rail
-w((158.75,33.02), (158.75,27.94))                              # +5V symbol
-w((163.83,33.02), (163.83,27.94))                              # PWR_FLAG
-w((152.40,33.02), P("C1","1"));  w(P("C1","2"), (152.40,52.07))
-w((168.91,33.02), P("C2","1"));  w(P("C2","2"), (168.91,52.07))
-w((109.22,39.37), P("C3","1"));  w(P("C3","2"), (109.22,52.07))  # its own +5V and GND
+stub("F1", "1", 101.60, "DESK_5V", 180)
+w(P("F1","2"), (127.00, 35.56), P("D1","2"))
+w((127.00, 35.56), (127.00, 33.02))                            # D5V_F, above the wire
+LABELS.append(("D5V_F", 127.00, 33.02, 0))
+w(P("D1","1"), (170.18, 35.56))                                # +5V rail
+w((157.48, 30.48), (157.48, 35.56))                            # +5V symbol
+w((162.56, 30.48), (162.56, 35.56))                            # PWR_FLAG
+for c in ("C3", "C1", "C2"):
+    x = P(c, "1")[0]
+    w((x, 35.56), P(c, "1"));  w(P(c, "2"), (x, 52.07))
 
 # --- RX LEVEL SHIFT -------------------------------------------------------
-w((109.22,83.82), P("R1","1"))
-w(P("R1","2"), (161.29,83.82))                                 # RX_DIV node
-w((137.16,83.82), P("R2","1"));  w(P("R2","2"), (137.16,107.95))
-w((152.40,83.82), P("D2","3"))
-w(P("D2","1"), (144.78,110.49))                                # clamp to GND
-w(P("D2","2"), (160.02, 92.71))                                # clamp to +3V3
-w(P("D2","2"), (170.18, P("D2","2")[1]))                       # PWR_FLAG
+stub("R1", "1", 101.60, "DESK_TX", 180)
+stub("R1", "2", 172.72, "RX_DIV")
+w((127.00, 81.28), P("R2","1"));  w(P("R2","2"), (127.00, 97.79))
+w(P("D2","3"), (147.32, 81.28))                                # clamp's COM to the node
+w(P("D2","1"), (139.70, 91.44), (139.70, 96.52))               # A to GND
+w(P("D2","2"), (160.02, 91.44))                                # K to +3V3
+w((160.02, 91.44), (165.10, 91.44))                            # and its flag
 
 # --- TX AND WAKE ----------------------------------------------------------
-w((109.22,140.97), P("R3","2"));  w(P("R3","1"), (146.05,140.97))
-w((109.22,160.02), P("R4","2"));  w(P("R4","1"), (146.05,160.02))
+for r, desk, esp in (("R3","DESK_RX","ESP_TX"), ("R4","PIN20","ESP_P20")):
+    stub(r, "2", 101.60, desk, 180)
+    stub(r, "1", 149.86, esp)
 
-# --- module socket stubs --------------------------------------------------
+# --- module sockets: row B is the module's left-hand column and row A its
+# right-hand one -- the sheet is laid out to match the DevKit pinout you would
+# look up
 U1A_N = {"1":"ESP_P20","9":"ESP_TX","10":"RX_DIV","14":"GND","15":"+3V3"}
 U1B_N = {"6":"LED_BT","7":"LED_DESK","14":"GND","15":"+5V"}
-# row B is the module's left-hand column and row A its right-hand one -- the
-# sheet is laid out to match the DevKit pinout you would look up
-for p in U1B_N: w(P("U1B",p), (195.58, P("U1B",p)[1]))
-for p in U1A_N: w(P("U1A",p), (243.84, P("U1A",p)[1]))
-
-# ---- labels: net name at the far end of a stub ----
-LABELS = [("DESK_5V", 72.39, P("RJ45_1","8")[1], 0),
-          ("DESK_TX", 72.39, P("RJ45_1","5")[1], 0),
-          ("DESK_RX", 72.39, P("RJ45_1","6")[1], 0),
-          ("PIN20",   72.39, P("RJ45_1","4")[1], 0),
-          ("LED_DESK_A", 35.56, P("RJ45_1","10")[1], 180),
-          ("LED_BT_A",   35.56, P("RJ45_1","12")[1], 180),
-          ("LED_BT_A", 31.75,125.73,180), ("LED_BT",   67.31,125.73,0),
-          ("LED_DESK_A",31.75,144.78,180),("LED_DESK", 67.31,144.78,0),
-          ("DESK_5V",109.22, 33.02,180), ("D5V_F",  130.81, 41.91,270),
-          ("DESK_TX",109.22, 83.82,180), ("RX_DIV", 161.29, 83.82,0),
-          ("DESK_RX",109.22,140.97,180), ("ESP_TX", 146.05,140.97,0),
-          ("PIN20",  109.22,160.02,180), ("ESP_P20",146.05,160.02,0)]
-for p,n in U1B_N.items(): LABELS.append((n,195.58,P("U1B",p)[1],180))
-for p,n in U1A_N.items(): LABELS.append((n,243.84,P("U1A",p)[1],180))
+for ref, nets, x in (("U1B", U1B_N, 215.90), ("U1A", U1A_N, 259.08)):
+    for p, n in nets.items():
+        if n in ("GND", "+5V", "+3V3"):
+            stub(ref, p, x + 2.54)                             # to its power symbol
+        else:
+            stub(ref, p, x, n, 180)
 
 # ---- functional blocks: (x0, y0, x1, y1, title, subtitle) ----
 BLOCKS = [
- ( 15.24, 15.24,  88.90,  96.52, "DESK CONNECTOR",  "RJ45 8P8C to the LoctekMotion control box"),
- ( 15.24,104.14,  88.90, 156.21, "LED INDICATORS",  "LEDs are inside the jack, series limited"),
- ( 96.52, 15.24, 172.72,  57.15, "5 V INPUT",       "PTC, reverse block, bulk"),
- ( 96.52, 64.77, 172.72, 117.48, "RX LEVEL SHIFT",  "5 V desk -> 3.3 V ESP, clamped"),
- ( 96.52,119.38, 172.72, 171.45, "TX AND WAKE",     "series limit, 3.3 V needs no divider"),
- (180.34, 15.24, 287.02,  74.93, "ESP32 DevKit V1 30-pin socket",
+ ( 15.24, 15.24,  83.82,  86.36, "DESK CONNECTOR",  "RJ45 8P8C to the LoctekMotion control box"),
+ ( 15.24, 93.98,  83.82, 132.08, "LED INDICATORS",  "LEDs are inside the jack, series limited"),
+ ( 91.44, 15.24, 190.50,  60.96, "5 V INPUT",       "PTC, reverse block, bulk for the radio's start-up surge"),
+ ( 91.44, 68.58, 190.50, 116.84, "RX LEVEL SHIFT",  "5 V desk -> 3.3 V ESP, clamped"),
+ ( 91.44,124.46, 175.26, 160.02, "TX AND WAKE",     "series limit, 3.3 V needs no divider"),
+ (198.12, 15.24, 287.02,  99.06, "ESP32 DevKit V1 30-pin socket",
                                  "pin names as silkscreened beside the holes"),
- (180.34, 82.55, 287.02, 111.76, "MOUNTING",
-                                 "4x M3, 51.8 x 29.2 pattern - H3/H4 sit under the module"),
+ (198.12,106.68, 287.02, 139.70, "MOUNTING",
+                                 "4x M3, 71.8 x 28.8 pattern - H3/H4 sit under the module"),
 ]
 
 # notes sit inside their block, left aligned with the title
-NOTES = [( 17.78, 92.71, "pins 1-3 unused - the control box only uses 4..8"),
-         ( 99.06,114.30, "R1/R2 divide, D2 clamps what is left to the 3V3 rail"),
-         (182.88, 71.12, "RX2 = GPIO16    TX2 = GPIO17    D23 = GPIO23"),
-         (182.88,106.68, "no test pads: every net is already on a through-hole pad")]
+NOTES = [( 17.78, 82.55, "pins 1-3 unused - the control box only uses 4..8"),
+         ( 93.98,113.03, "R1/R2 divide, D2 clamps what is left to the 3V3 rail"),
+         (200.66, 95.25, "RX2 = GPIO16    TX2 = GPIO17    D23 = GPIO23"),
+         (200.66,135.89, "no test pads: every net is already on a through-hole pad")]
 
 # ---- build ----
 sch = Schematic.create_new(); sch.paper.paperSize = "A4"
@@ -211,42 +251,33 @@ for ref,(lib,name,x,y,ang,mir,val,fp) in PLACE.items():
     key = f"{lib}:{name}"
     if key not in seen:
         s = proto(lib,name); s.libId = key; s.libraryNickname, s.entryName = lib, name
+        # kiutils drops KiCad 9's "(pin_numbers (hide yes))", so set it again
+        if name in HIDE_PIN_NUMBERS:
+            s.hidePinNumbers = True
+            s.pinNamesHide = True
         sch.libSymbols.append(s); seen.add(key)
     hidden = ref.startswith("#") or ref.startswith("TP")
     inst = SchematicSymbol(libraryNickname=lib, entryName=name,
                            position=Position(x,y,ang), unit=1,   # angle must be written even when 0
                            inBom=not (hidden or ref.startswith("TP") or ref.startswith("H")),
                            onBoard=True, mirror=mir, uuid=str(uuid.uuid4()))
-    eff = lambda hide: Effects(font=Font(width=1.27,height=1.27), hide=hide)
-    # NOTE: Property's third positional is `id`, not `position` -- passing a
-    # Position there writes a malformed file that KiCad simply refuses to open.
-    # Ref and value go clear of the body: above a tall connector, above and
-    # below a rotated two-pin part, beside an upright one.
-    if name == "8P8C_LED_Shielded":
-        rx, ry0, ry1 = x, y - 20.32, y - 17.78
-    elif name.startswith("ESP32_DevKitV1"):
-        rx, ry0, ry1 = x, y - 24.13, y - 21.59
-    elif ang in (90, 270):
-        # KiCad rotates a field with its symbol, so these read bottom-to-top and
-        # need 6.35 of clearance -- and rows of rotated parts need 19.05 between
-        # them or one part's value lands on the next one's reference.
-        rx, ry0, ry1 = x, y - 6.35, y + 6.35
-    elif ref in ("C1", "C2"):
-        rx, ry0, ry1 = x - 7.62, y - 2.54, y + 2.54
-    elif ref == "C3":
-        # clear of its own body, under F1's value
-        rx, ry0, ry1 = x + 10.16, y - 1.27, y + 3.81
-    elif ref == "D1":
-        # fields to the left, clear of C1's tap off the rail
-        rx, ry0, ry1 = x - 7.62, y - 2.54, y + 2.54
-    elif ref == "D2":
-        # SOT-23 body is 15 mm wide in the symbol; +5.08 lands inside it
-        rx, ry0, ry1 = x + 10.16, y - 2.54, y + 2.54
+    # A field turns with its symbol, so a part turned 90 or 270 gets its fields
+    # turned the same way to read level on the sheet.
+    fang = ang if ang in (90, 270) else 0
+    def eff(hide, just="center"):
+        j = Justify() if just == "center" else Justify(horizontally=just)
+        return Effects(font=Font(width=1.27,height=1.27), hide=hide, justify=j)
+    if ref in FIELDS:
+        (rx, ry0), (vx, ry1), just = FIELDS[ref]
     else:
-        rx, ry0, ry1 = x + 5.08, y - 2.54, y + 2.54
+        rx, ry0, vx, ry1, just = x, y, x, y, "center"
+    name_shown = ref in POWER_NAMES
+    if name_shown:
+        vx, ry1 = POWER_NAMES[ref]
     inst.properties = [
-        Property(key="Reference", value=ref, position=Position(rx,ry0,0), effects=eff(hidden)),
-        Property(key="Value",     value=val, position=Position(rx,ry1,0), effects=eff(hidden)),
+        Property(key="Reference", value=ref, position=Position(rx,ry0,fang), effects=eff(hidden, just)),
+        Property(key="Value",     value=val, position=Position(vx,ry1,fang),
+                 effects=eff(hidden and not name_shown, just)),
         Property(key="Footprint", value=fp,  position=Position(x,y,0), effects=eff(True)),
         Property(key="Datasheet", value="~", position=Position(x,y,0), effects=eff(True))]
     sch.schematicSymbols.append(inst)
@@ -308,9 +339,13 @@ for p,c in ends.items():
     if touching >= 3:
         sch.junctions.append(Junction(position=Position(*p),uuid=str(uuid.uuid4())))
 
+# Global, not local: on the root sheet a local label names its net "/DESK_TX",
+# and the board's nets carry no sheet path, so parity would call every one of
+# them a conflict. "passive" keeps the label a plain box with no direction.
 for t,x,y,a in LABELS:
-    sch.globalLabels.append(GlobalLabel(text=t,position=Position(x,y,a),shape="input",
-        effects=Effects(font=Font(width=1.27,height=1.27)),uuid=str(uuid.uuid4())))
+    just = Justify(horizontally="right" if a in (180, 270) else "left")
+    sch.globalLabels.append(GlobalLabel(text=t,position=Position(x,y,a),shape="passive",
+        effects=Effects(font=Font(width=1.27,height=1.27), justify=just),uuid=str(uuid.uuid4())))
 
 def left(size):
     return Effects(font=Font(width=size,height=size), justify=Justify(horizontally="left"))
