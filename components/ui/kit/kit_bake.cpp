@@ -549,11 +549,18 @@ Pane *pane_of(lv_obj_t *o)
 
 // What the pane's own style asks for, rather than what is left once the
 // carried picture has taken the shadow over.
+// The pane's shadow as it is meant, not as put out while its picture stands in for it.
 lv_opa_t shadow_opa(const Pane &p)
 {
     lv_style_value_t v;
-    if (lv_obj_get_local_style_prop(p.obj, LV_STYLE_SHADOW_OPA, &v, 0) == LV_STYLE_RES_FOUND ||
-        lv_style_get_prop(p.base, LV_STYLE_SHADOW_OPA, &v) == LV_STYLE_RES_FOUND) {
+    if (p.carried) {
+        if (p.own.had) {
+            return p.own.opa;
+        }
+    } else if (lv_obj_get_local_style_prop(p.obj, LV_STYLE_SHADOW_OPA, &v, 0) == LV_STYLE_RES_FOUND) {
+        return static_cast<lv_opa_t>(v.num);
+    }
+    if (lv_style_get_prop(p.base, LV_STYLE_SHADOW_OPA, &v) == LV_STYLE_RES_FOUND) {
         return static_cast<lv_opa_t>(v.num);
     }
     return LV_OPA_COVER;
