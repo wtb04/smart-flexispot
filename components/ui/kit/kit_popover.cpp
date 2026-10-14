@@ -1433,7 +1433,8 @@ lv_obj_t *notice(const NoticeSpec &spec)
     if (s_notice != nullptr) {
         leave(s_notice);
     }
-    constexpr std::int32_t W = 620, Y = 100;
+    constexpr std::int32_t W = 620;
+    const std::int32_t     Y = spec.top;
     lv_obj_t *slab = glass(layer(Layer::Alert), Glass::Notice);
     s_notice       = slab;
     auto *parts    = new NoticeParts;

@@ -767,6 +767,7 @@ struct NoticeSpec {
     Ink          ink     = Ink::Accent;
     std::int32_t timeout_ms = 8000;  // 0 or less: until tapped, without the line that runs down
     bool         solid   = false;    // over a picture rather than the ground: nothing blurs what shows through
+    std::int32_t top     = 100;      // from the screen's top: under the bar, or higher where there is none
     void (*done)(lv_obj_t *notice) = nullptr;  // tapped, flicked up or its time up; without it, it leaves
 };
 /** As notice() above, with what it says of itself. Returns the slab; one dropping in sends the last away. */

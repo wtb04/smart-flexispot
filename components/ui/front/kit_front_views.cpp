@@ -478,6 +478,7 @@ void show_next_notice()
     spec.timeout_ms = notice.timeout_ms < 0 ? 0 : notice.timeout_ms > 0 ? notice.timeout_ms : DEFAULT_MS;
     spec.done       = notice_done;
     spec.solid      = detail::fullscreen_open();
+    spec.top        = spec.solid ? views::TOP : spec.top;  // no bar over a fullscreen view: level with its own row of chips
     s_on_show       = true;
     s_notice        = kit::notice(spec);
 }
