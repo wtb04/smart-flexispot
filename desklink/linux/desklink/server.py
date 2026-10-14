@@ -60,7 +60,10 @@ class PanelClient:
         self._session = Soup.Session(timeout=timeout_s)
 
     def post(self, url: str, body: bytes, done: Callable[[int | None, bytes], None]) -> None:
-        message = Soup.Message.new("POST", url)
+        try:
+            message = Soup.Message.new("POST", url)
+        except TypeError:  # an address the URI parser refuses, as one with a space
+            message = None
         if message is None:
             GLib.idle_add(lambda: done(None, b""))
             return
