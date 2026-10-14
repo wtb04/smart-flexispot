@@ -13,12 +13,12 @@ import re, sys, pcbnew
 # Both silk bands outboard of the sockets are full of DevKit pin names now, so
 # U1A/U1B sit in the only gap left: between the test-pad labels and pin 1.
 REF_POS = {
-    "RJ45_1": (11.0, 29.0), "F1": (37.0, 22.9), "D1": (44.0, 22.1),
-    "C1": (52.0, 17.0), "C2": (48.0, 19.1), "D2": (48.0, 12.5),
-    "R1": (42.0, 8.7), "R2": (42.0, 17.1), "R3": (47.0, 8.7), "R4": (36.0, 8.7),
+    "RJ45_1": (11.0, 29.0), "F1": (19.3, 6.0), "D1": (25.8, 5.6), "C3": (23.5, 23.2),
+    "C1": (62.0, 17.0), "C2": (58.0, 19.1), "D2": (58.0, 12.5),
+    "R1": (52.0, 8.7), "R2": (52.0, 17.1), "R3": (57.0, 8.7), "R4": (46.0, 8.7),
     "R5": (18.2, 14.4), "R6": (18.2, 20.6),   # in the sliver, either side of DESK
-    "U1A": (18.6, 2.75), "U1B": (18.6, 32.45),
-    "H1": (9.5, 3.2), "H2": (9.5, 32.0), "H3": (50.5, 10.7), "H4": (50.5, 24.7),
+    "U1A": (28.6, 2.75), "U1B": (28.6, 32.45),
+    "H1": (9.5, 3.2), "H2": (9.5, 32.0), "H3": (60.5, 10.7), "H4": (60.5, 24.7),
 }
 
 f = sys.argv[1] if len(sys.argv) > 1 else "tab5-desk-ctrl.kicad_pcb"
@@ -60,13 +60,13 @@ for fp in b.GetFootprints():
             if g.GetWidth() < pcbnew.FromMM(0.15):
                 g.SetWidth(pcbnew.FromMM(0.15))
 
-# Two 19-pin through-hole rows perforate B.Cu almost end to end, so the pour
-# fragments and thermal-relief spokes can end up feeding an orphaned island.
-# Solid pad connections keep the copper contiguous. Trade-off: through-hole GND
-# pads sink more heat, so use a decent iron on J1 and the headers.
+# Thermal reliefs on the GND pads. rev1 joined them to the pour solid, to keep
+# the copper contiguous, and its ground pins then took a long time with an iron
+# at 390 C. GND is routed as tracks by route.py, so the spokes cannot strand a
+# pad on an island any more.
 for z in b.Zones():
     if z.GetNetname() == "GND" and not z.GetIsRuleArea():
-        z.SetPadConnection(pcbnew.ZONE_CONNECTION_FULL)
+        z.SetPadConnection(pcbnew.ZONE_CONNECTION_THERMAL)
 
 # the RJ45's 3D model: KiCad's 3D pack ships only three RJ45 models and this is
 # not one of them, so the real model was pulled from LCSC (easyeda2kicad) and
