@@ -144,6 +144,40 @@ TEST(ClaudeTable, waiting_on_you_is_told_once_and_ends_when_it_goes_on)
     EXPECT_EQ(shot(table, 3 * min).sessions[0].state, State::Working) << "answered, and run";
 }
 
+TEST(ClaudeTable, an_answered_question_is_told_so_its_notice_can_go)
+{
+    for (const char *goes_on : {"PostToolUse", "PostToolUseFailure", "PreToolUse", "Stop"}) {
+        Table   table;
+        Session answered;
+        table.apply(event("s1", "UserPromptSubmit"), 0);
+        table.apply(event("s1", "PermissionRequest", "Bash", "idf.py"), 1 * min);
+        table.apply(event("s1", goes_on, "Bash"), 2 * min, nullptr, &answered);
+        EXPECT_STREQ(answered.id, "s1") << goes_on;
+        EXPECT_NE(shot(table, 2 * min).sessions[0].state, State::NeedsYou) << goes_on;
+    }
+}
+
+TEST(ClaudeTable, a_session_ended_while_it_waited_is_answered_too)
+{
+    Table   table;
+    Session answered;
+    table.apply(event("s1", "PermissionRequest", "Bash", "idf.py"), 0);
+    table.apply(event("s1", "SessionEnd"), 1 * min, nullptr, &answered);
+    EXPECT_STREQ(answered.id, "s1");
+}
+
+TEST(ClaudeTable, nothing_is_answered_that_was_not_asked)
+{
+    Table   table;
+    Session answered;
+    table.apply(event("s1", "UserPromptSubmit"), 0);
+    table.apply(event("s1", "PostToolUse", "Bash"), 1 * min, nullptr, &answered);
+    EXPECT_STREQ(answered.id, "");
+    table.apply(event("s1", "PermissionRequest", "Bash", "idf.py"), 2 * min);
+    table.apply(event("s1", "PermissionRequest", "Bash", "idf.py"), 3 * min, nullptr, &answered);
+    EXPECT_STREQ(answered.id, "") << "still waiting";
+}
+
 TEST(ClaudeTable, a_turn_ends_done_or_failed)
 {
     Table table;

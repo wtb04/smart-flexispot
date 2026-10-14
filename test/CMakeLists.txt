@@ -84,6 +84,7 @@ host_test(picks_test COMPONENT room SOURCES test/test_picks.cpp picks.cpp LIBS c
 host_test(segments_test COMPONENT room SOURCES test/test_segments.cpp segments.cpp LIBS cjson)
 host_test(clock_math_test COMPONENT rtc SOURCES test/test_clock_math.cpp)
 host_test(screen_rules_test COMPONENT ui SOURCES test/test_screen_rules.cpp)
+host_test(notice_queue_test COMPONENT ui SOURCES test/test_notice_queue.cpp)
 host_test(travel_parse_test COMPONENT travel SOURCES test/test_travel_parse.cpp)
 host_test(watchdog_core_test COMPONENT watchdog SOURCES test/test_watchdog_core.cpp watchdog_core.cpp)
 

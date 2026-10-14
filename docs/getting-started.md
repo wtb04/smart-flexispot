@@ -169,6 +169,7 @@ For Claude Code, each laptop also needs `jq` and `curl`, which macOS has and mos
     "UserPromptSubmit":  [{ "hooks": [{ "type": "command", "command": "~/smart-flexispot/tools/claude-hook", "async": true }] }],
     "PreToolUse":        [{ "hooks": [{ "type": "command", "command": "~/smart-flexispot/tools/claude-hook", "async": true }] }],
     "PostToolUse":       [{ "hooks": [{ "type": "command", "command": "~/smart-flexispot/tools/claude-hook", "async": true }] }],
+    "PostToolUseFailure": [{ "hooks": [{ "type": "command", "command": "~/smart-flexispot/tools/claude-hook", "async": true }] }],
     "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "~/smart-flexispot/tools/claude-hook", "async": true }] }],
     "SubagentStart":     [{ "hooks": [{ "type": "command", "command": "~/smart-flexispot/tools/claude-hook", "async": true }] }],
     "SubagentStop":      [{ "hooks": [{ "type": "command", "command": "~/smart-flexispot/tools/claude-hook", "async": true }] }],

@@ -92,8 +92,9 @@ void describe(const Action &action, Tense tense, char *out, std::size_t size);
 class Table {
 public:
     /** False when the event changed nothing. With `asked`, a session that has
-     *  just begun to wait on you is copied there. */
-    bool apply(const Event &event, std::int64_t now_ms, Session *asked = nullptr);
+     *  just begun to wait on you is copied there; with `answered`, one that has
+     *  just stopped waiting, so what told you can go. */
+    bool apply(const Event &event, std::int64_t now_ms, Session *asked = nullptr, Session *answered = nullptr);
 
     void snapshot(std::int64_t now_ms, Snapshot &out) const;
 

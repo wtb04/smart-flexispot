@@ -10,6 +10,8 @@
 #include "status_model.h"
 #include "topics.h"
 
+#include <cstring>
+
 #ifndef SHOT_DESK_CARD
 #define SHOT_DESK_CARD 0
 #endif
@@ -410,6 +412,9 @@ Slot<PhotoArgs>      p_photo;
 constexpr int NOTICE_INBOX_LEN = 4;
 Notice        s_inbox[NOTICE_INBOX_LEN];
 int           s_inbox_count = 0;
+// Withdrawn after the inbox's notices are taken, so one sent and withdrawn at once goes.
+char          s_withdrawn[NOTICE_INBOX_LEN][sizeof(Notice::key)];
+int           s_withdrawn_count = 0;
 
 void drop_oldest(Notice *queue, int &count)
 {
@@ -781,9 +786,18 @@ void apply_inbox()
         notices[i] = s_inbox[i];
     }
     s_inbox_count = 0;
+    static char withdrawn[NOTICE_INBOX_LEN][sizeof(Notice::key)];
+    const int   withdrawn_count = s_withdrawn_count;
+    for (int i = 0; i < withdrawn_count; ++i) {
+        std::memcpy(withdrawn[i], s_withdrawn[i], sizeof(withdrawn[i]));
+    }
+    s_withdrawn_count = 0;
     portEXIT_CRITICAL(&s_pending_lock);
     for (int i = 0; i < count; ++i) {
         notices_take(notices[i]);
+    }
+    for (int i = 0; i < withdrawn_count; ++i) {
+        withdraw_notice(withdrawn[i]);
     }
 }
 
@@ -1181,7 +1195,7 @@ bool diagnostics_open()
 }
 
 esp_err_t notify(const char *source, const char *title, const char *message, Level level,
-                 int timeout_ms)
+                 int timeout_ms, const char *key)
 {
     portENTER_CRITICAL(&s_pending_lock);
     if (s_inbox_count == NOTICE_INBOX_LEN) {
@@ -1193,6 +1207,23 @@ esp_err_t notify(const char *source, const char *title, const char *message, Lev
     copy_text(slot.message, sizeof(slot.message), message);
     slot.level = level;
     slot.timeout_ms = timeout_ms;
+    copy_text(slot.key, sizeof(slot.key), key != nullptr ? key : "");
+    portEXIT_CRITICAL(&s_pending_lock);
+    s_pending.store(true, std::memory_order_release);
+    return ESP_OK;
+}
+
+esp_err_t withdraw(const char *key)
+{
+    ESP_RETURN_ON_FALSE(key != nullptr && key[0] != '\0', ESP_ERR_INVALID_ARG, TAG, "no key");
+    portENTER_CRITICAL(&s_pending_lock);
+    if (s_withdrawn_count == NOTICE_INBOX_LEN) {
+        for (int i = 1; i < s_withdrawn_count; ++i) {
+            std::memcpy(s_withdrawn[i - 1], s_withdrawn[i], sizeof(s_withdrawn[i]));
+        }
+        --s_withdrawn_count;
+    }
+    copy_text(s_withdrawn[s_withdrawn_count++], sizeof(s_withdrawn[0]), key);
     portEXIT_CRITICAL(&s_pending_lock);
     s_pending.store(true, std::memory_order_release);
     return ESP_OK;

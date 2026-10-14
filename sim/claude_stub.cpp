@@ -44,20 +44,28 @@ std::string event(const char *session, const char *machine, const char *project,
 void from_hook(const std::string &payload)
 {
     claude::Session asked;
-    bool            was_asked = false;
-    if (!claude::take(payload.data(), payload.size(), asked, was_asked)) {
+    claude::Session answered;
+    bool            was_asked    = false;
+    bool            was_answered = false;
+    if (!claude::take(payload.data(), payload.size(), asked, was_asked, answered, was_answered)) {
         std::printf("W (sim) not an event the panel would take: %s\n", payload.c_str());
         return;
     }
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_claude());
+    char key[48];
+    if (was_answered) {
+        std::snprintf(key, sizeof(key), "claude:%s", answered.id);
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::withdraw(key));
+    }
     if (was_asked) {
+        std::snprintf(key, sizeof(key), "claude:%s", asked.id);
         char wants[96];
         claude::describe(asked.doing, claude::Tense::Wanted, wants, sizeof(wants));
         char title[64];
         std::snprintf(title, sizeof(title), "%s needs you", asked.project);
         char message[128];
         std::snprintf(message, sizeof(message), "%s %s", asked.machine, wants);
-        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::notify("Claude Code", title, message, ui::Level::Warn, 60 * 1000));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::notify("Claude Code", title, message, ui::Level::Warn, 60 * 1000, key));
     }
 }
 

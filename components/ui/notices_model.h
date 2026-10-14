@@ -18,5 +18,7 @@ const NoticesState &notices_state();
 void notices_take(const Notice &notice);
 /** The oldest waiting, out of the queue, or false with none. */
 bool notices_take_next(Notice &notice);
+/** Every waiting one sent with `key`, out of the queue. */
+void notices_withdraw(const char *key);
 
 }  // namespace ui::detail
