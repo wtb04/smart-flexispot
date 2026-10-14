@@ -75,6 +75,15 @@ def track_from(identity: str, props: dict, elapsed_us: int, now: float) -> Track
                  can_previous=bool(props.get("CanGoPrevious")), art_url=str(meta.get("mpris:artUrl") or ""))
 
 
+def seek_call(position: float, trackid: str, track: Track | None, now: float) -> tuple[str, tuple]:
+    """SetPosition where the player names its track, else Seek by the distance from where it plays now."""
+    micros = int(max(position, 0.0) * 1e6)
+    if trackid:
+        return "SetPosition", (trackid, micros)
+    here = int(track.position(now) * 1e6) if track else 0
+    return "Seek", (micros - here,)
+
+
 class _Player:
     def __init__(self, bus, name, changed, clock):
         self.name = name
@@ -175,12 +184,8 @@ class Mpris:
             if position is None:
                 return False
             meta = target.props().get("Metadata") or {}
-            trackid = meta.get("mpris:trackid")
-            micros = int(max(position, 0.0) * 1e6)
-            if trackid:
-                args, method = GLib.Variant("(ox)", (trackid, micros)), "SetPosition"
-            else:
-                args, method = GLib.Variant("(x)", (micros - target.elapsed_us,)), "Seek"
+            method, values = seek_call(position, str(meta.get("mpris:trackid") or ""), target.track(), self._clock())
+            args = GLib.Variant("(ox)" if method == "SetPosition" else "(x)", values)
         else:
             method = {"play": "Play", "pause": "Pause", "next": "Next", "previous": "Previous",
                       "play_pause": "PlayPause"}.get(name)

@@ -6,7 +6,7 @@ from pathlib import Path
 import gi
 
 gi.require_version("Secret", "1")
-from gi.repository import Secret  # noqa: E402
+from gi.repository import GLib, Secret  # noqa: E402
 
 
 @dataclass
@@ -50,7 +50,10 @@ class SecretKeyStore:
     _attributes = {"service": "nl.w-tb.desklink", "account": "panel"}
 
     def read(self) -> str:
-        return Secret.password_lookup_sync(self._schema, self._attributes, None) or ""
+        try:
+            return Secret.password_lookup_sync(self._schema, self._attributes, None) or ""
+        except GLib.Error:  # no Secret Service running, or its collection locked
+            return ""
 
     def write(self, hex_key: str) -> None:
         if hex_key:

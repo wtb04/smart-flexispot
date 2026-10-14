@@ -33,6 +33,27 @@ def status_line(link, server_error: str | None) -> str:
     return server_error or link.status_text()
 
 
+def health_of(link, server_error: str | None) -> str:
+    return "trouble" if server_error else link.health()
+
+
+class ToggleGuard:
+    """A click on the bar icon takes the focus first, which closes the dropdown,
+    and then asks to toggle it: that ask must not open it again."""
+
+    QUIET_S = 0.4
+
+    def __init__(self, clock=time.monotonic):
+        self._clock = clock
+        self._hidden_at = -1.0
+
+    def hidden_by_focus(self) -> None:
+        self._hidden_at = self._clock()
+
+    def may_open(self) -> bool:
+        return self._hidden_at < 0 or self._clock() - self._hidden_at > self.QUIET_S
+
+
 def subtitle(track) -> str:
     return ", ".join(part for part in (track.artist, track.identity) if part)
 
@@ -118,27 +139,36 @@ class Dropdown:
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", lambda _c, key, *_: key == Gdk.KEY_Escape and (self.hide() or True))
         self.window.add_controller(keys)
-        self.window.connect("notify::is-active", lambda w, _p: not w.is_active() and self.hide())
+        self._guard = ToggleGuard()
+        self.window.connect("notify::is-active", self._focus_changed)
         self._link.add_listener(self.refresh)
-        self._ticker = 0
+        self._ticker = None
         self._cover_version = None
+
+    def _focus_changed(self, window, _param) -> None:
+        if not window.is_active() and window.get_visible():
+            self._guard.hidden_by_focus()
+            self.hide()
 
     def toggle(self) -> None:
         if self.window.get_visible():
             self.hide()
+            return
+        if not self._guard.may_open():
             return
         monitor = _focused_monitor()
         if monitor is not None:
             Layer.set_monitor(self.window, monitor)
         self.refresh()
         self.window.present()
-        self._ticker = GLib.timeout_add(1000, lambda: self._tick() or True)
+        from .link import GLibTimers
+        self._ticker = GLibTimers().every(1, self._tick)
 
     def hide(self) -> None:
         self.window.set_visible(False)
         if self._ticker:
-            GLib.source_remove(self._ticker)
-            self._ticker = 0
+            self._ticker.cancel()
+            self._ticker = None
 
     def _tick(self) -> None:
         track = self._link.track
@@ -163,8 +193,7 @@ class Dropdown:
             texture = Gdk.Texture.new_from_bytes(GLib.Bytes.new(link.artwork.jpeg)) if link.artwork else None
             self._cover.set_from_paintable(texture)
             self._cover.set_visible(texture is not None)
-        health = "trouble" if self._app.server_error else link.health()
-        self._dot.set_css_classes([f"desklink-dot-{health}"])
+        self._dot.set_css_classes([f"desklink-dot-{health_of(link, self._app.server_error)}"])
         self._status.set_label(status_line(link, self._app.server_error))
         if self._sharing.get_active() != link.settings.sharing:
             self._sharing.set_active(link.settings.sharing)

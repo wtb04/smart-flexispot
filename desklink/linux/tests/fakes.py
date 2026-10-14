@@ -57,14 +57,18 @@ class FakeClock:
 class FakeClient:
     """Answers like the panel: a sealed pong to every state."""
 
-    def __init__(self, clock, reaches=True, status=200):
+    def __init__(self, clock, reaches=True, status=200, defer=False):
         self.posts = []
-        self.reaches, self.status = reaches, status
+        self.pending = []
+        self.reaches, self.status, self.defer = reaches, status, defer
         self.panel = seal.Envelope(KEY, clock_ms=clock.wall_ms)
 
     def post(self, url, body, done):
         message = self.panel.opened(body, "/link")
         self.posts.append((url, message))
+        if self.defer:
+            self.pending.append(done)
+            return
         if self.status is None:
             done(None, b"")
             return
