@@ -878,7 +878,13 @@ void go_live()
         return;
     }
     s_pop.live = true;
+    // the live page under the same dim is the picture to the pixel: it takes
+    // over without the whole screen drawn again, its slowest frame
+    lv_display_t *disp = lv_obj_get_display(s_pop.backdrop);
+    const bool    loud = lv_display_is_invalidation_enabled(disp);
+    lv_display_enable_invalidation(disp, false);
     lv_obj_set_hidden(s_pop.backdrop, true);
+    lv_display_enable_invalidation(disp, loud);
     lv_obj_set_style_shadow_width(s_pop.card, LIVE_SHADOW_W, 0);
     lv_obj_set_style_shadow_offset_y(s_pop.card, LIVE_SHADOW_Y, 0);
 }
@@ -976,25 +982,12 @@ void give_back()
 // frame: the frozen picture costs a copy where the live screen it covers
 // would cost drawing, so its bands are cheap, and nothing waits for a whole
 // screen of it in one frame.
-// Behind a dim, a veil over the page's sharp picture, darkening in a few
-// steps: each a whole screen to draw again, so a few, not one a frame.
-constexpr int VEIL_STEPS = 3;
-
-void veil(int from, int to, std::uint32_t ms)
+// Behind a dim, the veil over the page's sharp picture goes on and off in one
+// step: each change is the whole screen drawn again, some 100 ms on the panel,
+// so a fade in steps was a few slow frames rather than a fade.
+void veil(bool on)
 {
-    lv_anim_t a;
-    lv_anim_init(&a);
-    lv_anim_set_var(&a, s_pop.scrim);
-    lv_anim_set_values(&a, from, to);
-    lv_anim_set_duration(&a, ms);
-    lv_anim_set_exec_cb(&a, [](void *obj, int32_t step) {
-        auto          *scrim = static_cast<lv_obj_t *>(obj);
-        const lv_opa_t opa   = static_cast<lv_opa_t>(colours().scrim_opa * step / VEIL_STEPS);
-        if (lv_obj_get_style_bg_opa(scrim, LV_PART_MAIN) != opa) {
-            lv_obj_set_style_bg_opa(scrim, opa, 0);
-        }
-    });
-    lv_anim_start(&a);
+    lv_obj_set_style_bg_opa(s_pop.scrim, on ? colours().scrim_opa : LV_OPA_TRANSP, 0);
 }
 
 void frost_band(std::int32_t a, std::int32_t b)
@@ -1238,8 +1231,7 @@ lv_obj_t *popover(lv_obj_t *source, std::int32_t w, std::int32_t h, From from, b
     }
     if (s_pop.backdrop != nullptr && behind() == Behind::Dim) {
         lv_obj_set_style_bg_color(s_pop.scrim, lv_color_hex(colours().scrim), 0);
-        lv_obj_set_style_bg_opa(s_pop.scrim, LV_OPA_TRANSP, 0);
-        veil(0, VEIL_STEPS, motion::pop_ms / 2);
+        veil(true);  // with the first band, in the same frame
     }
     lv_obj_add_flag(s_pop.scrim, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(s_pop.scrim, [](lv_event_t *) { close_popover(true); }, LV_EVENT_CLICKED, nullptr);
@@ -1325,7 +1317,7 @@ void close_popover(bool animate)
         place(s_pop.p);
     }
     if (s_pop.backdrop != nullptr && behind() == Behind::Dim && s_pop.scrim != nullptr) {
-        veil(VEIL_STEPS, 0, motion::close_ms);
+        veil(false);
     }
     // quick, and into the source without passing it
     run(s_pop.p, 0, motion::close_ms, motion::settle, back_in_source);
