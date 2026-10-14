@@ -622,6 +622,125 @@ bool press(int x, int y, int ms)
     return true;
 }
 
+#if LV_USE_PROFILER
+// LVGL's own steps, each added up as it ends: how long it took itself and with
+// what it called, and how often, per task. A profiling build's alone (build/prof).
+namespace prof {
+struct Step {
+    const char  *name;
+    std::int64_t own_us, all_us;
+    int          calls;
+};
+struct Open {
+    int          step;
+    std::int64_t at_us, inner_us;
+};
+constexpr int STEPS = 160, DEPTH = 48, TASKS = 8;
+struct Task {
+    void *handle;
+    Open  open[DEPTH];
+    int   depth;
+};
+EXT_RAM_BSS_ATTR Step s_steps[STEPS];
+EXT_RAM_BSS_ATTR Task s_tasks[TASKS];
+int                   s_step_count = 0, s_task_count = 0;
+std::int64_t          s_started_us = 0;
+std::atomic<bool>     s_on{false};
+portMUX_TYPE          s_lock = portMUX_INITIALIZER_UNLOCKED;
+
+Task *task_of(void *handle)
+{
+    for (int i = 0; i < s_task_count; ++i) {
+        if (s_tasks[i].handle == handle) {
+            return &s_tasks[i];
+        }
+    }
+    if (s_task_count == TASKS) {
+        return nullptr;
+    }
+    Task &t = s_tasks[s_task_count++];
+    t.handle = handle;
+    t.depth  = 0;
+    return &t;
+}
+
+int step_of(const char *name)
+{
+    for (int i = 0; i < s_step_count; ++i) {
+        if (s_steps[i].name == name) {
+            return i;
+        }
+    }
+    if (s_step_count == STEPS) {
+        return -1;
+    }
+    s_steps[s_step_count] = {name, 0, 0, 0};
+    return s_step_count++;
+}
+
+void start()
+{
+    portENTER_CRITICAL(&s_lock);
+    s_step_count = 0;
+    s_task_count = 0;
+    s_started_us = esp_timer_get_time();
+    portEXIT_CRITICAL(&s_lock);
+    s_on.store(true);
+}
+
+int report(char *out, std::size_t size)
+{
+    s_on.store(false);
+    vTaskDelay(pdMS_TO_TICKS(20));  // any step under way ends unseen
+    std::sort(s_steps, s_steps + s_step_count, [](const Step &a, const Step &b) { return a.own_us > b.own_us; });
+    int n = std::snprintf(out, size, "over %.0f ms\n%-44s %9s %9s %7s\n", (esp_timer_get_time() - s_started_us) / 1000.0,
+                          "step", "own ms", "all ms", "calls");
+    for (int i = 0; i < s_step_count && n < static_cast<int>(size) - 100; ++i) {
+        const Step &s = s_steps[i];
+        n += std::snprintf(out + n, size - n, "%-44.44s %9.1f %9.1f %7d\n", s.name, s.own_us / 1000.0, s.all_us / 1000.0, s.calls);
+    }
+    return n;
+}
+}  // namespace prof
+
+extern "C" void draw_profile_begin(const char *step)
+{
+    if (!prof::s_on.load(std::memory_order_relaxed)) {
+        return;
+    }
+    const std::int64_t now = esp_timer_get_time();
+    portENTER_CRITICAL(&prof::s_lock);
+    prof::Task *t = prof::task_of(xTaskGetCurrentTaskHandle());
+    if (t != nullptr && t->depth < prof::DEPTH) {
+        t->open[t->depth++] = {prof::step_of(step), now, 0};
+    }
+    portEXIT_CRITICAL(&prof::s_lock);
+}
+
+extern "C" void draw_profile_end(const char *)
+{
+    if (!prof::s_on.load(std::memory_order_relaxed)) {
+        return;
+    }
+    const std::int64_t now = esp_timer_get_time();
+    portENTER_CRITICAL(&prof::s_lock);
+    prof::Task *t = prof::task_of(xTaskGetCurrentTaskHandle());
+    if (t != nullptr && t->depth > 0) {
+        const prof::Open o   = t->open[--t->depth];
+        const std::int64_t all = now - o.at_us;
+        if (o.step >= 0) {
+            prof::s_steps[o.step].all_us += all;
+            prof::s_steps[o.step].own_us += all - o.inner_us;
+            prof::s_steps[o.step].calls += 1;
+        }
+        if (t->depth > 0) {
+            t->open[t->depth - 1].inner_us += all;
+        }
+    }
+    portEXIT_CRITICAL(&prof::s_lock);
+}
+#endif
+
 esp_err_t bench_page(httpd_req_t *req)
 {
     if (!ota::authorised(req)) {
@@ -648,6 +767,13 @@ esp_err_t bench_page(httpd_req_t *req)
             n = std::snprintf(text, sizeof(text), "backdrop %c\n", query[2]);
         } else if (std::strcmp(query, "fp") == 0 || std::strcmp(query, "fpc") == 0) {  // each frame and touch lately; fpc starts over
             n = board::frame_report(text, sizeof(text), query[2] == 'c');
+#if LV_USE_PROFILER
+        } else if (std::strcmp(query, "prof") == 0) {  // LVGL's draw steps traced from now
+            prof::start();
+            n = std::snprintf(text, sizeof(text), "tracing\n");
+        } else if (std::strcmp(query, "profd") == 0) {  // and what they cost since
+            n = prof::report(text, sizeof(text));
+#endif
         } else if (std::strncmp(query, "fx=", 3) == 0) {  // fx=0 or 1: the shadows, to feel the panel without them
             ui::kit::set_effects(query[3] != '0');
             n = std::snprintf(text, sizeof(text), "shadows %s\n", query[3] != '0' ? "on" : "off");
