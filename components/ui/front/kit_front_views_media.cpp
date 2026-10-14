@@ -228,6 +228,7 @@ void show_cover()
             s_covers = media.covers;
             s_larges = media.larges;
         }
+        s_cover->set_paused(!media.playing);
     }
     if (s_tinted != media.covers) {
         tint(nullptr);
@@ -271,6 +272,7 @@ void show()
 
     lv_obj_t *glyph = lv_obj_get_child(s_play, 0);
     set_icon(glyph, media.playing ? ic::pause : ic::play_arrow, true);
+    s_cover->set_paused(!media.playing);
     lv_obj_set_hidden(s_prev, !media.remote || !media.tracks_back);
     lv_obj_set_hidden(s_play, !media.remote);
     lv_obj_set_hidden(s_next, !media.remote || !media.tracks_on);
@@ -471,6 +473,7 @@ void show()
     }
     tick(nullptr);
     set_icon(lv_obj_get_child(s_play, 0), media.playing ? ic::pause : ic::play_arrow, true);
+    s_still->set_paused(!media.playing);
     for (lv_obj_t *control : {s_back, s_play, s_on}) {
         lv_obj_set_hidden(control, !media.remote);
     }

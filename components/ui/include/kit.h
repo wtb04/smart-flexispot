@@ -410,6 +410,8 @@ class Cover : public InPsram {
     void clear(bool animate = true);
     /** Back to the empty well, and its memory given back. */
     void release();
+    /** Dimmed with a play mark over it, as what it shows is paused; only over a picture. */
+    void        set_paused(bool paused);
     /** What the empty well shows in place of its glyph, an A8 picture in the tertiary ink; nullptr for the glyph again. */
     void        set_mark(const lv_image_dsc_t *picture);
     bool        has_picture() const { return m_has; }
@@ -430,7 +432,7 @@ class Cover : public InPsram {
     void settle();
 
     lv_obj_t      *m_root = nullptr, *m_well = nullptr, *m_pic = nullptr;
-    lv_obj_t      *m_glyph = nullptr, *m_mark = nullptr;
+    lv_obj_t      *m_glyph = nullptr, *m_mark = nullptr, *m_hush = nullptr;
     Made           m_cur{};
     lv_draw_buf_t *m_ghost = nullptr;  // what was shown, at a fraction of the size, while the new one fades in over it
     std::int32_t   m_w = 0, m_h = 0, m_r = 0;
