@@ -13,11 +13,11 @@ from kiutils.items.common import Position
 from kiutils.items.brditems import Segment, Via
 
 PCB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tab5-desk-ctrl.kicad_pcb")
-W, H, GRID = 70.0, 35.2, 0.1
+W, H, GRID = 80.0, 35.2, 0.1
 NX, NY = int(W / GRID) + 1, int(H / GRID) + 1
 EDGE = 0.5                      # board rule: copper-to-edge clearance
 CLEAR = 0.25                     # router clearance (DRC rule is 0.20)
-KEEPOUT = (29.5, 7.1, 43.0, 28.4)
+KEEPOUT = (39.5, 7.1, 53.0, 28.4)
 # An M3 pan head with a washer is about 6 mm across and clamps down on whatever
 # is under it, with only soldermask between steel and copper. DRC only knows
 # about the drill, so it happily routes to 0.37 mm of a mounting hole -- keep
