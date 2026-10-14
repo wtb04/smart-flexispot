@@ -98,3 +98,11 @@ class FakeCovers:
 
     def load(self, url, done):
         self.asked.append((url, done))
+
+
+class FakeYouTube:
+    def __init__(self):
+        self.asked = []
+
+    def find(self, title, channel, small, done):
+        self.asked.append((title, channel, small, done))

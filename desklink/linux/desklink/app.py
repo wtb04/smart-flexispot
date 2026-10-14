@@ -10,7 +10,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GLib  # noqa: E402
 
-from . import __version__, artwork, link, player, server, settings, volume  # noqa: E402
+from . import __version__, artwork, link, player, server, settings, volume, youtube  # noqa: E402
 
 log = logging.getLogger("desklink")
 APP_ID = "nl.w-tb.desklink"
@@ -49,7 +49,8 @@ class App(Adw.Application):
         self.link = link.Link(settings=stored, save_settings=lambda s: settings.save(s, self._settings_path),
                               key=self._keys.read(), client=server.PanelClient(), volume=self._volume,
                               covers=artwork.Covers(), player_command=self._mpris.command, clock=link.Clock(),
-                              timers=link.GLibTimers(), machine=machine_name(), locked=hyprlock_running)
+                              timers=link.GLibTimers(), machine=machine_name(), locked=hyprlock_running,
+                              youtube=youtube.YouTube())
         self._server = server.Server(self.link.handle)
         self.server_error = self._server.start()
         self._volume.start()
