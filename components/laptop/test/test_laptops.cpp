@@ -165,3 +165,20 @@ TEST(Laptops, a_new_port_is_a_new_laptop)
     EXPECT_EQ(laptops.count(), 2);
     EXPECT_EQ(laptops.current_origin(), "http://10.1.10.40:47802");
 }
+
+TEST(Laptops, a_laptop_at_a_new_address_takes_its_own_row_over)
+{
+    Laptops    laptops;
+    NowPlaying before = paused("Song");
+    before.machine    = "CloudPad";
+    laptops.take("http://10.1.10.40:47801", before, 0, PING);
+    laptops.reached("http://10.1.10.40:47801", true);
+    NowPlaying after = paused("Song");
+    after.machine    = "CloudPad";  // Desk Link restarted, or the laptop docked onto another network
+    const Taken taken = laptops.take("http://10.1.20.77:47801", after, 1 * S, PING);
+    EXPECT_EQ(laptops.count(), 1);
+    EXPECT_EQ(laptops.current_origin(), "http://10.1.20.77:47801");
+    EXPECT_TRUE(taken.tell);
+    EXPECT_TRUE(taken.ping) << "the new address is tried back";
+    EXPECT_EQ(taken.reaches, -1) << "what was known of the old address says nothing of the new";
+}
