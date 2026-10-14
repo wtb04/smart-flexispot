@@ -408,15 +408,17 @@ Slot<bool>           p_claude;
 Slot<DetailsArgs>    p_details;
 Slot<PhotoArgs>      p_photo;
 
-// Notifications in the order they were asked for; the oldest goes when full.
-constexpr int NOTICE_INBOX_LEN = 4;
-Notice        s_inbox[NOTICE_INBOX_LEN];
+// Notices and their withdrawals in the order they were asked for, so a question
+// answered and asked again at once keeps the new one; the oldest goes when full.
+struct Posted {
+    Notice notice;
+    bool   withdraw = false;  // take back notice.key rather than show it
+};
+constexpr int NOTICE_INBOX_LEN = 8;
+Posted        s_inbox[NOTICE_INBOX_LEN];
 int           s_inbox_count = 0;
-// Withdrawn after the inbox's notices are taken, so one sent and withdrawn at once goes.
-char          s_withdrawn[NOTICE_INBOX_LEN][sizeof(Notice::key)];
-int           s_withdrawn_count = 0;
 
-void drop_oldest(Notice *queue, int &count)
+void drop_oldest(Posted *queue, int &count)
 {
     for (int i = 1; i < count; ++i) {
         queue[i - 1] = queue[i];
@@ -779,25 +781,20 @@ void apply_page_updates()
 
 void apply_inbox()
 {
-    static Notice notices[NOTICE_INBOX_LEN];
+    static Posted posted[NOTICE_INBOX_LEN];
     portENTER_CRITICAL(&s_pending_lock);
     const int count = s_inbox_count;
     for (int i = 0; i < count; ++i) {
-        notices[i] = s_inbox[i];
+        posted[i] = s_inbox[i];
     }
     s_inbox_count = 0;
-    static char withdrawn[NOTICE_INBOX_LEN][sizeof(Notice::key)];
-    const int   withdrawn_count = s_withdrawn_count;
-    for (int i = 0; i < withdrawn_count; ++i) {
-        std::memcpy(withdrawn[i], s_withdrawn[i], sizeof(withdrawn[i]));
-    }
-    s_withdrawn_count = 0;
     portEXIT_CRITICAL(&s_pending_lock);
     for (int i = 0; i < count; ++i) {
-        notices_take(notices[i]);
-    }
-    for (int i = 0; i < withdrawn_count; ++i) {
-        withdraw_notice(withdrawn[i]);
+        if (posted[i].withdraw) {
+            withdraw_notice(posted[i].notice.key);
+        } else {
+            notices_take(posted[i].notice);
+        }
     }
 }
 
@@ -1201,7 +1198,8 @@ esp_err_t notify(const char *source, const char *title, const char *message, Lev
     if (s_inbox_count == NOTICE_INBOX_LEN) {
         drop_oldest(s_inbox, s_inbox_count);
     }
-    Notice &slot = s_inbox[s_inbox_count++];
+    s_inbox[s_inbox_count].withdraw = false;
+    Notice &slot = s_inbox[s_inbox_count++].notice;
     copy_text(slot.source, sizeof(slot.source), source);
     copy_text(slot.title, sizeof(slot.title), title);
     copy_text(slot.message, sizeof(slot.message), message);
@@ -1217,13 +1215,13 @@ esp_err_t withdraw(const char *key)
 {
     ESP_RETURN_ON_FALSE(key != nullptr && key[0] != '\0', ESP_ERR_INVALID_ARG, TAG, "no key");
     portENTER_CRITICAL(&s_pending_lock);
-    if (s_withdrawn_count == NOTICE_INBOX_LEN) {
-        for (int i = 1; i < s_withdrawn_count; ++i) {
-            std::memcpy(s_withdrawn[i - 1], s_withdrawn[i], sizeof(s_withdrawn[i]));
-        }
-        --s_withdrawn_count;
+    if (s_inbox_count == NOTICE_INBOX_LEN) {
+        drop_oldest(s_inbox, s_inbox_count);
     }
-    copy_text(s_withdrawn[s_withdrawn_count++], sizeof(s_withdrawn[0]), key);
+    Posted &slot  = s_inbox[s_inbox_count++];
+    slot          = Posted{};
+    slot.withdraw = true;
+    copy_text(slot.notice.key, sizeof(slot.notice.key), key);
     portEXIT_CRITICAL(&s_pending_lock);
     s_pending.store(true, std::memory_order_release);
     return ESP_OK;
