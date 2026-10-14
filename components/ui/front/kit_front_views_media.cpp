@@ -153,9 +153,11 @@ Rail *progress(lv_obj_t *parent, std::int32_t x, std::int32_t y, std::int32_t w)
 namespace music {
 constexpr std::int32_t COVER = media::kLargeArtSize, X0 = 96, Y0 = (size::screen_h - COVER) / 2;
 constexpr std::int32_t X = X0 + COVER + 72, W = size::screen_w - X - X0;
+// the words from the cover's top, the controls down to its foot, spread evenly between
+constexpr std::int32_t SPREAD = 48;
 constexpr std::int32_t VOLUME_Y = Y0 + COVER - size::button_lg, TRANSPORT_H = 88, SIDE = 80;
-constexpr std::int32_t TRANSPORT_Y = VOLUME_Y - space::xxl - TRANSPORT_H;
-constexpr std::int32_t TIMES_Y = TRANSPORT_Y - space::xxl - 24, RAIL_Y = TIMES_Y - 30;
+constexpr std::int32_t TRANSPORT_Y = VOLUME_Y - SPREAD - TRANSPORT_H;
+constexpr std::int32_t TIMES_Y = TRANSPORT_Y - SPREAD - 24, RAIL_Y = TIMES_Y - 30;
 
 detail::ViewId s_view = detail::kNoView;
 lv_obj_t      *s_root = nullptr;
@@ -297,11 +299,11 @@ void build(lv_obj_t *)
     lv_obj_add_flag(s_cover->obj(), LV_OBJ_FLAG_CLICKABLE);  // a tap on the record plays or pauses it
     lv_obj_add_event_cb(s_cover->obj(), [](lv_event_t *) { detail::media_toggle_play(); }, LV_EVENT_CLICKED, nullptr);
 
-    // from the top of the cover down to the progress, the words sitting on it
+    // level with the top of the cover
     lv_obj_t *words = bare(root, W, RAIL_Y - space::l - Y0);
     lv_obj_set_pos(words, X, Y0);
     lv_obj_set_flex_flow(words, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(words, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_set_flex_align(words, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     lv_obj_set_style_pad_row(words, space::xs, 0);
     s_source = line(words, Role::Small, Ink::Secondary, W);
     s_title  = line(words, Role::H1, Ink::Primary, W);

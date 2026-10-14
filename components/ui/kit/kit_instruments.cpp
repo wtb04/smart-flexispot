@@ -357,11 +357,17 @@ void Rail::place(std::int32_t value)
         }
     };
     const std::int32_t thick = m_spec.quiet ? 4 : TRACK;  // a quiet track's line, which would cut a thicker fill in half
-    const std::int32_t w = v ? thick : at + TRACK, h = v ? at + TRACK : thick;
+    // with no knob to sit under, a quiet fill runs from nothing at the start to the whole line at the end
+    const std::int32_t run = m_spec.quiet ? (std::clamp(value, m_spec.min, m_spec.max) - m_spec.min) * len / (m_spec.max - m_spec.min)
+                                          : at + TRACK;
+    const std::int32_t w = v ? thick : run, h = v ? run : thick;
+    if (lv_obj_is_hidden(m_fill) != (run == 0)) {
+        lv_obj_set_hidden(m_fill, run == 0);
+    }
     if (lv_obj_get_style_width(m_fill, LV_PART_MAIN) != w || lv_obj_get_style_height(m_fill, LV_PART_MAIN) != h) {
         lv_obj_set_size(m_fill, w, h);
     }
-    put(m_fill, 0, v ? len - at - TRACK : 0);
+    put(m_fill, 0, v ? len - run : 0);
     const std::int32_t knob_at = at + TRACK / 2 - KNOB / 2;
     put(m_knob, v ? 0 : END + knob_at, v ? END + len - knob_at - KNOB : 0);
 }
