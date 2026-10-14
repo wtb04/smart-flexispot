@@ -58,9 +58,22 @@ Taken Laptops::take(const std::string &origin, const NowPlaying &now, std::int64
                     std::int64_t ping_every_us)
 {
     int index = find(origin);
+    if (index < 0 && !now.machine.empty()) {
+        // the same laptop at a new address, as one restarted or docked onto another network
+        for (int i = 0; i < count_; ++i) {
+            if (rows_[i].now.machine == now.machine) {
+                index               = i;
+                rows_[i].origin     = origin;
+                rows_[i].pinged_us  = -1;
+                rows_[i].reaches    = -1;
+                rows_[i].missed     = 0;
+                break;
+            }
+        }
+    }
     if (index < 0) {
-        index              = make_room();
-        rows_[index]       = Seen{};
+        index               = make_room();
+        rows_[index]        = Seen{};
         rows_[index].origin = origin;
     }
     Seen &row = rows_[index];
