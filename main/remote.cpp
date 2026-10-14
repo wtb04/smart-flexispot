@@ -774,6 +774,11 @@ esp_err_t bench_page(httpd_req_t *req)
         } else if (std::strcmp(query, "profd") == 0) {  // and what they cost since
             n = prof::report(text, sizeof(text));
 #endif
+        } else if (std::strncmp(query, "pm=", 3) == 0) {  // pm=g, r or a: popovers grow, rise or appear
+            ui::kit::set_pop_motion(query[3] == 'g' ? ui::kit::PopMotion::Grow
+                                    : query[3] == 'r' ? ui::kit::PopMotion::Rise
+                                                      : ui::kit::PopMotion::Appear);
+            n = std::snprintf(text, sizeof(text), "popovers %c\n", query[3]);
         } else if (std::strncmp(query, "fx=", 3) == 0) {  // fx=0 or 1: the shadows, to feel the panel without them
             ui::kit::set_effects(query[3] != '0');
             n = std::snprintf(text, sizeof(text), "shadows %s\n", query[3] != '0' ? "on" : "off");
