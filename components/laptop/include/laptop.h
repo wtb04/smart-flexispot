@@ -10,6 +10,8 @@
 // Desk Link: a laptop's Now Playing and its Claude Code sessions, told to the
 // panel's server sealed, and play, pause, seek, skip and volume sent back the
 // same way. Each side pings the other, so each knows the other is there.
+// Several laptops may share at once: the panel follows whichever plays, as
+// laptops.h has it, and the commands go to that one.
 namespace laptop {
 struct Handlers {
     void (*playing)(const NowPlaying &now) = nullptr;
