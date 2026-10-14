@@ -1,7 +1,7 @@
-// The Setup page: the screen and sound, which are changed now and then, on the
-// left, with the focus timer's plan and the panel's own settings, set once, a
-// tap away in sheets; how the panel is, and sleeping and restarting it, on the
-// right, the first in kit_front_setup_diag.cpp.
+// The Setup page: its sections listed on the left, the chosen one's settings on
+// the right, as a tablet's settings are: the screen and sound, the focus
+// timer's plan, the panel's own settings, how the panel is (in
+// kit_front_setup_diag.cpp), and sleeping and restarting it.
 
 #include "kit_front.h"
 
@@ -21,10 +21,8 @@ namespace {
 namespace ic = kit::glyph;
 using namespace kit;
 
-constexpr std::int32_t COL_W = (inset::width - space::l) / 2;
-constexpr std::int32_t RAIL_W = 230, PROGRESS_W = 170, SEG_2 = 230, SEG_3 = 300;
-constexpr std::int32_t SHEET_W = 760;
-constexpr std::int32_t SHEET_ROW = 80;
+constexpr std::int32_t SIDE_W = 300, SIDE_ROW_H = 72, DETAIL_W = inset::width - SIDE_W - space::l;
+constexpr std::int32_t RAIL_W = 300, PROGRESS_W = 200, SEG_2 = 260, SEG_3 = 330;
 // a sheet's padding, its head and the frame round its body
 constexpr std::int32_t SHEET_CHROME = 2 * space::xxl + size::button + space::l + 3 * space::s;
 
@@ -48,11 +46,9 @@ constexpr PlanSpec PLAN[PLAN_COUNT] = {
 };
 
 Rail     *s_brightness = nullptr, *s_volume = nullptr, *s_progress = nullptr;
-lv_obj_t *s_brightness_row = nullptr, *s_volume_row = nullptr, *s_plan_row = nullptr;
+lv_obj_t *s_brightness_row = nullptr, *s_volume_row = nullptr;
 lv_obj_t *s_restart = nullptr;
 bool      s_update_ready = false;
-
-// What the sheets hold while one is open.
 lv_obj_t *s_turn = nullptr, *s_gate = nullptr, *s_charging = nullptr, *s_link = nullptr;
 Stepper  *s_plan[PLAN_COUNT] = {};
 
@@ -66,30 +62,6 @@ lv_obj_t *setting_row(lv_obj_t *parent, const char *glyph, const char *title, co
     spec.trail  = trail;
     lv_obj_t *r = row(parent, spec);
     row_height(r, SETUP_ROW_H);
-    return r;
-}
-
-lv_obj_t *opening_row(lv_obj_t *parent, const char *glyph, const char *title, const char *detail,
-                      void (*open)(lv_obj_t *source))
-{
-    lv_obj_t *r = setting_row(parent, glyph, title, detail, Trail::Chevron);
-    popover_source(r);
-    lv_obj_add_event_cb(
-        r, [](lv_event_t *e) { reinterpret_cast<void (*)(lv_obj_t *)>(lv_event_get_user_data(e))(lv_event_get_current_target_obj(e)); },
-        LV_EVENT_CLICKED, reinterpret_cast<void *>(open));
-    return r;
-}
-
-lv_obj_t *settings_sheet(lv_obj_t *source, const char *title, int rows)
-{
-    return sheet(source, title, SHEET_W, SHEET_CHROME + rows * SHEET_ROW);
-}
-
-lv_obj_t *sheet_setting(lv_obj_t *body, const char *glyph, const char *title, const char *detail = nullptr,
-                        Trail trail = Trail::None)
-{
-    lv_obj_t *r = setting_row(body, glyph, title, detail, trail);
-    row_height(r, SHEET_ROW);
     return r;
 }
 
@@ -127,24 +99,6 @@ void on_segment(lv_obj_t *seg, void (*picked)(int index))
             reinterpret_cast<void (*)(int)>(lv_event_get_user_data(e))(segmented_chosen(lv_event_get_current_target_obj(e)));
         },
         LV_EVENT_VALUE_CHANGED, reinterpret_cast<void *>(picked));
-}
-
-// Whatever of a sheet was kept here is gone with it.
-void forget_on_close(lv_obj_t *body, lv_obj_t **refs[], int count)
-{
-    auto **held = static_cast<lv_obj_t ***>(lv_malloc(sizeof(lv_obj_t **) * (count + 1)));
-    std::copy(refs, refs + count, held);
-    held[count] = nullptr;
-    lv_obj_add_event_cb(
-        body,
-        [](lv_event_t *e) {
-            auto **held = static_cast<lv_obj_t ***>(lv_event_get_user_data(e));
-            for (lv_obj_t ***r = held; *r != nullptr; ++r) {
-                **r = nullptr;
-            }
-            lv_free(held);
-        },
-        LV_EVENT_DELETE, held);
 }
 
 // --- the screen and sound -------------------------------------------------
@@ -222,11 +176,8 @@ void paint_volume()
     }
 }
 
-void build_screen(lv_obj_t *column)
+void build_screen(lv_obj_t *g)
 {
-    section(column, "Screen and sound");
-    lv_obj_t *g = group(column, COL_W);
-
     s_brightness_row = setting_row(g, ic::light, "Brightness", "");
     s_brightness = slider(s_brightness_row, board::kMinBrightness, detail::s_initial_brightness);
     percent_detail(s_brightness_row, s_brightness->value());
@@ -277,7 +228,7 @@ void build_screen(lv_obj_t *column)
     });
 }
 
-// --- the panel's own settings, set once -----------------------------------
+// --- the panel's own settings ---------------------------------------------
 
 void paint_panel()
 {
@@ -285,20 +236,16 @@ void paint_panel()
     choose(s_gate, st.on[static_cast<int>(Setting::PresenceGate)] ? 1 : 0);
     choose(s_link, st.on[static_cast<int>(Setting::DeskBluetooth)] ? 1 : 0);
     choose(s_turn, static_cast<int>(detail::s_orientation));
-    if (s_charging != nullptr) {
-        lv_obj_t  *sw = row_trail(s_charging);
-        const bool on = st.on[static_cast<int>(Setting::Charging)];
-        if (lv_obj_has_state(sw, LV_STATE_CHECKED) != on) {
-            lv_obj_set_state(sw, LV_STATE_CHECKED, on);
-        }
+    lv_obj_t  *sw = row_trail(s_charging);
+    const bool on = st.on[static_cast<int>(Setting::Charging)];
+    if (lv_obj_has_state(sw, LV_STATE_CHECKED) != on) {
+        lv_obj_set_state(sw, LV_STATE_CHECKED, on);
     }
 }
 
-void open_panel(lv_obj_t *source)
+void build_panel(lv_obj_t *body)
 {
-    lv_obj_t *body = settings_sheet(source, "Panel", 4);
-
-    s_turn = segmented(sheet_setting(body, ic::aspect_ratio, "Orientation"), {"Normal", "Flipped", "Auto"},
+    s_turn = segmented(setting_row(body, ic::aspect_ratio, "Orientation"), {"Normal", "Flipped", "Auto"},
                        static_cast<int>(detail::s_orientation), SEG_3);
     on_segment(s_turn, [](int i) {
         const auto picked = static_cast<Orientation>(i);
@@ -311,11 +258,11 @@ void open_panel(lv_obj_t *source)
         }
     });
 
-    s_gate = segmented(sheet_setting(body, ic::smartphone, "Pages while away", "Calendar and radar"),
+    s_gate = segmented(setting_row(body, ic::smartphone, "Pages while away", "Calendar and radar"),
                        {"Show", "Hide"}, 0, SEG_2);
     on_segment(s_gate, [](int i) { detail::settings_pick(Setting::PresenceGate, i == 1); });
 
-    s_charging = sheet_setting(body, ic::bolt, "Battery charging", nullptr, Trail::Toggle);
+    s_charging = setting_row(body, ic::bolt, "Battery charging", nullptr, Trail::Toggle);
     lv_obj_add_event_cb(
         row_trail(s_charging),
         [](lv_event_t *e) {
@@ -323,11 +270,10 @@ void open_panel(lv_obj_t *source)
         },
         LV_EVENT_VALUE_CHANGED, nullptr);
 
-    s_link = segmented(sheet_setting(body, ic::desk, "Desk link"), {"Wire", "Bluetooth"}, 0, SEG_2);
+    s_link = segmented(setting_row(body, ic::desk, "Desk link"), {"Wire", "Bluetooth"}, 0, SEG_2);
     on_segment(s_link, [](int i) { detail::settings_pick(Setting::DeskBluetooth, i == 1); });
 
-    lv_obj_t **refs[] = {&s_turn, &s_gate, &s_charging, &s_link};
-    forget_on_close(body, refs, static_cast<int>(std::size(refs)));
+    subscribe(Topic::Settings, detail::kNoView, paint_panel);
     paint_panel();
 }
 
@@ -336,20 +282,14 @@ void open_panel(lv_obj_t *source)
 void paint_plan()
 {
     const Focus &f = detail::focus_state();
-    char         line[64];
-    std::snprintf(line, sizeof line, "%d min focus, %d min break, %d rounds", f.work_min, f.break_min, f.rounds);
-    set_row_detail(s_plan_row, line);
     const int values[PLAN_COUNT] = {f.work_min, f.break_min, f.long_break_min, f.rounds};
     for (int i = 0; i < PLAN_COUNT; ++i) {
-        if (s_plan[i] != nullptr) {
-            s_plan[i]->set_value(values[i]);
-        }
+        s_plan[i]->set_value(values[i]);
     }
 }
 
-void open_plan(lv_obj_t *source)
+void build_plan(lv_obj_t *body)
 {
-    lv_obj_t *body = settings_sheet(source, "Focus plan", PLAN_COUNT);
     for (int i = 0; i < PLAN_COUNT; ++i) {
         const PlanSpec &p = PLAN[i];
         StepperSpec     spec;
@@ -358,7 +298,7 @@ void open_plan(lv_obj_t *source)
         spec.step  = p.step;
         spec.value = p.min;
         spec.unit  = p.unit;
-        s_plan[i]  = new Stepper(sheet_setting(body, p.glyph, p.title, p.detail), spec);
+        s_plan[i]  = new Stepper(setting_row(body, p.glyph, p.title, p.detail), spec);
         lv_obj_add_event_cb(
             s_plan[i]->obj(),
             [](lv_event_t *) {
@@ -368,17 +308,6 @@ void open_plan(lv_obj_t *source)
                 }
             },
             LV_EVENT_VALUE_CHANGED, nullptr);
-        // after the stepper's own, which stops its repeat
-        lv_obj_add_event_cb(
-            s_plan[i]->obj(),
-            [](lv_event_t *e) {
-                auto *st = static_cast<Stepper *>(lv_event_get_user_data(e));
-                for (Stepper *&held : s_plan) {
-                    held = held == st ? nullptr : held;
-                }
-                delete st;
-            },
-            LV_EVENT_DELETE, s_plan[i]);
     }
     // one width, so their buttons line up in columns
     lv_obj_update_layout(body);
@@ -390,18 +319,8 @@ void open_plan(lv_obj_t *source)
         lv_obj_set_width(st->obj(), widest);
         lv_obj_set_flex_align(st->obj(), LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     }
-    paint_plan();
-}
-
-void build_more(lv_obj_t *column)
-{
-    lv_obj_t *head = section(column, "Focus and panel");
-    lv_obj_set_style_margin_top(head, space::l, 0);
-    lv_obj_t *g = group(column, COL_W);
-    s_plan_row  = opening_row(g, ic::timer, "Focus plan", "", open_plan);
-    opening_row(g, ic::tune, "Panel", "Orientation, charging, desk link and more", open_panel);
     subscribe(Topic::Focus, detail::kNoView, paint_plan);
-    subscribe(Topic::Settings, detail::kNoView, paint_panel);
+    paint_plan();
 }
 
 // --- sleeping and restarting ----------------------------------------------
@@ -449,12 +368,9 @@ void paint_update()
     }
 }
 
-void build_power(lv_obj_t *column)
+void build_system(lv_obj_t *g)
 {
-    lv_obj_t *head = section(column, "Sleep and restart");
-    lv_obj_set_style_margin_top(head, space::l, 0);
-    lv_obj_t *g = group(column, COL_W);
-    RowSpec   off;
+    RowSpec off;
     off.glyph  = ic::visibility_off;
     off.title  = "Screen off";
     off.detail = "Tap to wake";
@@ -493,6 +409,39 @@ void build_power(lv_obj_t *column)
         LV_EVENT_SHORT_CLICKED, nullptr);
     subscribe(Topic::Update, detail::kNoView, paint_update);
 }
+
+// --- the sections ---------------------------------------------------------
+
+struct SectionSpec {
+    const char *glyph, *name;
+    void (*build)(lv_obj_t *column);
+};
+constexpr SectionSpec SECTIONS[] = {
+    {ic::light, "Screen and sound", build_screen},
+    {ic::timer, "Focus", build_plan},
+    {ic::tune, "Panel", build_panel},
+    {ic::monitor_heart, "Diagnostics", nullptr},
+    {ic::power_settings_new, "System", build_system},
+};
+constexpr int SECTION_COUNT = static_cast<int>(std::size(SECTIONS));
+constexpr int DIAGNOSTICS   = 3;
+
+int       s_chosen = 0;  // while the panel runs: Setup opens on the last one
+lv_obj_t *s_detail = nullptr;
+lv_obj_t *s_side[SECTION_COUNT] = {}, *s_column[SECTION_COUNT] = {};
+
+void choose_section(int index)
+{
+    if (index == s_chosen) {
+        return;
+    }
+    lv_obj_set_hidden(s_column[s_chosen], true);
+    set_row_chosen(s_side[s_chosen], false);
+    s_chosen = index;
+    set_card_title(s_detail, SECTIONS[index].name);
+    lv_obj_set_hidden(s_column[index], false);
+    set_row_chosen(s_side[index], true);
+}
 }  // namespace
 
 void build_setup(lv_obj_t *page)
@@ -500,14 +449,37 @@ void build_setup(lv_obj_t *page)
     lv_obj_t *cols = flow(page, LV_FLEX_FLOW_ROW, space::l);
     lv_obj_set_size(cols, inset::width, inset::height);
 
-    lv_obj_t *left = flow(cols, LV_FLEX_FLOW_COLUMN, 0);
-    lv_obj_set_size(left, COL_W, inset::height);
-    build_screen(left);
-    build_more(left);
+    lv_obj_t *side = card_list(cols, "Setup", SIDE_W, inset::height);
+    s_column[0]    = card_list(cols, SECTIONS[s_chosen].name, DETAIL_W, inset::height);
+    s_detail       = lv_obj_get_parent(s_column[0]);
+    for (int i = 1; i < SECTION_COUNT; ++i) {
+        s_column[i] = card_column(s_detail);
+    }
 
-    lv_obj_t *right = flow(cols, LV_FLEX_FLOW_COLUMN, 0);
-    lv_obj_set_size(right, COL_W, inset::height);
-    build_setup_diagnostics(right, COL_W, 4 * SETUP_ROW_H);
-    build_power(right);
+    lv_obj_t *mark = nullptr;
+    for (int i = 0; i < SECTION_COUNT; ++i) {
+        RowSpec spec;
+        spec.glyph     = SECTIONS[i].glyph;
+        spec.title     = SECTIONS[i].name;
+        spec.pressable = true;
+        s_side[i]      = row(side, spec);
+        row_height(s_side[i], SIDE_ROW_H);
+        lv_obj_add_event_cb(
+            s_side[i],
+            [](lv_event_t *e) { choose_section(static_cast<int>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e)))); },
+            LV_EVENT_CLICKED, reinterpret_cast<void *>(static_cast<std::intptr_t>(i)));
+        if (i == DIAGNOSTICS) {
+            mark = dot(s_side[i], Ink::Green, 12);
+        }
+        if (SECTIONS[i].build != nullptr) {
+            SECTIONS[i].build(s_column[i]);
+        }
+    }
+    build_setup_diagnostics(s_column[DIAGNOSTICS], mark);
+
+    for (int i = 0; i < SECTION_COUNT; ++i) {
+        lv_obj_set_hidden(s_column[i], i != s_chosen);
+    }
+    set_row_chosen(s_side[s_chosen], true);
 }
 }  // namespace ui::kitfront
