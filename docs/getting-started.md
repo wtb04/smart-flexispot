@@ -153,7 +153,14 @@ cd desklink/macos && make install
 
 Then give it the key from its menu, under Panel, or before its first start with `defaults write nl.w-tb.desklink key <DESK_LINK_KEY>`, which it moves into the keychain. The menu says whether the panel answers, and whether the panel reaches the Mac back; a firewall that lets Desk Link out but keeps port 47801 shut stops the commands.
 
-For Claude Code, each laptop also needs `jq` and `curl`, which macOS has, and this repository's `tools/claude-hook`. In `~/.claude/settings.json`, run it on every event that changes what the panel shows; `async` keeps Claude Code from ever waiting on it:
+On Linux, [Desk Link for Linux](../desklink/linux/) does the same from the bar:
+
+```sh
+cd desklink/linux && make install
+desklink set-key <DESK_LINK_KEY>
+```
+
+For Claude Code, each laptop also needs `jq` and `curl`, which macOS has and most Linux systems do, and this repository's `tools/claude-hook`. In `~/.claude/settings.json`, run it on every event that changes what the panel shows; `async` keeps Claude Code from ever waiting on it:
 
 ```json
 {
