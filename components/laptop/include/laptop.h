@@ -16,10 +16,11 @@ namespace laptop {
 struct Handlers {
     void (*playing)(const NowPlaying &now) = nullptr;
     void (*claude)(const char *event, std::size_t length) = nullptr;  // a tools/claude-hook event
+    void (*sharing)(int laptops) = nullptr;  // how many share, as one joins or goes quiet
 };
 
 /** On the update server, which must be up. The handlers run on its task, and
- *  `playing` on a timer's once a laptop has gone quiet. */
+ *  `playing` and `sharing` on a timer's once a laptop has gone quiet. */
 esp_err_t start(Handlers handlers);
 
 void play_pause();

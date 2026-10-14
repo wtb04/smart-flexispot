@@ -168,12 +168,14 @@ lv_obj_t *heading(lv_obj_t *body, const char *title, const char *sub);
 lv_obj_t *dot(lv_obj_t *parent, Ink ink, std::int32_t px = 12);
 void      set_dot(lv_obj_t *dot, Ink ink);
 
-/** The bar's status as the panel has always drawn it: the time, Wi-Fi and the phone. */
+/** The bar's status as the panel has always drawn it: the time, Wi-Fi and the phone; and the
+ *  laptops sharing through Desk Link, how many on its screen when more than one. */
 struct Status {
-    lv_obj_t *root = nullptr, *clock = nullptr, *wifi = nullptr, *phone = nullptr;
+    lv_obj_t *root = nullptr, *clock = nullptr, *wifi = nullptr, *phone = nullptr, *laptop = nullptr,
+             *laptops = nullptr;
 };
 Status status(lv_obj_t *parent);
-void   set_status(const Status &s, const char *time, bool wifi, bool phone);
+void   set_status(const Status &s, const char *time, bool wifi, bool phone, int laptops);
 
 enum class Button : std::uint8_t {
     Raised,  // the ordinary button on a surface

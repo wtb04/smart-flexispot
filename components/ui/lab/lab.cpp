@@ -405,7 +405,7 @@ void build_bar(lv_obj_t *scr)
     lv_obj_set_size(bar, CONTENT_W, size::bar);
     lv_obj_set_flex_align(bar, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-    set_status(status(bar), "9:41", true, true);
+    set_status(status(bar), "9:41", true, true, 1);
     spacer(bar);
 
     lv_obj_t *room  = capsule(bar);

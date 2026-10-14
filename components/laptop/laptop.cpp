@@ -215,6 +215,13 @@ void tell(const NowPlaying &now)
     }
 }
 
+void tell_sharing(int laptops)
+{
+    if (s_on.sharing != nullptr) {
+        s_on.sharing(laptops);
+    }
+}
+
 // The laptop's port tried from here: a firewall there lets the laptop talk
 // to the panel and keeps the panel's commands out.
 void ping_back(const std::string &origin)
@@ -247,11 +254,15 @@ esp_err_t take_state(httpd_req_t *req, const std::string &plain)
     const std::string origin = "http://" + from + ':' + std::to_string(now.port);
     Taken             taken;
     NowPlaying        followed;
+    int               was     = 0;
+    int               sharing = 0;
     {
         std::lock_guard<std::mutex> hold(s_lock);
         const std::string before = s_laptops.current_origin();
+        was                      = s_laptops.count();
         taken                    = s_laptops.take(origin, now, esp_timer_get_time(), PING_EVERY_US);
         followed                 = s_laptops.current_now();
+        sharing                  = s_laptops.count();
         if (s_laptops.current_origin() != before) {
             const std::string who = followed.active ? followed.machine + " at " + s_laptops.current_origin() : "none";
             ESP_LOGI(TAG, "following %s", who.c_str());
@@ -262,6 +273,9 @@ esp_err_t take_state(httpd_req_t *req, const std::string &plain)
     }
     if (taken.tell) {
         tell(followed);
+    }
+    if (sharing != was) {
+        tell_sharing(sharing);
     }
     return answer(req, "200 OK",
                   sealed(std::string(LINK) + REPLY,
@@ -316,15 +330,25 @@ esp_err_t take(httpd_req_t *req)
 void check_quiet(void *)
 {
     NowPlaying followed;
+    bool       moved   = false;
+    int        was     = 0;
+    int        sharing = 0;
     {
         std::lock_guard<std::mutex> hold(s_lock);
-        if (!s_laptops.forget_quiet(esp_timer_get_time(), QUIET_US)) {
+        was     = s_laptops.count();
+        moved   = s_laptops.forget_quiet(esp_timer_get_time(), QUIET_US);
+        sharing = s_laptops.count();
+        if (sharing == was) {
             return;
         }
         followed = s_laptops.current_now();
-        ESP_LOGI(TAG, "a laptop went quiet; following %s", followed.active ? followed.machine.c_str() : "none");
+        ESP_LOGI(TAG, "a laptop went quiet, %d left; following %s", sharing,
+                 followed.active ? followed.machine.c_str() : "none");
     }
-    tell(followed);
+    if (moved) {
+        tell(followed);
+    }
+    tell_sharing(sharing);
 }
 
 void send_to(const std::string &origin, Command command, int value = 0)

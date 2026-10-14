@@ -182,3 +182,21 @@ TEST(Laptops, a_laptop_at_a_new_address_takes_its_own_row_over)
     EXPECT_TRUE(taken.ping) << "the new address is tried back";
     EXPECT_EQ(taken.reaches, -1) << "what was known of the old address says nothing of the new";
 }
+
+TEST(Laptops, counts_those_sharing_as_they_join_and_go_quiet)
+{
+    Laptops laptops;
+    EXPECT_EQ(laptops.count(), 0);
+    laptops.take(MAC, nothing(), 0, PING);
+    EXPECT_EQ(laptops.count(), 1) << "sharing with nothing playing is sharing all the same";
+    laptops.take(MAC, playing("Song"), 10 * S, PING);
+    EXPECT_EQ(laptops.count(), 1) << "a heartbeat is the same laptop";
+    laptops.take(LINUX, paused("Video"), 12 * S, PING);
+    EXPECT_EQ(laptops.count(), 2);
+    laptops.take(MAC, playing("Song"), 20 * S, PING);
+    EXPECT_FALSE(laptops.forget_quiet(43 * S, QUIET)) << "Linux went quiet, but the Mac is still followed";
+    EXPECT_EQ(laptops.count(), 1);
+    EXPECT_EQ(laptops.current_origin(), MAC);
+    EXPECT_TRUE(laptops.forget_quiet(51 * S, QUIET));
+    EXPECT_EQ(laptops.count(), 0);
+}
