@@ -11,6 +11,7 @@ test:
 install:
 	rm -rf $(SHARE) && mkdir -p $(SHARE) && cp -r desklink $(SHARE)/ && rm -rf $(SHARE)/desklink/__pycache__
 	mkdir -p $(PREFIX)/bin && sed 's|@SHARE@|$(SHARE)|' desklink.sh > $(PREFIX)/bin/desklink && chmod 755 $(PREFIX)/bin/desklink
+	install -Dm755 data/desklink-status.sh $(PREFIX)/bin/desklink-status
 	install -Dm644 data/desklink.service $(UNITS)/desklink.service
 	install -Dm644 data/nl.w-tb.desklink.desktop $(PREFIX)/share/applications/nl.w-tb.desklink.desktop
 	if ls data/icons/*.svg >/dev/null 2>&1; then install -Dm644 -t $(ICONS) data/icons/*.svg; fi
@@ -20,6 +21,6 @@ install:
 
 uninstall:
 	-systemctl --user disable --now desklink.service
-	rm -rf $(SHARE) $(PREFIX)/bin/desklink $(UNITS)/desklink.service \
+	rm -rf $(SHARE) $(PREFIX)/bin/desklink $(PREFIX)/bin/desklink-status $(UNITS)/desklink.service \
 		$(PREFIX)/share/applications/nl.w-tb.desklink.desktop $(ICONS)/nl.w-tb.desklink*.svg $(ICONS)/desklink-*.svg
 	systemctl --user daemon-reload
