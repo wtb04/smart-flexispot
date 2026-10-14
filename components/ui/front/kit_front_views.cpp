@@ -7,6 +7,7 @@
 #include "kit_fonts.h"
 #include "media.h"
 #include "media_model.h"
+#include "notice_queue.h"
 #include "notices_model.h"
 #include "room_model.h"
 #include "status_model.h"
@@ -415,6 +416,7 @@ constexpr time_t CLOCK_SET  = 1'700'000'000;  // any earlier and the clock is no
 
 lv_obj_t *s_notice    = nullptr;
 bool      s_on_show   = false;
+char      s_shown_key[sizeof(detail::Notice::key)] = "";
 char      s_came[8]   = "";  // when the one on show came
 
 Ink ink_of(Level level)
@@ -444,11 +446,13 @@ void show_next_notice()
 {
     detail::Notice notice{};
     if (!detail::notices_take_next(notice)) {
-        s_notice  = nullptr;
-        s_on_show = false;
+        s_notice       = nullptr;
+        s_on_show      = false;
+        s_shown_key[0] = '\0';
         dismiss_notice();
         return;
     }
+    std::memcpy(s_shown_key, notice.key, sizeof s_shown_key);
     char source[sizeof notice.source];
     const char *from = notice.source[0] != '\0' ? notice.source : "Notice";
     std::size_t i    = 0;
@@ -511,4 +515,12 @@ void build_views(lv_obj_t *screen)
 
 namespace ui::detail {
 bool notice_on_show() { return kitfront::s_on_show; }
+
+void withdraw_notice(const char *key)
+{
+    notices_withdraw(key);
+    if (kitfront::s_on_show && keyed_text(kitfront::s_shown_key, key)) {
+        kitfront::show_next_notice();
+    }
+}
 }  // namespace ui::detail

@@ -194,13 +194,16 @@ Session &Table::make_room(std::int64_t now_ms)
     return row;
 }
 
-bool Table::apply(const Event &event, std::int64_t now_ms, Session *asked)
+bool Table::apply(const Event &event, std::int64_t now_ms, Session *asked, Session *answered)
 {
     heard_ms_            = now_ms;
     const std::string &e = event.event;
     Session           *s = find(event.session);
     if (e == "SessionEnd") {
         if (s != nullptr) {
+            if (answered != nullptr && s->state == State::NeedsYou) {
+                *answered = *s;
+            }
             remove(static_cast<int>(s - rows_.data()));
         }
         return true;
@@ -216,6 +219,7 @@ bool Table::apply(const Event &event, std::int64_t now_ms, Session *asked)
     if (!event.project.empty()) {
         copy(s->project, event.project);
     }
+    const bool waited = s->state == State::NeedsYou;
     s->heard_ms = now_ms;
     if (event.steps_total >= 0) {
         s->steps_done  = event.steps_done;
@@ -248,7 +252,7 @@ bool Table::apply(const Event &event, std::int64_t now_ms, Session *asked)
             s->lately[0]    = s->doing;
             s->lately_count = std::min(s->lately_count + 1, kLatelyCount);
         }
-    } else if (e == "PostToolUse") {
+    } else if (e == "PostToolUse" || e == "PostToolUseFailure") {  // the latter when you declined
         if (s->state == State::NeedsYou) {
             begin(State::Working);
         }
@@ -274,6 +278,9 @@ bool Table::apply(const Event &event, std::int64_t now_ms, Session *asked)
         ++s->agents;
     } else if (e == "SubagentStop") {
         s->agents = std::max(0, s->agents - 1);
+    }
+    if (answered != nullptr && waited && s->state != State::NeedsYou) {
+        *answered = *s;
     }
     return true;
 }

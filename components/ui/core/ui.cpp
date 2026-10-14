@@ -264,12 +264,17 @@ Slot<bool>           p_claude;
 Slot<DetailsArgs>    p_details;
 Slot<PhotoArgs>      p_photo;
 
-// Notifications in the order they were asked for; the oldest goes when full.
-constexpr int NOTICE_INBOX_LEN = 4;
-Notice        s_inbox[NOTICE_INBOX_LEN];
+// Notices and their withdrawals in the order they were asked for, so a question
+// answered and asked again at once keeps the new one; the oldest goes when full.
+struct Posted {
+    Notice notice;
+    bool   withdraw = false;  // take back notice.key rather than show it
+};
+constexpr int NOTICE_INBOX_LEN = 8;
+Posted        s_inbox[NOTICE_INBOX_LEN];
 int           s_inbox_count = 0;
 
-void drop_oldest(Notice *queue, int &count)
+void drop_oldest(Posted *queue, int &count)
 {
     for (int i = 1; i < count; ++i) {
         queue[i - 1] = queue[i];
@@ -625,16 +630,20 @@ void apply_page_updates()
 
 void apply_inbox()
 {
-    static Notice notices[NOTICE_INBOX_LEN];
+    static Posted posted[NOTICE_INBOX_LEN];
     portENTER_CRITICAL(&s_pending_lock);
     const int count = s_inbox_count;
     for (int i = 0; i < count; ++i) {
-        notices[i] = s_inbox[i];
+        posted[i] = s_inbox[i];
     }
     s_inbox_count = 0;
     portEXIT_CRITICAL(&s_pending_lock);
     for (int i = 0; i < count; ++i) {
-        notices_take(notices[i]);
+        if (posted[i].withdraw) {
+            withdraw_notice(posted[i].notice.key);
+        } else {
+            notices_take(posted[i].notice);
+        }
     }
 }
 
@@ -1014,18 +1023,36 @@ bool diagnostics_open()
 }
 
 esp_err_t notify(const char *source, const char *title, const char *message, Level level,
-                 int timeout_ms)
+                 int timeout_ms, const char *key)
 {
     portENTER_CRITICAL(&s_pending_lock);
     if (s_inbox_count == NOTICE_INBOX_LEN) {
         drop_oldest(s_inbox, s_inbox_count);
     }
-    Notice &slot = s_inbox[s_inbox_count++];
+    s_inbox[s_inbox_count].withdraw = false;
+    Notice &slot = s_inbox[s_inbox_count++].notice;
     copy_text(slot.source, sizeof(slot.source), source);
     copy_text(slot.title, sizeof(slot.title), title);
     copy_text(slot.message, sizeof(slot.message), message);
     slot.level = level;
     slot.timeout_ms = timeout_ms;
+    copy_text(slot.key, sizeof(slot.key), key != nullptr ? key : "");
+    portEXIT_CRITICAL(&s_pending_lock);
+    s_pending.store(true, std::memory_order_release);
+    return ESP_OK;
+}
+
+esp_err_t withdraw(const char *key)
+{
+    ESP_RETURN_ON_FALSE(key != nullptr && key[0] != '\0', ESP_ERR_INVALID_ARG, TAG, "no key");
+    portENTER_CRITICAL(&s_pending_lock);
+    if (s_inbox_count == NOTICE_INBOX_LEN) {
+        drop_oldest(s_inbox, s_inbox_count);
+    }
+    Posted &slot  = s_inbox[s_inbox_count++];
+    slot          = Posted{};
+    slot.withdraw = true;
+    copy_text(slot.notice.key, sizeof(slot.notice.key), key);
     portEXIT_CRITICAL(&s_pending_lock);
     s_pending.store(true, std::memory_order_release);
     return ESP_OK;
