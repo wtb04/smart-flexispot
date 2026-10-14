@@ -1,4 +1,5 @@
 #include "ui_core.h"
+#include "esp_attr.h"
 #include "media_model.h"
 #if defined(ESP_PLATFORM)
 #include "watchdog.h"
@@ -271,7 +272,7 @@ struct Posted {
     bool   withdraw = false;  // take back notice.key rather than show it
 };
 constexpr int NOTICE_INBOX_LEN = 8;
-Posted        s_inbox[NOTICE_INBOX_LEN];
+EXT_RAM_BSS_ATTR Posted s_inbox[NOTICE_INBOX_LEN];  // in PSRAM, as internal RAM is short
 int           s_inbox_count = 0;
 
 void drop_oldest(Posted *queue, int &count)
@@ -630,7 +631,7 @@ void apply_page_updates()
 
 void apply_inbox()
 {
-    static Posted posted[NOTICE_INBOX_LEN];
+    EXT_RAM_BSS_ATTR static Posted posted[NOTICE_INBOX_LEN];
     portENTER_CRITICAL(&s_pending_lock);
     const int count = s_inbox_count;
     for (int i = 0; i < count; ++i) {

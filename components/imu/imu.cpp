@@ -1,5 +1,6 @@
 #include "imu.h"
 
+#include "esp_attr.h"
 #include "bmi270.h"
 #include "bsp/m5stack_tab5.h"
 #include "esp_check.h"
@@ -113,7 +114,7 @@ float sharpest_jolt()
     if (s_imu == nullptr || read(FIFO_LENGTH, length_bytes, 2) != ESP_OK) {
         return 0.0f;
     }
-    static std::uint8_t frames[FIFO_BYTES];
+    EXT_RAM_BSS_ATTR static std::uint8_t frames[FIFO_BYTES];  // in PSRAM, as internal RAM is short
     std::size_t length = std::min<std::size_t>((length_bytes[0] | (length_bytes[1] << 8)) & FIFO_LENGTH_MASK,
                                                sizeof(frames));
     length -= length % FRAME_BYTES;

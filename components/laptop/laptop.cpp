@@ -1,4 +1,5 @@
 #include "laptop.h"
+#include "esp_attr.h"
 #include "laptops.h"
 
 #include "esp_app_desc.h"
@@ -119,7 +120,7 @@ Gcm                s_gcm;
 link::Fresh        s_fresh;  // the server's task alone takes from it
 Handlers           s_on;
 std::mutex         s_lock;
-Laptops            s_laptops;  // every laptop sharing, and the one followed
+EXT_RAM_BSS_ATTR Laptops s_laptops;  // every laptop sharing, and the one followed; in PSRAM, as internal RAM is short
 esp_timer_handle_t s_quiet = nullptr;
 
 std::int64_t now_ms()
