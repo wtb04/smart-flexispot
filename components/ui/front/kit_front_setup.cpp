@@ -429,6 +429,7 @@ constexpr int DIAGNOSTICS   = 3;
 int       s_chosen = 0;  // while the panel runs: Setup opens on the last one
 lv_obj_t *s_detail = nullptr;
 lv_obj_t *s_side[SECTION_COUNT] = {}, *s_column[SECTION_COUNT] = {};
+lv_obj_t *s_health = nullptr;  // Diagnostics' dot, gone while it is chosen: its card says the same, and red on the accent is lost
 
 void choose_section(int index)
 {
@@ -441,6 +442,7 @@ void choose_section(int index)
     set_card_title(s_detail, SECTIONS[index].name);
     lv_obj_set_hidden(s_column[index], false);
     set_row_chosen(s_side[index], true);
+    lv_obj_set_hidden(s_health, index == DIAGNOSTICS);
 }
 }  // namespace
 
@@ -476,6 +478,8 @@ void build_setup(lv_obj_t *page)
         }
     }
     build_setup_diagnostics(s_column[DIAGNOSTICS], mark);
+    s_health = mark;
+    lv_obj_set_hidden(s_health, s_chosen == DIAGNOSTICS);
 
     for (int i = 0; i < SECTION_COUNT; ++i) {
         lv_obj_set_hidden(s_column[i], i != s_chosen);
