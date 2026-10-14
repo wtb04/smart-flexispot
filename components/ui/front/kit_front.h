@@ -58,10 +58,10 @@ void      build_views(lv_obj_t *screen);  // the fullscreen views, the favourite
 // Setup's own, in kit_front_setup*.cpp.
 /** A row of Setup's: room round each, on a panel read from an arm's length. */
 inline constexpr std::int32_t SETUP_ROW_H = 82;
-/** What the panel reports of itself, under a caption in `column`: how it is, and
- *  each part, whose readings open on a tap and whose log on a hold, in a tile
- *  `h` tall. kit_front_setup_diag.cpp */
-void build_setup_diagnostics(lv_obj_t *column, std::int32_t w, std::int32_t h);
+/** What the panel reports of itself, in `column` of Setup's card: how it is, and
+ *  a row for each part, whose readings open on a tap and whose log on a hold;
+ *  `mark`, a dot, shows how it is as well. kit_front_setup_diag.cpp */
+void build_setup_diagnostics(lv_obj_t *column, lv_obj_t *mark);
 
 // What Home's next event takes from the calendar's, in kit_front_calendar.cpp.
 std::uint32_t event_ink(std::uint8_t feed);
