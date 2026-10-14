@@ -686,6 +686,8 @@ lv_obj_t *layer(Layer which)
     return l != nullptr ? l : lv_screen_active();
 }
 
+void tile_covered(lv_obj_t *tile) { bake::covered(tile); }
+
 lv_obj_t *tile(lv_obj_t *parent, Lift lift)
 {
     lv_obj_t *obj = lv_obj_create(parent);

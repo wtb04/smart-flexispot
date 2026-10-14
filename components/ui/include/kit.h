@@ -143,6 +143,8 @@ lv_obj_t *layer(Layer which);
 
 enum class Lift : std::uint8_t { Low, High };
 lv_obj_t *tile(lv_obj_t *parent, Lift lift = Lift::Low);
+/** A tile with a clear ground that its content covers to its rounded edge: its shadow is painted only round it. */
+void tile_covered(lv_obj_t *tile);
 lv_obj_t *well(lv_obj_t *parent);
 
 // Dock is large glass beside the content: its shadow ends in the gap, as one
