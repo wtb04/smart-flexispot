@@ -75,7 +75,6 @@ final class Link: ObservableObject {
     // screens off, and the panel would show what was paused there all night.
     private static let idleAway: TimeInterval = 120
     private var sleeping = false
-    private var screensAsleep = false
     private var stillSince = Date()  // nothing has played since
     private var toldAway = false
 
@@ -109,13 +108,11 @@ final class Link: ObservableObject {
             MainActor.assumeIsolated { self?.sleeping = true; self?.report() }
         }
         workspace.addObserver(forName: NSWorkspace.screensDidSleepNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.screensAsleep = true; self?.report() }
+            MainActor.assumeIsolated { self?.report() }
         }
-        workspace.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.sleeping = false
-                self?.screensAsleep = false
-                self?.report()
+        for woke in [NSWorkspace.didWakeNotification, NSWorkspace.screensDidWakeNotification] {
+            workspace.addObserver(forName: woke, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.sleeping = false; self?.report() }
             }
         }
         source.clearLeftovers()
@@ -230,9 +227,12 @@ final class Link: ObservableObject {
     }
 
     /// Nobody at this Mac: asleep, or its screens off and nothing played for a while.
+    /// The screens are asked each time: a wake from a dark wake can come without
+    /// its notice, and a Mac kept for away then stayed silent all day.
     private var away: Bool {
         if track?.playing == true { stillSince = Date() }
-        return sleeping || (screensAsleep && track?.playing != true && Date().timeIntervalSince(stillSince) > Self.idleAway)
+        guard CGDisplayIsAsleep(CGMainDisplayID()) != 0 else { return false }
+        return sleeping || (track?.playing != true && Date().timeIntervalSince(stillSince) > Self.idleAway)
     }
 
     private func report() {
