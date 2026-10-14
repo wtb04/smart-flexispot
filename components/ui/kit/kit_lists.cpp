@@ -16,7 +16,7 @@ constexpr std::uint32_t LATE_MS  = 80;  // how long a finger rests on a row unde
 constexpr std::uint32_t FLASH_MS = 90;  // a tap quicker than that still shows
 
 bool       s_ready = false;
-lv_style_t s_row, s_row_group, s_row_list, s_fill, s_fill_lit, s_fill_open;
+lv_style_t s_row, s_row_group, s_row_list, s_fill, s_fill_lit, s_fill_open, s_fill_chosen;
 lv_style_t s_text_col, s_scroller, s_scrollbar, s_section, s_square, s_badge, s_badge_text;
 lv_style_t s_tint[8];
 lv_style_transition_dsc_t s_lit_tr, s_unlit_tr;
@@ -73,7 +73,7 @@ lv_style_t &tint(Ink ink) { return s_tint[static_cast<int>(ink)]; }
 
 void init_styles()
 {
-    for (lv_style_t *st : {&s_row, &s_row_group, &s_row_list, &s_fill, &s_fill_lit, &s_fill_open, &s_text_col,
+    for (lv_style_t *st : {&s_row, &s_row_group, &s_row_list, &s_fill, &s_fill_lit, &s_fill_open, &s_fill_chosen, &s_text_col,
                            &s_scroller, &s_scrollbar, &s_section, &s_square, &s_badge, &s_badge_text}) {
         lv_style_init(st);
     }
@@ -93,6 +93,8 @@ void init_styles()
     lv_style_set_bg_opa(&s_fill_lit, LV_OPA_COVER);
     lv_style_set_transition(&s_fill_lit, &s_lit_tr);
     lv_style_set_bg_opa(&s_fill_open, LV_OPA_COVER);
+    lv_style_set_bg_opa(&s_fill_chosen, LV_OPA_COVER);
+    lv_style_set_transition(&s_fill_chosen, &s_lit_tr);
 
     lv_style_set_pad_row(&s_text_col, 1);
 
@@ -130,6 +132,7 @@ void restyle_lists()
     for (lv_style_t *st : {&s_fill, &s_fill_lit, &s_fill_open}) {
         lv_style_set_bg_color(st, lv_color_hex(p.raised_hi));
     }
+    lv_style_set_bg_color(&s_fill_chosen, lv_color_hex(p.accent));
     lv_style_set_bg_color(&s_scrollbar, lv_color_hex(p.ink));
     lv_style_set_bg_opa(&s_scrollbar, p.ink3_opa);
 
@@ -177,6 +180,7 @@ struct Row : InPsram {
     lv_obj_t   *title = nullptr, *detail = nullptr, *value = nullptr, *trail = nullptr;
     lv_timer_t *timer = nullptr;
     std::int32_t inset = 0;   // where its hairline starts
+    Ink  tint = Ink::Accent, ink = Ink::Primary;
     bool grouped  = false;    // edge to edge in a group's tile, so its ends are the tile's corners
     bool pressable = false;
     bool toggles  = false;
@@ -426,12 +430,51 @@ lv_obj_t *list(lv_obj_t *parent, std::int32_t w, std::int32_t h)
     return col;
 }
 
+lv_obj_t *card(lv_obj_t *parent, const char *title, Lift lift)
+{
+    lv_obj_t *t = tile(parent, lift);
+    lv_obj_set_flex_flow(t, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(t, space::s, 0);
+    text(t, Role::Small, title, Ink::Secondary);
+    return t;
+}
+
+void set_card_title(lv_obj_t *card, const char *title) { set_text_if(lv_obj_get_child(card, 0), title); }
+
+// As list(), the column inside the tile's padding; the title where a widget's is.
+lv_obj_t *card_list(lv_obj_t *parent, const char *title, std::int32_t w, std::int32_t h)
+{
+    lv_obj_t *t = card(parent, title);
+    lv_obj_set_size(t, w, h);
+    lv_obj_set_style_pad_all(t, space::s, 0);
+    lv_obj_t *head = lv_obj_get_child(t, 0);
+    lv_obj_set_style_margin_left(head, space::xl - space::s, 0);
+    lv_obj_set_style_margin_top(head, space::xl - space::s, 0);
+    return card_column(t);
+}
+
+lv_obj_t *card_column(lv_obj_t *card)
+{
+    lv_obj_t *col = lv_obj_create(card);
+    lv_obj_remove_style_all(col);
+    lv_obj_add_style(col, &s_scroller, 0);
+    lv_obj_add_style(col, &s_scrollbar, LV_PART_SCROLLBAR);
+    lv_obj_set_width(col, LV_PCT(100));
+    lv_obj_set_flex_grow(col, 1);
+    lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_scroll_dir(col, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(col, LV_SCROLLBAR_MODE_ACTIVE);
+    return col;
+}
+
 lv_obj_t *row(lv_obj_t *parent, const RowSpec &spec)
 {
     auto *data     = new Row{};
     data->grouped  = !lv_obj_is_scrollable(parent);
     data->toggles  = spec.trail == Trail::Toggle;
     data->pressable = spec.trail == Trail::Chevron || data->toggles || spec.action || spec.pressable;
+    data->tint      = spec.tint;
+    data->ink       = spec.action ? Ink::Accent : Ink::Primary;
 
     lv_obj_t *obj = lv_obj_create(parent);
     lv_obj_remove_style_all(obj);
@@ -496,7 +539,7 @@ lv_obj_t *row(lv_obj_t *parent, const RowSpec &spec)
         lv_obj_set_width(data->title, LV_PCT(100));
         lv_label_set_long_mode(data->title, LV_LABEL_LONG_MODE_WRAP);
     } else {
-        data->title = one_line(col, Role::Body, spec.title, spec.action ? Ink::Accent : Ink::Primary, LV_PCT(100));
+        data->title = one_line(col, Role::Body, spec.title, data->ink, LV_PCT(100));
     }
     if (spec.detail != nullptr) {
         data->detail = one_line(col, Role::Small, spec.detail, Ink::Secondary, LV_PCT(100));
@@ -576,7 +619,7 @@ lv_obj_t *badge(lv_obj_t *parent, const char *value, Ink ink, const char *glyph,
     const std::int32_t text_w = width > 0 ? width - 2 * BADGE_PAD - inner : widest(Role::Small, {value});
     lv_obj_set_size(t, std::max<std::int32_t>(text_w, 1), fonts::small()->line_height);
     lv_obj_set_style_text_align(t, LV_TEXT_ALIGN_CENTER, 0);
-    lv_label_set_long_mode(t, LV_LABEL_LONG_MODE_CLIP);
+    lv_label_set_long_mode(t, width > 0 ? LV_LABEL_LONG_MODE_DOTS : LV_LABEL_LONG_MODE_CLIP);
     lv_obj_set_width(b, width > 0 ? width : text_w + 2 * BADGE_PAD + inner);
     return b;
 }
@@ -978,22 +1021,43 @@ void set_row_title(lv_obj_t *obj, const char *title, Ink ink)
     }
 }
 
+namespace {
+lv_obj_t *square_of(lv_obj_t *row)
+{
+    lv_obj_t *sq = row_of(row) != nullptr ? lv_obj_get_child(row, 0) : nullptr;
+    for (std::uint32_t i = 0; sq != nullptr && i < sq->style_cnt; ++i) {
+        if (sq->styles[i].style == &s_square) {
+            return sq;
+        }
+    }
+    return nullptr;
+}
+}  // namespace
+
 void set_row_glyph(lv_obj_t *obj, const char *glyph)
 {
-    if (row_of(obj) == nullptr) {
-        return;
-    }
-    lv_obj_t *sq = lv_obj_get_child(obj, 0);
-    if (sq == nullptr || sq->style_cnt == 0) {
-        return;
-    }
-    bool square = false;
-    for (std::uint32_t i = 0; i < sq->style_cnt; ++i) {
-        square = square || sq->styles[i].style == &s_square;
-    }
-    lv_obj_t *g = square ? lv_obj_get_child(sq, 0) : nullptr;
+    lv_obj_t *sq = square_of(obj);
+    lv_obj_t *g  = sq != nullptr ? lv_obj_get_child(sq, 0) : nullptr;
     if (g != nullptr && std::strcmp(lv_label_get_text(g), glyph) != 0) {
         lv_label_set_text(g, glyph);
+    }
+}
+
+void set_row_chosen(lv_obj_t *obj, bool chosen)
+{
+    Row *row = row_of(obj);
+    if (row == nullptr || lv_obj_has_state(obj, LV_STATE_CHECKED) == chosen) {
+        return;
+    }
+    // over the press and the open popover's too, which would otherwise take the accent off under the finger
+    for (lv_state_t also : {LV_STATE_DEFAULT, LV_STATE_USER_1, LV_STATE_USER_2}) {
+        lv_obj_add_style(obj, &s_fill_chosen, static_cast<lv_style_selector_t>(LV_PART_SELECTED) | LV_STATE_CHECKED | also);
+    }
+    lv_obj_set_state(obj, LV_STATE_CHECKED, chosen);
+    ink_if(row->title, chosen ? Ink::OnAccent : row->ink);
+    if (lv_obj_t *sq = square_of(obj)) {
+        lv_obj_remove_style(sq, &tint(chosen ? row->tint : Ink::OnAccent), 0);
+        lv_obj_add_style(sq, &tint(chosen ? Ink::OnAccent : row->tint), 0);
     }
 }
 
