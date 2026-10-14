@@ -627,7 +627,7 @@ esp_err_t bench_page(httpd_req_t *req)
     if (!ota::authorised(req)) {
         return refuse(req);
     }
-    EXT_RAM_BSS_ATTR static char text[7000];
+    EXT_RAM_BSS_ATTR static char text[28000];
     int         n = 0;
     if (lvgl_port_lock(STATS_LOCK_MS)) {
         char query[24] = "";
@@ -646,6 +646,11 @@ esp_err_t bench_page(httpd_req_t *req)
                                   : query[2] == 's' ? ui::kit::Behind::Soft
                                                     : ui::kit::Behind::Blur);
             n = std::snprintf(text, sizeof(text), "backdrop %c\n", query[2]);
+        } else if (std::strcmp(query, "fp") == 0 || std::strcmp(query, "fpc") == 0) {  // each frame and touch lately; fpc starts over
+            n = board::frame_report(text, sizeof(text), query[2] == 'c');
+        } else if (std::strncmp(query, "fx=", 3) == 0) {  // fx=0 or 1: the shadows, to feel the panel without them
+            ui::kit::set_effects(query[3] != '0');
+            n = std::snprintf(text, sizeof(text), "shadows %s\n", query[3] != '0' ? "on" : "off");
         } else if (query[0] == 't' && query[1] == '=') {  // t=x,y,ms: a press there, that long
             int x = 0, y = 0, ms = 80;
             std::sscanf(query + 2, "%d,%d,%d", &x, &y, &ms);

@@ -73,6 +73,11 @@ struct FlushTimes {
 };
 FlushTimes take_flush_times();
 
+/** The last few hundred frames and touches, a line each: when, how long the
+ *  frame took to its first area and its last, and its turning, catching up and
+ *  waiting; with `clear`, it starts over. For a development build's bench. */
+int frame_report(char *out, std::size_t size, bool clear);
+
 /** A zoom drawn past LVGL, which is to draw nothing until zoom_end(): each
  *  frame is the picture LVGL shows, magnified by the PPA as it turns it onto
  *  the panel, where a whole frame drawn by LVGL was 88 ms. zoom_begin() keeps

@@ -223,9 +223,14 @@ esp_err_t srm_unscaled(ppa_client_handle_t client, const ppa_srm_oper_config_t &
         return ppa_do_scale_rotate_mirror(client, &op);
     }
     for (std::uint32_t done = 0; done < h;) {
+        // pieces each a row past a multiple of the macro-block: as many as the
+        // rows left are past one, the rest of them a macro-block and a row tall,
+        // which the PPA writes as a column that wide rather than one pixel wide
         std::uint32_t rows = h - done;
         if (srm_keeps_order(w, rows)) {
-            rows = (rows - 1) / SRM_MB * SRM_MB + 1;
+            const std::uint32_t pieces = rows % SRM_MB == 0 ? SRM_MB : rows % SRM_MB;
+            const std::uint32_t rest   = (pieces - 1) * (SRM_MB + 1);
+            rows = rows > rest ? rows - rest : (rows - 1) / SRM_MB * SRM_MB + 1;
         }
         op.in.block_offset_y  = whole.in.block_offset_y + done;
         op.in.block_h         = rows;
@@ -549,8 +554,96 @@ void note_drawn(const Rect &r)
     }
 }
 
+// --- what each frame cost, for the bench -------------------------------------
+
+struct FrameNote {
+    std::int64_t  at_us;
+    std::int32_t  first_us, end_us, rotate_us, catch_us, wait_us;
+    std::uint32_t pixels;
+    std::uint16_t areas;
+    char          kind;  // F a frame, P a press, R a release
+    lv_area_t     where[2];  // its first two areas, in LVGL's coordinates
+};
+constexpr int    NOTES          = 400;
+FrameNote       *s_notes        = nullptr;
+int              s_note_next    = 0;
+int              s_note_count   = 0;
+std::int64_t     s_frame_start  = 0;
+std::int64_t     s_frame_first  = 0;
+FlushTimes       s_frame_base{};
+lv_area_t        s_frame_where[2]{};
+int              s_frame_areas = 0;
+portMUX_TYPE     s_note_lock    = portMUX_INITIALIZER_UNLOCKED;
+
+void note_frame(const FrameNote &n)
+{
+    if (s_notes == nullptr) {
+        return;
+    }
+    portENTER_CRITICAL(&s_note_lock);
+    s_notes[s_note_next] = n;
+    s_note_next          = (s_note_next + 1) % NOTES;
+    s_note_count         = std::min(s_note_count + 1, NOTES);
+    portEXIT_CRITICAL(&s_note_lock);
+}
+
+void touched(lv_event_t *e);
+
+void frame_starts(lv_event_t *)
+{
+    static bool s_hooked = false;  // the touch is added after the display
+    if (!s_hooked) {
+        for (lv_indev_t *in = lv_indev_get_next(nullptr); in != nullptr; in = lv_indev_get_next(in)) {
+            lv_indev_add_event_cb(in, touched, LV_EVENT_PRESSED, nullptr);
+            lv_indev_add_event_cb(in, touched, LV_EVENT_RELEASED, nullptr);
+            s_hooked = true;
+        }
+    }
+    s_frame_start = esp_timer_get_time();
+    s_frame_first = 0;
+    s_frame_areas = 0;
+    s_frame_base  = s_flush_times;
+}
+
+void touched(lv_event_t *e)
+{
+    FrameNote n{};
+    n.at_us = esp_timer_get_time();
+    n.kind  = lv_event_get_code(e) == LV_EVENT_PRESSED ? 'P' : 'R';
+    note_frame(n);
+}
+
+void frame_ends()
+{
+    if (s_frame_start == 0) {
+        return;
+    }
+    const std::int64_t now = esp_timer_get_time();
+    const auto         d   = [](std::int64_t v) { return static_cast<std::int32_t>(std::max<std::int64_t>(v, 0)); };
+    FrameNote n{};
+    n.at_us     = s_frame_start;
+    n.first_us  = d((s_frame_first != 0 ? s_frame_first : now) - s_frame_start);
+    n.end_us    = d(now - s_frame_start);
+    n.rotate_us = d(s_flush_times.rotate_us - s_frame_base.rotate_us);
+    n.catch_us  = d(s_flush_times.catch_up_us - s_frame_base.catch_up_us);
+    n.wait_us   = d(s_flush_times.wait_us - s_frame_base.wait_us);
+    n.pixels    = static_cast<std::uint32_t>(std::max<std::int64_t>(static_cast<std::int64_t>(s_flush_times.pixels - s_frame_base.pixels), 0));
+    n.areas     = static_cast<std::uint16_t>(s_flush_times.areas - s_frame_base.areas);
+    n.kind      = 'F';
+    n.where[0]  = s_frame_where[0];
+    n.where[1]  = s_frame_where[1];
+    note_frame(n);
+    s_frame_start = 0;
+}
+
 void flush_rotated(lv_display_t *disp, const lv_area_t *area, std::uint8_t *pixels)
 {
+    if (s_frame_first == 0) {
+        s_frame_first = esp_timer_get_time();
+    }
+    if (s_frame_areas < 2) {
+        s_frame_where[s_frame_areas++] = *area;
+    }
     prepare_back(disp);
 
     const auto      w     = static_cast<std::uint32_t>(lv_area_get_width(area));
@@ -567,6 +660,7 @@ void flush_rotated(lv_display_t *disp, const lv_area_t *area, std::uint8_t *pixe
 
     if (lv_display_flush_is_last(disp)) {
         s_flush_times.frames += 1;
+        frame_ends();
         if (s_holding) {
             hold_back_buffer();
         } else {
@@ -666,6 +760,10 @@ esp_err_t flush_straight_to_panel(lv_display_t *disp)
     if (xTaskCreatePinnedToCore(catcher, "catch up", 3072, nullptr, LVGL_TASK_PRIORITY, &s_catcher, 1 - LVGL_TASK_CORE) == pdPASS) {
         lv_display_add_event_cb(disp, render_starts, LV_EVENT_RENDER_START, nullptr);
     }
+#if REMOTE_ENABLED
+    s_notes = static_cast<FrameNote *>(heap_caps_calloc(NOTES, sizeof(FrameNote), MALLOC_CAP_SPIRAM));
+    lv_display_add_event_cb(disp, frame_starts, LV_EVENT_REFR_START, nullptr);
+#endif
     return ESP_OK;
 }
 
@@ -1081,6 +1179,39 @@ esp_err_t shrink_shown(std::uint8_t *out, std::size_t out_bytes, std::uint32_t w
     op.scale_y = scale;
     op.mode    = PPA_TRANS_MODE_BLOCKING;
     return ppa_do_scale_rotate_mirror(side, &op);
+}
+
+int frame_report(char *out, std::size_t size, bool clear)
+{
+    if (s_notes == nullptr || size == 0) {
+        return 0;
+    }
+    portENTER_CRITICAL(&s_note_lock);
+    const int count = s_note_count;
+    const int first = (s_note_next - count + NOTES) % NOTES;
+    if (clear) {
+        s_note_count = 0;
+    }
+    portEXIT_CRITICAL(&s_note_lock);
+    int          n    = std::snprintf(out, size, "    ms  kind  first   end  turn catch  wait   kpx areas  gap\n");
+    std::int64_t last = 0;
+    for (int i = 0; i < count && n < static_cast<int>(size) - 80; ++i) {
+        portENTER_CRITICAL(&s_note_lock);
+        const FrameNote f = s_notes[(first + i) % NOTES];
+        portEXIT_CRITICAL(&s_note_lock);
+        if (f.kind != 'F') {
+            n += std::snprintf(out + n, size - n, "%8lld %c\n", f.at_us / 1000, f.kind);
+            continue;
+        }
+        n += std::snprintf(out + n, size - n, "%8lld F %6.1f %5.1f %5.1f %5.1f %5.1f %5u %5u %4lld  %d,%d %dx%d  %d,%d %dx%d\n",
+                           f.at_us / 1000, f.first_us / 1000.0, f.end_us / 1000.0, f.rotate_us / 1000.0,
+                           f.catch_us / 1000.0, f.wait_us / 1000.0, static_cast<unsigned>(f.pixels / 1000), f.areas,
+                           last != 0 ? (f.at_us - last) / 1000 : 0, (int)f.where[0].x1, (int)f.where[0].y1,
+                           (int)lv_area_get_width(&f.where[0]), (int)lv_area_get_height(&f.where[0]), (int)f.where[1].x1,
+                           (int)f.where[1].y1, (int)lv_area_get_width(&f.where[1]), (int)lv_area_get_height(&f.where[1]));
+        last = f.at_us;
+    }
+    return std::min(n, static_cast<int>(size) - 1);
 }
 
 FlushTimes take_flush_times()
