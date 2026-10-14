@@ -322,7 +322,7 @@ enum class PopGlass : std::uint8_t { Live, Frozen };
 void     set_pop_glass(PopGlass how);
 PopGlass pop_glass();
 /** Grow: the outline opens out of the source. Rise: the card fades in at its place, coming up a little. */
-enum class PopMotion : std::uint8_t { Grow, Rise };
+enum class PopMotion : std::uint8_t { Grow, Rise, Appear };
 void      set_pop_motion(PopMotion how);
 PopMotion pop_motion();
 /** The last frozen picture, for looking at from a development build. */

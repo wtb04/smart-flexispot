@@ -24,7 +24,10 @@ namespace ui::kit {
 namespace {
 
 PopGlass       s_how    = PopGlass::Frozen;
-PopMotion      s_motion = PopMotion::Grow;
+// Appear: the card and the dim in one frame, and gone in one. A card moving is
+// its whole area drawn again each frame, 50 to 65 ms for the desk's, so its
+// motion ran at 15 frames a second: slower than none.
+PopMotion      s_motion = PopMotion::Appear;
 char           s_freeze_report[96] = "";
 char           s_up_report[96]     = "";
 char           s_ahead_report[96]  = "";
@@ -796,7 +799,7 @@ void draw_picture(lv_event_t *e)
     lv_area_t card;
     lv_obj_get_coords(s_pop.card, &card);
     lv_area_t at = s_pop.picture_at;
-    if (s_motion == PopMotion::Rise && !s_pop.closing) {
+    if (s_motion == PopMotion::Rise) {
         lv_area_move(&at, card.x1 - s_pop.to.x1, card.y1 - s_pop.to.y1);  // what is on it comes up with it
     }
     const std::int32_t r = std::min({radius::pop, lv_area_get_width(&card) / 2, lv_area_get_height(&card) / 2});
@@ -827,9 +830,10 @@ void run(std::int32_t from, std::int32_t to, std::uint32_t ms, lv_anim_path_cb_t
 void back_in_source(lv_anim_t *);
 
 // Grow: the outline opens out of the source while what is on the card stays
-// still on the screen, so it reads as opening out of what was tapped. Rise:
-// the card at its place from the start, coming up a little, so the area that
-// changes is the card's own and never grows. Either goes back into the source.
+// still on the screen, so it reads as opening out of what was tapped, and
+// goes back into it. Rise: the card at its place from the start, coming up a
+// little and going down as much, so the area that changes is the card's own
+// and never grows.
 // No fades: an object faded with what is on it is drawn off-screen first,
 // every frame, which costs the panel more than all the rest.
 void place(std::int32_t p)
@@ -844,7 +848,7 @@ void place(std::int32_t p)
         p = s_pop.closing ? 0 : PROGRESS;
     }
     s_pop.p = p;
-    if (s_motion == PopMotion::Grow || s_pop.closing) {
+    if (s_motion == PopMotion::Grow) {
         const std::int32_t x = lerp(s_pop.from.x1, s_pop.to.x1, p), y = lerp(s_pop.from.y1, s_pop.to.y1, p);
         const std::int32_t w = std::max<std::int32_t>(lerp(lv_area_get_width(&s_pop.from), lv_area_get_width(&s_pop.to), p), 8);
         const std::int32_t h = std::max<std::int32_t>(lerp(lv_area_get_height(&s_pop.from), lv_area_get_height(&s_pop.to), p), 8);
@@ -1048,6 +1052,9 @@ void back_in_source(lv_anim_t *)
         finish_close();
         return;
     }
+    if (s_motion != PopMotion::Grow && behind() == Behind::Dim) {
+        veil(false);
+    }
     const lv_area_t &src = s_pop.from;
     s_pop.centre = s_pop.rows ? (src.y1 + src.y2) / 2 : (src.x1 + src.x2) / 2;
     const std::int32_t length = s_pop.rows ? size::screen_h : size::screen_w;
@@ -1094,7 +1101,11 @@ void on_frame(lv_event_t *)
     ++s_frames;
     if (s_pop.waiting) {
         s_pop.waiting = false;
-        run(0, PROGRESS, motion::pop_ms, motion::spring, landed);
+        if (s_motion == PopMotion::Appear) {
+            landed(nullptr);
+        } else {
+            run(0, PROGRESS, motion::pop_ms, motion::spring, landed);
+        }
     }
 }
 
@@ -1269,7 +1280,7 @@ lv_obj_t *popover(lv_obj_t *source, std::int32_t w, std::int32_t h, From from, b
         // the shadow is painted into the backdrop: a soft shadow of a moving
         // shape is drawn again every frame, and is most of what a frame costs
         lv_obj_set_style_shadow_width(s_pop.card, 0, 0);
-        if (s_motion == PopMotion::Rise) {
+        if (s_motion != PopMotion::Grow) {
             shadow_on(s_pop.to);
         }
         lv_obj_add_event_cb(s_pop.card, draw_picture, LV_EVENT_DRAW_MAIN_BEGIN, nullptr);
@@ -1285,7 +1296,7 @@ lv_obj_t *popover(lv_obj_t *source, std::int32_t w, std::int32_t h, From from, b
     lv_obj_remove_flag(s_pop.body, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(s_pop.body, LV_OBJ_FLAG_IGNORE_LAYOUT);
 
-    place(0);
+    place(s_motion == PopMotion::Appear ? PROGRESS : 0);
     s_pop.waiting = true;
     return s_pop.body;
 }
@@ -1311,13 +1322,19 @@ void close_popover(bool animate)
     }
     if (s_pop.backdrop != nullptr) {
         shadow_off();  // the shadow goes with the card
-        if (paint_picture(span(s_pop.from, s_pop.to))) {
+        if (paint_picture(s_motion == PopMotion::Grow ? span(s_pop.from, s_pop.to) : s_pop.to)) {
             show_picture(true);
         }
         place(s_pop.p);
     }
-    if (s_pop.backdrop != nullptr && behind() == Behind::Dim && s_pop.scrim != nullptr) {
+    // a rising card goes down under the dim, which lifts as it goes, in the one
+    // frame of the whole screen; one growing back into its source over the page
+    if (s_motion == PopMotion::Grow && s_pop.backdrop != nullptr && behind() == Behind::Dim && s_pop.scrim != nullptr) {
         veil(false);
+    }
+    if (s_motion == PopMotion::Appear) {
+        back_in_source(nullptr);
+        return;
     }
     // quick, and into the source without passing it
     run(s_pop.p, 0, motion::close_ms, motion::settle, back_in_source);
