@@ -368,7 +368,7 @@ Cover         *s_still = nullptr;
 std::uint32_t  s_stills = UINT32_MAX;
 lv_timer_t    *s_still_retry = nullptr;
 lv_obj_t      *s_skip = nullptr;
-lv_obj_t      *s_series = nullptr, *s_title = nullptr, *s_episode = nullptr;
+lv_obj_t      *s_source = nullptr, *s_series = nullptr, *s_title = nullptr, *s_episode = nullptr;
 Cover         *s_channel = nullptr;  // the channel's or the series' picture, beside its name
 std::uint32_t  s_channels = UINT32_MAX;
 lv_timer_t    *s_channel_retry = nullptr;
@@ -423,6 +423,7 @@ void tick(lv_timer_t *)
 void show_words()
 {
     const MediaState &media = media_state();
+    set_text_if(s_source, media.source);
     set_title(s_title, media.title);
     const char *split = std::strchr(media.artist, '\n');
     char        series[sizeof media.artist];
@@ -546,13 +547,16 @@ void build(lv_obj_t *)
     lv_obj_set_pos(words, X, Y0);
     lv_obj_set_flex_flow(words, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(words, space::xs, 0);
+    // what plays it, the title, then whose it is, as the music view has its artist
+    s_source = line(words, Role::Small, Ink::Secondary, W);
+    lv_obj_set_style_pad_bottom(s_source, space::xs, 0);
+    s_title = line(words, Role::H1, Ink::Primary, W);
     lv_obj_t *channel = flow(words, LV_FLEX_FLOW_ROW, space::m);
     lv_obj_set_flex_align(channel, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_bottom(channel, space::s, 0);
+    lv_obj_set_style_pad_top(channel, space::s, 0);
     s_channel = new Cover(channel, CHANNEL, CHANNEL, Shape::Round);
     lv_obj_set_hidden(s_channel->obj(), true);
     s_series  = line(channel, Role::H3, Ink::Secondary, W - CHANNEL - space::m);
-    s_title   = line(words, Role::H1, Ink::Primary, W);
     s_episode = line(words, Role::Body, Ink::Secondary, W);
 
     s_rail = progress(root, X, RAIL_Y, W);
@@ -620,7 +624,7 @@ void build(lv_obj_t *)
     for (lv_obj_t *label : {s_title}) {
         ink_on_black(label, Ink::Primary);
     }
-    for (lv_obj_t *label : {s_series, s_episode, s_elapsed, s_ends, s_total}) {
+    for (lv_obj_t *label : {s_source, s_series, s_episode, s_elapsed, s_ends, s_total}) {
         ink_on_black(label, Ink::Secondary);
     }
     lv_obj_t *track = lv_obj_get_child(s_rail->obj(), 0);
