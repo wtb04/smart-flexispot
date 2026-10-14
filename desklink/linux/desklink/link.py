@@ -80,7 +80,7 @@ class Reach(enum.Enum):
 
 
 def build_state(machine: str, port: int, track: Track | None, art: artwork.Artwork | None, volume,
-                now: float) -> dict:
+                now: float, square: artwork.Artwork | None = None) -> dict:
     state = {"type": "state", "machine": machine, "port": port, "title": ""}
     if track is None:
         return state
@@ -97,14 +97,14 @@ def build_state(machine: str, port: int, track: Track | None, art: artwork.Artwo
         state["muted"] = volume.muted
     state.update(app=track.identity, title=track.title, artist=track.artist, playing=track.playing,
                  position=round(track.position(now), 1), duration=track.duration,
-                 art=art.version if art else "", square="",
+                 art=art.version if art else "", square=square.version if square else "",
                  video=art.wide if art else track.browser, takes=takes)
     return state
 
 
 class Link:
     def __init__(self, *, settings: Settings, save_settings, key: str, client, volume, covers, player_command,
-                 clock, timers, machine: str, locked: Callable[[], bool]):
+                 clock, timers, machine: str, locked: Callable[[], bool], youtube=None):
         self.settings = settings
         self._save = save_settings
         self._client = client
@@ -115,11 +115,17 @@ class Link:
         self._timers = timers
         self._machine = machine
         self._locked = locked
+        self._youtube = youtube
         self._envelope: seal.Envelope | None = None
         self._listeners: list[Callable[[], None]] = []
         self.track: Track | None = None
         self.artwork: artwork.Artwork | None = None
         self._cover_url = ""
+        self._small: bytes | None = None  # the player's own cover, before a video's thumbnail replaces it
+        self.square: artwork.Artwork | None = None
+        self._looked_up = ""  # the browser video a thumbnail was searched for
+        self._search_waits = False
+        self._found = False
         self.reach = Reach.UNKNOWN
         self.reaches_back: bool | None = None
         self.firmware = ""
@@ -172,11 +178,15 @@ class Link:
     def _apply(self, track: Track | None) -> None:
         self._vanishing = None
         url = track.art_url if track else ""
-        if url != self._cover_url:
+        new_cover = url != self._cover_url
+        if new_cover:
             self._cover_url = url
-            self.artwork = None
+            self._small = None
+            if not self._found:
+                self.artwork = None
             if url:
                 self._covers.load(url, lambda data, wanted=url: self._cover_loaded(wanted, data))
+        self._look_up(track, url, new_cover)
         paused = (track is not None and self.track is not None and track.title == self.track.title
                   and track.playing != self.track.playing)
         self.track = track
@@ -189,7 +199,45 @@ class Link:
     def _cover_loaded(self, url: str, data: bytes | None) -> None:
         if url != self._cover_url:
             return
-        self.artwork = artwork.make(data) if data else None
+        self._small = data
+        if not self._found:
+            self.artwork = artwork.make(data) if data else None
+        if self._search_waits:
+            self._search_waits = False
+            self._search(data)
+        self._changed()
+        self.report_soon()
+
+    def _look_up(self, track: Track | None, url: str, new_cover: bool) -> None:
+        wanted = f"{track.title}\n{track.artist}" if track and track.browser and self._youtube else ""
+        if wanted == self._looked_up:
+            return
+        self._looked_up = wanted
+        self.square = None
+        self._search_waits = False
+        if self._found:
+            self._found = False
+            self.artwork = artwork.make(self._small) if self._small else None
+        if not wanted:
+            return
+        if url and new_cover:
+            self._search_waits = True  # the small cover goes with the search, for the likeness check
+        else:
+            self._search(self._small if url else None)
+
+    def _search(self, small: bytes | None) -> None:
+        wanted = self._looked_up
+        title, artist = wanted.split("\n", 1)
+        self._youtube.find(title, artist, small, lambda found: self._video_found(wanted, found))
+
+    def _video_found(self, wanted: str, found) -> None:
+        if wanted != self._looked_up or found is None:
+            return
+        thumbnail = artwork.make(found.thumbnail)
+        if thumbnail is None:
+            return
+        self.artwork, self._found = thumbnail, True
+        self.square = artwork.make(found.channel) if found.channel else None
         self._changed()
         self.report_soon()
 
@@ -227,7 +275,7 @@ class Link:
             return
         track = None if (away or force_nothing) else self.track
         state = build_state(self._machine, seal.PORT, track, self.artwork if track else None, self._volume,
-                            self._clock.monotonic())
+                            self._clock.monotonic(), self.square if track else None)
         self._send(state, self._answered)
 
     def _send(self, message: dict, done=None) -> None:
@@ -337,9 +385,11 @@ class Link:
         reply = path + " reply"
         kind = message["type"]
         if kind == "cover":
-            if self.artwork is None or message.get("art") != self.artwork.version:
+            picture = next((art for art in (self.artwork, self.square) if art and art.version == message.get("art")),
+                           None)
+            if picture is None:
                 return Response(404)
-            return Response(200, "application/octet-stream", self._envelope.sealed_bytes(self.artwork.jpeg, reply))
+            return Response(200, "application/octet-stream", self._envelope.sealed_bytes(picture.jpeg, reply))
         if kind == "ping":
             return Response(200, "application/octet-stream", self._envelope.sealed({"type": "pong"}, reply))
         if kind == "command":

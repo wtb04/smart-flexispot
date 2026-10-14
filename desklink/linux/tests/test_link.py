@@ -230,3 +230,79 @@ class LinkTest(unittest.TestCase):
         self.assertFalse(self.link.set_key("nope"))
         self.assertTrue(self.link.set_key(fakes.KEY_HEX))
         self.assertTrue(self.link.has_key())
+
+
+def png(width, height, colour=(200, 120, 30)):
+    import io
+    from PIL import Image
+    out = io.BytesIO()
+    Image.new("RGB", (width, height), colour).save(out, "PNG")
+    return out.getvalue()
+
+
+class YouTubeCoverTest(unittest.TestCase):
+    def setUp(self):
+        from desklink.youtube import Found
+        self.Found = Found
+        self.timers = fakes.FakeTimers()
+        self.clock = fakes.FakeClock(self.timers)
+        self.client = fakes.FakeClient(self.clock)
+        self.covers = fakes.FakeCovers()
+        self.youtube = fakes.FakeYouTube()
+        self.link = link.Link(settings=Settings(), save_settings=lambda s: None, key=fakes.KEY_HEX,
+                              client=self.client, volume=fakes.FakeVolume(), covers=self.covers,
+                              player_command=lambda *a: True, clock=self.clock, timers=self.timers,
+                              machine="CloudPad", locked=lambda: False, youtube=self.youtube)
+        self.panel = seal.Envelope(fakes.KEY, clock_ms=self.clock.wall_ms)
+        self.link.start()
+
+    def chrome(self, title="We Raced The Entire Length Of Japan - Ep 6", art_url="file:///tmp/.chrome", **more):
+        return track(identity="Google Chrome", title=title, artist="Jet Lag: The Game", art_url=art_url,
+                     can_next=False, can_previous=False, **more)
+
+    def test_browser_cover_is_replaced_by_the_videos_own(self):
+        self.link.take(self.chrome())
+        small = png(150, 83)
+        self.covers.asked[-1][1](small)
+        title, channel, given, done = self.youtube.asked[-1]
+        self.assertEqual((title, channel, given), ("We Raced The Entire Length Of Japan - Ep 6", "Jet Lag: The Game",
+                                                   small))
+        self.timers.advance(0.3)
+        self.assertEqual(len(self.client.states()[-1]["art"]), 12)
+        thumbnail, channel_picture = png(1280, 720), png(480, 480, (10, 10, 10))
+        done(self.Found(thumbnail, channel_picture))
+        self.timers.advance(0.3)
+        state = self.client.states()[-1]
+        self.assertEqual(state["art"], artwork.make(thumbnail).version)
+        self.assertEqual(state["square"], artwork.make(channel_picture).version)
+        self.assertTrue(state["video"])
+        reply = self.link.handle("POST", "/cover", self.panel.sealed({"type": "cover", "art": state["square"]},
+                                                                     "/cover"), False)
+        self.assertEqual(reply.status, 200)
+
+    def test_no_small_cover_searches_at_once(self):
+        self.link.take(self.chrome(art_url=""))
+        self.assertIsNone(self.youtube.asked[-1][2])
+
+    def test_one_search_per_video_and_none_for_other_players(self):
+        self.link.take(self.chrome(art_url=""))
+        self.link.take(self.chrome(art_url="", playing=False))
+        self.assertEqual(len(self.youtube.asked), 1)
+        self.link.take(track())
+        self.assertEqual(len(self.youtube.asked), 1)
+
+    def test_a_late_answer_for_another_video_is_ignored(self):
+        self.link.take(self.chrome(art_url=""))
+        done = self.youtube.asked[-1][3]
+        self.link.take(self.chrome(title="Another Episode", art_url=""))
+        done(self.Found(png(1280, 720), None))
+        self.timers.advance(0.3)
+        self.assertEqual(self.client.states()[-1]["art"], "")
+
+    def test_not_found_keeps_the_small_cover(self):
+        self.link.take(self.chrome())
+        self.covers.asked[-1][1](png(150, 83))
+        self.youtube.asked[-1][3](None)
+        self.timers.advance(0.3)
+        state = self.client.states()[-1]
+        self.assertEqual((len(state["art"]), state["square"]), (12, ""))
