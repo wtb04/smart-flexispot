@@ -11,3 +11,7 @@ Both speak the protocol in the panel's `components/laptop/include/link_envelope.
 state to the panel's `/link`, commands and cover requests back to port 47801 on the laptop.
 [conformance/](conformance/) holds fixtures made with the panel's own code that each version is
 tested against.
+
+Several laptops can share at once. The panel follows whichever plays, and when several do, the
+one that began playing last; when none plays it stays with the one it had. The others' Claude
+Code sessions show all the same.
