@@ -45,7 +45,10 @@ class Covers:
         if url.startswith("file://"):
             Gio.File.new_for_uri(url).load_contents_async(None, self._file_loaded, done)
         elif url.startswith(("http://", "https://")):
-            message = Soup.Message.new("GET", url)
+            try:
+                message = Soup.Message.new("GET", url)
+            except TypeError:  # a URL the URI parser refuses
+                message = None
             if message is None:
                 GLib.idle_add(lambda: done(None))
                 return

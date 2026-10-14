@@ -30,6 +30,14 @@ class Clock:
         return seal.now_ms()
 
 
+def _guarded(fn: Callable[[], None]) -> None:
+    # an exception in a GLib callback would remove its timer for good, the heartbeat with it
+    try:
+        fn()
+    except Exception:
+        log.exception("timer callback")
+
+
 class GLibTimers:
     class Timer:
         def __init__(self):
@@ -45,7 +53,7 @@ class GLibTimers:
 
         def fire():
             timer.source = 0
-            fn()
+            _guarded(fn)
             return False
 
         timer.source = GLib.timeout_add(int(seconds * 1000), fire)
@@ -53,7 +61,7 @@ class GLibTimers:
 
     def every(self, seconds: float, fn: Callable[[], None]) -> "GLibTimers.Timer":
         timer = self.Timer()
-        timer.source = GLib.timeout_add(int(seconds * 1000), lambda: fn() or True)
+        timer.source = GLib.timeout_add(int(seconds * 1000), lambda: _guarded(fn) or True)
         return timer
 
 
