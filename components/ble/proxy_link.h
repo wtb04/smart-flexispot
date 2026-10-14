@@ -28,6 +28,9 @@ esp_err_t start();
 
 bool connected();
 
+/** A slower link while the screen is dark. */
+void set_dark(bool dark);
+
 int quiet_ms();
 
 void collect(LinkStats &out);

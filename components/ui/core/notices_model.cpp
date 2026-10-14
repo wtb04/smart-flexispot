@@ -1,5 +1,6 @@
 #include "notices_model.h"
 
+#include "notice_queue.h"
 #include "topics.h"
 
 namespace ui::detail {
@@ -39,6 +40,15 @@ bool notices_take_next(Notice &notice)
     drop_oldest();
     publish(Topic::Notices);
     return true;
+}
+
+void notices_withdraw(const char *key)
+{
+    const int left = withdraw_keyed(s_notices.waiting, s_notices.count, key);
+    if (left != s_notices.count) {
+        s_notices.count = left;
+        publish(Topic::Notices);
+    }
 }
 
 }  // namespace ui::detail

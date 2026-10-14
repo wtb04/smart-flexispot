@@ -28,6 +28,7 @@ struct Notice {
     char message[192];
     Level level;
     int   timeout_ms;
+    char  key[48];  // what withdraw() takes it back by; empty for none
 };
 
 // What the screen calls each preset. Everything off the screen says Preset 1 to 6.
@@ -94,6 +95,8 @@ void start_screen_schedule();
 
 // What the screen schedule asks of the views on show (screen_rules.h).
 bool notice_on_show();
+/** Takes back the notices sent with `key`, waiting or on show. */
+void withdraw_notice(const char *key);
 /** How long the open film leaves the screen lit untouched: 0 with none open,
  *  screen_rules::kNever while it keeps it lit. */
 std::int64_t cinema_dark_after();

@@ -13,4 +13,8 @@ void note_brightness(int percent);
 /** The panel's own screen control, so Home Assistant sees it too. */
 void note_screen(bool on);
 
+/** The screen switched from outside the panel's own controls: Home Assistant,
+ *  or a knock while it is dark. */
+void set_screen(bool on);
+
 }  // namespace network

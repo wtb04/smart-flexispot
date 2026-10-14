@@ -18,7 +18,7 @@ This project's own code, documents and board are copyright 2026 Wouter ten Brink
 | Instrument Sans, drawn into the design kit's fonts in [components/ui/fonts](components/ui/fonts) | [tools/make_fonts.py](tools/make_fonts.py) | SIL Open Font License 1.1 |
 | Material Symbols Rounded, drawn into the design kit's icon fonts in [components/ui/fonts](components/ui/fonts) | [tools/make_fonts.py](tools/make_fonts.py) | Apache-2.0 |
 | Natural Earth, drawn into the map | [tools/make_map.py](tools/make_map.py) | public domain |
-| mediaremote-adapter, built into Desk Link | [desklink/Vendor/mediaremote-adapter](https://github.com/ungive/mediaremote-adapter), a submodule | BSD-3-Clause, its [LICENSE](https://github.com/ungive/mediaremote-adapter/blob/master/LICENSE) |
+| mediaremote-adapter, built into Desk Link | [desklink/macos/Vendor/mediaremote-adapter](https://github.com/ungive/mediaremote-adapter), a submodule | BSD-3-Clause, its [LICENSE](https://github.com/ungive/mediaremote-adapter/blob/master/LICENSE) |
 
 Not this project's, and not under its licence either:
 

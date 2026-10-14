@@ -144,16 +144,23 @@ An update waits on the Setup page until you tap it, and is refused while the des
 
 ## 7. Desk Link on your Mac
 
-Optional. [Desk Link](../desklink/) is a menu bar app that tells the panel what plays on the Mac and takes its play, pause, seek and volume back, and passes Claude Code's events on, every message sealed with the key in `desk_link_secrets.h`. It needs macOS 26, Xcode's command line tools and CMake:
+Optional. [Desk Link](../desklink/macos/) is a menu bar app that tells the panel what plays on the Mac and takes its play, pause, seek and volume back, and passes Claude Code's events on, every message sealed with the key in `desk_link_secrets.h`. It needs macOS 26, Xcode's command line tools and CMake:
 
 ```sh
 git submodule update --init
-cd desklink && make install
+cd desklink/macos && make install
 ```
 
 Then give it the key from its menu, under Panel, or before its first start with `defaults write nl.w-tb.desklink key <DESK_LINK_KEY>`, which it moves into the keychain. The menu says whether the panel answers, and whether the panel reaches the Mac back; a firewall that lets Desk Link out but keeps port 47801 shut stops the commands.
 
-For Claude Code, each laptop also needs `jq` and `curl`, which macOS has, and this repository's `tools/claude-hook`. In `~/.claude/settings.json`, run it on every event that changes what the panel shows; `async` keeps Claude Code from ever waiting on it:
+On Linux, [Desk Link for Linux](../desklink/linux/) does the same from the bar:
+
+```sh
+cd desklink/linux && make install
+desklink set-key <DESK_LINK_KEY>
+```
+
+For Claude Code, each laptop also needs `jq` and `curl`, which macOS has and most Linux systems do, and this repository's `tools/claude-hook`. In `~/.claude/settings.json`, run it on every event that changes what the panel shows; `async` keeps Claude Code from ever waiting on it:
 
 ```json
 {
@@ -162,6 +169,7 @@ For Claude Code, each laptop also needs `jq` and `curl`, which macOS has, and th
     "UserPromptSubmit":  [{ "hooks": [{ "type": "command", "command": "~/smart-flexispot/tools/claude-hook", "async": true }] }],
     "PreToolUse":        [{ "hooks": [{ "type": "command", "command": "~/smart-flexispot/tools/claude-hook", "async": true }] }],
     "PostToolUse":       [{ "hooks": [{ "type": "command", "command": "~/smart-flexispot/tools/claude-hook", "async": true }] }],
+    "PostToolUseFailure": [{ "hooks": [{ "type": "command", "command": "~/smart-flexispot/tools/claude-hook", "async": true }] }],
     "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "~/smart-flexispot/tools/claude-hook", "async": true }] }],
     "SubagentStart":     [{ "hooks": [{ "type": "command", "command": "~/smart-flexispot/tools/claude-hook", "async": true }] }],
     "SubagentStop":      [{ "hooks": [{ "type": "command", "command": "~/smart-flexispot/tools/claude-hook", "async": true }] }],
