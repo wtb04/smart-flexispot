@@ -28,12 +28,16 @@ final class Link: ObservableObject {
         }
     }
     @Published var panel: String {
-        didSet { defaults.set(panel, forKey: "panel") }
+        didSet {
+            defaults.set(panel, forKey: "panel")
+            if panel != oldValue { forgetReach() }
+        }
     }
     @Published var key: String {
         didSet {
             Keychain.write(key)
             seal = Seal(hex: key)
+            if key != oldValue { forgetReach() }
         }
     }
     @Published var opensAtLogin: Bool {
@@ -65,6 +69,7 @@ final class Link: ObservableObject {
     private var pendingReport: DispatchWorkItem?
     private var vanishing: DispatchWorkItem?  // nothing playing, passed on once it has lasted
     private var seal: Seal?
+    private var generation = 0  // bumped by a new address or key, so an older reply is not taken for theirs
     private var coverFrom: Data?   // what artwork and cover are made from
     private var lookedUp = ""      // the browser's video a YouTube thumbnail was asked for
     private var thumbnail: Data?   // and the one found
@@ -123,6 +128,12 @@ final class Link: ObservableObject {
     func playPause() {
         guard let track else { return }
         source.send(track.playing ? .pause : .play)
+    }
+
+    private func forgetReach() {
+        generation += 1
+        reach = .unknown
+        reachesBack = nil
     }
 
     private func begin() {
@@ -270,8 +281,9 @@ final class Link: ObservableObject {
             state["takes"] = takes
         }
         log.info("state \(track?.title ?? (away ? "nothing, away" : "nothing"), privacy: .public), art \(self.artwork?.version ?? "none", privacy: .public), square \(self.square?.version ?? "none", privacy: .public)")
+        let generation = self.generation
         send(state) { [weak self] reach, pong in
-            guard let self, self.sharing else { return }
+            guard let self, self.sharing, self.generation == generation else { return }
             self.reach = reach
             if let pong {
                 self.heard = Date()
