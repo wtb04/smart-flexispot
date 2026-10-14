@@ -24,10 +24,9 @@ namespace ui::kit {
 namespace {
 
 PopGlass       s_how    = PopGlass::Frozen;
-// Appear: the card and the dim in one frame, and gone in one. A card moving is
-// its whole area drawn again each frame, 50 to 65 ms for the desk's, so its
-// motion ran at 15 frames a second: slower than none.
-PopMotion      s_motion = PopMotion::Appear;
+// Appear, the card and the dim in one frame and gone in one, is the cheapest,
+// but reads as abrupt: the card grows out of what was tapped.
+PopMotion      s_motion = PopMotion::Grow;
 char           s_freeze_report[96] = "";
 char           s_up_report[96]     = "";
 char           s_ahead_report[96]  = "";
@@ -889,6 +888,10 @@ void go_live()
     lv_display_enable_invalidation(disp, false);
     lv_obj_set_hidden(s_pop.backdrop, true);
     lv_display_enable_invalidation(disp, loud);
+    // but for what was tapped, caught pressed as the picture was taken on the press
+    if (s_pop.source != nullptr) {
+        lv_obj_invalidate(s_pop.source);
+    }
     lv_obj_set_style_shadow_width(s_pop.card, LIVE_SHADOW_W, 0);
     lv_obj_set_style_shadow_offset_y(s_pop.card, LIVE_SHADOW_Y, 0);
 }

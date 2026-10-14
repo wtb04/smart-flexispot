@@ -75,7 +75,6 @@ lv_style_t s_ground, s_tile, s_tile_hi, s_well;
 lv_style_t s_glass_sm, s_glass_lg, s_glass_dock, s_glass_note;
 lv_style_t s_role[11];
 lv_style_t s_ink[8], s_dot[8], s_mark;
-lv_style_t s_btn_open;
 lv_style_t s_btn, s_btn_pressed, s_btn_accent, s_btn_flat, s_btn_soft, s_btn_round, s_btn_checked;
 // what each kind turns to under the finger: a darker fill of its own colour
 lv_style_t s_btn_flat_pressed, s_btn_accent_pressed, s_btn_checked_pressed, s_lamp_on_pressed;
@@ -254,8 +253,6 @@ void apply()
     lv_style_set_bg_opa(&s_btn_accent, LV_OPA_COVER);
     lv_style_set_text_color(&s_btn_accent, hex(s_pal.on_accent));
 
-    lv_style_set_bg_color(&s_btn_open, dark ? hex(0xffffff) : hex(s_pal.raised_hi));
-    lv_style_set_bg_opa(&s_btn_open, dark ? 56 : LV_OPA_COVER);
 
     lv_style_set_bg_opa(&s_btn_flat, LV_OPA_TRANSP);
     lv_style_set_shadow_opa(&s_btn_flat, LV_OPA_TRANSP);
@@ -334,7 +331,7 @@ void apply()
 void init_styles()
 {
     for (lv_style_t *st : {&s_ground, &s_tile, &s_tile_hi, &s_well, &s_glass_sm, &s_glass_lg, &s_glass_dock,
-                           &s_glass_note, &s_btn, &s_btn_open, &s_btn_pressed, &s_btn_accent, &s_btn_flat, &s_btn_soft, &s_btn_round,
+                           &s_glass_note, &s_btn, &s_btn_pressed, &s_btn_accent, &s_btn_flat, &s_btn_soft, &s_btn_round,
                            &s_btn_flat_pressed, &s_btn_accent_pressed, &s_btn_checked_pressed, &s_lamp_on_pressed,
                            &s_btn_checked, &s_lamp, &s_lamp_on, &s_lamp_on_ink, &s_hair, &s_switch,
                            &s_switch_on, &s_switch_knob, &s_seg, &s_seg_item, &s_seg_thumb}) {
@@ -901,7 +898,6 @@ lv_obj_t *button(lv_obj_t *parent, Button kind, const char *glyph, const char *l
     if (round) {
         lv_obj_add_style(btn, &s_btn_round, 0);
     }
-    lv_obj_add_style(btn, &s_btn_open, LV_STATE_USER_1);
     if (checkable) {
         lv_obj_add_flag(btn, LV_OBJ_FLAG_CHECKABLE);
         lv_obj_add_style(btn, &s_btn_checked, LV_STATE_CHECKED);
