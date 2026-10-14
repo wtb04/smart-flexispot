@@ -79,9 +79,9 @@ When something plays on Jellyfin the control bar follows it, and holding it ther
 
 ![A video from the laptop in the cinema view](docs/screenshots/laptop.png)
 
-[Desk Link](desklink/), a small menu bar app on my Mac, connects the laptop to the panel. Whatever plays on the Mac shows on the panel with its cover, a video in the cinema view and music on the media card, and the panel's buttons pause, seek, skip and change the volume there. Claude Code's sessions come through it too. Jellyfin comes first, then the speaker, then the laptop. Everything the two send each other is encrypted with a key they share, and each regularly checks that the other is still there.
+[Desk Link](desklink/macos/), a small menu bar app on my Mac, connects the laptop to the panel. Whatever plays on the Mac shows on the panel with its cover, a video in the cinema view and music on the media card, and the panel's buttons pause, seek, skip and change the volume there. Claude Code's sessions come through it too. Jellyfin comes first, then the speaker, then the laptop. Everything the two send each other is encrypted with a key they share, and each regularly checks that the other is still there.
 
-<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="desklink/shots/menu-dark.png"><img src="desklink/shots/menu-light.png" alt="Desk Link's menu, under its icon in the menu bar" width="407"></picture></p>
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="desklink/macos/shots/menu-dark.png"><img src="desklink/macos/shots/menu-light.png" alt="Desk Link's menu, under its icon in the menu bar" width="407"></picture></p>
 
 ### Planes overhead
 
