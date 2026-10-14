@@ -2,9 +2,7 @@
 
 #include "kit.h"
 
-#if defined(ESP_PLATFORM)
 #include "esp_heap_caps.h"
-#endif
 
 #include "kit_pixels.h"
 
@@ -49,6 +47,12 @@ bool same(const Pose &a, const Pose &b)
            a.look == b.look;
 }
 
+// A shadow opacity an object had of its own, to give back once its shadow is live again.
+struct OwnShadow {
+    bool     had = false;
+    lv_opa_t opa = 0;
+};
+
 struct Caster {
     lv_obj_t     *tile = nullptr;
     Pose          seen, baked_at;
@@ -60,6 +64,8 @@ struct Caster {
     std::int32_t  radius  = 0;
     bool          baked   = false;
     bool          refused = false;  // as it stands now; asked again once it moves
+    OwnShadow     own;
+    bool          filled = false;  // its content covers it to its rounded edge, though its own ground is clear
 };
 
 KIT_IN_PSRAM Caster s_casters[96];
@@ -68,7 +74,6 @@ lv_obj_t      *s_ground  = nullptr, *s_content = nullptr, *s_canvas = nullptr;
 lv_draw_buf_t *s_picture = nullptr, *s_strip = nullptr;  // in PSRAM on the panel
 void (*s_repaint)(const lv_area_t &area) = nullptr;
 std::uint32_t  s_look    = 1;
-lv_style_t     s_settled;
 
 Pose pose_of(lv_obj_t *tile)
 {
@@ -201,14 +206,23 @@ Walk walk(lv_obj_t *o, lv_obj_t *tile, const lv_area_t &box)
 
 // The style change alone would redraw the whole object, where only its rim
 // changes, or nothing at all.
-void quietly(lv_obj_t *obj, bool settle)
+// The shadow is put out as the tile's own property, not as a style added: a
+// style refreshes every property of the tile's children too, 18 ms for the
+// week's, where a shadow's opacity is not inherited and touches the tile alone.
+// One the tile had of its own is kept to give back.
+void quietly(lv_obj_t *obj, bool settle, OwnShadow &own)
 {
     lv_display_t *disp = lv_obj_get_display(obj);
     lv_display_enable_invalidation(disp, false);
     if (settle) {
-        lv_obj_add_style(obj, &s_settled, 0);
+        lv_style_value_t value{};
+        own.had = lv_obj_get_local_style_prop(obj, LV_STYLE_SHADOW_OPA, &value, 0) == LV_RESULT_OK;
+        own.opa = static_cast<lv_opa_t>(value.num);
+        lv_obj_set_style_shadow_opa(obj, LV_OPA_TRANSP, 0);
+    } else if (own.had) {
+        lv_obj_set_style_shadow_opa(obj, own.opa, 0);
     } else {
-        lv_obj_remove_style(obj, &s_settled, 0);
+        lv_obj_remove_local_style_prop(obj, LV_STYLE_SHADOW_OPA, 0);
     }
     lv_display_enable_invalidation(disp, true);
 }
@@ -262,21 +276,30 @@ void invalidate_rim(const lv_area_t &box, const lv_area_t &body, std::int32_t r)
     }
 }
 
-// The parts of `box` a shadow is painted into, a strip at a time: whole
-// strips across it, but along the straight sides of an opaque tile only the
-// columns either side, as under the tile nothing of it shows.
+// The parts of `box` a shadow is painted into, a strip at a time. Beside an
+// opaque tile, in any of its rows, only the columns either side: between its
+// corners' columns the tile covers every row it has, its rounded corners too.
 template <typename Fn>
 void each_painted(const lv_area_t &box, const lv_area_t &body, std::int32_t corner, bool cover, Fn &&fn)
 {
+    const bool narrow = body.x2 - body.x1 <= 2 * corner;
     for (std::int32_t y0 = box.y1; y0 <= box.y2; y0 += STRIP) {
-        const std::int32_t rows  = std::min(STRIP, box.y2 - y0 + 1);
-        const bool         sides = cover && y0 >= body.y1 + corner && y0 + rows - 1 <= body.y2 - corner &&
-                           body.x2 - body.x1 > 2 * corner;
-        if (sides) {
-            fn(y0, rows, box.x1, body.x1 + corner);
-            fn(y0, rows, body.x2 - corner, box.x2);
-        } else {
-            fn(y0, rows, box.x1, box.x2);
+        const std::int32_t y1 = std::min(y0 + STRIP, box.y2 + 1);
+        if (!cover || narrow) {
+            fn(y0, y1 - y0, box.x1, box.x2);
+            continue;
+        }
+        // above the tile, beside it, below it
+        const std::int32_t in1 = std::clamp(body.y1, y0, y1), in2 = std::clamp(body.y2 + 1, y0, y1);
+        if (in1 > y0) {
+            fn(y0, in1 - y0, box.x1, box.x2);
+        }
+        if (in2 > in1) {
+            fn(in1, in2 - in1, box.x1, body.x1 + corner);
+            fn(in1, in2 - in1, body.x2 - corner, box.x2);
+        }
+        if (y1 > in2) {
+            fn(in2, y1 - in2, box.x1, box.x2);
         }
     }
 }
@@ -302,12 +325,85 @@ void unbake(Caster &c)
     c.baked = false;
     restore(c);
     invalidate_rim(c.painted, c.baked_at.coords, c.radius);
-    quietly(c.tile, false);
+    quietly(c.tile, false, c.own);
     for (int i = 0; i < s_count; ++i) {
         if (s_casters[i].baked && overlap(s_casters[i].painted, c.painted)) {
             unbake(s_casters[i]);  // the restoring wiped its shadow where the two meet
         }
     }
+}
+
+// A shadow's blur is most of what a page change costs, and a page's tiles
+// come back in the same shapes: each shape's shadow is kept as the alpha of
+// the pixels painted, in the order they are painted, and laid down again.
+struct Shade {
+    std::int32_t  w = 0, h = 0;                    // the tile's
+    lv_area_t     box{};                           // the painted box, from the tile's corner
+    std::int32_t  radius = 0, width = 0, spread = 0, ofs_x = 0, ofs_y = 0;
+    lv_opa_t      opa   = 0;
+    bool          cover = false;
+    std::uint8_t *alpha = nullptr;
+    std::size_t   bytes = 0;
+};
+constexpr int         SHADES       = 24;
+constexpr std::size_t SHADES_BYTES = 1536 * 1024;
+KIT_IN_PSRAM Shade    s_shades[SHADES];
+int                   s_next_shade = 0;
+std::size_t           s_shade_bytes = 0;
+
+Shade shape_of(const lv_draw_box_shadow_dsc_t &dsc, const lv_area_t &body, const lv_area_t &box)
+{
+    Shade k;
+    k.w      = lv_area_get_width(&body);
+    k.h      = lv_area_get_height(&body);
+    k.box    = {box.x1 - body.x1, box.y1 - body.y1, box.x2 - body.x1, box.y2 - body.y1};
+    k.radius = dsc.radius;
+    k.width  = dsc.width;
+    k.spread = dsc.spread;
+    k.ofs_x  = dsc.ofs_x;
+    k.ofs_y  = dsc.ofs_y;
+    k.opa    = dsc.opa;
+    k.cover  = dsc.bg_cover != 0;
+    return k;
+}
+
+bool same(const Shade &a, const Shade &b)
+{
+    return a.w == b.w && a.h == b.h && same(a.box, b.box) && a.radius == b.radius && a.width == b.width &&
+           a.spread == b.spread && a.ofs_x == b.ofs_x && a.ofs_y == b.ofs_y && a.opa == b.opa && a.cover == b.cover;
+}
+
+std::size_t painted_bytes(const lv_area_t &box, const lv_area_t &body, std::int32_t corner, bool cover)
+{
+    std::size_t n = 0;
+    each_painted(box, body, corner, cover, [&](std::int32_t, std::int32_t rows, std::int32_t x1, std::int32_t x2) {
+        n += static_cast<std::size_t>(rows) * static_cast<std::size_t>(x2 - x1 + 1);
+    });
+    return n;
+}
+
+// A slot for a new shape, its alpha `bytes` long; null when there is no room.
+Shade *keep_shade(const Shade &shape, std::size_t bytes)
+{
+    Shade &slot = s_shades[s_next_shade];
+    if (slot.alpha != nullptr) {
+        heap_caps_free(slot.alpha);
+        s_shade_bytes -= slot.bytes;
+        slot.alpha = nullptr;
+    }
+    if (s_shade_bytes + bytes > SHADES_BYTES) {
+        return nullptr;
+    }
+    auto *alpha = static_cast<std::uint8_t *>(heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (alpha == nullptr) {
+        return nullptr;
+    }
+    slot          = shape;
+    slot.alpha    = alpha;
+    slot.bytes    = bytes;
+    s_shade_bytes += bytes;
+    s_next_shade  = (s_next_shade + 1) % SHADES;
+    return &slot;
 }
 
 // The shadow as LVGL draws it, laid on the ground in full colour and
@@ -317,14 +413,36 @@ void paint(const lv_draw_box_shadow_dsc_t &dsc, const lv_area_t &body, const lv_
     const std::uint32_t stride = s_picture->header.stride;
     const int sr = static_cast<int>((dsc.color.red)), sg = static_cast<int>(dsc.color.green),
               sb = static_cast<int>(dsc.color.blue);
-    each_painted(box, body, corner_of(dsc.radius, body), dsc.bg_cover != 0,
+    const std::int32_t corner = corner_of(dsc.radius, body);
+    const bool         cover  = dsc.bg_cover != 0;
+    const Shade        shape  = shape_of(dsc, body, box);
+    const Shade       *kept   = nullptr;
+    for (const Shade &k : s_shades) {
+        if (k.alpha != nullptr && same(k, shape)) {
+            kept = &k;
+            break;
+        }
+    }
+    Shade *making = kept == nullptr ? keep_shade(shape, painted_bytes(box, body, corner, cover)) : nullptr;
+    std::size_t at = 0;
+    each_painted(box, body, corner, cover,
                  [&](std::int32_t y0, std::int32_t rows, std::int32_t x1, std::int32_t x2) {
-        shadow_strip(dsc, body, box, y0, x1, x2);
+        if (kept == nullptr) {
+            shadow_strip(dsc, body, box, y0, x1, x2);
+        }
         for (std::int32_t r = 0; r < rows; ++r) {
             const std::uint8_t *in  = s_strip->data + static_cast<std::size_t>(r) * s_strip->header.stride;
             auto              *out = reinterpret_cast<std::uint16_t *>(s_picture->data + static_cast<std::size_t>(y0 + r) * stride) + box.x1;
             for (std::int32_t x = x1 - box.x1; x <= x2 - box.x1; ++x) {
-                const int a = in[x * 4 + 3];
+                int a = 0;
+                if (kept != nullptr) {
+                    a = kept->alpha[at++];
+                } else {
+                    a = in[x * 4 + 3];
+                    if (making != nullptr) {
+                        making->alpha[at++] = static_cast<std::uint8_t>(a);
+                    }
+                }
                 if (a == 0) {
                     continue;
                 }
@@ -363,7 +481,7 @@ bool bake(Caster &c, const Pose &pose)
             cover = cover && d.bg_grad.stops[i].opa >= LV_OPA_COVER;
         }
     }
-    s.bg_cover = cover ? 1 : 0;
+    s.bg_cover = cover || c.filled ? 1 : 0;
 
     const std::int32_t reach = s.width / 2 + 1;
     lv_area_t box{pose.coords.x1 + s.ofs_x - s.spread - reach, pose.coords.y1 + s.ofs_y - s.spread - reach,
@@ -382,7 +500,7 @@ bool bake(Caster &c, const Pose &pose)
     c.baked    = true;
     c.painted  = box;
     c.baked_at = pose;
-    quietly(c.tile, true);
+    quietly(c.tile, true, c.own);
     invalidate_rim(box, pose.coords, c.radius);
     return true;
 }
@@ -413,6 +531,7 @@ struct Pane {
     lv_area_t         box{};              // where the picture lies, from the pane's corner
     bool              carried = false, refused = false;
     bool              trimmable = false;  // drawn untransformed and unblurred, so LVGL's box round it is plain
+    OwnShadow         own;
 };
 
 KIT_IN_PSRAM Pane s_panes[24];
@@ -640,7 +759,7 @@ void on_refresh(lv_event_t *)
         const Shape shape = shape_of(p);
         if (p.carried && !same(shape, p.drawn)) {
             p.carried = false;  // live again while it changes shape
-            quietly(p.obj, false);
+            quietly(p.obj, false, p.own);
             lv_obj_invalidate(p.obj);
         }
         if (!same(shape, p.seen)) {
@@ -675,7 +794,7 @@ void carry_panes()
         // the picture is the shadow as it was drawn, so nothing needs drawing again
         p.drawn   = shape;
         p.carried = true;
-        quietly(p.obj, true);
+        quietly(p.obj, true, p.own);
     }
 }
 
@@ -723,8 +842,6 @@ void on_delete(lv_event_t *e)
 void begin(lv_obj_t *ground, lv_obj_t *content, lv_draw_buf_t *picture, void (*repaint)(const lv_area_t &area))
 {
     if (s_ground == nullptr) {
-        lv_style_init(&s_settled);
-        lv_style_set_shadow_opa(&s_settled, LV_OPA_TRANSP);
         lv_display_add_event_cb(lv_obj_get_display(ground), on_refresh, LV_EVENT_REFR_START, nullptr);
         lv_display_add_event_cb(lv_obj_get_display(ground), on_invalidate, LV_EVENT_INVALIDATE_AREA, nullptr);
         lv_timer_create(on_tick, 100, nullptr);
@@ -746,7 +863,7 @@ void painted()
     for (int i = 0; i < s_count; ++i) {
         if (s_casters[i].baked) {
             s_casters[i].baked = false;
-            quietly(s_casters[i].tile, false);
+            quietly(s_casters[i].tile, false, s_casters[i].own);
         }
     }
 }
@@ -785,6 +902,15 @@ void now()
         Caster &c = s_casters[i];
         if (!c.baked && !c.refused && c.seen.shown) {
             c.refused = !bake(c, c.seen);
+        }
+    }
+}
+
+void covered(lv_obj_t *tile)
+{
+    for (int i = 0; i < s_count; ++i) {
+        if (s_casters[i].tile == tile) {
+            s_casters[i].filled = true;
         }
     }
 }

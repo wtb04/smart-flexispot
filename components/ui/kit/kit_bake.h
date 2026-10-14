@@ -22,6 +22,8 @@ void restyle();
 void now();
 /** A tile whose shadow may be painted in. */
 void cast(lv_obj_t *tile);
+/** A cast tile its content covers to its rounded edge, its own ground clear: nothing of its shadow shows under it. */
+void covered(lv_obj_t *tile);
 /** A pane of glass whose shadow, while its shape holds, is a picture drawn once. `base` is its kit style. */
 void glass(lv_obj_t *obj, const lv_style_t *base);
 

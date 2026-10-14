@@ -3161,6 +3161,7 @@ void lay_out_map()
     const std::int32_t h      = s_map_h;
     const std::int32_t area_w = w - COLUMN_W - look::space::m;  // the map beside the column
     lv_obj_set_style_bg_opa(s_bezel, LV_OPA_TRANSP, 0);
+    kit::tile_covered(s_bezel);  // the map's picture covers it, corners and all
     lv_obj_set_pos(s_bezel, 0, 0);
     lv_obj_set_size(s_bezel, w, h);
     build_scope_in({w, h, area_w / 2, h / 2, h / 2 - RIM_BAND, look::radius::card}, 0, 0);
