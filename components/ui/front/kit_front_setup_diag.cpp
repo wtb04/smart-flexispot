@@ -1,6 +1,6 @@
-// What the panel reports of itself, on Setup's right: in one tile whether all
-// is well, and each of its parts as a glyph in its state's ink, whose readings
-// open as a sheet on a tap and whose log on a hold; and the log of them all.
+// What the panel reports of itself, Setup's Diagnostics: in one line whether
+// all is well, and each of its parts as a row with its state in its ink, whose
+// readings open as a sheet on a tap and whose log on a hold; and the log of them all.
 
 #include "kit_front.h"
 
@@ -9,6 +9,7 @@
 #include "topics.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 
@@ -17,8 +18,7 @@ namespace {
 namespace ic = kit::glyph;
 using namespace kit;
 
-constexpr int          GRID_COLS = 3;
-constexpr std::int32_t STATE_DOT = 14, VALUE_W = 170;
+constexpr std::int32_t STATE_DOT = 14, STATE_W = 340, BADGE_W = 220;
 constexpr std::int32_t CARD_W = 660, SHEET_ROW_H = 52, SHEET_MAX_H = 600;
 // a sheet's padding, its head and the frame round its body
 constexpr std::int32_t SHEET_CHROME = 2 * space::xxl + size::button + space::l + 3 * space::s;
@@ -27,9 +27,8 @@ constexpr int          LOG_MAX = 200;
 constexpr int          ALL     = -1;
 constexpr std::int32_t END_SLACK = 8;  // near enough the end to count as there
 
-lv_obj_t     *s_summary = nullptr, *s_summary_dot = nullptr;
+lv_obj_t     *s_summary = nullptr, *s_summary_dot = nullptr, *s_mark = nullptr;
 lv_obj_t     *s_card[kMaxCards] = {};
-lv_obj_t     *s_card_glyph[kMaxCards] = {};
 Level         s_level[kMaxCards] = {};
 std::uint32_t s_card_stamp[kMaxCards] = {};
 
@@ -86,6 +85,14 @@ void set_text_if(lv_obj_t *label, const char *value)
 
 const char *or_dash(const char *value) { return value[0] != '\0' ? value : "--"; }
 
+// "box silent" as "Box silent": a state on its own, as a row's or a badge's.
+const char *state_text(const char *value, char *out, std::size_t size)
+{
+    std::snprintf(out, size, "%s", or_dash(value));
+    out[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(out[0])));
+    return out;
+}
+
 void paint_summary()
 {
     int  poor = 0;
@@ -110,10 +117,10 @@ void paint_summary()
     set_text_if(s_summary, text);
     set_ink(s_summary, ink);
     set_dot(s_summary_dot, poor == 0 ? Ink::Green : ink);
+    if (s_mark != nullptr) {
+        set_dot(s_mark, poor == 0 ? Ink::Green : ink);
+    }
 }
-
-// A part at a glance: as the text when well, in its ink when not, faint until told.
-Ink glyph_ink(Level level) { return level == Level::Good ? Ink::Primary : ink_of(level, Ink::Tertiary); }
 
 void paint_sheet()
 {
@@ -121,7 +128,8 @@ void paint_sheet()
         return;
     }
     const detail::InfoState &card = detail::diagnostics_state().cards[s_sheet];
-    set_badge(s_sheet_state, or_dash(card.value), ink_of(card.level, Ink::Secondary));
+    char state[sizeof card.value];
+    set_badge(s_sheet_state, state_text(card.value, state, sizeof state), ink_of(card.level, Ink::Secondary));
     for (int r = 0; r < kMaxRows; ++r) {
         const detail::InfoState &info = detail::diagnostics_state().rows[s_sheet][r];
         if (s_sheet_value[r] != nullptr && info.stamp != s_sheet_stamp[r]) {
@@ -140,10 +148,10 @@ void paint()
         const detail::InfoState &card = d.cards[i];
         if (card.stamp != s_card_stamp[i]) {
             s_card_stamp[i] = card.stamp;
-            if (s_level[i] != card.level) {
-                set_ink(s_card_glyph[i], glyph_ink(card.level));
-                levels = true;
-            }
+            char state[sizeof card.value];
+            set_row_value(s_card[i], state_text(card.value, state, sizeof state));
+            ink_if(row_trail(s_card[i]), ink_of(card.level, Ink::Tertiary));
+            levels = levels || s_level[i] != card.level;
             s_level[i] = card.level;
         }
     }
@@ -167,8 +175,12 @@ void open_card(int card, lv_obj_t *source)
 
     // in its head, the part's state and its log
     lv_obj_t *head = lv_obj_get_child(lv_obj_get_parent(lv_obj_get_parent(body)), 0);
-    lv_obj_set_flex_grow(lv_obj_get_child(head, 0), 1);
-    s_sheet_state = badge(head, "--", Ink::Secondary, nullptr, VALUE_W, true);
+    lv_obj_set_style_pad_column(head, space::m, 0);
+    lv_obj_t *title = lv_obj_get_child(head, 0);
+    lv_obj_set_flex_grow(title, 1);
+    lv_label_set_long_mode(title, LV_LABEL_LONG_MODE_DOTS);
+    lv_obj_set_height(title, lv_font_get_line_height(lv_obj_get_style_text_font(title, LV_PART_MAIN)));
+    s_sheet_state = badge(head, "--", Ink::Secondary, nullptr, BADGE_W, true);
     lv_obj_move_to_index(s_sheet_state, 1);
     lv_obj_t *log = button(head, Button::Raised, nullptr, "Log");
     lv_obj_set_style_pad_hor(log, space::xl, 0);
@@ -345,64 +357,50 @@ void open_log(int card, lv_obj_t *source)
 
 // --- the summary ----------------------------------------------------------
 
-// What a finger on a part shows: as a pressed row.
-lv_style_t s_pressed;
-
-void restyle_pressed(void *)
+lv_obj_t *part(lv_obj_t *column, int i)
 {
-    lv_style_set_bg_color(&s_pressed, lv_color_hex(colours().raised_hi));
-}
+    const Card &c = detail::s_cards[i];
+    RowSpec     spec;
+    spec.glyph     = glyph_of(c.glyph);
+    spec.title     = c.title;
+    spec.trail     = Trail::Value;
+    spec.value     = "--";
+    spec.value_w   = STATE_W;
+    spec.pressable = true;
+    lv_obj_t *r = row(column, spec);
+    row_height(r, SETUP_ROW_H);
+    ink_if(row_trail(r), Ink::Tertiary);
 
-lv_obj_t *part(lv_obj_t *grid, int i, std::int32_t w, std::int32_t h)
-{
-    const Card &c    = detail::s_cards[i];
-    lv_obj_t   *cell = flow(grid, LV_FLEX_FLOW_COLUMN, space::xs);
-    lv_obj_set_size(cell, w, h);
-    lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_radius(cell, radius::inner, 0);
-    lv_obj_set_clickable(cell, true);
-    lv_obj_add_style(cell, &s_pressed, LV_STATE_PRESSED);
-    s_card_glyph[i] = icon(cell, glyph_of(c.glyph), 34, true, Ink::Tertiary);
-    lv_obj_t *name  = text(cell, Role::Small, c.title, Ink::Secondary);
-    lv_obj_set_size(name, w - 2 * space::s, fonts::small()->line_height);
-    lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_CENTER, 0);
-    lv_label_set_long_mode(name, LV_LABEL_LONG_MODE_DOTS);
-
-    popover_source(cell);
+    popover_source(r);
     const auto index = reinterpret_cast<void *>(static_cast<std::intptr_t>(i));
     lv_obj_add_event_cb(
-        cell,
+        r,
         [](lv_event_t *e) {
             open_card(static_cast<int>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e))),
                       lv_event_get_current_target_obj(e));
         },
         LV_EVENT_SHORT_CLICKED, index);
     lv_obj_add_event_cb(
-        cell,
+        r,
         [](lv_event_t *e) {
             open_log(static_cast<int>(reinterpret_cast<std::intptr_t>(lv_event_get_user_data(e))),
                      lv_event_get_current_target_obj(e));
         },
         LV_EVENT_LONG_PRESSED, index);
-    return cell;
+    return r;
 }
 }  // namespace
 
-void build_setup_diagnostics(lv_obj_t *column, std::int32_t w, std::int32_t h)
+void build_setup_diagnostics(lv_obj_t *column, lv_obj_t *mark)
 {
-    section(column, "Diagnostics");
-    lv_obj_t *t = tile(column);
-    lv_obj_set_size(t, w, h);
-    lv_obj_set_style_pad_all(t, space::xl, 0);
-    lv_obj_set_flex_flow(t, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(t, space::s, 0);
-
-    lv_obj_t *head = flow(t, LV_FLEX_FLOW_ROW, space::m);
-    lv_obj_set_size(head, LV_PCT(100), size::button);
+    s_mark = mark;
+    lv_obj_t *head = flow(column, LV_FLEX_FLOW_ROW, space::m);
+    lv_obj_set_size(head, LV_PCT(100), SETUP_ROW_H);
+    lv_obj_set_style_pad_hor(head, space::m, 0);
     lv_obj_set_flex_align(head, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     s_summary_dot = dot(head, Ink::Green, STATE_DOT);
-    s_summary     = text(head, Role::H1, "All healthy");
-    lv_obj_set_width(s_summary, widest(Role::H1, {"All healthy", "9 need attention"}));
+    s_summary     = text(head, Role::H2, "All healthy");
+    lv_obj_set_width(s_summary, widest(Role::H2, {"All healthy", "9 need attention"}));
     filler(head);
     lv_obj_t *log = button(head, Button::Raised, nullptr, "Log");
     lv_obj_set_style_pad_hor(log, space::xl, 0);
@@ -410,24 +408,12 @@ void build_setup_diagnostics(lv_obj_t *column, std::int32_t w, std::int32_t h)
     lv_obj_add_event_cb(log, [](lv_event_t *e) { open_log(ALL, lv_event_get_current_target_obj(e)); },
                         LV_EVENT_CLICKED, nullptr);
 
-    lv_style_init(&s_pressed);
-    lv_style_set_bg_opa(&s_pressed, LV_OPA_COVER);
-    restyle_pressed(nullptr);
-    on_restyle(t, restyle_pressed, nullptr);
-
     const int count = std::min(detail::s_card_count, kMaxCards);
     if (count == 0) {
-        empty(t, ic::monitor_heart, "Nothing reported");
-    } else {
-        lv_obj_t *grid = flow(t, LV_FLEX_FLOW_ROW_WRAP, 0);
-        lv_obj_set_width(grid, LV_PCT(100));
-        lv_obj_set_flex_grow(grid, 1);
-        const int          lines  = (count + GRID_COLS - 1) / GRID_COLS;
-        const std::int32_t cell_w = (w - 2 * space::xl) / GRID_COLS;
-        const std::int32_t cell_h = (h - 2 * space::xl - size::button - space::s) / lines;
-        for (int i = 0; i < count; ++i) {
-            s_card[i] = part(grid, i, cell_w, cell_h);
-        }
+        empty(column, ic::monitor_heart, "Nothing reported");
+    }
+    for (int i = 0; i < count; ++i) {
+        s_card[i] = part(column, i);
     }
     subscribe(Topic::Diagnostics, detail::kNoView, paint);
 }
