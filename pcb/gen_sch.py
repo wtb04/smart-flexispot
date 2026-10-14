@@ -47,6 +47,8 @@ PLACE = {
  "D1": ("Device","D_Schottky", 146.05, 33.02,  0,"y","SS14","Diode_SMD:D_SMA"),
  "C1": ("Device","C",          152.40, 43.18,  0,None,"22uF 25V","Capacitor_SMD:C_1206_3216Metric"),
  "C2": ("Device","C",          168.91, 43.18,  0,None,"100nF 50V","Capacitor_SMD:C_0805_2012Metric"),
+ # the bulk capacitor that carries the radio's start-up surge on desk power
+ "C3": ("Device","C_Polarized",109.22, 45.72,  0,None,"1000uF 6.3V","Capacitor_THT:CP_Radial_D8.0mm_P3.50mm"),
  "R1": ("Device","R",          123.19, 83.82, 90,None,"10k","Resistor_SMD:R_0805_2012Metric"),
  "R2": ("Device","R",          137.16, 96.52,  0,None,"15k","Resistor_SMD:R_0805_2012Metric"),
  "D2": ("Diode","BAT54S",      152.40,102.87,  0,"x","BAT54S","Package_TO_SOT_SMD:SOT-23"),
@@ -66,6 +68,7 @@ for ref,(sym,x,y) in {"#PWR08":("GND", 19.05, 83.82), "#PWR09":("GND", 52.07, 83
                       "#PWR10":("GND", 68.58, 83.82), "#PWR02":("GND",152.40, 52.07),
                       "#PWR03":("GND",168.91, 52.07), "#PWR04":("GND",137.16,107.95),
                       "#PWR05":("GND",144.78,110.49),
+                      "#PWR07":("+5V",109.22, 39.37), "#PWR11":("GND",109.22, 52.07),
                       "#PWR01":("+5V",158.75, 27.94), "#PWR06":("+3V3",160.02, 92.71),
                       "#FLG01":("PWR_FLAG",163.83, 27.94),   # +5V rail
                       "#FLG02":("PWR_FLAG", 80.01, 48.26),   # GND at the desk connector
@@ -140,6 +143,7 @@ w((158.75,33.02), (158.75,27.94))                              # +5V symbol
 w((163.83,33.02), (163.83,27.94))                              # PWR_FLAG
 w((152.40,33.02), P("C1","1"));  w(P("C1","2"), (152.40,52.07))
 w((168.91,33.02), P("C2","1"));  w(P("C2","2"), (168.91,52.07))
+w((109.22,39.37), P("C3","1"));  w(P("C3","2"), (109.22,52.07))  # its own +5V and GND
 
 # --- RX LEVEL SHIFT -------------------------------------------------------
 w((109.22,83.82), P("R1","1"))
@@ -164,8 +168,8 @@ for p in U1A_N: w(P("U1A",p), (243.84, P("U1A",p)[1]))
 
 # ---- labels: net name at the far end of a stub ----
 LABELS = [("DESK_5V", 72.39, P("RJ45_1","8")[1], 0),
-          ("DESK_TX", 72.39, P("RJ45_1","6")[1], 0),
-          ("DESK_RX", 72.39, P("RJ45_1","5")[1], 0),
+          ("DESK_TX", 72.39, P("RJ45_1","5")[1], 0),
+          ("DESK_RX", 72.39, P("RJ45_1","6")[1], 0),
           ("PIN20",   72.39, P("RJ45_1","4")[1], 0),
           ("LED_DESK_A", 35.56, P("RJ45_1","10")[1], 180),
           ("LED_BT_A",   35.56, P("RJ45_1","12")[1], 180),
@@ -200,7 +204,7 @@ NOTES = [( 17.78, 92.71, "pins 1-3 unused - the control box only uses 4..8"),
 # ---- build ----
 sch = Schematic.create_new(); sch.paper.paperSize = "A4"
 sch.titleBlock = TitleBlock(title="FlexiSpot / LoctekMotion BLE desk companion",
-                            revision="rev1", company="Wouter ten Brinke",
+                            revision="rev2", company="Wouter ten Brinke",
                             comments={1: "ESP32 DevKit V1 30-pin carrier, RJ45 to the control box"})
 seen = set()
 for ref,(lib,name,x,y,ang,mir,val,fp) in PLACE.items():
@@ -229,6 +233,9 @@ for ref,(lib,name,x,y,ang,mir,val,fp) in PLACE.items():
         rx, ry0, ry1 = x, y - 6.35, y + 6.35
     elif ref in ("C1", "C2"):
         rx, ry0, ry1 = x - 7.62, y - 2.54, y + 2.54
+    elif ref == "C3":
+        # clear of its own body, under F1's value
+        rx, ry0, ry1 = x + 10.16, y - 1.27, y + 3.81
     elif ref == "D1":
         # fields to the left, clear of C1's tap off the rail
         rx, ry0, ry1 = x - 7.62, y - 2.54, y + 2.54

@@ -1,9 +1,10 @@
 CONFIG_IDF_TARGET="esp32"
 
-# The desk hangs off UART2, as the carrier board in pcb/ wires it: GPIO17 (TX2)
-# to RJ45 pin 5, where the box listens, GPIO16 (RX2) from the divider off pin 6,
-# where it sends, and wake on 23. Wired by hand with the pins the other way
-# round, swap TX and RX; the wrong way looks exactly like a dead control box.
+# The desk hangs off UART2, as the rev2 carrier board in pcb/ wires it: GPIO17
+# (TX2) to RJ45 pin 6, where the box listens, GPIO16 (RX2) from the divider off
+# pin 5, where it sends, and wake on 23. A rev1 board, or one wired by hand the
+# other way round, needs TX and RX swapped; the wrong way looks exactly like a
+# dead control box.
 CONFIG_LOCTEK_UART_NUM=2
 CONFIG_LOCTEK_TX_GPIO=17
 CONFIG_LOCTEK_RX_GPIO=16

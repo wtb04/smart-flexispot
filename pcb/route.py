@@ -13,17 +13,18 @@ from kiutils.items.common import Position
 from kiutils.items.brditems import Segment, Via
 
 PCB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tab5-desk-ctrl.kicad_pcb")
-W, H, GRID = 60.0, 35.2, 0.1
+W, H, GRID = 70.0, 35.2, 0.1
 NX, NY = int(W / GRID) + 1, int(H / GRID) + 1
 EDGE = 0.5                      # board rule: copper-to-edge clearance
 CLEAR = 0.25                     # router clearance (DRC rule is 0.20)
-KEEPOUT = (19.5, 7.1, 33.0, 28.4)
+KEEPOUT = (29.5, 7.1, 43.0, 28.4)
 # An M3 pan head with a washer is about 6 mm across and clamps down on whatever
 # is under it, with only soldermask between steel and copper. DRC only knows
 # about the drill, so it happily routes to 0.37 mm of a mounting hole -- keep
 # copper a washer radius clear instead.
 SCREW_KEEP = 3.0
 POWER = {"+5V", "DESK_5V", "D5V_F"}
+JACK_GND_HALO = 1.6
 VIA_D, VIA_DRILL = 0.6, 0.3
 HOLE2HOLE = 0.3                 # board rule is 0.2495; keep a margin
 VIA_COST = 700                   # ~7 mm of track: keeps the via count down
@@ -102,6 +103,14 @@ def build_obstacles(net, hw):
         for L in p["lay"]:
             rect_mask(m[L], p["x"] - pw - infl, p["y"] - ph - infl,
                       p["x"] + pw + infl, p["y"] + ph + infl)
+    # The jack's pin 7 is GND among signal pins, and a B.Cu track hugging it
+    # leaves its thermal relief one spoke. Keep other nets off the copper
+    # around it there, so the pour reaches it from the free side.
+    if net != "GND":
+        for p in pads:
+            if p["ref"] == "RJ45_1" and p["num"] == "7":
+                rect_mask(m[1], p["x"] - JACK_GND_HALO - hw, p["y"] - JACK_GND_HALO - hw,
+                          p["x"] + JACK_GND_HALO + hw, p["y"] + JACK_GND_HALO + hw)
     for (L, x0, y0, x1, y1, w, n) in routed:
         if n == net:
             continue
