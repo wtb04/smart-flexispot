@@ -110,10 +110,16 @@ class App(Adw.Application):
         return True
 
     def toggle_dropdown(self):
-        log.info("dropdown: %s", self.link.status_text())
+        from .ui import Dropdown
+        if getattr(self, "_dropdown", None) is None:
+            self._dropdown = Dropdown(self)
+        self._dropdown.toggle()
 
     def show_settings(self):
-        log.info("settings: %s", self.link.status_text())
+        from .ui import SettingsWindow
+        if getattr(self, "_settings_window", None) is None:
+            self._settings_window = SettingsWindow(self)
+        self._settings_window.present()
 
     @staticmethod
     def autostart_enabled() -> bool:

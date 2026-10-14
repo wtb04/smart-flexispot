@@ -15,6 +15,8 @@ install:
 	install -Dm644 data/desklink.service $(UNITS)/desklink.service
 	install -Dm644 data/nl.w-tb.desklink.desktop $(PREFIX)/share/applications/nl.w-tb.desklink.desktop
 	if ls data/icons/*.svg >/dev/null 2>&1; then install -Dm644 -t $(ICONS) data/icons/*.svg; fi
+	# a stale icon-theme.cache hides icons added after it, so GTK never finds them
+	if [ -f $(PREFIX)/share/icons/hicolor/icon-theme.cache ]; then gtk4-update-icon-cache -q -t -f $(PREFIX)/share/icons/hicolor; fi
 	systemctl --user daemon-reload
 	systemctl --user enable desklink.service
 	systemctl --user restart desklink.service
