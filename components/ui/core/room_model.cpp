@@ -26,6 +26,16 @@ constexpr std::uint32_t STOP_REST_MS    = 1200;
 // Pressed, the desk starts in about half a second; still for longer than this
 // it has stopped of its own, and a tap starts it again rather than stopping it.
 constexpr std::uint32_t HALTED_MS       = 1500;
+// The box takes no stop this soon after a preset of its own starts the desk:
+// one 0.8 s after the tap, the desk a quarter second under way, was ignored.
+// A stop tapped sooner is pressed once this has passed.
+constexpr std::uint32_t START_LOCK_MS   = 1000;
+// A stop the box did not take leaves the desk moving: looked at this long after,
+// a height that changed this recently is a desk still going, and it is pressed
+// again, as often as this.
+constexpr std::uint32_t STOP_CHECK_MS   = 1200;
+constexpr std::uint32_t STILL_GOING_MS  = 500;
+constexpr int           STOP_TRIES      = 2;
 
 DeskState   s_desk;
 LightsState s_lights;
@@ -36,6 +46,11 @@ int           s_held        = -1;  // the preset waiting for the desk to stand s
 std::uint32_t s_stopped_at  = 0;   // when a tap here last stopped the desk
 lv_timer_t   *s_held_timer  = nullptr;
 lv_timer_t   *s_motion_timer = nullptr;  // to see the height stand still again
+std::uint32_t s_started_at  = 0;   // when a start was last pressed here
+int           s_stopping    = -1;  // the preset pressed again to stop the desk, until it has
+bool          s_stop_due    = false;  // waiting for the box to take a stop
+int           s_stop_tries  = 0;
+lv_timer_t   *s_stop_timer  = nullptr;
 
 void copy(char *to, std::size_t size, const char *from)
 {
@@ -81,6 +96,67 @@ void press(int index)
     }
 }
 
+void start(int index)
+{
+    s_started_at = lv_tick_get();
+    press(index);
+}
+
+void stop_done()
+{
+    s_stopping = -1;
+    s_stop_due = false;
+    if (s_stop_timer != nullptr) {
+        lv_timer_delete(s_stop_timer);
+        s_stop_timer = nullptr;
+    }
+}
+
+void press_stop()
+{
+    s_stop_due   = false;
+    s_stopped_at = lv_tick_get();
+    press(s_stopping);
+}
+
+void follow_stop(lv_timer_t *)
+{
+    if (s_stop_due) {
+        if (lv_tick_elaps(s_started_at) >= START_LOCK_MS) {
+            ESP_LOGI(TAG, "desk: stop pressed now the box takes it");
+            press_stop();
+        }
+        return;
+    }
+    if (lv_tick_elaps(s_stopped_at) < STOP_CHECK_MS) {
+        return;
+    }
+    if (lv_tick_elaps(s_height_at) < STILL_GOING_MS && s_stop_tries < STOP_TRIES) {
+        ++s_stop_tries;
+        ESP_LOGW(TAG, "desk: still moving after the stop, pressed again (%d)", s_stop_tries);
+        press_stop();
+        return;
+    }
+    stop_done();
+}
+
+// The same preset again, which is what stops the box's own travel: no sooner
+// than the box takes it, and again if the desk goes on regardless.
+void stop_with(int index)
+{
+    stop_done();
+    s_stopping   = index;
+    s_stop_tries = 0;
+    s_stop_timer = lv_timer_create(follow_stop, SETTLE_CHECK_MS, nullptr);
+    if (lv_tick_elaps(s_started_at) < START_LOCK_MS) {
+        ESP_LOGI(TAG, "desk: stop tapped as it starts: pressed once the box takes it");
+        s_stop_due   = true;
+        s_stopped_at = lv_tick_get();
+        return;
+    }
+    press_stop();
+}
+
 void press_held(lv_timer_t *)
 {
     if (lv_tick_elaps(s_height_at) < SETTLE_MS || lv_tick_elaps(s_stopped_at) < STOP_REST_MS) {
@@ -90,7 +166,7 @@ void press_held(lv_timer_t *)
     forget_held();
     ESP_LOGI(TAG, "desk: still, preset %d pressed", index + 1);
     s_moved_at = lv_tick_get();  // its travel starts now
-    press(index);
+    start(index);
 }
 
 bool coasting()
@@ -177,6 +253,7 @@ void desk_go_to(int index)
     if (index < 0 || index >= kPresetCount) {
         return;
     }
+    stop_done();  // a tap of its own from here on
     if (s_stopped_at != 0 && lv_tick_elaps(s_stopped_at) >= STOPPED_MS) {
         s_stopped_at = 0;
     }
@@ -196,9 +273,14 @@ void desk_go_to(int index)
     }
     if (s_desk.travelling >= 0) {
         ESP_LOGI(TAG, "desk: preset %d tapped on the way to %d: stop", index + 1, s_desk.travelling + 1);
+        const bool boxs = s_desk.travelling < kBoxPresets;  // the panel's own lets go at once, and needs no more
         arrived();
-        press(index);
-        s_stopped_at = lv_tick_get();
+        if (boxs) {
+            stop_with(index);
+        } else {
+            press(index);
+            s_stopped_at = lv_tick_get();
+        }
         return;
     }
     if (s_desk.preset_active[index]) {
@@ -218,7 +300,7 @@ void desk_go_to(int index)
         return;
     }
     ESP_LOGI(TAG, "desk: preset %d tapped: go", index + 1);
-    press(index);
+    start(index);
 }
 
 void lights_take(bool on)
