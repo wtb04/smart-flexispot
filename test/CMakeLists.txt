@@ -74,6 +74,7 @@ host_test(jellyfin_protocol_test COMPONENT jellyfin SOURCES test/test_jellyfin_p
 host_test(laptop_protocol_test COMPONENT laptop SOURCES test/test_laptop_protocol.cpp laptop_protocol.cpp
     LIBS cjson)
 host_test(link_envelope_test COMPONENT laptop SOURCES test/test_link_envelope.cpp link_envelope.cpp)
+host_test(laptops_test COMPONENT laptop SOURCES test/test_laptops.cpp laptops.cpp)
 host_test(job_core_test COMPONENT jobs SOURCES test/test_job_core.cpp job_core.cpp)
 host_test(loctek_proto_test COMPONENT loctek SOURCES test/test_loctek_proto.cpp loctek_proto.cpp INCLUDES ${UNITS})
 host_test(net_core_test COMPONENT net SOURCES test/test_net_core.cpp net_core.cpp)
