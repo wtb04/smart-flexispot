@@ -57,12 +57,29 @@ class App(Adw.Application):
         self._watch_sleep()
         self.link.add_listener(lambda: log.debug("status: %s", self.link.status_text()))
         self.link.start()
+        from .tray import Tray
+        self._tray = Tray(self.link, self.toggle_dropdown, self.show_settings)
+        self._tray.start()
+        self.link.add_listener(self._write_bar_status)
+        self._write_bar_status()
 
     def _watch_sleep(self):
         system = Gio.bus_get_sync(Gio.BusType.SYSTEM, None)
         system.signal_subscribe("org.freedesktop.login1", "org.freedesktop.login1.Manager", "PrepareForSleep",
                                 "/org/freedesktop/login1", None, Gio.DBusSignalFlags.NONE,
                                 lambda *args: self.link.set_sleeping(args[5].unpack()[0]))
+
+    def _write_bar_status(self):
+        from . import tray
+        track = self.link.track
+        health = "trouble" if self.server_error else self.link.health()
+        text = self.server_error or self.link.status_text()
+        tray.write_bar_status(tray.bar_status_path(), tray.bar_status(health, bool(track and track.playing), text))
+
+    def do_shutdown(self):
+        from . import tray
+        tray.write_bar_status(tray.bar_status_path(), {"alt": "off", "text": "", "tooltip": "Desk Link is not running"})
+        Adw.Application.do_shutdown(self)
 
     def do_command_line(self, command_line):
         args = command_line.get_arguments()[1:]
@@ -75,8 +92,11 @@ class App(Adw.Application):
         if args == ["--version"]:
             command_line.print_literal(f"Desk Link {__version__}\n")
             return 0
+        if args == ["settings"]:
+            self.show_settings()
+            return 0
         if args:
-            command_line.printerr_literal("usage: desklink [set-key <hex> | --version]\n")
+            command_line.printerr_literal("usage: desklink [settings | set-key <hex> | --version]\n")
             return 1
         if self._started:
             self.toggle_dropdown()
