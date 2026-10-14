@@ -1,10 +1,12 @@
 #include "ui_internal.h"
 
+#include "notice_queue.h"
 #include "notices_model.h"
 #include "status_model.h"
 #include "topics.h"
 
 #include <cctype>
+#include <cstring>
 #include <ctime>
 
 namespace ui::detail {
@@ -37,6 +39,7 @@ lv_obj_t   *s_notice_body   = nullptr;
 lv_obj_t   *s_notice_line   = nullptr;  // runs down until the notice goes
 lv_timer_t *s_notice_timer = nullptr;
 char        s_notice_clock[8] = "";  // when the notice on show came
+char        s_shown_key[sizeof(Notice::key)] = "";
 
 std::uint32_t notice_ink(Level level)
 {
@@ -178,13 +181,23 @@ void show_next_notice()
 {
     Notice notice{};
     if (!notices_take_next(notice)) {
+        s_shown_key[0] = '\0';
         hide_notice();
         return;
     }
+    std::memcpy(s_shown_key, notice.key, sizeof(s_shown_key));
     write_notice(notice);
     raise_notice();
     restart_notice_timer(notice.timeout_ms);
 }
+void withdraw_notice(const char *key)
+{
+    notices_withdraw(key);
+    if (notice_on_show() && keyed_text(s_shown_key, key)) {
+        show_next_notice();
+    }
+}
+
 namespace {
 void notice_timeout_cb(lv_timer_t *) { show_next_notice(); }
 void notice_tapped_cb(lv_event_t *) { show_next_notice(); }

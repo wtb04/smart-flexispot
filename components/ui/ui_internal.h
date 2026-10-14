@@ -74,6 +74,7 @@ struct Notice {
     char message[192];
     Level level;
     int   timeout_ms;
+    char  key[48];  // what withdraw() takes it back by; empty for none
 };
 
 // What the screen calls each preset. Everything off the screen says Preset 1 to 6.
@@ -176,6 +177,8 @@ void paint_desk_shortcuts();
 void show_desk_travel(lv_obj_t *obj, bool travelling);  // after the preset the desk is at changes
 void show_next_notice();
 bool notice_on_show();
+/** Takes back the notices sent with `key`, waiting or on show. */
+void withdraw_notice(const char *key);
 void paint_notice_corner();  // when the notice on show came, and how many wait
 void create_notice_card();
 /** The screen going dark by itself, and lighting again: see screen_rules.h. */

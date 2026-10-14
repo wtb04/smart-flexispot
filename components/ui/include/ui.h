@@ -421,9 +421,12 @@ esp_err_t set_update(const UpdateState &state);
 /** Queued rather than shown at once: they arrive in bursts. A full queue drops the oldest.
  *  `source` says where it came from, over the title, which is the headline; the
  *  message goes under it, or is the headline itself when there is no title.
- *  A negative timeout keeps it until it is tapped. */
+ *  A negative timeout keeps it until it is tapped. With a `key`, withdraw() can
+ *  take it back before then. */
 esp_err_t notify(const char *source, const char *title, const char *message, Level level,
-                 int timeout_ms);
+                 int timeout_ms, const char *key = "");
+/** Takes back the notices sent with `key`, as an answered question does the one asking it. */
+esp_err_t withdraw(const char *key);
 
 /** A development build's: how long the radar takes to go from Home to its page,
  *  draw, zoom and go back, written to `out`. With the LVGL lock. */
