@@ -1,4 +1,5 @@
 #include "laptop.h"
+#include "laptops.h"
 
 #include "esp_app_desc.h"
 #include "esp_check.h"
@@ -105,13 +106,8 @@ Gcm                s_gcm;
 link::Fresh        s_fresh;  // the server's task alone takes from it
 Handlers           s_on;
 std::mutex         s_lock;
-NowPlaying         s_now;
-std::string        s_origin;  // http://address:port, where it answers
-std::int64_t       s_heard_us  = 0;
-std::int64_t       s_pinged_us = 0;
-int                s_reaches   = -1;  // whether the panel reaches the laptop's port back
-int                s_missed    = 0;   // pings in a row it did not
-esp_timer_handle_t s_quiet     = nullptr;
+Laptops            s_laptops;  // every laptop sharing, and the one followed
+esp_timer_handle_t s_quiet = nullptr;
 
 std::int64_t now_ms()
 {
@@ -193,15 +189,10 @@ net::Host host_of(const std::string &origin)
 void reached(const std::string &origin, bool yes)
 {
     std::lock_guard<std::mutex> hold(s_lock);
-    if (origin != s_origin) {
-        return;
+    if (s_laptops.reached(origin, yes) && s_laptops.reaches_of(origin) >= 0) {
+        ESP_LOGI(TAG, "%s %s", origin.c_str(),
+                 s_laptops.reaches_of(origin) == 1 ? "answers back" : "does not answer back");
     }
-    s_missed      = yes ? 0 : s_missed + 1;
-    const int now = yes ? 1 : s_missed >= 2 ? 0 : s_reaches;
-    if (now != s_reaches && now >= 0) {
-        ESP_LOGI(TAG, "%s %s", s_now.machine.c_str(), now == 1 ? "answers back" : "does not answer back");
-    }
-    s_reaches = now;
 }
 
 void tell(const NowPlaying &now)
@@ -240,31 +231,28 @@ esp_err_t take_state(httpd_req_t *req, const std::string &plain)
     if (!laptop::read(plain.data(), plain.size(), now) || from.empty()) {
         return answer(req, "400 Bad Request");
     }
-    const std::string  origin  = "http://" + from + ':' + std::to_string(now.port);
-    const std::int64_t heard   = esp_timer_get_time();
-    bool               ping    = false;
-    int                reaches = -1;
+    const std::string origin = "http://" + from + ':' + std::to_string(now.port);
+    Taken             taken;
+    NowPlaying        followed;
     {
         std::lock_guard<std::mutex> hold(s_lock);
-        if (origin != s_origin) {
-            ESP_LOGI(TAG, "%s at %s", now.machine.c_str(), origin.c_str());
-            s_reaches = -1;
-            s_missed  = 0;
+        const std::string before = s_laptops.current_origin();
+        taken                    = s_laptops.take(origin, now, esp_timer_get_time(), PING_EVERY_US);
+        followed                 = s_laptops.current_now();
+        if (s_laptops.current_origin() != before) {
+            const std::string who = followed.active ? followed.machine + " at " + s_laptops.current_origin() : "none";
+            ESP_LOGI(TAG, "following %s", who.c_str());
         }
-        ping        = origin != s_origin || heard - s_pinged_us >= PING_EVERY_US;
-        s_pinged_us = ping ? heard : s_pinged_us;
-        s_now       = now;
-        s_origin    = origin;
-        s_heard_us  = heard;
-        reaches     = s_reaches;
     }
-    if (ping) {
+    if (taken.ping) {
         ping_back(origin);
     }
-    tell(now);
+    if (taken.tell) {
+        tell(followed);
+    }
     return answer(req, "200 OK",
                   sealed(std::string(LINK) + REPLY,
-                         pong_body(PANEL, esp_app_get_description()->version, reaches, now_ms())));
+                         pong_body(PANEL, esp_app_get_description()->version, taken.reaches, now_ms())));
 }
 
 esp_err_t take(httpd_req_t *req)
@@ -314,28 +302,20 @@ esp_err_t take(httpd_req_t *req)
 
 void check_quiet(void *)
 {
+    NowPlaying followed;
     {
         std::lock_guard<std::mutex> hold(s_lock);
-        if (s_origin.empty() || esp_timer_get_time() - s_heard_us < QUIET_US) {
+        if (!s_laptops.forget_quiet(esp_timer_get_time(), QUIET_US)) {
             return;
         }
-        ESP_LOGI(TAG, "%s went quiet", s_now.machine.c_str());
-        s_now    = NowPlaying{};
-        s_origin = "";
+        followed = s_laptops.current_now();
+        ESP_LOGI(TAG, "a laptop went quiet; following %s", followed.active ? followed.machine.c_str() : "none");
     }
-    tell(NowPlaying{});
+    tell(followed);
 }
 
-void send(Command command, int value = 0)
+void send_to(const std::string &origin, Command command, int value = 0)
 {
-    std::string origin;
-    {
-        std::lock_guard<std::mutex> hold(s_lock);
-        if (!s_now.active) {
-            return;
-        }
-        origin = s_origin;
-    }
     const std::string body = command_body(command, value, now_ms());
     net::Request      request;
     request.host        = host_of(origin);
@@ -360,6 +340,19 @@ void send(Command command, int value = 0)
         }
     };
     net::submit(std::move(request));
+}
+
+void send(Command command, int value = 0)
+{
+    std::string origin;
+    {
+        std::lock_guard<std::mutex> hold(s_lock);
+        if (!s_laptops.current_now().active) {
+            return;
+        }
+        origin = s_laptops.current_origin();
+    }
+    send_to(origin, command, value);
 }
 }  // namespace
 
@@ -388,18 +381,23 @@ esp_err_t start(Handlers handlers)
 // reports does not undo the first; shown at once, as the next report would.
 void play_pause()
 {
-    NowPlaying now;
+    NowPlaying  now;
+    std::string origin;  // the laptop tapped: a pause there may hand the panel to another
+    bool        playing = false;
     {
         std::lock_guard<std::mutex> hold(s_lock);
-        if (!s_now.active || !s_now.takes_pause) {
-            ESP_LOGI(TAG, "play or pause, but %s", s_now.active ? "it does not take one" : "nothing plays");
+        const NowPlaying current = s_laptops.current_now();
+        if (!current.active || !current.takes_pause) {
+            ESP_LOGI(TAG, "play or pause, but %s", current.active ? "it does not take one" : "nothing plays");
             return;
         }
-        s_now.playing = !s_now.playing;
-        now           = s_now;
+        origin  = s_laptops.current_origin();
+        playing = !current.playing;
+        s_laptops.set_playing(playing, esp_timer_get_time());
+        now = s_laptops.current_now();
     }
     tell(now);
-    send(now.playing ? Command::Play : Command::Pause);
+    send_to(origin, playing ? Command::Play : Command::Pause);
 }
 
 void seek(int position_s)
@@ -446,7 +444,7 @@ std::size_t fetch_cover(const char *url, std::uint8_t *into, std::size_t size)
     std::string origin;
     {
         std::lock_guard<std::mutex> hold(s_lock);
-        origin = s_origin;
+        origin = s_laptops.current_origin();
     }
     if (origin.empty()) {
         return 0;
