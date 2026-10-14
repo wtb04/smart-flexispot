@@ -41,7 +41,7 @@ void paint_status()
 {
     const detail::StatusState &st = detail::status_state();
     const char *time = detail::pinned_clock() != nullptr ? detail::pinned_clock() : st.time[0] != 0 ? st.time : "--:--";
-    set_status(s_status, time, st.wifi, st.present);
+    set_status(s_status, time, st.wifi, st.present, st.laptops);
 }
 
 void paint_lights()

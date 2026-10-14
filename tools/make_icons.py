@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Rasterises the panel's own marks into an LVGL A8 header.
 
-The few the design kit's Material Symbols have no match for: the bar's Wi-Fi and
-phone marks, and the radar's planes and missing photo. A few rectangles, circles
-and polygons, sampled sixteen times a pixel so the curves do not stair-step.
+The few the design kit's Material Symbols have no match for: the bar's Wi-Fi,
+phone and laptop marks, and the radar's planes and missing photo. A few
+rectangles, circles and polygons, sampled sixteen times a pixel so the curves
+do not stair-step.
 Alpha only: the panel recolours them, the same way it recolours the map.
 """
 import pathlib
@@ -99,10 +100,18 @@ PHONE_LAYERS = [(rounded(6.5, 2, 21.5, 26, 2.8), True),
                 (rounded(7.6, 3.1, 20.4, 24.9, 1.9), 0.28),
                 (rounded(11.8, 4.1, 16.2, 5.6, 0.75), True),
                 (rounded(11.3, 22.9, 16.7, 23.8, 0.45), True)]
+# A MacBook open, in the same hand: the lid's hairline round a faintly lit
+# screen, on a base a little wider than the lid. No notch: the screen holds
+# how many laptops share when more than one does.
+LAPTOP_LAYERS = [(rounded(3, 4, 25, 21, 2.4), True),
+                 (rounded(4.1, 5.1, 23.9, 21, 1.5), 0.28),
+                 (rounded(1, 20.5, 27, 23.2, 1.1), True)]
 WIFI = paint(WIFI_LAYERS, STATUS_SIDE)
 WIFI_OFF = paint(struck(WIFI_LAYERS, 4, 3, 24, 26), STATUS_SIDE)
 PHONE = paint(PHONE_LAYERS, STATUS_SIDE)
 PHONE_OFF = paint(struck(PHONE_LAYERS, 4, 3, 24, 26), STATUS_SIDE)
+LAPTOP = paint(LAPTOP_LAYERS, STATUS_SIDE)
+LAPTOP_OFF = paint(struck(LAPTOP_LAYERS, 4, 3, 24, 26), STATUS_SIDE)
 
 PLANE_SIDE = 28
 
@@ -161,7 +170,7 @@ out.write_text(f"""#pragma once
 
 namespace ui {{
 namespace icons {{
-{emit("no_photo", NO_PHOTO, NO_PHOTO_SIDE)}{emit("wifi", WIFI, STATUS_SIDE)}{emit("wifi_off", WIFI_OFF, STATUS_SIDE)}{emit("phone", PHONE, STATUS_SIDE)}{emit("phone_off", PHONE_OFF, STATUS_SIDE)}{emit("plane", PLANE, PLANE_SIDE)}{emit("plane_large", PLANE_LARGE, PLANE_LARGE_SIDE)}
+{emit("no_photo", NO_PHOTO, NO_PHOTO_SIDE)}{emit("wifi", WIFI, STATUS_SIDE)}{emit("wifi_off", WIFI_OFF, STATUS_SIDE)}{emit("phone", PHONE, STATUS_SIDE)}{emit("phone_off", PHONE_OFF, STATUS_SIDE)}{emit("laptop", LAPTOP, STATUS_SIDE)}{emit("laptop_off", LAPTOP_OFF, STATUS_SIDE)}{emit("plane", PLANE, PLANE_SIDE)}{emit("plane_large", PLANE_LARGE, PLANE_LARGE_SIDE)}
 }}  // namespace icons
 }}  // namespace ui
 """)

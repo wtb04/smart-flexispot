@@ -34,7 +34,8 @@ Everything else is played, and nothing but those read-only feeds leaves the Mac:
 - Home Assistant, in `home_assistant.cpp`: not answering at first, then with
   readings, lights and a thermostat that the page's taps change;
 - what plays, in `media_stub.cpp`: the speaker with music, and a Jellyfin
-  episode with its intro, the episodes either side, subtitles and cinema mode;
+  episode with its intro, the episodes either side, subtitles and cinema mode,
+  with none, one or two laptops sharing through Desk Link;
 - notices from Home Assistant, in `notices.cpp`, read by the panel's own parser;
 - firmware updates, in `updates.cpp`, arriving and waiting to be installed;
 - Claude Code on the laptops, in `claude_stub.cpp`: sessions working, one waiting on you, all done, none, through the panel's own table;

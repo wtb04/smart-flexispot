@@ -351,6 +351,9 @@ esp_err_t set_time(const char *text);
 
 esp_err_t set_links(bool wifi);
 
+/** How many laptops share through Desk Link. */
+esp_err_t set_laptops(int count);
+
 /** The owner's phone here or not, which also gates which pages appear. */
 esp_err_t set_presence(bool has_key, bool present);
 

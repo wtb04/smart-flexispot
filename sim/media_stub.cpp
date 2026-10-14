@@ -64,6 +64,7 @@ bool         s_playing = false;
 int          s_volume  = 35;
 bool         s_muted   = false;
 bool         s_subtitles = false;
+int          s_laptops   = 1;  // sharing through Desk Link, the Mac at the desk among them
 
 bool video()
 {
@@ -266,6 +267,7 @@ void start()
         paint(s_pick_art[i], media::kPickArtSize, media::kPickArtSize, static_cast<float>(i) / media::kPickCount);
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_pick_art(i, s_pick_art[i].data()));
     }
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_laptops(s_laptops));
     show(Scene::Idle);
 }
 
@@ -300,6 +302,9 @@ void show(Scene scene)
 {
     s_scene   = scene;
     s_playing = scene != Scene::Idle;
+    if (scene == Scene::Laptop && s_laptops == 0) {
+        next_laptops();
+    }
     // An episode starts just before its intro, so Skip intro can be tried.
     const bool episode = scene == Scene::Episode || scene == Scene::Followed;
     go_to(episode ? 1 : 0, episode ? INTRO_FROM_S - 5 : scene == Scene::Laptop ? 412 : 60);
@@ -312,6 +317,12 @@ void next_scene()
          : s_scene == Scene::Episode  ? Scene::Followed
          : s_scene == Scene::Followed ? Scene::Laptop
                                       : Scene::Idle);
+}
+
+void next_laptops()
+{
+    s_laptops = (s_laptops + 1) % 3;
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_laptops(s_laptops));
 }
 
 void on_media(ui::MediaAction action)

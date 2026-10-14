@@ -248,6 +248,7 @@ Slot<ThermostatArgs> p_thermostat;
 Slot<PresenceArgs>   p_presence;
 Slot<TimeText>       p_time;
 Slot<bool>           p_wifi;
+Slot<int>            p_laptops;
 // Kept in PSRAM: sized for the most any card can have, it is several
 // kilobytes, and static data would take them from internal RAM.
 Slot<InfoArgs>      *p_rows = nullptr;  // [card * kMaxRows + row]
@@ -424,6 +425,12 @@ void apply_wifi(bool wifi)
     publish(Topic::Status);
 }
 
+void apply_laptops(int count)
+{
+    status_state().laptops = count;
+    publish(Topic::Status);
+}
+
 void apply_screen(bool on)
 {
     status_state().screen_on = on;
@@ -583,6 +590,9 @@ void apply_status_updates()
     }
     if (bool wifi = false; take(p_wifi, wifi)) {
         apply_wifi(wifi);
+    }
+    if (int laptops = 0; take(p_laptops, laptops)) {
+        apply_laptops(laptops);
     }
     if (int volume = 0; take(p_notification_volume, volume)) {
         settings_take_volume(volume);
@@ -892,6 +902,12 @@ esp_err_t set_time(const char *text)
 esp_err_t set_links(bool wifi)
 {
     put(p_wifi, wifi);
+    return ESP_OK;
+}
+
+esp_err_t set_laptops(int count)
+{
+    put(p_laptops, count);
     return ESP_OK;
 }
 

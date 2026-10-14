@@ -854,17 +854,23 @@ Status status(lv_obj_t *parent)
     lv_obj_set_width(s.clock, widest);
     lv_obj_set_style_text_align(s.clock, LV_TEXT_ALIGN_RIGHT, 0);  // close to the marks, as the minutes go by
     lv_label_set_text(s.clock, "");
-    for (lv_obj_t **mark : {&s.wifi, &s.phone}) {
+    for (lv_obj_t **mark : {&s.wifi, &s.phone, &s.laptop}) {
         *mark = lv_image_create(s.root);
         lv_obj_add_style(*mark, &s_mark, 0);
         lv_obj_remove_flag(*mark, LV_OBJ_FLAG_CLICKABLE);
     }
     lv_image_set_src(s.wifi, &icons::wifi_off_icon);
     lv_image_set_src(s.phone, &icons::phone_off_icon);
+    lv_image_set_src(s.laptop, &icons::laptop_off_icon);
+    s.laptops = text(s.laptop, Role::Label, "");
+    lv_obj_set_width(s.laptops, icons::laptop_icon.header.w);
+    lv_obj_set_style_text_align(s.laptops, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(s.laptops, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_hidden(s.laptops, true);
     return s;
 }
 
-void set_status(const Status &s, const char *time, bool wifi, bool phone)
+void set_status(const Status &s, const char *time, bool wifi, bool phone, int laptops)
 {
     if (std::strcmp(lv_label_get_text(s.clock), time) != 0) {
         lv_label_set_text(s.clock, time);
@@ -876,6 +882,17 @@ void set_status(const Status &s, const char *time, bool wifi, bool phone)
     }
     if (lv_image_get_src(s.phone) != p) {
         lv_image_set_src(s.phone, p);
+    }
+    const void *l = laptops > 0 ? &icons::laptop_icon : &icons::laptop_off_icon;
+    if (lv_image_get_src(s.laptop) != l) {
+        lv_image_set_src(s.laptop, l);
+    }
+    const char count[] = {static_cast<char>('0' + std::min(laptops, 9)), '\0'};
+    if (laptops > 1 && std::strcmp(lv_label_get_text(s.laptops), count) != 0) {
+        lv_label_set_text(s.laptops, count);
+    }
+    if (lv_obj_is_hidden(s.laptops) != (laptops < 2)) {
+        lv_obj_set_hidden(s.laptops, laptops < 2);
     }
 }
 

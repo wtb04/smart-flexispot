@@ -19,6 +19,7 @@ void tick();
 
 void show(Scene scene);
 void next_scene();  // idle, music, an episode, one only followed, a laptop's clip, and round again
+void next_laptops();  // laptops sharing through Desk Link: two, none, one, and round again
 
 void on_media(ui::MediaAction action);
 void on_seek(int position_s);

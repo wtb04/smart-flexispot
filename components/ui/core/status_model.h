@@ -8,6 +8,7 @@ namespace ui::detail {
 struct StatusState {
     bool present   = false;  // the owner's phone is near, so their pages show
     bool wifi      = false;
+    int  laptops   = 0;      // sharing through Desk Link
     bool screen_on = true;
     char time[16]  = "";     // HH:MM as the clock gives it, empty until it is set
     // The pack, and whether the panel runs on it: unplugged, on the desk, rather
