@@ -135,6 +135,7 @@ class Link:
         self._sleeping = False
         self._still_since = clock.monotonic()
         self._told_away = False
+        self._generation = 0  # bumped by a new address or key, so an older reply is not taken for theirs
         self.set_key(key, store=False)
 
     # wiring
@@ -159,6 +160,8 @@ class Link:
         for timer in (self._beat, self._soon, self._vanishing):
             if timer:
                 timer.cancel()
+        if self._vanishing:
+            self.track, self.artwork, self._cover_url = None, None, ""  # it went; there is no later to pass it on
         self._beat = self._soon = self._vanishing = None
         self.report(force_nothing=True)
         self.reach, self.reaches_back = Reach.UNKNOWN, None
@@ -276,7 +279,8 @@ class Link:
         track = None if (away or force_nothing) else self.track
         state = build_state(self._machine, seal.PORT, track, self.artwork if track else None, self._volume,
                             self._clock.monotonic(), self.square if track else None)
-        self._send(state, self._answered)
+        generation = self._generation
+        self._send(state, lambda status, body: self._answered(status, body, generation))
 
     def _send(self, message: dict, done=None) -> None:
         if not self.settings.panel or self._envelope is None:
@@ -284,8 +288,8 @@ class Link:
         body = self._envelope.sealed(message, "/link")
         self._client.post(f"http://{self.settings.panel}/link", body, done or (lambda *_: None))
 
-    def _answered(self, status: int | None, body: bytes) -> None:
-        if not self.settings.sharing:
+    def _answered(self, status: int | None, body: bytes, generation: int | None = None) -> None:
+        if not self.settings.sharing or (generation is not None and generation != self._generation):
             return
         if status is None:
             self.reach = Reach.UNREACHABLE
@@ -318,14 +322,18 @@ class Link:
     def set_panel(self, panel: str) -> None:
         self.settings.panel = panel.strip()
         self._save(self.settings)
+        self._generation += 1
         self.reach, self.reaches_back = Reach.UNKNOWN, None
         self.report()
         self._changed()
 
     def set_key(self, hex_key: str, store: bool = True) -> bool:
+        if store and not hex_key:
+            return False  # an emptied field is no key to forget the old one for
         key = seal.parse_key(hex_key) if hex_key else None
         if hex_key and key is None:
             return False
+        self._generation += 1
         self._envelope = seal.Envelope(key, clock_ms=self._clock.wall_ms) if key else None
         self.reach, self.reaches_back = Reach.UNKNOWN, None
         if store:

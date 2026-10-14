@@ -35,16 +35,20 @@ def run_async(argv: list[str], done: Callable[[bool, str], None]) -> None:
 
 
 class Volume:
-    def __init__(self, on_change: Callable[[], None], run=run_async, poll_s: int = 2):
+    def __init__(self, on_change: Callable[[], None], run=run_async, poll_s: int = 2, timers=None):
         self.percent: int | None = None
         self.muted = False
         self._on_change = on_change
         self._run = run
         self._poll_s = poll_s
+        if timers is None:
+            from .link import GLibTimers
+            timers = GLibTimers()
+        self._timers = timers
 
     def start(self) -> None:
         self.refresh()
-        GLib.timeout_add_seconds(self._poll_s, lambda: self.refresh() or True)
+        self._timers.every(self._poll_s, self.refresh)
 
     def refresh(self) -> None:
         self._run(["wpctl", "get-volume", SINK], self._got)

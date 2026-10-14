@@ -71,10 +71,10 @@ class App(Adw.Application):
                                 lambda *args: self.link.set_sleeping(args[5].unpack()[0]))
 
     def _write_bar_status(self):
-        from . import tray
+        from . import tray, ui
         track = self.link.track
-        health = "trouble" if self.server_error else self.link.health()
-        text = self.server_error or self.link.status_text()
+        health = ui.health_of(self.link, self.server_error)
+        text = ui.status_line(self.link, self.server_error)
         tray.write_bar_status(tray.bar_status_path(), tray.bar_status(health, bool(track and track.playing), text))
 
     def do_shutdown(self):
@@ -85,10 +85,9 @@ class App(Adw.Application):
     def do_command_line(self, command_line):
         args = command_line.get_arguments()[1:]
         if args[:1] == ["set-key"] and len(args) == 2:
-            if not self.link.set_key(args[1]):
+            if not self.set_key(args[1]):
                 command_line.printerr_literal("the key is 64 hex digits, DESK_LINK_KEY in desk_link_secrets.h\n")
                 return 1
-            self._keys.write(args[1])
             return 0
         if args == ["--version"]:
             command_line.print_literal(f"Desk Link {__version__}\n")
@@ -107,7 +106,10 @@ class App(Adw.Application):
     def set_key(self, hex_key: str) -> bool:
         if not self.link.set_key(hex_key):
             return False
-        self._keys.write(hex_key)
+        try:
+            self._keys.write(hex_key)
+        except GLib.Error as error:
+            log.warning("cannot keep the key in the keyring: %s", error.message)
         return True
 
     def toggle_dropdown(self):
