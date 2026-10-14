@@ -56,7 +56,8 @@ right one with `kit::layer(Layer::...)`. Don't fake depth with a bigger shadow.
 | `Rail` | a straight scale, slider or progress, with notches for presets |
 | `popover`, `popover_source` | a glass card that grows out of what was tapped |
 | `notice` | a slab that drops from under the bar and leaves on its own |
-| `section`, `group`, `row` | a caption, and rows in one tile split by hairlines: a glyph, a time, a feed's mark, a title and a detail line, then a value, a chevron, a toggle or a badge |
+| `card`, `card_list` | a tile with its title inside, at its top left, the one way a card is named: Home's widgets and Setup's cards alike; and one whose rows scroll under the title |
+| `section`, `group`, `row` | a caption among a list's rows, and rows in one tile split by hairlines: a glyph, a time, a feed's mark, a title and a detail line, then a value, a chevron, a toggle or a badge; `set_row_chosen` fills the chosen one of a list with the accent |
 | `list` | a tile with a column that scrolls inside it, for a long list |
 | `badge`, `empty` | a small pill in an ink, and what shows where a feed is missing |
 | `Readout`, `Stepper` | a big figure, and minus, value, plus, both a size that never changes |

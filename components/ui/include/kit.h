@@ -535,7 +535,7 @@ void      edge_follows(lv_obj_t *scroller);
 enum class Span : std::uint8_t { One, Wide, Tall, Big };
 /** Cells four across and three to the page's height; widgets take the first place they fit, in the order made. */
 lv_obj_t *widget_grid(lv_obj_t *page, int columns = 4);
-/** A widget: a tile with its caption, for showing only. Returns its body, to fill. */
+/** A widget: a card, for showing only. Returns its body, to fill. */
 lv_obj_t *widget(lv_obj_t *grid, Span span, const char *caption);
 /** A tap on the widget whose body this is opens a page, as the radar's opens the radar. */
 void      widget_opens(lv_obj_t *body, int page);
@@ -552,8 +552,19 @@ void      widget_place(lv_obj_t *body, int col, int row, int w, int h);
 /** How wide the widest of `texts` is set in `role`: the width for a label that shows any of them. */
 std::int32_t widest(Role role, std::initializer_list<const char *> texts);
 
-/** A small caption over a group, or a day's name in a list, with `aside` at its right. */
+/** A caption among a list's rows, as a day's name, with `aside` at its right. A card's own title is card()'s. */
 lv_obj_t *section(lv_obj_t *parent, const char *title, const char *aside = nullptr);
+
+/**
+ * A card: a tile with its title inside, at its top left, as every widget has
+ * its own. What it holds follows the title, in a column.
+ */
+lv_obj_t *card(lv_obj_t *parent, const char *title, Lift lift = Lift::Low);
+void      set_card_title(lv_obj_t *card, const char *title);
+/** A card `w` by `h` whose rows scroll under its title, inside it, as a list's do. Returns the column. */
+lv_obj_t *card_list(lv_obj_t *parent, const char *title, std::int32_t w, std::int32_t h);
+/** Another column for a card_list's card, to show in place of the first. */
+lv_obj_t *card_column(lv_obj_t *card);
 
 /** Rows in one tile, split by hairlines; the first and last row's press reaches into its corners. */
 lv_obj_t *group(lv_obj_t *parent, std::int32_t width);
@@ -744,6 +755,8 @@ void set_soft(lv_obj_t *btn, bool on);
 void set_row_title(lv_obj_t *row, const char *title, Ink ink = Ink::Primary);
 /** The glyph in a row's square, for a row that has one. */
 void set_row_glyph(lv_obj_t *row, const char *glyph);
+/** The row filled with the accent, its words on it, as the dock marks its page: the one chosen of a list. */
+void set_row_chosen(lv_obj_t *row, bool chosen);
 
 // --- rows used again (Home and Calendar) -----------------------------------
 
