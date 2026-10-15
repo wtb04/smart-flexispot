@@ -1,4 +1,4 @@
 Designator,Qty,Value,LCSC,MPN,KiCad footprint
-C3,1,1000uF 6.3V,,EEU-FR0J102,Capacitor_THT:CP_Radial_D8.0mm_P3.50mm
+C3,1,470uF 10V,,EEU-FR1A471,Capacitor_THT:CP_Radial_D8.0mm_P3.50mm
 RJ45_1,1,RJ45 8P8C 2xLED,C386757,R-RJ45R08P-C000,Connector_RJ:RJ45_Connfly_DS1128-09-S8xx-S_Horizontal
 "U1A,U1B",2,Socket 1x15 2.54mm,C124408,1x15 female header 2.54mm,Connector_PinSocket_2.54mm:PinSocket_1x15_P2.54mm_Vertical

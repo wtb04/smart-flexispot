@@ -64,10 +64,16 @@ RJ_X, RJ_Y = 7.92, 21.17
 # than belt-and-braces: it holds copper out from under the antenna end.
 KEEPOUT = (39.5, 7.1, 53.0, 28.4)
 
-NETS = ["", "GND", "+5V", "DESK_5V", "D5V_F", "DESK_TX", "LED_BT", "LED_BT_A",
-        "LED_DESK", "LED_DESK_A",
+NETS = ["", "GND", "+5V", "DESK_5V", "D5V_F", "DESK_TX", "BT_LED", "BT_A",
+        "LINK_LED", "LINK_A",
         "RX_DIV", "DESK_RX", "ESP_TX", "PIN20", "ESP_P20", "+3V3"]
 NETIDX = {n: i for i, n in enumerate(NETS)}
+# The schematic names its signal nets with plain labels, which on the root sheet
+# KiCad calls "/DESK_TX"; the board's nets carry the same names so parity holds.
+# Power nets come from power symbols and have no sheet path.
+POWER_NETS = {"", "GND", "+5V", "+3V3"}
+def kname(n):
+    return n if n in POWER_NETS else "/" + n
 
 # DOIT ESP32 DevKit V1, 30-pin. Read off the module itself (photo), not assumed.
 # The module's silkscreen has USB on the LEFT; our board has USB on the RIGHT, so
@@ -94,7 +100,7 @@ U1A_NETS = {"1": "ESP_P20",
             "9": "ESP_TX", "10": "RX_DIV", "14": "GND", "15": "+3V3"}
 # LEDs on row B pins 6/7 (D32=GPIO32, D33=GPIO33). Row B is the bottom row, so
 # these runs use the empty bottom channel instead of the crowded top one.
-U1B_NETS = {"6": "LED_BT", "7": "LED_DESK", "14": "GND", "15": "+5V"}
+U1B_NETS = {"6": "BT_LED", "7": "LINK_LED", "14": "GND", "15": "+5V"}
 
 PARTS = [
     # Chanklement R-RJ45R08P-C000 (LCSC C386757). Footprint verified against the
@@ -104,7 +110,7 @@ PARTS = [
     ("RJ45_1", "Connector_RJ", "RJ45_Connfly_DS1128-09-S8xx-S_Horizontal",
      RJ_X, RJ_Y, 90, "RJ45 8P8C 2xLED",
      {"4": "PIN20", "5": "DESK_TX", "6": "DESK_RX", "7": "GND", "8": "DESK_5V",
-      "9": "GND", "10": "LED_DESK_A", "11": "GND", "12": "LED_BT_A", "SH": "GND"}),
+      "9": "GND", "10": "LINK_A", "11": "GND", "12": "BT_A", "SH": "GND"}),
     # The 5 V input sits behind the jack, where pin 8 brings it in: F1, then D1,
     # then the bulk capacitor. D1 (SS14) blocks back-feed from the module's USB
     # toward the desk.
@@ -116,7 +122,7 @@ PARTS = [
     # AMS1117: a restart loop only USB power broke. C3 carries that surge. It
     # stands outside the module's outline, since it is taller than the gap
     # under the DevKit, and with + (pad 1) toward D1.
-    ("C3", "Capacitor_THT", "CP_Radial_D8.0mm_P3.50mm", 25.25, 17.6, 180, "1000uF 6.3V",
+    ("C3", "Capacitor_THT", "CP_Radial_D8.0mm_P3.50mm", 25.25, 17.6, 180, "470uF 10V",
      {"1": "+5V", "2": "GND"}),
     # decoupling next to the module's 5V pin (row B pin 15, VIN, at the USB end)
     # 22uF, not the 100uF inherited from revA: at 5V across it a 10V-rated
@@ -136,9 +142,9 @@ PARTS = [
     # LED series limits. The LEDs live inside the jack; these sit near the module
     # so the GPIO runs stay short.
     ("R5", "Resistor_SMD", "R_0805_2012Metric", 18.2, 11.9, 90, "220R",
-     {"1": "LED_BT", "2": "LED_BT_A"}),
+     {"1": "BT_LED", "2": "BT_A"}),
     ("R6", "Resistor_SMD", "R_0805_2012Metric", 18.2, 22.9, 90, "220R",
-     {"1": "LED_DESK", "2": "LED_DESK_A"}),
+     {"1": "LINK_LED", "2": "LINK_A"}),
     ("D2", "Package_TO_SOT_SMD", "SOT-23", 68.0, 14.9, 0, "BAT54S",
      {"1": "GND", "2": "+3V3", "3": "RX_DIV"}),
     ("U1A", "Connector_PinSocket_2.54mm", HDR, PIN1_X, ROW_A_Y, 90, "Socket 1x15 2.54mm", U1A_NETS),
@@ -168,7 +174,7 @@ MPN = {
     "F1":  "SMD1206P050TF/15", # PTTC PTC, 500 mA hold, 1206
     "D1":  "SS14-E3/61T",      # Vishay Schottky 40 V 1 A, SMA
     "D2":  "BAT54S,215",       # Nexperia dual Schottky, SOT-23
-    "C3":  "EEU-FR0J102",      # Panasonic 1000 uF 6.3 V radial, 8 x 11.5 mm
+    "C3":  "EEU-FR1A471",      # Panasonic 470 uF 10 V radial, 8 x 11.5 mm
 }
 # JLCPCB catalogue numbers. Everything except C1 and F1 is JLCPCB's OWN match
 # from an earlier upload of this BOM, so those are authoritative for their
@@ -216,7 +222,7 @@ def rot_offset(px, py, deg):
 
 
 board = Board.create_new()
-board.nets = [Net(i, n) for i, n in enumerate(NETS)]
+board.nets = [Net(i, kname(n)) for i, n in enumerate(NETS)]
 PADS = {}   # (ref, padnum) -> (x, y, w, h, layerset)
 
 
@@ -259,7 +265,7 @@ def place(ref, lib, fpname, x, y, rot, value, netmap):
         pad.keepEndLayers = False
         if pad.number and str(pad.number) in netmap:
             n = netmap[str(pad.number)]
-            pad.net = Net(NETIDX[n], n)
+            pad.net = Net(NETIDX[n], kname(n))
         if rot:
             pad.position.angle = (pad.position.angle or 0) + rot
         ox, oy = rot_offset(pad.position.X, pad.position.Y, rot)
