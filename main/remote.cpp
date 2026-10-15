@@ -18,6 +18,8 @@
 #include "app_state.h"
 #include "jobs.h"
 #include "net_stream.h"
+#include "lwip/inet.h"
+#include "lwip/sockets.h"
 #include "ota.h"
 #include "power.h"
 #include "kit.h"
@@ -304,6 +306,54 @@ std::uint32_t objects_under(lv_obj_t *obj)
     return count;
 }
 
+// The sockets open now, a line each: kind, local port and whom it talks to.
+// lwIP has 24 in all; run out, and nothing connects, the web server included.
+int list_sockets(char *out, std::size_t size)
+{
+    int n = 0, open = 0;
+    for (int fd = LWIP_SOCKET_OFFSET; fd < LWIP_SOCKET_OFFSET + CONFIG_LWIP_MAX_SOCKETS; ++fd) {
+        sockaddr_storage local{}, peer{};
+        socklen_t        len = sizeof local;
+        if (getsockname(fd, reinterpret_cast<sockaddr *>(&local), &len) != 0) {
+            continue;
+        }
+        ++open;
+        int       type = 0;
+        socklen_t tl   = sizeof type;
+        getsockopt(fd, SOL_SOCKET, SO_TYPE, &type, &tl);
+        len = sizeof peer;
+        const bool linked = getpeername(fd, reinterpret_cast<sockaddr *>(&peer), &len) == 0;
+        // the server's sockets are IPv6 with the IPv4 peer in the address's last four bytes
+        const auto split = [](const sockaddr_storage &a, std::uint32_t &ip4, unsigned &port) {
+            if (a.ss_family == AF_INET6) {
+                const auto &v6 = reinterpret_cast<const sockaddr_in6 &>(a);
+                std::memcpy(&ip4, &v6.sin6_addr.s6_addr[12], 4);
+                port = ntohs(v6.sin6_port);
+            } else {
+                const auto &v4 = reinterpret_cast<const sockaddr_in &>(a);
+                ip4  = v4.sin_addr.s_addr;
+                port = ntohs(v4.sin_port);
+            }
+        };
+        std::uint32_t lip = 0, pip = 0;
+        unsigned      lport = 0, pport = 0;
+        split(local, lip, lport);
+        char to[32] = "-";
+        if (linked) {
+            split(peer, pip, pport);
+            const auto *b4 = reinterpret_cast<const std::uint8_t *>(&pip);
+            std::snprintf(to, sizeof to, "%u.%u.%u.%u:%u", b4[0], b4[1], b4[2], b4[3], pport);
+        }
+        if (out != nullptr && n < static_cast<int>(size) - 80) {
+            n += std::snprintf(out + n, size - n, "%2d %s :%u -> %s\n", fd, type == SOCK_STREAM ? "tcp" : "udp", lport, to);
+        }
+    }
+    if (out != nullptr) {
+        n += std::snprintf(out + n, size - n, "%d of %d open\n", open, CONFIG_LWIP_MAX_SOCKETS);
+    }
+    return out != nullptr ? n : open;
+}
+
 [[noreturn]] void stats_task(void *)
 {
     for (;;) {
@@ -332,7 +382,8 @@ std::uint32_t objects_under(lv_obj_t *obj)
                  static_cast<int>(s_slowest_us.exchange(0) / units::kUsPerMs));
         static std::uint32_t refreshed = 0;
         const std::uint32_t  now       = board::refreshes();
-        ESP_LOGI(TAG, "panel: %u refreshes", static_cast<unsigned>(now - refreshed));
+        ESP_LOGI(TAG, "panel: %u refreshes, %d sockets", static_cast<unsigned>(now - refreshed),
+                 list_sockets(nullptr, 0));
         refreshed = now;
     }
 }
@@ -765,6 +816,8 @@ esp_err_t bench_page(httpd_req_t *req)
                                   : query[2] == 's' ? ui::kit::Behind::Soft
                                                     : ui::kit::Behind::Blur);
             n = std::snprintf(text, sizeof(text), "backdrop %c\n", query[2]);
+        } else if (std::strcmp(query, "socks") == 0) {  // every socket open, to find one that leaks
+            n = list_sockets(text, sizeof(text));
         } else if (std::strcmp(query, "fp") == 0 || std::strcmp(query, "fpc") == 0) {  // each frame and touch lately; fpc starts over
             n = board::frame_report(text, sizeof(text), query[2] == 'c');
 #if LV_USE_PROFILER
