@@ -32,7 +32,7 @@ LAYERS = ["F.Cu", "B.Cu"]
 # ESP_P20 goes early: it is the longest awkward run (row A pin 1 sits at the far
 # end, past the antenna keepout) and it loses if the top channel fills up first
 ORDER = ["ESP_P20", "+5V", "DESK_5V", "D5V_F", "+3V3", "DESK_TX",
-         "LED_BT", "LED_BT_A", "LED_DESK", "LED_DESK_A",
+         "BT_LED", "BT_A", "LINK_LED", "LINK_A",
          "RX_DIV", "DESK_RX", "ESP_TX", "PIN20", "GND"]
 
 
@@ -43,7 +43,7 @@ def rot_offset(px, py, deg):
 
 board = Board.from_file(PCB)
 netname = {n.number: n.name for n in board.nets}
-netnum = {n.name: n.number for n in board.nets}
+netnum = {n.name.lstrip("/"): n.number for n in board.nets}  # "/DESK_TX" is DESK_TX
 
 pads = []   # dict(ref, num, net, x, y, w, h, layers, tht)
 for fp in board.footprints:
@@ -54,7 +54,7 @@ for fp in board.footprints:
         sx, sy = (p.size.Y, p.size.X) if rot in (90, 270) else (p.size.X, p.size.Y)
         tht = p.type in ("thru_hole", "np_thru_hole")
         pads.append(dict(ref=fp.properties.get("Reference", "?"), num=str(p.number or ""),
-                         net=(p.net.name if p.net else ""), x=fx + ox, y=fy + oy,
+                         net=(p.net.name.lstrip("/") if p.net else ""), x=fx + ox, y=fy + oy,
                          w=sx, h=sy, tht=tht,
                          mount=(p.type == "np_thru_hole"
                                 and fp.properties.get("Reference", "").startswith("H")),

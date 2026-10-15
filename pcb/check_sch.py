@@ -68,15 +68,17 @@ for g in sch.globalLabels:
                                      (x-w, x, y-h/2, y+h/2) if a == 180 else
                                      (x-h/2, x+h/2, y-w, y) if a == 90 else
                                      (x-h/2, x+h/2, y, y+w))))
-# A net label's text stands on its anchor, running away from the wire it ends;
-# the 0.3 mm gap keeps the wire it labels from counting as an overlap.
+# A net label's text stands just above the wire it names, so its own wire --
+# the one ending at its anchor -- is no overlap; any other wire still is.
+own = {}
 for g in sch.labels:
     w, h = len(g.text)*1.27*ADV, 1.4
     x, y, a = g.position.X, g.position.Y, g.position.angle or 0
-    texts.append(("label", g.text, *((x+0.3, x+0.3+w, y-h-0.2, y-0.2) if a == 0 else
-                                     (x-0.3-w, x-0.3, y-h-0.2, y-0.2) if a == 180 else
-                                     (x-h-0.2, x-0.2, y-0.3-w, y-0.3) if a == 90 else
-                                     (x-h-0.2, x-0.2, y+0.3, y+0.3+w))))
+    own[g.text, x, y] = (x, y)
+    texts.append(("label", g.text, *((x+0.3, x+0.3+w, y-h-0.3, y-0.3) if a == 0 else
+                                     (x-0.3-w, x-0.3, y-h-0.3, y-0.3) if a == 180 else
+                                     (x-h-0.3, x-0.3, y-0.3-w, y-0.3) if a == 90 else
+                                     (x-h-0.3, x-0.3, y+0.3, y+0.3+w)), (x, y)))
 for inst in sch.schematicSymbols:
     for pr in inst.properties:
         if pr.key not in ("Reference", "Value") or not pr.value: continue
@@ -101,6 +103,9 @@ for i, a in enumerate(texts):
         if ov(a[2], a[3], bx[1], bx[2]) and ov(a[4], a[5], bx[3], bx[4]):
             hits.append(f"{a[0]} {a[1]!r} sits on symbol {bx[0]}")
     for x1, y1, x2, y2 in wires:
+        anchor = a[6] if len(a) > 6 else None
+        if anchor and y1 == y2 == anchor[1] and anchor[0] in (x1, x2):
+            continue                                   # the wire this label names
         if ov(a[2], a[3], min(x1,x2), max(x1,x2)) and ov(a[4], a[5], min(y1,y2), max(y1,y2)):
             hits.append(f"{a[0]} {a[1]!r} sits on a wire at ({x1:.1f},{y1:.1f})-({x2:.1f},{y2:.1f})")
 
