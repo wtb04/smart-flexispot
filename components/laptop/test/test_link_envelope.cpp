@@ -124,6 +124,25 @@ TEST(LinkEnvelope, what_is_not_an_envelope)
     EXPECT_EQ(open(cipher, "/link", "DL1", 3, plain, nonce), Opened::Malformed);
 }
 
+TEST(LinkEnvelope, opened_where_it_lies)
+{
+    StandIn           cipher(0x42);
+    const std::string picture("\xff\xd8 a cover \xff\xd9", 13);
+    std::string       body = seal(cipher, nonce_of(1), "/cover reply", picture);
+    std::size_t       length = 0;
+    Nonce             nonce{};
+    EXPECT_EQ(open_in_place(cipher, "/cover reply", body.data(), body.size(), length, nonce), Opened::Ok);
+    EXPECT_EQ(body.substr(0, length), picture) << "the picture where the envelope began";
+    EXPECT_EQ(nonce, nonce_of(1));
+
+    std::string forged = seal(cipher, nonce_of(2), "/cover reply", picture);
+    forged.back() ^= 1;
+    EXPECT_EQ(open_in_place(cipher, "/cover reply", forged.data(), forged.size(), length, nonce), Opened::Forged);
+    EXPECT_EQ(length, 0u);
+    std::string cut = body.substr(0, 3 + kNonceLen);
+    EXPECT_EQ(open_in_place(cipher, "/cover reply", cut.data(), cut.size(), length, nonce), Opened::Malformed);
+}
+
 TEST(LinkEnvelope, fresh_refuses_the_stale_and_the_repeated)
 {
     Fresh              fresh;

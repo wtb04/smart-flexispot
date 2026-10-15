@@ -105,7 +105,7 @@ A few things are mine in the code rather than secrets, and are worth a look befo
 - Your favourite playlists, in the same file, for the music card's popup.
 - Your desk's height range, in `idf.py menuconfig`, *Loctek desk control*: 660 to 1310 mm is mine.
 - Your time zone, in `idf.py menuconfig`, *Panel time*. Central European Time is the default.
-- What the presets are called on the screen: copy the list in `components/ui/ui_internal.h` to `components/ui/ui_presets.h`, which git ignores, and rename them there.
+- What the presets are called on the screen: copy the list in `components/ui/core/ui_core.h` to `components/ui/ui_presets.h`, which git ignores, and rename them there.
 - The radar's map covers the Channel to Berlin, 48.5 to 56 N and 0.5 to 13 E. For your own part of the world, `tools/make_map.py --out components/radar/map_data.h --box <south> <west> <north> <east>` draws a new one from Natural Earth; keep the box modest, as every line on it costs memory to draw.
 
 ## 5. Flash it
@@ -119,7 +119,7 @@ idf.py -p /dev/cu.usbmodem* flash monitor
 
 Ctrl-] leaves the monitor. If the port does not show up, hold BOOT while plugging in.
 
-It boots into a splash that shows the desk, the network and Home Assistant coming up, and is on the home page in about ten seconds.
+It boots straight onto the home page, which fills in as the desk, the network and Home Assistant come up.
 
 Every [release](https://github.com/wtb04/smart-flexispot/releases) has a `smart_flexispot-<version>-full.bin` that can be written at 0x0 without building anything:
 
@@ -144,16 +144,23 @@ An update waits on the Setup page until you tap it, and is refused while the des
 
 ## 7. Desk Link on your Mac
 
-Optional. [Desk Link](../desklink/) is a menu bar app that tells the panel what plays on the Mac and takes its play, pause, seek and volume back, and passes Claude Code's events on, every message sealed with the key in `desk_link_secrets.h`. It needs macOS 26, Xcode's command line tools and CMake:
+Optional. [Desk Link](../desklink/macos/) is a menu bar app that tells the panel what plays on the Mac and takes its play, pause, seek and volume back, and passes Claude Code's events on, every message sealed with the key in `desk_link_secrets.h`. It needs macOS 26, Xcode's command line tools and CMake:
 
 ```sh
 git submodule update --init
-cd desklink && make install
+cd desklink/macos && make install
 ```
 
 Then give it the key from its menu, under Panel, or before its first start with `defaults write nl.w-tb.desklink key <DESK_LINK_KEY>`, which it moves into the keychain. The menu says whether the panel answers, and whether the panel reaches the Mac back; a firewall that lets Desk Link out but keeps port 47801 shut stops the commands.
 
-For Claude Code, each laptop also needs `jq` and `curl`, which macOS has, and this repository's `tools/claude-hook`. In `~/.claude/settings.json`, run it on every event that changes what the panel shows; `async` keeps Claude Code from ever waiting on it:
+On Linux, [Desk Link for Linux](../desklink/linux/) does the same from the bar:
+
+```sh
+cd desklink/linux && make install
+desklink set-key <DESK_LINK_KEY>
+```
+
+For Claude Code, each laptop also needs `jq` and `curl`, which macOS has and most Linux systems do, and this repository's `tools/claude-hook`. In `~/.claude/settings.json`, run it on every event that changes what the panel shows; `async` keeps Claude Code from ever waiting on it:
 
 ```json
 {
@@ -162,6 +169,7 @@ For Claude Code, each laptop also needs `jq` and `curl`, which macOS has, and th
     "UserPromptSubmit":  [{ "hooks": [{ "type": "command", "command": "~/smart-flexispot/tools/claude-hook", "async": true }] }],
     "PreToolUse":        [{ "hooks": [{ "type": "command", "command": "~/smart-flexispot/tools/claude-hook", "async": true }] }],
     "PostToolUse":       [{ "hooks": [{ "type": "command", "command": "~/smart-flexispot/tools/claude-hook", "async": true }] }],
+    "PostToolUseFailure": [{ "hooks": [{ "type": "command", "command": "~/smart-flexispot/tools/claude-hook", "async": true }] }],
     "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "~/smart-flexispot/tools/claude-hook", "async": true }] }],
     "SubagentStart":     [{ "hooks": [{ "type": "command", "command": "~/smart-flexispot/tools/claude-hook", "async": true }] }],
     "SubagentStop":      [{ "hooks": [{ "type": "command", "command": "~/smart-flexispot/tools/claude-hook", "async": true }] }],

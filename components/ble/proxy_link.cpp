@@ -87,9 +87,6 @@ constexpr int STOP_SENDS = 2;
 constexpr std::uint32_t HOLD_TASK_STACK    = 2048;
 constexpr UBaseType_t   HOLD_TASK_PRIORITY = 5;
 
-constexpr int PERCENTILE = 99;
-constexpr int PERCENT    = 100;
-
 std::atomic<std::uint32_t> s_seq{0};
 std::atomic<std::int64_t>  s_sent_us{0};
 std::atomic<bool>          s_waiting{false};
@@ -99,7 +96,6 @@ portMUX_TYPE s_stats_lock = portMUX_INITIALIZER_UNLOCKED;
 constexpr int SAMPLE_MAX = 256;
 int s_samples[SAMPLE_MAX];
 int s_sample_count = 0;
-int s_lost         = 0;
 
 SemaphoreHandle_t s_send_lock = nullptr;
 StaticSemaphore_t s_send_lock_ctrl;
@@ -275,9 +271,6 @@ void expire_stale_timing()
     }
     if (esp_timer_get_time() - s_sent_us.load(std::memory_order_relaxed) > PROBE_TIMEOUT_US) {
         s_waiting.store(false, std::memory_order_relaxed);
-        portENTER_CRITICAL(&s_stats_lock);
-        ++s_lost;
-        portEXIT_CRITICAL(&s_stats_lock);
     }
 }
 
@@ -457,7 +450,6 @@ void collect(LinkStats &out)
     portENTER_CRITICAL(&s_stats_lock);
     count = s_sample_count;
     std::memcpy(copy, s_samples, sizeof(int) * static_cast<std::size_t>(count));
-    out.lost = s_lost;
     portEXIT_CRITICAL(&s_stats_lock);
 
     out.connected = s_up.load(std::memory_order_relaxed);
@@ -467,9 +459,7 @@ void collect(LinkStats &out)
     }
 
     std::sort(copy, copy + count);
-    out.min_us    = copy[0];
     out.median_us = copy[count / 2];
-    out.p99_us    = copy[(count * PERCENTILE) / PERCENT];
     out.max_us    = copy[count - 1];
 }
 

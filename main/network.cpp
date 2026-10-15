@@ -38,8 +38,8 @@ constexpr char TAG[] = "network";
 
 constexpr int PUBLISH_MS      = 2000;
 constexpr int NETWORK_WAIT_MS = 30 * units::kMsPerSecond;
-// The splash waits on the links, so at startup they are looked at this often
-// rather than at the next publish, for as long as LINKS_WAIT_MS.
+// At startup the links are looked at this often rather than at the next
+// publish, for as long as LINKS_WAIT_MS, so the first publish waits for them.
 constexpr int LOOK_EVERY_MS = 100;
 constexpr int LINKS_WAIT_MS = 10 * units::kMsPerSecond;
 
@@ -211,14 +211,9 @@ bool links_up()
 
 void show_links(const ble::Stats &radio)
 {
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_links(wifi::connected()));
     ESP_ERROR_CHECK_WITHOUT_ABORT(
-        ui::set_links(wifi::connected(), hass::connected() && hass::ws::connected()));
-    ESP_ERROR_CHECK_WITHOUT_ABORT(
-        ui::set_presence(radio.has_key, radio.phone_present, radio.ever_seen));
-
-    if (links_up()) {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_done());
-    }
+        ui::set_presence(radio.has_key, radio.phone_present));
 }
 
 void log_heap_baseline_once()

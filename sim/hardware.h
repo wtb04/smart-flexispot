@@ -23,7 +23,7 @@ void next_battery();
 void toggle_phone();
 void toggle_wifi();
 
-/** Whether Home Assistant answers, which the control bar shows beside Wi-Fi. */
+/** Whether Home Assistant answers. */
 void set_home_assistant(bool up);
 
 /** Setup's diagnostics, as main/diagnostics.cpp fills them, from what is

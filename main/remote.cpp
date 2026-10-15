@@ -1,5 +1,6 @@
 #include "remote.h"
 
+#include "esp_attr.h"
 #include "esp_check.h"
 #include "esp_core_dump.h"
 #include "esp_flash.h"
@@ -17,8 +18,12 @@
 #include "app_state.h"
 #include "jobs.h"
 #include "net_stream.h"
+#include "lwip/inet.h"
+#include "lwip/sockets.h"
 #include "ota.h"
 #include "power.h"
+#include "kit.h"
+#include "lab.h"
 #include "ui.h"
 #include "units.h"
 
@@ -97,6 +102,7 @@ struct Walk {
     int         count;
     std::size_t small_bytes;
     int         small_count;
+    std::size_t listed = LISTED_BLOCK;
 };
 
 bool walk_block(walker_heap_into_t, walker_block_info_t block, void *user)
@@ -105,7 +111,7 @@ bool walk_block(walker_heap_into_t, walker_block_info_t block, void *user)
     if (!block.used) {
         return true;
     }
-    if (block.size < LISTED_BLOCK || walk->count == MAX_BLOCKS) {
+    if (block.size < walk->listed || walk->count == MAX_BLOCKS) {
         walk->small_bytes += block.size;
         ++walk->small_count;
     } else {
@@ -138,15 +144,20 @@ esp_err_t heap_page(httpd_req_t *req)
     while (tasks < MAX_TASKS && xTaskGetNext(&it) != -1) {
         stacks[tasks++] = {pxTaskGetStackStart(it.pxTaskHandle), pcTaskGetName(it.pxTaskHandle)};
     }
-    Walk walk{blocks, 0, 0, 0};
-    heap_caps_walk(MALLOC_CAP_DMA, walk_block, &walk);
+    // ?psram: PSRAM's big blocks rather than the DMA-capable heap's
+    char query[8] = "";
+    httpd_req_get_url_query_str(req, query, sizeof(query));
+    const bool     psram = std::strcmp(query, "psram") == 0;
+    const uint32_t caps  = psram ? MALLOC_CAP_SPIRAM : MALLOC_CAP_DMA;
+    Walk walk{blocks, 0, 0, 0, psram ? 32 * 1024 : LISTED_BLOCK};
+    heap_caps_walk(caps, walk_block, &walk);
 
     httpd_resp_set_type(req, "text/plain");
     char line[128];
     int  n = std::snprintf(line, sizeof(line), "free %u largest %u low %u\n",
-                           static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_DMA)),
-                           static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_DMA)),
-                           static_cast<unsigned>(heap_caps_get_minimum_free_size(MALLOC_CAP_DMA)));
+                           static_cast<unsigned>(heap_caps_get_free_size(caps)),
+                           static_cast<unsigned>(heap_caps_get_largest_free_block(caps)),
+                           static_cast<unsigned>(heap_caps_get_minimum_free_size(caps)));
     httpd_resp_send_chunk(req, line, n);
     for (int i = 0; i < walk.count; ++i) {
         const auto *from = static_cast<const std::uint8_t *>(blocks[i].ptr);
@@ -295,6 +306,54 @@ std::uint32_t objects_under(lv_obj_t *obj)
     return count;
 }
 
+// The sockets open now, a line each: kind, local port and whom it talks to.
+// lwIP has 24 in all; run out, and nothing connects, the web server included.
+int list_sockets(char *out, std::size_t size)
+{
+    int n = 0, open = 0;
+    for (int fd = LWIP_SOCKET_OFFSET; fd < LWIP_SOCKET_OFFSET + CONFIG_LWIP_MAX_SOCKETS; ++fd) {
+        sockaddr_storage local{}, peer{};
+        socklen_t        len = sizeof local;
+        if (getsockname(fd, reinterpret_cast<sockaddr *>(&local), &len) != 0) {
+            continue;
+        }
+        ++open;
+        int       type = 0;
+        socklen_t tl   = sizeof type;
+        getsockopt(fd, SOL_SOCKET, SO_TYPE, &type, &tl);
+        len = sizeof peer;
+        const bool linked = getpeername(fd, reinterpret_cast<sockaddr *>(&peer), &len) == 0;
+        // the server's sockets are IPv6 with the IPv4 peer in the address's last four bytes
+        const auto split = [](const sockaddr_storage &a, std::uint32_t &ip4, unsigned &port) {
+            if (a.ss_family == AF_INET6) {
+                const auto &v6 = reinterpret_cast<const sockaddr_in6 &>(a);
+                std::memcpy(&ip4, &v6.sin6_addr.s6_addr[12], 4);
+                port = ntohs(v6.sin6_port);
+            } else {
+                const auto &v4 = reinterpret_cast<const sockaddr_in &>(a);
+                ip4  = v4.sin_addr.s_addr;
+                port = ntohs(v4.sin_port);
+            }
+        };
+        std::uint32_t lip = 0, pip = 0;
+        unsigned      lport = 0, pport = 0;
+        split(local, lip, lport);
+        char to[32] = "-";
+        if (linked) {
+            split(peer, pip, pport);
+            const auto *b4 = reinterpret_cast<const std::uint8_t *>(&pip);
+            std::snprintf(to, sizeof to, "%u.%u.%u.%u:%u", b4[0], b4[1], b4[2], b4[3], pport);
+        }
+        if (out != nullptr && n < static_cast<int>(size) - 80) {
+            n += std::snprintf(out + n, size - n, "%2d %s :%u -> %s\n", fd, type == SOCK_STREAM ? "tcp" : "udp", lport, to);
+        }
+    }
+    if (out != nullptr) {
+        n += std::snprintf(out + n, size - n, "%d of %d open\n", open, CONFIG_LWIP_MAX_SOCKETS);
+    }
+    return out != nullptr ? n : open;
+}
+
 [[noreturn]] void stats_task(void *)
 {
     for (;;) {
@@ -323,7 +382,8 @@ std::uint32_t objects_under(lv_obj_t *obj)
                  static_cast<int>(s_slowest_us.exchange(0) / units::kUsPerMs));
         static std::uint32_t refreshed = 0;
         const std::uint32_t  now       = board::refreshes();
-        ESP_LOGI(TAG, "panel: %u refreshes", static_cast<unsigned>(now - refreshed));
+        ESP_LOGI(TAG, "panel: %u refreshes, %d sockets", static_cast<unsigned>(now - refreshed),
+                 list_sockets(nullptr, 0));
         refreshed = now;
     }
 }
@@ -496,21 +556,297 @@ esp_err_t desk_page(httpd_req_t *req)
 
 // How long the radar takes to open its map, draw, zoom and close. With
 // ?open it is only shown, so its feed can start before the bench.
+esp_err_t frozen_page(httpd_req_t *req)
+{
+    if (!ota::authorised(req)) {
+        return refuse(req);
+    }
+    const lv_draw_buf_t *pic = ui::kit::frozen_picture();
+    if (pic == nullptr) {
+        httpd_resp_set_status(req, "404 Not Found");
+        return httpd_resp_sendstr(req, "no frozen picture yet\n");
+    }
+    httpd_resp_set_type(req, "application/octet-stream");
+    char head[32];
+    const int n = std::snprintf(head, sizeof(head), "RGB565 %d %d\n", static_cast<int>(pic->header.w),
+                                static_cast<int>(pic->header.h));
+    esp_err_t err = httpd_resp_send_chunk(req, head, n);
+    for (std::uint32_t y = 0; err == ESP_OK && y < pic->header.h; ++y) {
+        err = httpd_resp_send_chunk(req, reinterpret_cast<const char *>(pic->data + y * pic->header.stride),
+                                    static_cast<ssize_t>(pic->header.w * 2));
+    }
+    return err == ESP_OK ? httpd_resp_send_chunk(req, nullptr, 0) : err;
+}
+
+// What the panel shows, straight from its frame buffer, unturned: a picture
+// taken by LVGL drawing the screen again misses whatever was drawn past it.
+esp_err_t panel_page(httpd_req_t *req)
+{
+    if (!ota::authorised(req)) {
+        return refuse(req);
+    }
+    int w = 0, h = 0;
+    const std::uint16_t *fb = board::shown_frame(&w, &h);
+    if (fb == nullptr) {
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        return httpd_resp_sendstr(req, "no panel\n");
+    }
+    httpd_resp_set_type(req, "application/octet-stream");
+    char head[32];
+    const int n = std::snprintf(head, sizeof(head), "RGB565 %d %d\n", w, h);
+    esp_err_t err = httpd_resp_send_chunk(req, head, n);
+    constexpr int ROWS = 8;
+    for (int y = 0; err == ESP_OK && y < h; y += ROWS) {
+        err = httpd_resp_send_chunk(req, reinterpret_cast<const char *>(fb + y * w),
+                                    static_cast<ssize_t>(std::min(ROWS, h - y) * w * 2));
+    }
+    board::let_go_of_frame();
+    return err == ESP_OK ? httpd_resp_send_chunk(req, nullptr, 0) : err;
+}
+
+// A finger on the screen from here, for testing on the panel with nobody at
+// it: the touch's own reading, overridden while it lasts, so what LVGL sees is
+// what a real press is.
+struct Touch {
+    lv_indev_t      *indev = nullptr;
+    lv_indev_read_cb_t read = nullptr;
+    lv_point_t       raw{};
+    std::uint32_t    until = 0;
+    bool             on    = false, lifting = false;
+} s_touch;
+
+lv_point_t turned(lv_point_t p)
+{
+    if (lv_indev_get_ccw(s_touch.indev)) {
+        lv_display_rotate_point_ccw(lv_indev_get_display(s_touch.indev), &p);
+    } else {
+        lv_display_rotate_point(lv_indev_get_display(s_touch.indev), &p);
+    }
+    return p;
+}
+
+void touch_read(lv_indev_t *indev, lv_indev_data_t *data)
+{
+    s_touch.read(indev, data);
+    if (!s_touch.on) {
+        return;
+    }
+    data->point = s_touch.raw;
+    if (static_cast<std::int32_t>(lv_tick_get() - s_touch.until) < 0) {
+        data->state = LV_INDEV_STATE_PRESSED;
+    } else {
+        data->state = LV_INDEV_STATE_RELEASED;
+        s_touch.on  = false;
+    }
+}
+
+bool press(int x, int y, int ms)
+{
+    if (s_touch.indev == nullptr) {
+        for (lv_indev_t *dev = lv_indev_get_next(nullptr); dev != nullptr; dev = lv_indev_get_next(dev)) {
+            if (lv_indev_get_type(dev) == LV_INDEV_TYPE_POINTER) {
+                s_touch.indev = dev;
+                s_touch.read  = lv_indev_get_read_cb(dev);
+                lv_indev_set_read_cb(dev, touch_read);
+                break;
+            }
+        }
+        if (s_touch.indev == nullptr) {
+            return false;
+        }
+    }
+    // the screen's point back to the touch's own, from where the turn sends three
+    const lv_point_t o = turned({0, 0}), ex = turned({1, 0}), ey = turned({0, 1});
+    const int ax = ex.x - o.x, ay = ex.y - o.y, bx = ey.x - o.x, by = ey.y - o.y;
+    const int dx = x - o.x, dy = y - o.y;
+    s_touch.raw   = {static_cast<std::int32_t>(ax * dx + ay * dy), static_cast<std::int32_t>(bx * dx + by * dy)};
+    s_touch.until = lv_tick_get() + static_cast<std::uint32_t>(ms);
+    s_touch.on    = true;
+    lv_timer_create(
+        [](lv_timer_t *t) {
+            lv_indev_read(s_touch.indev);  // a touch that only reads when the controller signals
+            if (!s_touch.on) {
+                lv_timer_delete(t);
+            }
+        },
+        10, nullptr);
+    return true;
+}
+
+#if LV_USE_PROFILER
+// LVGL's own steps, each added up as it ends: how long it took itself and with
+// what it called, and how often, per task. A profiling build's alone (build/prof).
+namespace prof {
+struct Step {
+    const char  *name;
+    std::int64_t own_us, all_us;
+    int          calls;
+};
+struct Open {
+    int          step;
+    std::int64_t at_us, inner_us;
+};
+constexpr int STEPS = 160, DEPTH = 48, TASKS = 8;
+struct Task {
+    void *handle;
+    Open  open[DEPTH];
+    int   depth;
+};
+EXT_RAM_BSS_ATTR Step s_steps[STEPS];
+EXT_RAM_BSS_ATTR Task s_tasks[TASKS];
+int                   s_step_count = 0, s_task_count = 0;
+std::int64_t          s_started_us = 0;
+std::atomic<bool>     s_on{false};
+portMUX_TYPE          s_lock = portMUX_INITIALIZER_UNLOCKED;
+
+Task *task_of(void *handle)
+{
+    for (int i = 0; i < s_task_count; ++i) {
+        if (s_tasks[i].handle == handle) {
+            return &s_tasks[i];
+        }
+    }
+    if (s_task_count == TASKS) {
+        return nullptr;
+    }
+    Task &t = s_tasks[s_task_count++];
+    t.handle = handle;
+    t.depth  = 0;
+    return &t;
+}
+
+int step_of(const char *name)
+{
+    for (int i = 0; i < s_step_count; ++i) {
+        if (s_steps[i].name == name) {
+            return i;
+        }
+    }
+    if (s_step_count == STEPS) {
+        return -1;
+    }
+    s_steps[s_step_count] = {name, 0, 0, 0};
+    return s_step_count++;
+}
+
+void start()
+{
+    portENTER_CRITICAL(&s_lock);
+    s_step_count = 0;
+    s_task_count = 0;
+    s_started_us = esp_timer_get_time();
+    portEXIT_CRITICAL(&s_lock);
+    s_on.store(true);
+}
+
+int report(char *out, std::size_t size)
+{
+    s_on.store(false);
+    vTaskDelay(pdMS_TO_TICKS(20));  // any step under way ends unseen
+    std::sort(s_steps, s_steps + s_step_count, [](const Step &a, const Step &b) { return a.own_us > b.own_us; });
+    int n = std::snprintf(out, size, "over %.0f ms\n%-44s %9s %9s %7s\n", (esp_timer_get_time() - s_started_us) / 1000.0,
+                          "step", "own ms", "all ms", "calls");
+    for (int i = 0; i < s_step_count && n < static_cast<int>(size) - 100; ++i) {
+        const Step &s = s_steps[i];
+        n += std::snprintf(out + n, size - n, "%-44.44s %9.1f %9.1f %7d\n", s.name, s.own_us / 1000.0, s.all_us / 1000.0, s.calls);
+    }
+    return n;
+}
+}  // namespace prof
+
+extern "C" void draw_profile_begin(const char *step)
+{
+    if (!prof::s_on.load(std::memory_order_relaxed)) {
+        return;
+    }
+    const std::int64_t now = esp_timer_get_time();
+    portENTER_CRITICAL(&prof::s_lock);
+    prof::Task *t = prof::task_of(xTaskGetCurrentTaskHandle());
+    if (t != nullptr && t->depth < prof::DEPTH) {
+        t->open[t->depth++] = {prof::step_of(step), now, 0};
+    }
+    portEXIT_CRITICAL(&prof::s_lock);
+}
+
+extern "C" void draw_profile_end(const char *)
+{
+    if (!prof::s_on.load(std::memory_order_relaxed)) {
+        return;
+    }
+    const std::int64_t now = esp_timer_get_time();
+    portENTER_CRITICAL(&prof::s_lock);
+    prof::Task *t = prof::task_of(xTaskGetCurrentTaskHandle());
+    if (t != nullptr && t->depth > 0) {
+        const prof::Open o   = t->open[--t->depth];
+        const std::int64_t all = now - o.at_us;
+        if (o.step >= 0) {
+            prof::s_steps[o.step].all_us += all;
+            prof::s_steps[o.step].own_us += all - o.inner_us;
+            prof::s_steps[o.step].calls += 1;
+        }
+        if (t->depth > 0) {
+            t->open[t->depth - 1].inner_us += all;
+        }
+    }
+    portEXIT_CRITICAL(&prof::s_lock);
+}
+#endif
+
 esp_err_t bench_page(httpd_req_t *req)
 {
     if (!ota::authorised(req)) {
         return refuse(req);
     }
-    static char text[4096];
+    EXT_RAM_BSS_ATTR static char text[28000];
     int         n = 0;
     if (lvgl_port_lock(STATS_LOCK_MS)) {
-        char query[8] = "";
+        char query[24] = "";
         httpd_req_get_url_query_str(req, query, sizeof(query));
+        if (std::strcmp(query, "lab") == 0) {
+            if (!ui::lab::built()) {
+                ui::lab::build([]() { return static_cast<std::uint64_t>(esp_timer_get_time()); });
+            }
+            ui::lab::bench();
+            n = std::snprintf(text, sizeof(text), "the lab is up and its bench running; /bench?report in a minute\n");
+        } else if (query[0] == 'k' && query[1] == '=' && query[2] != '\0' && ui::lab::built()) {
+            ui::lab::key(query[2]);  // a key as the simulator would pass it, to drive the lab from here
+            n = std::snprintf(text, sizeof(text), "pressed %c\n", query[2]);
+        } else if (query[0] == 'b' && query[1] == '=') {  // what lies behind a popover, to compare them on the panel
+            ui::kit::set_behind(query[2] == 'd' ? ui::kit::Behind::Dim
+                                  : query[2] == 's' ? ui::kit::Behind::Soft
+                                                    : ui::kit::Behind::Blur);
+            n = std::snprintf(text, sizeof(text), "backdrop %c\n", query[2]);
+        } else if (std::strcmp(query, "socks") == 0) {  // every socket open, to find one that leaks
+            n = list_sockets(text, sizeof(text));
+        } else if (std::strcmp(query, "fp") == 0 || std::strcmp(query, "fpc") == 0) {  // each frame and touch lately; fpc starts over
+            n = board::frame_report(text, sizeof(text), query[2] == 'c');
+#if LV_USE_PROFILER
+        } else if (std::strcmp(query, "prof") == 0) {  // LVGL's draw steps traced from now
+            prof::start();
+            n = std::snprintf(text, sizeof(text), "tracing\n");
+        } else if (std::strcmp(query, "profd") == 0) {  // and what they cost since
+            n = prof::report(text, sizeof(text));
+#endif
+        } else if (std::strncmp(query, "pm=", 3) == 0) {  // pm=g, r or a: popovers grow, rise or appear
+            ui::kit::set_pop_motion(query[3] == 'g' ? ui::kit::PopMotion::Grow
+                                    : query[3] == 'r' ? ui::kit::PopMotion::Rise
+                                                      : ui::kit::PopMotion::Appear);
+            n = std::snprintf(text, sizeof(text), "popovers %c\n", query[3]);
+        } else if (std::strncmp(query, "fx=", 3) == 0) {  // fx=0 or 1: the shadows, to feel the panel without them
+            ui::kit::set_effects(query[3] != '0');
+            n = std::snprintf(text, sizeof(text), "shadows %s\n", query[3] != '0' ? "on" : "off");
+        } else if (query[0] == 't' && query[1] == '=') {  // t=x,y,ms: a press there, that long
+            int x = 0, y = 0, ms = 80;
+            std::sscanf(query + 2, "%d,%d,%d", &x, &y, &ms);
+            n = std::snprintf(text, sizeof(text), press(x, y, ms) ? "pressed %d,%d for %d ms\n" : "no touch\n", x, y, ms);
+        } else if (std::strcmp(query, "kr") == 0) {  // the design kit's last page change and popover
+            n = std::snprintf(text, sizeof(text), "%s\n%s", ui::kit::change_report(), ui::kit::freeze_report());
+        } else if (std::strcmp(query, "report") == 0) {
+            n = ui::lab::report(text, sizeof(text));
+        } else
         n = std::strcmp(query, "open") == 0     ? ui::bench_radar_open(text, sizeof(text))
             : std::strcmp(query, "map") == 0    ? ui::bench_radar_map(text, sizeof(text), true)
             : std::strcmp(query, "back") == 0   ? ui::bench_radar_map(text, sizeof(text), false)
-            : std::strcmp(query, "desk") == 0   ? ui::bench_desk_card(text, sizeof(text))
-            : std::strcmp(query, "pages") == 0  ? ui::bench_pages(text, sizeof(text))
                                                 : ui::bench_radar(text, sizeof(text));
         lvgl_port_unlock();
     }
@@ -533,6 +869,8 @@ esp_err_t start()
         {.uri = "/heap", .method = HTTP_GET, .handler = heap_page, .user_ctx = nullptr},
         {.uri = "/power", .method = HTTP_GET, .handler = power_page, .user_ctx = nullptr},
         {.uri = "/bench", .method = HTTP_GET, .handler = bench_page, .user_ctx = nullptr},
+        {.uri = "/frozen", .method = HTTP_GET, .handler = frozen_page, .user_ctx = nullptr},
+        {.uri = "/panel", .method = HTTP_GET, .handler = panel_page, .user_ctx = nullptr},
         {.uri = "/desk", .method = HTTP_GET, .handler = desk_page, .user_ctx = nullptr},
         {.uri = "/restart", .method = HTTP_GET, .handler = restart_page, .user_ctx = nullptr},
         {.uri = "/streams", .method = HTTP_GET, .handler = streams_page, .user_ctx = nullptr},

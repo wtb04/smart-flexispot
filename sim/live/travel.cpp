@@ -38,12 +38,6 @@ int options(Option *out, int capacity)
     }
     return count;
 }
-
-bool ok()
-{
-    std::lock_guard<std::mutex> hold(s_lock);
-    return s_ok;
-}
 }  // namespace travel
 
 namespace live {

@@ -34,6 +34,8 @@
 #include <cstdio>
 #include <cstring>
 
+extern "C" void lvgl_port_ppa_delete(void *handle);  // in the port, not in its public headers
+
 namespace board {
 namespace {
 constexpr char TAG[] = "board";
@@ -100,10 +102,13 @@ esp_err_t power_up_panel()
 
 
 constexpr int        MAX_DIRTY     = 64;  // as LV_INV_BUF_SIZE, in the project's CMakeLists.txt
-// Three: a frame is drawn into one while the panel is still taking up the
-// last, which it does a frame or two after it is asked to (see
-// components/esp_lcd), rather than waiting for it as with two.
-constexpr int        FRAME_BUFFERS = 3;
+// Four: the panel takes up a buffer a frame or two after it is asked to (see
+// components/esp_lcd), and a frame drawn meanwhile replaces the one asked for
+// rather than waiting for it, so drawing goes at its own pace and the panel
+// shows the newest at each refresh. With three, the frame after waited for
+// the panel every time, and that wait, not drawing, held small changes to 30
+// frames a second.
+constexpr int        FRAME_BUFFERS = 4;
 constexpr std::uint32_t DRAWING_LOCK_MS = 1000;
 constexpr TickType_t SWAP_TIMEOUT  = pdMS_TO_TICKS(100);
 
@@ -133,7 +138,13 @@ SemaphoreHandle_t      s_swapped = nullptr;
 // until they are the same, the one shown before may still be read.
 std::atomic<int>       s_asked{0};
 std::atomic<int>       s_showing{0};
+// Buffers the panel may be reading: the one asked for, and any asked for
+// before it that the panel has not been seen past. Only buffers outside this
+// may be drawn into.
+std::atomic<std::uint32_t> s_unsafe{1};
 int                    s_target = -1;  // the one this frame goes into, once it begins
+std::uint32_t          s_pinned = 0;   // kept as they are while a glide copies from them
+std::atomic<std::uint32_t> s_looked_at{0};  // kept while a development build sends it out
 
 board::FlushTimes s_flush_times;
 
@@ -188,14 +199,72 @@ IRAM_ATTR bool frame_sent(esp_lcd_panel_handle_t, esp_lcd_dpi_panel_event_data_t
 
 std::atomic<std::uint32_t> s_swaps{0};
 
-// The buffer last handed over is the one on show, so the one before is free.
+// The buffer last handed over is the one on show, so every other is free. The
+// driver calls this only while the panel reads the buffer it was last asked
+// for, which is s_asked once the handover has returned: show_back_buffer()
+// asks first and notes it after.
 IRAM_ATTR bool frame_done(esp_lcd_panel_handle_t, esp_lcd_dpi_panel_event_data_t *, void *)
 {
     s_swaps.fetch_add(1, std::memory_order_relaxed);
-    s_showing.store(s_asked.load(std::memory_order_relaxed), std::memory_order_relaxed);
+    const int asked = s_asked.load(std::memory_order_relaxed);
+    s_showing.store(asked, std::memory_order_relaxed);
+    s_unsafe.store(1u << asked, std::memory_order_relaxed);
     BaseType_t woken = pdFALSE;
     xSemaphoreGiveFromISR(s_swapped, &woken);
     return woken == pdTRUE;
+}
+
+// The SRM keeps its macro-blocks in order when a block's last one is bigger
+// than the 2D-DMA's FIFO, and kept so it can stall for good while the panel
+// is scanned out (esp-idf #19023 and #19096, DIG-734): the screen froze on a
+// rotation that never ended. Such a block goes as stripes of rows, each with
+// a last macro-block of one row, which the driver always lets out of order.
+constexpr std::uint32_t SRM_MB      = 16;  // a v1 P4's only macro-block size
+constexpr std::uint32_t SRM_W_UNIT  = 64;  // pixels of RGB565 the SRM takes across at a time
+constexpr std::uint32_t SRM_FIFO    = 12 * 128;  // bits
+constexpr std::uint32_t RGB565_BITS = 16;
+
+bool srm_keeps_order(std::uint32_t w, std::uint32_t h)
+{
+    const std::uint32_t w_left = w % SRM_W_UNIT == 0 ? SRM_W_UNIT : w % SRM_W_UNIT;
+    const std::uint32_t h_left = h % SRM_MB == 0 ? SRM_MB : h % SRM_MB;
+    return (w > SRM_W_UNIT || h > SRM_MB) && w_left * h_left * RGB565_BITS >= SRM_FIFO;
+}
+
+/** An unscaled SRM, in stripes where it would stall whole. */
+esp_err_t srm_unscaled(ppa_client_handle_t client, const ppa_srm_oper_config_t &whole)
+{
+    const std::uint32_t w = whole.in.block_w, h = whole.in.block_h;
+    ppa_srm_oper_config_t op = whole;
+    if (!srm_keeps_order(w, h)) {
+        return ppa_do_scale_rotate_mirror(client, &op);
+    }
+    for (std::uint32_t done = 0; done < h;) {
+        // pieces each a row past a multiple of the macro-block: as many as the
+        // rows left are past one, the rest of them a macro-block and a row tall,
+        // which the PPA writes as a column that wide rather than one pixel wide
+        std::uint32_t rows = h - done;
+        if (srm_keeps_order(w, rows)) {
+            const std::uint32_t pieces = rows % SRM_MB == 0 ? SRM_MB : rows % SRM_MB;
+            const std::uint32_t rest   = (pieces - 1) * (SRM_MB + 1);
+            rows = rows > rest ? rows - rest : (rows - 1) / SRM_MB * SRM_MB + 1;
+        }
+        op.in.block_offset_y  = whole.in.block_offset_y + done;
+        op.in.block_h         = rows;
+        op.out.block_offset_x = whole.out.block_offset_x;
+        op.out.block_offset_y = whole.out.block_offset_y;
+        // where these rows of the block land, turned anticlockwise as the PPA turns
+        switch (whole.rotation_angle) {
+            case PPA_SRM_ROTATION_ANGLE_0:   op.out.block_offset_y += done; break;
+            case PPA_SRM_ROTATION_ANGLE_90:  op.out.block_offset_x += done; break;
+            case PPA_SRM_ROTATION_ANGLE_180: op.out.block_offset_y += h - done - rows; break;
+            case PPA_SRM_ROTATION_ANGLE_270: op.out.block_offset_x += h - done - rows; break;
+            default: break;
+        }
+        ESP_RETURN_ON_ERROR(ppa_do_scale_rotate_mirror(client, &op), TAG, "srm stripe");
+        done += rows;
+    }
+    return ESP_OK;
 }
 
 esp_err_t copy_rect(const std::uint8_t *from, std::uint8_t *to, const Rect &r,
@@ -222,16 +291,38 @@ esp_err_t copy_rect(const std::uint8_t *from, std::uint8_t *to, const Rect &r,
     op.scale_x            = 1.0f;
     op.scale_y            = 1.0f;
     op.mode               = PPA_TRANS_MODE_BLOCKING;
-    return ppa_do_scale_rotate_mirror(s_ppa, &op);
+    return srm_unscaled(s_ppa, op);
 }
 
+std::uint64_t area_of(const Rect &r) { return static_cast<std::uint64_t>(r.w) * r.h; }
+
+Rect joined(const Rect &a, const Rect &b)
+{
+    const std::uint32_t x = std::min(a.x, b.x), y = std::min(a.y, b.y);
+    return {x, y, std::max(a.x + a.w, b.x + b.w) - x, std::max(a.y + a.h, b.y + b.h) - y};
+}
+
+// A buffer's list of where it is behind, each part copied once: a part that
+// overlaps one already there becomes the two together when that copies no
+// more than both would, as a moving card's frames mostly cover each other.
 void note(Rect *list, int &count, const Rect &r)
 {
     if (count == 1 && list[0].w == BSP_LCD_H_RES && list[0].h == BSP_LCD_V_RES) {
         return;  // behind by the whole of it already
     }
+    Rect add = r;
+    for (int i = 0; i < count;) {
+        const Rect both = joined(list[i], add);
+        if (area_of(both) <= area_of(list[i]) + area_of(add)) {
+            add            = both;
+            list[i]        = list[--count];
+            i              = 0;
+        } else {
+            ++i;
+        }
+    }
     if (count < MAX_DIRTY) {
-        list[count++] = r;
+        list[count++] = add;
     } else {
         list[0] = {0, 0, BSP_LCD_H_RES, BSP_LCD_V_RES};
         count   = 1;
@@ -305,38 +396,94 @@ void catch_up_around(const std::uint8_t *from, std::uint8_t *to, const Rect &r, 
     }
 }
 
-// A buffer neither on show nor asked for, which nothing reads.
+// A buffer the panel cannot be reading, waited for if all of them might be.
 int free_buffer()
 {
-    const int asked   = s_asked.load(std::memory_order_relaxed);
-    const int showing = s_showing.load(std::memory_order_relaxed);
-    for (int i = 0; i < FRAME_BUFFERS; ++i) {
-        if (i != asked && i != showing) {
-            return i;
+    for (;;) {
+        const int           asked  = s_asked.load(std::memory_order_relaxed);
+        const std::uint32_t unsafe = s_unsafe.load(std::memory_order_relaxed);
+        for (int i = 0; i < FRAME_BUFFERS; ++i) {
+            if (i != asked && (unsafe & (1u << i)) == 0 && ((s_pinned | s_looked_at.load(std::memory_order_relaxed)) & (1u << i)) == 0) {
+                return i;
+            }
         }
+        const std::int64_t waiting = esp_timer_get_time();
+        if (xSemaphoreTake(s_swapped, SWAP_TIMEOUT) != pdTRUE) {
+            ESP_LOGW(TAG, "panel did not swap buffers");
+            s_unsafe.store(1u << asked, std::memory_order_relaxed);
+        }
+        s_flush_times.wait_us += esp_timer_get_time() - waiting;
     }
-    return -1;
 }
 
-// The first area of a frame picks the buffer to draw into and brings it up to
-// the last frame, only where this frame does not draw anew, since a whole
-// screen took 43 ms.
-void prepare_back(lv_display_t *disp)
+// The catching up, done on the other core while LVGL draws: as drawing starts
+// it already knows what it will redraw, so which parts of the buffer it goes
+// into need bringing up to date, and by the first area it flushes those are
+// mostly done. Without the helper, done there and then.
+TaskHandle_t      s_catcher     = nullptr;
+SemaphoreHandle_t s_caught      = nullptr;
+bool              s_catching    = false;
+Rect              s_to_catch[MAX_DIRTY];
+int               s_to_catch_n  = 0;
+
+void catch_all()
 {
-    if (s_target >= 0) {
-        return;
+    const std::uint8_t *latest = s_fbs[s_asked.load(std::memory_order_relaxed)];
+    for (int i = 0; i < s_to_catch_n; ++i) {
+        catch_up(latest, s_fbs[s_target], s_to_catch[i]);
     }
-    s_target = free_buffer();
-    const std::int64_t  catching = esp_timer_get_time();
-    const std::uint8_t *latest   = s_fbs[s_asked.load(std::memory_order_relaxed)];
+}
+
+void catcher(void *)
+{
+    for (;;) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        catch_all();
+        xSemaphoreGive(s_caught);
+    }
+}
+
+void begin_back(lv_display_t *disp, bool helped)
+{
+    s_target     = free_buffer();
+    s_to_catch_n = 0;
     for (int i = 0; i < s_behind_count[s_target]; ++i) {
-        const Rect &r = s_behind[s_target][i];
-        if (!redrawn(disp, r)) {
-            catch_up(latest, s_fbs[s_target], r);
+        if (!redrawn(disp, s_behind[s_target][i])) {
+            s_to_catch[s_to_catch_n++] = s_behind[s_target][i];
         }
     }
     s_behind_count[s_target] = 0;
-    s_flush_times.catch_up_us += esp_timer_get_time() - catching;
+    if (helped && s_catcher != nullptr && s_to_catch_n > 0) {
+        s_catching = true;
+        xTaskNotifyGive(s_catcher);
+    } else {
+        const std::int64_t catching = esp_timer_get_time();
+        catch_all();
+        s_flush_times.catch_up_us += esp_timer_get_time() - catching;
+    }
+}
+
+void render_starts(lv_event_t *e)
+{
+    if (s_target < 0) {
+        begin_back(static_cast<lv_display_t *>(lv_event_get_target(e)), true);
+    }
+}
+
+// The first area of a frame: the buffer it goes into, brought up to the last
+// frame only where this frame does not draw anew, since a whole screen took
+// 43 ms.
+void prepare_back(lv_display_t *disp)
+{
+    if (s_target < 0) {
+        begin_back(disp, false);
+    }
+    if (s_catching) {
+        const std::int64_t catching = esp_timer_get_time();
+        xSemaphoreTake(s_caught, portMAX_DELAY);
+        s_catching = false;
+        s_flush_times.catch_up_us += esp_timer_get_time() - catching;
+    }
 }
 
 // Where the area lands on the panel, which is portrait. The PPA turns
@@ -380,27 +527,37 @@ Placement place_on_panel(lv_display_t *disp, const lv_area_t *area)
 }
 
 // Handing the driver one of its own buffers makes it the one shown from a
-// frame or two on; the one-line area keeps its cache flush to a line. Only
-// one is asked for at a time, so a frame done before the panel has taken the
-// last waits for it here: the one shown before is then free, and the third
-// is the next drawn into.
+// frame or two on; the one-line area keeps its cache flush to a line. One
+// asked for and not yet taken up is simply replaced: it stays unsafe until
+// the panel is seen on the newer one. The order matters: unsafe first, so
+// it is never free while it may be read; asked after, so frame_done only
+// ever names the buffer the driver now has.
 void show_back_buffer()
 {
-    const std::int64_t waiting = esp_timer_get_time();
-    // A frame LVGL had begun before the screen went dark: no swap comes.
-    if (!s_streaming) {
-        s_showing.store(s_asked.load(std::memory_order_relaxed), std::memory_order_relaxed);
-    }
-    while (s_showing.load(std::memory_order_relaxed) != s_asked.load(std::memory_order_relaxed)) {
-        if (xSemaphoreTake(s_swapped, SWAP_TIMEOUT) != pdTRUE) {
-            ESP_LOGW(TAG, "panel did not swap buffers");
-            s_showing.store(s_asked.load(std::memory_order_relaxed), std::memory_order_relaxed);
-        }
-    }
-    s_flush_times.wait_us += esp_timer_get_time() - waiting;
-    xSemaphoreTake(s_swapped, 0);
+    s_unsafe.fetch_or(1u << s_target, std::memory_order_relaxed);
     esp_lcd_panel_draw_bitmap(s_panel, 0, 0, 1, 1, s_fbs[s_target]);
     s_asked.store(s_target, std::memory_order_relaxed);
+    s_target = -1;
+}
+
+// A page glided across by copying: the frame on show keeps the old page, the
+// next one LVGL draws, the new page at rest, is held back, and each step lays
+// the two side by side in a free buffer, where LVGL drawing the whole region
+// every frame went at eight a second.
+bool          s_holding     = false;
+int           s_glide_from  = -1, s_glide_held = -1;
+Rect          s_glide_at{};          // the region on the panel: a column of the screen is a row of it
+std::uint32_t s_glide_w     = 0;     // the region's width on the screen
+bool          s_glide_flip  = false; // the screen's left at the region's last row
+bool          s_glide_back  = false; // the new page comes in from the left
+std::int32_t  s_glide_shift = -1;
+board::GlideTimes s_glide_times;
+
+void hold_back_buffer()
+{
+    s_holding    = false;
+    s_glide_held = s_target;
+    s_pinned |= 1u << s_target;
     s_target = -1;
 }
 
@@ -414,8 +571,96 @@ void note_drawn(const Rect &r)
     }
 }
 
+// --- what each frame cost, for the bench -------------------------------------
+
+struct FrameNote {
+    std::int64_t  at_us;
+    std::int32_t  first_us, end_us, rotate_us, catch_us, wait_us;
+    std::uint32_t pixels;
+    std::uint16_t areas;
+    char          kind;  // F a frame, P a press, R a release
+    lv_area_t     where[2];  // its first two areas, in LVGL's coordinates
+};
+constexpr int    NOTES          = 400;
+FrameNote       *s_notes        = nullptr;
+int              s_note_next    = 0;
+int              s_note_count   = 0;
+std::int64_t     s_frame_start  = 0;
+std::int64_t     s_frame_first  = 0;
+FlushTimes       s_frame_base{};
+lv_area_t        s_frame_where[2]{};
+int              s_frame_areas = 0;
+portMUX_TYPE     s_note_lock    = portMUX_INITIALIZER_UNLOCKED;
+
+void note_frame(const FrameNote &n)
+{
+    if (s_notes == nullptr) {
+        return;
+    }
+    portENTER_CRITICAL(&s_note_lock);
+    s_notes[s_note_next] = n;
+    s_note_next          = (s_note_next + 1) % NOTES;
+    s_note_count         = std::min(s_note_count + 1, NOTES);
+    portEXIT_CRITICAL(&s_note_lock);
+}
+
+void touched(lv_event_t *e);
+
+void frame_starts(lv_event_t *)
+{
+    static bool s_hooked = false;  // the touch is added after the display
+    if (!s_hooked) {
+        for (lv_indev_t *in = lv_indev_get_next(nullptr); in != nullptr; in = lv_indev_get_next(in)) {
+            lv_indev_add_event_cb(in, touched, LV_EVENT_PRESSED, nullptr);
+            lv_indev_add_event_cb(in, touched, LV_EVENT_RELEASED, nullptr);
+            s_hooked = true;
+        }
+    }
+    s_frame_start = esp_timer_get_time();
+    s_frame_first = 0;
+    s_frame_areas = 0;
+    s_frame_base  = s_flush_times;
+}
+
+void touched(lv_event_t *e)
+{
+    FrameNote n{};
+    n.at_us = esp_timer_get_time();
+    n.kind  = lv_event_get_code(e) == LV_EVENT_PRESSED ? 'P' : 'R';
+    note_frame(n);
+}
+
+void frame_ends()
+{
+    if (s_frame_start == 0) {
+        return;
+    }
+    const std::int64_t now = esp_timer_get_time();
+    const auto         d   = [](std::int64_t v) { return static_cast<std::int32_t>(std::max<std::int64_t>(v, 0)); };
+    FrameNote n{};
+    n.at_us     = s_frame_start;
+    n.first_us  = d((s_frame_first != 0 ? s_frame_first : now) - s_frame_start);
+    n.end_us    = d(now - s_frame_start);
+    n.rotate_us = d(s_flush_times.rotate_us - s_frame_base.rotate_us);
+    n.catch_us  = d(s_flush_times.catch_up_us - s_frame_base.catch_up_us);
+    n.wait_us   = d(s_flush_times.wait_us - s_frame_base.wait_us);
+    n.pixels    = static_cast<std::uint32_t>(std::max<std::int64_t>(static_cast<std::int64_t>(s_flush_times.pixels - s_frame_base.pixels), 0));
+    n.areas     = static_cast<std::uint16_t>(s_flush_times.areas - s_frame_base.areas);
+    n.kind      = 'F';
+    n.where[0]  = s_frame_where[0];
+    n.where[1]  = s_frame_where[1];
+    note_frame(n);
+    s_frame_start = 0;
+}
+
 void flush_rotated(lv_display_t *disp, const lv_area_t *area, std::uint8_t *pixels)
 {
+    if (s_frame_first == 0) {
+        s_frame_first = esp_timer_get_time();
+    }
+    if (s_frame_areas < 2) {
+        s_frame_where[s_frame_areas++] = *area;
+    }
     prepare_back(disp);
 
     const auto      w     = static_cast<std::uint32_t>(lv_area_get_width(area));
@@ -432,7 +677,12 @@ void flush_rotated(lv_display_t *disp, const lv_area_t *area, std::uint8_t *pixe
 
     if (lv_display_flush_is_last(disp)) {
         s_flush_times.frames += 1;
-        show_back_buffer();
+        frame_ends();
+        if (s_holding) {
+            hold_back_buffer();
+        } else {
+            show_back_buffer();
+        }
     }
     lv_display_flush_ready(disp);
 }
@@ -455,28 +705,50 @@ void set_drawing(bool on)
     lvgl_port_unlock();
 }
 
-// esp_lvgl_port 2.9 keeps the panel only in its display context, whose first
-// fields are these. The version is pinned in dependencies.lock.
+// esp_lvgl_port 2.9 keeps the panel only in its display context, laid out as
+// this. The version is pinned in dependencies.lock.
 struct PortDisplayHead {
     int                       type;
     esp_lcd_panel_io_handle_t io;
     esp_lcd_panel_handle_t    panel;
+    esp_lcd_panel_handle_t    control;
+    lvgl_port_rotation_cfg_t  rotation;
+    lv_color_t               *draw_buffs[3];
+    std::uint8_t             *oled_buffer;
+    lv_display_t             *disp;
+    lv_display_rotation_t     current_rotation;
+    SemaphoreHandle_t         trans_sem;
+    lvgl_port_rounder_cb_t    rounder_cb;
+    void                     *ppa;  // its rotation, with a whole frame of its own to turn into
 };
 
 esp_err_t flush_straight_to_panel(lv_display_t *disp)
 {
-    const auto *port = static_cast<const PortDisplayHead *>(lv_display_get_driver_data(disp));
+    auto *port = static_cast<PortDisplayHead *>(lv_display_get_driver_data(disp));
     ESP_RETURN_ON_FALSE(port != nullptr && port->panel != nullptr, ESP_ERR_INVALID_STATE, TAG, "no panel");
     s_panel    = port->panel;
     s_panel_io = port->io;
+    // The flush below turns each area straight onto the panel, so the port's
+    // own rotation and its frame are never used: 1.8 MB of PSRAM back. Only
+    // when the context reads as laid out, its display where it should be.
+    if (port->disp == disp && port->ppa != nullptr) {
+        lvgl_port_ppa_delete(port->ppa);
+        port->ppa = nullptr;
+        ESP_LOGI(TAG, "the port's rotation frame given back");
+    }
     void *fb0 = nullptr;
     void *fb1 = nullptr;
     void *fb2 = nullptr;
-    ESP_RETURN_ON_ERROR(esp_lcd_dpi_panel_get_frame_buffer(s_panel, FRAME_BUFFERS, &fb0, &fb1, &fb2), TAG,
-                        "frame buffers");
+    ESP_RETURN_ON_ERROR(esp_lcd_dpi_panel_get_frame_buffer(s_panel, 3, &fb0, &fb1, &fb2), TAG, "frame buffers");
     s_fbs[0] = static_cast<std::uint8_t *>(fb0);
     s_fbs[1] = static_cast<std::uint8_t *>(fb1);
     s_fbs[2] = static_cast<std::uint8_t *>(fb2);
+    // the BSP makes three at most; the fourth as the driver makes its own
+    auto *fb3 = static_cast<std::uint8_t *>(heap_caps_calloc(1, FRAME_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT | MALLOC_CAP_DMA));
+    ESP_RETURN_ON_FALSE(fb3 != nullptr, ESP_ERR_NO_MEM, TAG, "fourth frame buffer");
+    esp_cache_msync(fb3, FRAME_BYTES, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+    ESP_RETURN_ON_ERROR(esp_lcd_dpi_panel_add_frame_buffer(s_panel, fb3), TAG, "fourth frame buffer");
+    s_fbs[3] = fb3;
     // The panel starts out on the first; the others hold nothing yet.
     for (int i = 1; i < FRAME_BUFFERS; ++i) {
         note(s_behind[i], s_behind_count[i], {0, 0, BSP_LCD_H_RES, BSP_LCD_V_RES});
@@ -486,7 +758,8 @@ esp_err_t flush_straight_to_panel(lv_display_t *disp)
     s_swapped = xSemaphoreCreateBinaryStatic(&swapped);
 
     ppa_client_config_t client{};
-    client.oper_type = PPA_OPERATION_SRM;
+    client.oper_type             = PPA_OPERATION_SRM;
+    client.max_pending_trans_num = 4;
     ESP_RETURN_ON_ERROR(ppa_register_client(&client, &s_ppa), TAG, "ppa");
 
     esp_lcd_dpi_panel_event_callbacks_t callbacks{};
@@ -498,6 +771,15 @@ esp_err_t flush_straight_to_panel(lv_display_t *disp)
                         "panel callbacks");
 
     lv_display_set_flush_cb(disp, flush_rotated);
+    static StaticSemaphore_t caught;
+    s_caught = xSemaphoreCreateBinaryStatic(&caught);
+    if (xTaskCreatePinnedToCore(catcher, "catch up", 3072, nullptr, LVGL_TASK_PRIORITY, &s_catcher, 1 - LVGL_TASK_CORE) == pdPASS) {
+        lv_display_add_event_cb(disp, render_starts, LV_EVENT_RENDER_START, nullptr);
+    }
+#if REMOTE_ENABLED
+    s_notes = static_cast<FrameNote *>(heap_caps_calloc(NOTES, sizeof(FrameNote), MALLOC_CAP_SPIRAM));
+    lv_display_add_event_cb(disp, frame_starts, LV_EVENT_REFR_START, nullptr);
+#endif
     return ESP_OK;
 }
 
@@ -601,32 +883,52 @@ inline std::uint16_t blend565(std::uint16_t under, std::uint16_t over, std::uint
     return static_cast<std::uint16_t>((r << 11) | (g << 5) | b);
 }
 
-// The rings over a zoom's frame, each pixel where it is in the picture, turned
-// onto the panel as the frame is; then out of the cache, for the DMA.
-void lay_rings(const ZoomFrame &f, std::uint8_t *to)
+// The pixel of the panel at (sx, sy) on the screen, or null outside `within`.
+std::uint16_t *panel_pixel(std::uint8_t *to, std::int32_t sx, std::int32_t sy, const lv_area_t &within)
 {
-    if (f.ring_at == nullptr || f.ring_count == 0) {
+    if (sx < within.x1 || sx > within.x2 || sy < within.y1 || sy > within.y2) {
+        return nullptr;
+    }
+    const std::int32_t hres = lv_display_get_horizontal_resolution(s_disp);
+    const std::int32_t vres = lv_display_get_vertical_resolution(s_disp);
+    std::int32_t       px = sx, py = sy;
+    switch (lv_display_get_rotation(s_disp)) {
+        case LV_DISPLAY_ROTATION_90:  px = sy; py = hres - sx - 1; break;
+        case LV_DISPLAY_ROTATION_180: px = hres - sx - 1; py = vres - sy - 1; break;
+        case LV_DISPLAY_ROTATION_270: px = vres - sy - 1; py = sx; break;
+        default: break;
+    }
+    return reinterpret_cast<std::uint16_t *>(to) + static_cast<std::size_t>(py) * BSP_LCD_H_RES + px;
+}
+
+// The rings over a zoom's frame, each pixel where it is in the picture, and
+// the picture's corners, turned onto the panel as the frame is; then out of
+// the cache, for the DMA.
+void lay_still(const ZoomFrame &f, std::uint8_t *to)
+{
+    const bool rings   = f.ring_at != nullptr && f.ring_count > 0;
+    const bool corners = f.row_from != nullptr && f.row_to != nullptr;
+    if (!rings && !corners) {
         return;
     }
-    const std::int32_t hres  = lv_display_get_horizontal_resolution(s_disp);
-    const std::int32_t vres  = lv_display_get_vertical_resolution(s_disp);
-    const auto         turn  = lv_display_get_rotation(s_disp);
-    auto              *frame = reinterpret_cast<std::uint16_t *>(to);
-    for (std::size_t i = 0; i < f.ring_count; ++i) {
+    for (std::size_t i = 0; rings && i < f.ring_count; ++i) {
         const std::int32_t sx = f.x + static_cast<std::int32_t>(f.ring_at[i] % static_cast<std::uint32_t>(f.w));
         const std::int32_t sy = f.y + static_cast<std::int32_t>(f.ring_at[i] / static_cast<std::uint32_t>(f.w));
-        if (sx < f.to.x1 || sx > f.to.x2 || sy < f.to.y1 || sy > f.to.y2) {
-            continue;
+        if (std::uint16_t *pixel = panel_pixel(to, sx, sy, f.to); pixel != nullptr) {
+            *pixel = blend565(*pixel, f.ring_ink, f.ring_opa[i]);
         }
-        std::int32_t px = sx, py = sy;
-        switch (turn) {
-            case LV_DISPLAY_ROTATION_90:  px = sy; py = hres - sx - 1; break;
-            case LV_DISPLAY_ROTATION_180: px = hres - sx - 1; py = vres - sy - 1; break;
-            case LV_DISPLAY_ROTATION_270: px = vres - sy - 1; py = sx; break;
-            default: break;
+    }
+    for (std::int32_t y = 0; corners && y < f.h; ++y) {
+        for (std::int32_t x = 0; x < f.row_from[y]; ++x) {
+            if (std::uint16_t *pixel = panel_pixel(to, f.x + x, f.y + y, f.to); pixel != nullptr) {
+                *pixel = f.around;
+            }
         }
-        std::uint16_t &pixel = frame[static_cast<std::size_t>(py) * BSP_LCD_H_RES + px];
-        pixel                = blend565(pixel, f.ring_ink, f.ring_opa[i]);
+        for (std::int32_t x = f.row_to[y] + 1; x < f.w; ++x) {
+            if (std::uint16_t *pixel = panel_pixel(to, f.x + x, f.y + y, f.to); pixel != nullptr) {
+                *pixel = f.around;
+            }
+        }
     }
     esp_cache_msync(to, FRAME_BYTES, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
 }
@@ -713,7 +1015,7 @@ esp_err_t zoom_frame(const ZoomFrame &f)
     const esp_err_t    err     = ppa_do_scale_rotate_mirror(s_ppa, &op);
     s_flush_times.rotate_us += esp_timer_get_time() - turning;
     note_drawn(place.rect);
-    lay_rings(f, s_fbs[s_target]);
+    lay_still(f, s_fbs[s_target]);
 
     constexpr std::size_t PIXEL = sizeof(std::uint16_t);
     for (int i = 0; i < s_kept_count; ++i) {
@@ -730,6 +1032,119 @@ esp_err_t zoom_frame(const ZoomFrame &f)
     return err;
 }
 
+bool glide_begin(const lv_area_t &region, bool from_left)
+{
+    if (s_panel == nullptr || s_disp == nullptr) {
+        return false;
+    }
+    const lv_display_rotation_t rotation = lv_display_get_rotation(s_disp);
+    if (rotation != LV_DISPLAY_ROTATION_90 && rotation != LV_DISPLAY_ROTATION_270) {
+        return false;  // there a column of the screen is not a row of the panel
+    }
+    s_glide_from  = s_asked.load(std::memory_order_relaxed);
+    s_pinned      = 1u << s_glide_from;
+    s_glide_held  = -1;
+    s_glide_at    = place_on_panel(s_disp, &region).rect;
+    s_glide_w     = static_cast<std::uint32_t>(lv_area_get_width(&region));
+    s_glide_flip  = rotation == LV_DISPLAY_ROTATION_90;
+    s_glide_back  = from_left;
+    s_glide_shift = -1;
+    s_glide_times = {};
+    s_holding     = true;
+    return true;
+}
+
+bool glide_held() { return s_glide_held >= 0; }
+
+bool glide_compose(std::int32_t shift)
+{
+    if (s_glide_held < 0) {
+        return false;
+    }
+    const auto w = static_cast<std::int32_t>(s_glide_w);
+    shift        = std::clamp<std::int32_t>(shift, 0, w);
+    const std::int64_t at = esp_timer_get_time();
+    s_target              = free_buffer();
+    s_glide_times.wait_us += esp_timer_get_time() - at;
+    const int     t       = s_target;
+    std::uint8_t *to      = s_fbs[t];
+    const std::uint8_t *old_page = s_fbs[s_glide_from], *new_page = s_fbs[s_glide_held];
+    // around the region, up to the latest: the held frame, until the glide's
+    // own first is on show; the region itself is laid down whole below
+    const std::uint8_t *latest = s_glide_shift < 0 ? new_page : s_fbs[s_asked.load(std::memory_order_relaxed)];
+    for (int i = 0; i < s_behind_count[t]; ++i) {
+        catch_up_around(latest, to, s_behind[t][i], s_glide_at);
+    }
+    s_behind_count[t] = 0;
+    s_glide_shift     = shift;
+    // the old page moved off by `shift` columns, the new one's first `shift` after
+    // it, by the PPA, which moves a block several times faster than the CPU
+    const auto          n   = static_cast<std::uint32_t>(shift);
+    const std::uint32_t top = s_glide_at.y, rows = s_glide_w, x = s_glide_at.x, bw = s_glide_at.w;
+    const auto block = [&](const std::uint8_t *from, std::uint32_t from_y, std::uint32_t to_y, std::uint32_t h) {
+        if (h > 0) {
+            copy_rect(from, to, {0, 0, bw, h}, PPA_SRM_ROTATION_ANGLE_0, BSP_LCD_H_RES, BSP_LCD_V_RES, x, from_y, x, to_y);
+        }
+    };
+    // columns of the screen, `from` onwards, laid at `at`; turned into rows of the panel
+    const auto columns = [&](const std::uint8_t *from, std::uint32_t from_col, std::uint32_t at, std::uint32_t count) {
+        if (s_glide_flip) {
+            block(from, top + rows - from_col - count, top + rows - at - count, count);
+        } else {
+            block(from, top + from_col, top + at, count);
+        }
+    };
+    if (s_glide_back) {  // the new page in from the left, as it comes before
+        columns(old_page, 0, n, rows - n);
+        columns(new_page, rows - n, 0, n);
+    } else {
+        columns(old_page, n, 0, rows - n);
+        columns(new_page, 0, rows - n, n);
+    }
+    note_drawn(s_glide_at);
+    s_glide_times.frames += 1;
+    s_glide_times.copy_us += esp_timer_get_time() - at;
+    return true;  // LVGL may draw what changed round the region into it now
+}
+
+void glide_show()
+{
+    if (s_target >= 0) {  // LVGL had nothing to add
+        show_back_buffer();
+    }
+}
+
+void glide_end()
+{
+    s_holding = false;
+    if (s_glide_held >= 0 && s_glide_shift != static_cast<std::int32_t>(s_glide_w)) {
+        glide_compose(static_cast<std::int32_t>(s_glide_w));  // cut short: the new page whole
+        glide_show();
+    }
+    // every buffer is behind the one on show by what it was noted to be, the
+    // held one and the old one too, so LVGL catches up as ever
+    s_glide_from = s_glide_held = -1;
+    s_pinned     = 0;
+}
+
+GlideTimes glide_times() { return s_glide_times; }
+
+void let_go_of_frame() { s_looked_at.store(0, std::memory_order_relaxed); }
+
+const std::uint16_t *shown_frame(int *w, int *h)
+{
+    if (s_panel == nullptr) {
+        return nullptr;
+    }
+    *w = BSP_LCD_H_RES;
+    *h = BSP_LCD_V_RES;
+    const int shown = s_showing.load(std::memory_order_relaxed);
+    s_looked_at.store(1u << shown, std::memory_order_relaxed);
+    std::uint8_t *fb = s_fbs[shown];
+    esp_cache_msync(fb, FRAME_BYTES, ESP_CACHE_MSYNC_FLAG_DIR_M2C);  // what the PPA put there, not what the cache last saw
+    return reinterpret_cast<const std::uint16_t *>(fb);
+}
+
 void zoom_end()
 {
     for (int i = 0; i < s_kept_count; ++i) {
@@ -737,6 +1152,82 @@ void zoom_end()
         s_kept[i].pixels = nullptr;
     }
     s_kept_count = 0;
+}
+
+esp_err_t shrink_shown(std::uint8_t *out, std::size_t out_bytes, std::uint32_t w, std::uint32_t h)
+{
+    ESP_RETURN_ON_FALSE(s_panel != nullptr && s_disp != nullptr, ESP_ERR_INVALID_STATE, TAG, "no panel");
+    // a client of its own: this runs off LVGL's task, and a client takes one job
+    // at a time, so sharing the flush's refused one of them now and then
+    static ppa_client_handle_t side = nullptr;
+    if (side == nullptr) {
+        ppa_client_config_t client{};
+        client.oper_type             = PPA_OPERATION_SRM;
+        client.max_pending_trans_num = 4;
+        ESP_RETURN_ON_ERROR(ppa_register_client(&client, &side), TAG, "ppa");
+    }
+    while (s_showing.load(std::memory_order_relaxed) != s_asked.load(std::memory_order_relaxed)) {
+        if (xSemaphoreTake(s_swapped, SWAP_TIMEOUT) != pdTRUE) {
+            break;
+        }
+    }
+    ppa_srm_oper_config_t op{};
+    op.in.buffer  = s_fbs[s_asked.load(std::memory_order_relaxed)];
+    op.in.pic_w   = BSP_LCD_H_RES;
+    op.in.pic_h   = BSP_LCD_V_RES;
+    op.in.block_w = BSP_LCD_H_RES;
+    op.in.block_h = BSP_LCD_V_RES;
+    op.in.srm_cm  = PPA_SRM_COLOR_MODE_RGB565;
+    op.out.buffer      = out;
+    op.out.buffer_size = out_bytes;
+    op.out.pic_w       = w;
+    op.out.pic_h       = h;
+    op.out.srm_cm      = PPA_SRM_COLOR_MODE_RGB565;
+    // the turn back from the panel's way up to LVGL's: the flush's, undone
+    switch (lv_display_get_rotation(s_disp)) {
+        case LV_DISPLAY_ROTATION_90: op.rotation_angle = PPA_SRM_ROTATION_ANGLE_270; break;
+        case LV_DISPLAY_ROTATION_180: op.rotation_angle = PPA_SRM_ROTATION_ANGLE_180; break;
+        case LV_DISPLAY_ROTATION_270: op.rotation_angle = PPA_SRM_ROTATION_ANGLE_90; break;
+        default: op.rotation_angle = PPA_SRM_ROTATION_ANGLE_0; break;
+    }
+    const float scale = static_cast<float>(std::max(w, h)) / static_cast<float>(std::max(BSP_LCD_H_RES, BSP_LCD_V_RES));
+    op.scale_x = scale;
+    op.scale_y = scale;
+    op.mode    = PPA_TRANS_MODE_BLOCKING;
+    return ppa_do_scale_rotate_mirror(side, &op);
+}
+
+int frame_report(char *out, std::size_t size, bool clear)
+{
+    if (s_notes == nullptr || size == 0) {
+        return 0;
+    }
+    portENTER_CRITICAL(&s_note_lock);
+    const int count = s_note_count;
+    const int first = (s_note_next - count + NOTES) % NOTES;
+    if (clear) {
+        s_note_count = 0;
+    }
+    portEXIT_CRITICAL(&s_note_lock);
+    int          n    = std::snprintf(out, size, "    ms  kind  first   end  turn catch  wait   kpx areas  gap\n");
+    std::int64_t last = 0;
+    for (int i = 0; i < count && n < static_cast<int>(size) - 80; ++i) {
+        portENTER_CRITICAL(&s_note_lock);
+        const FrameNote f = s_notes[(first + i) % NOTES];
+        portEXIT_CRITICAL(&s_note_lock);
+        if (f.kind != 'F') {
+            n += std::snprintf(out + n, size - n, "%8lld %c\n", f.at_us / 1000, f.kind);
+            continue;
+        }
+        n += std::snprintf(out + n, size - n, "%8lld F %6.1f %5.1f %5.1f %5.1f %5.1f %5u %5u %4lld  %d,%d %dx%d  %d,%d %dx%d\n",
+                           f.at_us / 1000, f.first_us / 1000.0, f.end_us / 1000.0, f.rotate_us / 1000.0,
+                           f.catch_us / 1000.0, f.wait_us / 1000.0, static_cast<unsigned>(f.pixels / 1000), f.areas,
+                           last != 0 ? (f.at_us - last) / 1000 : 0, (int)f.where[0].x1, (int)f.where[0].y1,
+                           (int)lv_area_get_width(&f.where[0]), (int)lv_area_get_height(&f.where[0]), (int)f.where[1].x1,
+                           (int)f.where[1].y1, (int)lv_area_get_width(&f.where[1]), (int)lv_area_get_height(&f.where[1]));
+        last = f.at_us;
+    }
+    return std::min(n, static_cast<int>(size) - 1);
 }
 
 FlushTimes take_flush_times()

@@ -82,6 +82,11 @@ struct FlushTimes {
 };
 FlushTimes take_flush_times();
 
+/** The last few hundred frames and touches, a line each: when, how long the
+ *  frame took to its first area and its last, and its turning, catching up and
+ *  waiting; with `clear`, it starts over. For a development build's bench. */
+int frame_report(char *out, std::size_t size, bool clear);
+
 /** A zoom drawn past LVGL, which is to draw nothing until zoom_end(): each
  *  frame is the picture LVGL shows, magnified by the PPA as it turns it onto
  *  the panel, where a whole frame drawn by LVGL was 88 ms. zoom_begin() keeps
@@ -101,10 +106,48 @@ struct ZoomFrame {
     const std::uint8_t  *ring_opa   = nullptr;
     std::size_t          ring_count = 0;
     std::uint16_t        ring_ink   = 0;
+    // What of each row of the picture is the picture, from and to: the rest,
+    // its rounded corners, came out square magnified, and is laid in
+    // `around` where it is, as the rings are.
+    const std::int16_t *row_from = nullptr;
+    const std::int16_t *row_to   = nullptr;
+    std::uint16_t       around   = 0;
 };
 esp_err_t zoom_begin(const lv_area_t *keep, int count);
+
+/** The frame on show, turned back the way LVGL draws it and shrunk by the PPA
+ *  to `w` by `h` into `out` (RGB565, cache-line aligned, `out_bytes` long): a
+ *  picture of the screen as it is, for a blurred backdrop, without drawing it
+ *  again. The shrink is in steps of 1/16. */
+esp_err_t shrink_shown(std::uint8_t *out, std::size_t out_bytes, std::uint32_t w, std::uint32_t h);
 esp_err_t zoom_frame(const ZoomFrame &frame);
 void      zoom_end();
+
+/** A page glided across past LVGL: glide_begin() keeps the frame on show,
+ *  the old page, and holds back the next frame LVGL draws, the new page at
+ *  rest; each step then lays the two side by side, the new one
+ *  `shift` pixels in from the right of `region`, or the left, by copying
+ *  rather than drawing; glide_end() shows the held frame. False where the
+ *  panel cannot. */
+bool glide_begin(const lv_area_t &region, bool from_left);
+bool glide_held();
+/** A step's frame laid down, LVGL then to draw what changed round the region
+ *  into it, the dock's mark sliding, before glide_show() puts it on show. */
+bool glide_compose(std::int32_t shift);
+void glide_show();
+void glide_end();
+struct GlideTimes {
+    std::uint32_t frames  = 0;
+    std::int64_t  copy_us = 0;
+    std::int64_t  wait_us = 0;  // of copy_us, waiting for a buffer the panel is done with
+};
+GlideTimes glide_times();
+
+/** The frame the panel is showing, as the panel holds it: portrait, `w` by `h`
+ *  RGB565, for a development build to look at exactly what is on the glass. */
+const std::uint16_t *shown_frame(int *w, int *h);
+/** Done with it: the panel may draw into it again. */
+void let_go_of_frame();
 
 /** Below this the panel does not get any dimmer, so offering the range is just a
  *  control that appears broken. */

@@ -9,8 +9,10 @@
 namespace claude {
 
 /** One event from tools/claude-hook. False when it is not one. A session that
- *  has just begun to wait on you is copied to `asked`, with true in `was_asked`. */
-bool take(const char *json, std::size_t length, Session &asked, bool &was_asked);
+ *  has just begun to wait on you is copied to `asked`, with true in `was_asked`;
+ *  one that has just stopped waiting to `answered`, with true in `was_answered`. */
+bool take(const char *json, std::size_t length, Session &asked, bool &was_asked, Session &answered,
+          bool &was_answered);
 
 void snapshot(Snapshot &out);
 

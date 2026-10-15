@@ -5,9 +5,10 @@ Usage: tools/screenshot.py [port] [out.png]
 
 The port defaults to the first /dev/cu.usbmodem* there is.
 
-Build with -DSHOT_ENABLED=1 first (and -DSHOT_DESK_CARD=1 for the desk card
-open), with the pages wanted in take_screenshots() in components/ui/ui.cpp; it is off otherwise because taking one holds the LVGL lock for several
-seconds. This restarts the panel, which is what asks for the picture.
+Build with -DSHOT_ENABLED=1 first, with the pages wanted in take_screenshots()
+in components/ui/front/kit_front.cpp; it is off otherwise because taking one
+holds the LVGL lock for several seconds. This restarts the panel, which is what
+asks for the picture.
 
 The panel writes numbered base64 RGB565 between BEGIN and END on the console.
 PNG is assembled here from zlib and struct, so nothing has to be installed

@@ -482,6 +482,15 @@ esp_err_t esp_lcd_dpi_panel_get_frame_buffer(esp_lcd_panel_handle_t panel, uint3
     return ESP_OK;
 }
 
+esp_err_t esp_lcd_dpi_panel_add_frame_buffer(esp_lcd_panel_handle_t panel, void *fb)
+{
+    ESP_RETURN_ON_FALSE(panel && fb, ESP_ERR_INVALID_ARG, TAG, "invalid argument");
+    esp_lcd_dpi_panel_t *dpi_panel = __containerof(panel, esp_lcd_dpi_panel_t, base);
+    ESP_RETURN_ON_FALSE(dpi_panel->num_fbs < DPI_PANEL_MAX_FB_NUM, ESP_ERR_INVALID_STATE, TAG, "no room for another frame buffer");
+    dpi_panel->fbs[dpi_panel->num_fbs++] = fb;
+    return ESP_OK;
+}
+
 static esp_err_t dpi_panel_init(esp_lcd_panel_t *panel)
 {
     esp_lcd_dpi_panel_t *dpi_panel = __containerof(panel, esp_lcd_dpi_panel_t, base);
@@ -549,18 +558,16 @@ static esp_err_t dpi_panel_draw_bitmap(esp_lcd_panel_t *panel, int x_start, int 
     y_start = MAX(y_start, 0);
     y_end = MIN(y_end, v_res);
 
-    bool do_copy = false;
+    bool do_copy = true;
     uint8_t draw_buf_fb_index = 0;
     // check if the user draw buffer resides in any frame buffer's memory range
     // if so, we don't need to copy the data, just do cache write back
-    if (draw_buffer >= dpi_panel->fbs[0] && draw_buffer < dpi_panel->fbs[0] + fb_size) {
-        draw_buf_fb_index = 0;
-    } else if (draw_buffer >= dpi_panel->fbs[1] && draw_buffer < dpi_panel->fbs[1] + fb_size) {
-        draw_buf_fb_index = 1;
-    } else if (draw_buffer >= dpi_panel->fbs[2] && draw_buffer < dpi_panel->fbs[2] + fb_size) {
-        draw_buf_fb_index = 2;
-    } else {
-        do_copy = true;
+    for (int i = 0; i < dpi_panel->num_fbs; i++) {
+        if (draw_buffer >= dpi_panel->fbs[i] && draw_buffer < dpi_panel->fbs[i] + fb_size) {
+            draw_buf_fb_index = i;
+            do_copy = false;
+            break;
+        }
     }
 
     if (!do_copy) { // no copy, just do cache memory write back

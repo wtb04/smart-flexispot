@@ -131,6 +131,12 @@ esp_err_t esp_lcd_new_panel_dpi(esp_lcd_dsi_bus_handle_t bus, const esp_lcd_dpi_
 esp_err_t esp_lcd_dpi_panel_get_frame_buffer(esp_lcd_panel_handle_t dpi_panel, uint32_t fb_num, void **fb0, ...);
 
 /**
+ * @brief Take on one more frame buffer, of the panel's size, allocated by the caller from DMA-capable PSRAM
+ *        (this copy's addition: the BSP creates at most three).
+ */
+esp_err_t esp_lcd_dpi_panel_add_frame_buffer(esp_lcd_panel_handle_t dpi_panel, void *fb);
+
+/**
  * @brief Set pre-defined pattern to the screen for testing or debugging purpose
  *
  * @param[in] dpi_panel MIPI DPI panel handle, returned from esp_lcd_new_panel_dpi()

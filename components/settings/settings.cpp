@@ -38,7 +38,6 @@ constexpr Spec SPECS[] = {
     {"presence_gate", 1, 0, 1},
     {"desk_over_ble", 1, 0, 1},
     {"accent", 0, 0, MAX_RGB},
-    {"rail_right", 1, 0, 1},
     {"flipped", 0, 0, 1},
     {"orient_auto", 0, 0, 1},
     // Upright reads x positive on this board, against what M5's demo implies:
@@ -57,6 +56,7 @@ constexpr Spec SPECS[] = {
     {"focus_ends", 0, 0, MAX_EPOCH_S},
     {"battery_mah", -1, -1, 1900},
     {"radar_km", 80, 20, 160},
+    {"light", 0, 0, 1},
 };
 constexpr int COUNT = static_cast<int>(Key::Count);
 static_assert(std::size(SPECS) == COUNT, "every key needs a spec");

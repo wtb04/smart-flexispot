@@ -1,0 +1,1131 @@
+#include "ui_core.h"
+#include "esp_attr.h"
+#include "media_model.h"
+#if defined(ESP_PLATFORM)
+#include "watchdog.h"
+#endif
+#include "focus_model.h"
+#include "diagnostics_model.h"
+#include "home_model.h"
+#include "notices_model.h"
+#include "radar_model.h"
+#include "room_model.h"
+#include "settings_model.h"
+#include "status_model.h"
+#include "topics.h"
+
+#include "esp_check.h"
+#include "esp_heap_caps.h"
+#include "esp_lvgl_port.h"
+#include "media.h"
+#include "units.h"
+
+#include <algorithm>
+#include <cstdio>
+#include <cstring>
+#include <utility>
+
+namespace ui::detail {
+namespace {
+constexpr std::uint32_t APPLY_PERIOD_MS = 20;
+
+constexpr int DEFAULT_BRIGHTNESS_PERCENT = 80;
+}  // namespace
+
+Orientation s_orientation        = Orientation::Normal;
+int         s_initial_brightness = DEFAULT_BRIGHTNESS_PERCENT;
+Handlers    s_handlers{};
+const Card *s_cards      = nullptr;
+int         s_card_count = 0;
+int               s_page = HOME_PAGE;
+std::atomic<bool> s_setup_visible{false};
+
+void set_screen_state(bool on)
+{
+    if (on == status_state().screen_on || s_handlers.screen == nullptr) {
+        return;
+    }
+    status_state().screen_on = on;
+    publish(Topic::Status);
+    s_handlers.screen(on);
+}
+
+namespace {
+void wake_on_touch(lv_event_t *)
+{
+    if (status_state().screen_on) {
+        return;
+    }
+
+    // The tap that lights the screen does nothing else: whatever was under the
+    // finger was not visible when it landed, and one of those things moves a desk.
+    // lv_indev_active(), not lv_event_get_indev() -- the latter returns the event's
+    // parameter, which is null for an event sent to the device itself, so both
+    // calls below quietly did nothing. stop_processing withholds the press; the
+    // reset drops the device's hold so the release cannot arrive as a click.
+    lv_indev_t *indev = lv_indev_active();
+    lv_indev_stop_processing(indev);
+    lv_indev_reset(indev, nullptr);
+    set_screen_state(true);
+}
+}  // namespace
+
+}  // namespace ui::detail
+
+namespace ui {
+using namespace detail;
+
+const char *preset_name(int index)
+{
+    return index >= 0 && index < kPresetCount ? PRESET_NAMES[index] : deskproto::kBetween;
+}
+
+namespace {
+// Every set_* below runs on some other task. None of them touches LVGL: each
+// copies its arguments into a slot holding only the latest value and returns,
+// and apply_pending() on the LVGL task draws whatever changed. So no caller
+// ever waits on the screen, and no update is ever lost, only superseded.
+// Notifications are events rather than state, and queue instead.
+portMUX_TYPE      s_pending_lock = portMUX_INITIALIZER_UNLOCKED;
+std::atomic<bool> s_pending{false};
+
+template <typename T>
+struct Slot {
+    bool dirty = false;
+    T    value{};
+};
+
+void copy_text(char *dest, std::size_t size, const char *source)
+{
+    std::size_t i = 0;
+    if (source != nullptr) {
+        for (; i + 1 < size && source[i] != '\0'; ++i) {
+            dest[i] = source[i];
+        }
+    }
+    dest[i] = '\0';
+}
+
+/** A string that may be null, kept as text plus whether there was any. */
+template <std::size_t N>
+struct Text {
+    char text[N];
+    bool null;
+
+    void set(const char *source)
+    {
+        null = source == nullptr;
+        copy_text(text, N, source);
+    }
+    const char *get() const { return null ? nullptr : text; }
+};
+
+template <typename T>
+void put(Slot<T> &slot, const T &value)
+{
+    portENTER_CRITICAL(&s_pending_lock);
+    slot.value = value;
+    slot.dirty = true;
+    portEXIT_CRITICAL(&s_pending_lock);
+    s_pending.store(true, std::memory_order_release);
+}
+
+template <typename T>
+bool take(Slot<T> &slot, T &out)
+{
+    portENTER_CRITICAL(&s_pending_lock);
+    const bool dirty = slot.dirty;
+    if (dirty) {
+        out        = slot.value;
+        slot.dirty = false;
+    }
+    portEXIT_CRITICAL(&s_pending_lock);
+    return dirty;
+}
+
+struct MediaArgs {
+    Text<32>  source;
+    Text<128> title;
+    Text<128> artist;
+    Text<24>  state;
+    bool      playing;
+    bool      art_coming;
+};
+struct ProgressArgs {
+    int  position_s;
+    int  duration_s;
+    bool playing;
+};
+struct BatteryArgs {
+    bool present;
+    int  percent;
+    bool on_battery;
+};
+struct ArtArgs {
+    const void *pixels;
+    bool        placeholder;
+    int         width;
+};
+struct PillArgs {
+    Text<40> label;
+    Text<40> value;
+    Level    level;
+};
+struct LightArgs {
+    Text<48> name;
+    bool     on;
+};
+struct ToggleArgs {
+    Text<32> label;
+    bool     on;
+};
+struct RangeArgs {
+    float min_c;
+    float max_c;
+    float step_c;
+};
+struct ThermostatArgs {
+    float    current_c;
+    float    target_c;
+    Text<24> mode;
+    Hvac     state;
+};
+using TimeText = Text<16>;
+struct PresenceArgs {
+    bool has_key;
+    bool present;
+};
+struct InfoArgs {
+    Text<64> value;
+    Level    level;
+};
+struct DetailsArgs {
+    char            hex[radar::kHexLen];
+    radar::Details  details;
+};
+struct SegmentsArgs {
+    MediaSegment items[kMaxSegments];
+    int          count;
+};
+struct PickArgs {
+    Text<48> name;
+};
+struct PhotoArgs {
+    char        hex[radar::kHexLen];
+    const void *pixels;
+    int         width;
+    int         height;
+    char        credit[radar::kPhotographerLen];
+};
+
+Slot<bool>           p_preset_active[kPresetCount];
+Slot<int>            p_height;
+Slot<bool>           p_desk_available;
+Slot<int>            p_preset_mm[kPresetCount];
+Slot<MediaArgs>      p_media;
+Slot<ProgressArgs>   p_progress;
+Slot<int>            p_media_volume;
+Slot<ArtArgs>        p_art;
+Slot<PickArgs>       p_pick[media::kPickCount];
+Slot<const void *>   p_pick_art[media::kPickCount];
+Slot<SegmentsArgs>   p_segments;
+Slot<bool>           p_media_seeks;
+Slot<bool>           p_media_remote;
+Slot<std::uint8_t>   p_media_takes;  // bit 0 a volume, bit 1 subtitles, bit 2 a volume that steps
+Slot<bool>           p_pause_settles;
+Slot<std::uint8_t>   p_subtitles;  // 1 for some to show, 2 for shown
+Slot<const void *>   p_still;
+Slot<const void *>   p_art_large;
+Slot<std::uint8_t>   p_neighbours;  // bit 0 one before, bit 1 one after, bit 2 they are episodes
+Slot<std::uint8_t>   p_tracks;      // bit 0 a track back, bit 1 one on
+Slot<PillArgs>       p_pill[kPillCount];
+Slot<bool>           p_lights;
+Slot<bool>           p_room_lit;
+Slot<LightArgs>      p_light[kLightCount];
+Slot<ToggleArgs>     p_toggle[kDialToggleCount];
+Slot<RangeArgs>      p_range;
+Slot<ThermostatArgs> p_thermostat;
+Slot<PresenceArgs>   p_presence;
+Slot<TimeText>       p_time;
+Slot<bool>           p_wifi;
+Slot<int>            p_laptops;
+// Kept in PSRAM: sized for the most any card can have, it is several
+// kilobytes, and static data would take them from internal RAM.
+Slot<InfoArgs>      *p_rows = nullptr;  // [card * kMaxRows + row]
+Slot<InfoArgs>       p_card[kMaxCards];
+Slot<int>            p_media_hold;
+Slot<int>            p_notification_volume;
+Slot<bool>           p_screen;
+Slot<bool>           p_setting[SETTING_COUNT];
+Slot<bool>           p_calendar;
+Slot<Focus>          p_focus;
+Slot<UpdateState>    p_update;
+Slot<BatteryArgs>    p_battery;
+Slot<bool>           p_radar;
+Slot<bool>           p_claude;
+Slot<DetailsArgs>    p_details;
+Slot<PhotoArgs>      p_photo;
+
+// Notices and their withdrawals in the order they were asked for, so a question
+// answered and asked again at once keeps the new one; the oldest goes when full.
+struct Posted {
+    Notice notice;
+    bool   withdraw = false;  // take back notice.key rather than show it
+};
+constexpr int NOTICE_INBOX_LEN = 8;
+EXT_RAM_BSS_ATTR Posted s_inbox[NOTICE_INBOX_LEN];  // in PSRAM, as internal RAM is short
+int           s_inbox_count = 0;
+
+void drop_oldest(Posted *queue, int &count)
+{
+    for (int i = 1; i < count; ++i) {
+        queue[i - 1] = queue[i];
+    }
+    --count;
+}
+
+// ---- What each update does, on the LVGL task. ----
+
+
+void apply_preset_active(int index, bool active)
+{
+    desk_take_active(index, active);
+}
+
+void apply_height(int height_mm)
+{
+    desk_take_height(height_mm);
+}
+
+void apply_desk_available(bool available)
+{
+    desk_take_available(available);
+}
+
+void apply_media_args(const MediaArgs &media)
+{
+    media_take_track(media.source.get(), media.title.get(), media.artist.get(), media.state.get(),
+                     media.playing);
+}
+
+// A new track's text waits here for its cover, or for this long when that is slow.
+constexpr std::uint32_t ART_WAIT_MS = 3 * units::kMsPerSecond;
+MediaArgs               s_held_media;
+bool                    s_media_held = false;
+lv_timer_t             *s_held_timer = nullptr;
+// And its progress with it, so the title, the cover and how far it is change
+// together, rather than the times running ahead under the last track's title.
+ProgressArgs            s_held_progress{};
+bool                    s_progress_held = false;
+
+void drop_held_media()
+{
+    s_media_held = false;
+    if (s_held_timer != nullptr) {
+        lv_timer_delete(s_held_timer);
+        s_held_timer = nullptr;
+    }
+}
+
+void release_held_media()
+{
+    if (s_media_held) {
+        drop_held_media();
+        apply_media_args(s_held_media);
+        if (std::exchange(s_progress_held, false)) {
+            media_take_progress(s_held_progress.position_s, s_held_progress.duration_s, s_held_progress.playing);
+        }
+    }
+}
+
+void held_too_long(lv_timer_t *)
+{
+    release_held_media();
+}
+
+bool same_track(const MediaArgs &a, const MediaArgs &b)
+{
+    return std::strcmp(a.title.text, b.title.text) == 0 &&
+           std::strcmp(a.artist.text, b.artist.text) == 0;
+}
+
+void hold_media(const MediaArgs &media)
+{
+    drop_held_media();
+    s_held_media = media;
+    s_media_held = true;
+    s_held_timer = lv_timer_create(held_too_long, ART_WAIT_MS, nullptr);
+    lv_timer_set_repeat_count(s_held_timer, 1);
+    lv_timer_set_auto_delete(s_held_timer, false);
+}
+
+void apply_pill(int index, const char *label, const char *value, Level level)
+{
+    PillState &pill = home_state().pills[index];
+    copy_text(pill.label, sizeof(pill.label), label);
+    copy_text(pill.value, sizeof(pill.value), value);
+    pill.level = level;
+    publish(Topic::Home);
+}
+
+void apply_lights(bool on)
+{
+    lights_take(on);
+}
+
+void apply_light(int index, const char *name, bool on)
+{
+    lights_take_light(index, name, on);
+}
+
+void apply_dial_toggle(int index, const char *label, bool on)
+{
+    ToggleState &toggle = home_state().toggles[index];
+    copy_text(toggle.label, sizeof(toggle.label), label);
+    toggle.on = on;
+    publish(Topic::Home);
+}
+
+void apply_thermostat_range(float min_c, float max_c, float step_c)
+{
+    ThermostatState &thermostat = home_state().thermostat;
+    thermostat.ranged = true;
+    thermostat.min_c  = min_c;
+    thermostat.max_c  = max_c;
+    thermostat.step_c = step_c;
+    publish(Topic::Home);
+}
+
+void apply_thermostat(float current_c, float target_c, const char *mode, Hvac state)
+{
+    ThermostatState &thermostat = home_state().thermostat;
+    thermostat.known     = true;
+    thermostat.current_c = current_c;
+    thermostat.target_c  = target_c;
+    copy_text(thermostat.mode, sizeof(thermostat.mode), mode);
+    thermostat.state = state;
+    publish(Topic::Home);
+}
+
+void apply_presence(bool has_key, bool present)
+{
+    status_state().present = has_key && present;
+    publish(Topic::Status);
+}
+
+void apply_time(const char *text)
+{
+    std::snprintf(status_state().time, sizeof(status_state().time), "%s", text != nullptr ? text : "");
+    publish(Topic::Status);
+}
+
+void apply_wifi(bool wifi)
+{
+    status_state().wifi = wifi;
+    publish(Topic::Status);
+}
+
+void apply_laptops(int count)
+{
+    status_state().laptops = count;
+    publish(Topic::Status);
+}
+
+void apply_screen(bool on)
+{
+    status_state().screen_on = on;
+    publish(Topic::Status);
+}
+
+void apply_settings_and_presence()
+{
+    bool on = false;
+    for (int i = 0; i < SETTING_COUNT; ++i) {
+        if (take(p_setting[i], on)) {
+            settings_take(i, on);
+        }
+    }
+    if (PresenceArgs presence{}; take(p_presence, presence)) {
+        apply_presence(presence.has_key, presence.present);
+    }
+    if (bool screen = false; take(p_screen, screen)) {
+        apply_screen(screen);
+    }
+    if (BatteryArgs battery{}; take(p_battery, battery)) {
+        status_take_battery(battery.present, battery.percent, battery.on_battery);
+    }
+}
+
+void apply_desk_updates()
+{
+    bool on = false;
+    for (int i = 0; i < kPresetCount; ++i) {
+        if (take(p_preset_active[i], on)) {
+            apply_preset_active(i, on);
+        }
+    }
+    if (bool available = false; take(p_desk_available, available)) {
+        apply_desk_available(available);
+    }
+    for (int i = 0; i < kPresetCount; ++i) {
+        if (int mm = 0; take(p_preset_mm[i], mm)) {
+            desk_take_preset_height(i, mm);
+        }
+    }
+    if (int height = 0; take(p_height, height)) {
+        apply_height(height);
+    }
+}
+
+void apply_media_updates()
+{
+    static MediaArgs media;  // large for the LVGL task's stack
+    if (take(p_media, media)) {
+        if (media.art_coming) {
+            hold_media(media);
+        } else if (s_media_held && same_track(media, s_held_media)) {
+            s_held_media = media;  // still waiting on its cover
+        } else {
+            drop_held_media();
+            apply_media_args(media);
+            if (std::exchange(s_progress_held, false)) {
+                media_take_progress(s_held_progress.position_s, s_held_progress.duration_s, s_held_progress.playing);
+            }
+        }
+    }
+    if (ArtArgs art{}; take(p_art, art)) {
+        media_take_cover(art.pixels, art.placeholder, art.width);
+        release_held_media();
+    }
+    if (SegmentsArgs segments{}; take(p_segments, segments)) {
+        media_take_segments(segments.items, segments.count);
+    }
+    if (bool remote = false; take(p_media_remote, remote)) {
+        media_take_remote(remote);
+    }
+    if (bool settles = true; take(p_pause_settles, settles)) {
+        media_take_pause_settles(settles);
+    }
+    if (std::uint8_t takes = 0; take(p_media_takes, takes)) {
+        media_take_takes((takes & 1) != 0, (takes & 2) != 0, (takes & 4) != 0);
+    }
+    if (bool seeks = false; take(p_media_seeks, seeks)) {
+        media_take_video(seeks);
+    }
+    if (std::uint8_t subtitles = 0; take(p_subtitles, subtitles)) {
+        media_take_subtitles((subtitles & 1) != 0, (subtitles & 2) != 0);
+    }
+    if (const void *still = nullptr; take(p_still, still)) {
+        media_take_still(still);
+    }
+    if (const void *large = nullptr; take(p_art_large, large)) {
+        media_take_large_cover(large);
+    }
+    if (std::uint8_t around = 0; take(p_neighbours, around)) {
+        media_take_neighbours((around & 1) != 0, (around & 2) != 0, (around & 4) != 0);
+    }
+    if (std::uint8_t tracks = 0; take(p_tracks, tracks)) {
+        media_take_tracks((tracks & 1) != 0, (tracks & 2) != 0);
+    }
+    for (int i = 0; i < media::kPickCount; ++i) {
+        if (PickArgs pick{}; take(p_pick[i], pick)) {
+            media_take_pick(i, pick.name.get());
+        }
+        if (const void *pixels = nullptr; take(p_pick_art[i], pixels)) {
+            media_take_pick_art(i, pixels);
+        }
+    }
+    if (ProgressArgs progress{}; take(p_progress, progress)) {
+        if (s_media_held) {
+            s_held_progress = progress;
+            s_progress_held = true;
+        } else {
+            media_take_progress(progress.position_s, progress.duration_s, progress.playing);
+        }
+    }
+    if (int volume = 0; take(p_media_volume, volume)) {
+        media_take_volume(volume);
+    }
+    if (int hold = 0; take(p_media_hold, hold)) {
+        media_take_hold_preset(hold);
+    }
+}
+
+void apply_home_updates()
+{
+    for (int i = 0; i < kPillCount; ++i) {
+        if (PillArgs pill{}; take(p_pill[i], pill)) {
+            apply_pill(i, pill.label.get(), pill.value.get(), pill.level);
+        }
+    }
+    if (bool lights = false; take(p_lights, lights)) {
+        apply_lights(lights);
+    }
+    if (bool lit = false; take(p_room_lit, lit)) {
+        lights_take_room(lit);
+    }
+    for (int i = 0; i < kLightCount; ++i) {
+        if (LightArgs light{}; take(p_light[i], light)) {
+            apply_light(i, light.name.get(), light.on);
+        }
+    }
+    for (int i = 0; i < kDialToggleCount; ++i) {
+        if (ToggleArgs toggle{}; take(p_toggle[i], toggle)) {
+            apply_dial_toggle(i, toggle.label.get(), toggle.on);
+        }
+    }
+    if (RangeArgs range{}; take(p_range, range)) {
+        apply_thermostat_range(range.min_c, range.max_c, range.step_c);
+    }
+    if (ThermostatArgs thermostat{}; take(p_thermostat, thermostat)) {
+        apply_thermostat(thermostat.current_c, thermostat.target_c, thermostat.mode.get(),
+                         thermostat.state);
+    }
+}
+
+void apply_status_updates()
+{
+    if (TimeText time{}; take(p_time, time)) {
+        apply_time(time.get());
+    }
+    if (bool wifi = false; take(p_wifi, wifi)) {
+        apply_wifi(wifi);
+    }
+    if (int laptops = 0; take(p_laptops, laptops)) {
+        apply_laptops(laptops);
+    }
+    if (int volume = 0; take(p_notification_volume, volume)) {
+        settings_take_volume(volume);
+    }
+}
+
+void apply_diagnostics_updates()
+{
+    for (int c = 0; c < s_card_count; ++c) {
+        if (InfoArgs card{}; take(p_card[c], card)) {
+            diagnostics_take_card(c, card.value.get(), card.level);
+        }
+        for (int r = 0; r < s_cards[c].row_count && r < kMaxRows; ++r) {
+            if (InfoArgs row{}; p_rows != nullptr && take(p_rows[c * kMaxRows + r], row)) {
+                diagnostics_take_row(c, r, row.value.get(), row.level);
+            }
+        }
+    }
+}
+
+void apply_page_updates()
+{
+    if (Focus focus{}; take(p_focus, focus)) {
+        detail::set_focus_state(focus);
+    }
+    if (UpdateState update{}; take(p_update, update)) {
+        settings_take_update(update);
+    }
+    if (bool calendar = false; take(p_calendar, calendar)) {
+        publish(Topic::Calendar);
+    }
+    if (bool radar = false; take(p_radar, radar)) {
+        publish(Topic::Radar);
+    }
+    if (bool claude = false; take(p_claude, claude)) {
+        publish(Topic::Claude);
+    }
+    static DetailsArgs details;
+    if (take(p_details, details)) {
+        radar_take_details(details.hex, details.details);
+    }
+    if (PhotoArgs photo{}; take(p_photo, photo)) {
+        radar_take_photo(photo.hex, photo.pixels, photo.width, photo.height, photo.credit);
+    }
+}
+
+void apply_inbox()
+{
+    EXT_RAM_BSS_ATTR static Posted posted[NOTICE_INBOX_LEN];
+    portENTER_CRITICAL(&s_pending_lock);
+    const int count = s_inbox_count;
+    for (int i = 0; i < count; ++i) {
+        posted[i] = s_inbox[i];
+    }
+    s_inbox_count = 0;
+    portEXIT_CRITICAL(&s_pending_lock);
+    for (int i = 0; i < count; ++i) {
+        if (posted[i].withdraw) {
+            withdraw_notice(posted[i].notice.key);
+        } else {
+            notices_take(posted[i].notice);
+        }
+    }
+}
+
+void apply_pending(lv_timer_t *)
+{
+    if (!s_pending.exchange(false, std::memory_order_acquire)) {
+        return;
+    }
+    // Settings and presence first: they decide which pages and presets show.
+    apply_settings_and_presence();
+    apply_desk_updates();
+    apply_media_updates();
+    apply_home_updates();
+    apply_status_updates();
+    apply_diagnostics_updates();
+    apply_page_updates();
+    apply_inbox();
+    detail::deliver_topics();  // what follows a topic, once for all that changed
+}
+}  // namespace
+
+esp_err_t set_preset_active(int index, bool active)
+{
+    ESP_RETURN_ON_FALSE(index >= 0 && index < kPresetCount, ESP_ERR_INVALID_ARG, TAG, "preset %d",
+                        index);
+    put(p_preset_active[index], active);
+    return ESP_OK;
+}
+
+esp_err_t set_height(int height_mm)
+{
+    put(p_height, height_mm);
+    return ESP_OK;
+}
+
+esp_err_t set_desk_available(bool available)
+{
+    put(p_desk_available, available);
+    return ESP_OK;
+}
+
+esp_err_t set_preset_height(int index, int height_mm)
+{
+    ESP_RETURN_ON_FALSE(index >= 0 && index < kPresetCount, ESP_ERR_INVALID_ARG, TAG, "preset");
+    put(p_preset_mm[index], height_mm);
+    return ESP_OK;
+}
+
+esp_err_t set_media(const char *source, const char *title, const char *artist, const char *state,
+                    bool playing, bool art_coming)
+{
+    static MediaArgs args;  // too large to build on a caller's stack
+    portENTER_CRITICAL(&s_pending_lock);
+    args.source.set(source);
+    args.title.set(title);
+    args.artist.set(artist);
+    args.state.set(state);
+    args.playing      = playing;
+    args.art_coming   = art_coming;
+    p_media.value     = args;
+    p_media.dirty = true;
+    portEXIT_CRITICAL(&s_pending_lock);
+    s_pending.store(true, std::memory_order_release);
+    return ESP_OK;
+}
+
+esp_err_t set_media_progress(int position_s, int duration_s, bool playing)
+{
+    put(p_progress, ProgressArgs{position_s, duration_s, playing});
+    return ESP_OK;
+}
+
+esp_err_t set_media_volume(int percent)
+{
+    put(p_media_volume, percent);
+    return ESP_OK;
+}
+
+esp_err_t set_album_art(const void *pixels, bool placeholder, int width)
+{
+    put(p_art, ArtArgs{pixels, placeholder, width > 0 ? std::min(width, media::kArtSize) : media::kArtSize});
+    return ESP_OK;
+}
+
+esp_err_t set_media_segments(const MediaSegment *segments, int count)
+{
+    SegmentsArgs args{};
+    args.count = std::clamp(count, 0, kMaxSegments);
+    for (int i = 0; i < args.count; ++i) {
+        args.items[i] = segments[i];
+    }
+    put(p_segments, args);
+    return ESP_OK;
+}
+
+esp_err_t set_media_neighbours(bool previous, bool next, bool episodes)
+{
+    put(p_neighbours, static_cast<std::uint8_t>((previous ? 1 : 0) | (next ? 2 : 0) | (episodes ? 4 : 0)));
+    return ESP_OK;
+}
+
+esp_err_t set_media_tracks(bool back, bool on)
+{
+    put(p_tracks, static_cast<std::uint8_t>((back ? 1 : 0) | (on ? 2 : 0)));
+    return ESP_OK;
+}
+
+esp_err_t set_album_art_large(const void *pixels)
+{
+    put(p_art_large, pixels);
+    return ESP_OK;
+}
+
+esp_err_t set_cinema_still(const void *pixels)
+{
+    put(p_still, pixels);
+    return ESP_OK;
+}
+
+esp_err_t set_media_remote(bool remote)
+{
+    put(p_media_remote, remote);
+    return ESP_OK;
+}
+
+esp_err_t set_media_pause_settles(bool settles)
+{
+    put(p_pause_settles, settles);
+    return ESP_OK;
+}
+
+esp_err_t set_media_takes(bool volume, bool subtitles, bool steps)
+{
+    put(p_media_takes, static_cast<std::uint8_t>((volume ? 1 : 0) | (subtitles ? 2 : 0) | (steps ? 4 : 0)));
+    return ESP_OK;
+}
+
+esp_err_t set_media_seeks(bool seeks)
+{
+    put(p_media_seeks, seeks);
+    return ESP_OK;
+}
+
+esp_err_t set_media_subtitles(bool available, bool shown)
+{
+    put(p_subtitles, static_cast<std::uint8_t>((available ? 1 : 0) | (shown ? 2 : 0)));
+    return ESP_OK;
+}
+
+esp_err_t set_pick(int index, const char *name)
+{
+    ESP_RETURN_ON_FALSE(index >= 0 && index < media::kPickCount, ESP_ERR_INVALID_ARG, TAG,
+                        "favourite %d", index);
+    PickArgs args{};
+    args.name.set(name);
+    put(p_pick[index], args);
+    return ESP_OK;
+}
+
+esp_err_t set_pick_art(int index, const void *pixels)
+{
+    ESP_RETURN_ON_FALSE(index >= 0 && index < media::kPickCount, ESP_ERR_INVALID_ARG, TAG,
+                        "favourite %d", index);
+    put(p_pick_art[index], pixels);
+    return ESP_OK;
+}
+
+esp_err_t set_pill(int index, const char *label, const char *value, Level level)
+{
+    ESP_RETURN_ON_FALSE(index >= 0 && index < kPillCount, ESP_ERR_INVALID_ARG, TAG, "pill %d",
+                        index);
+    PillArgs args{};
+    args.label.set(label);
+    args.value.set(value);
+    args.level = level;
+    put(p_pill[index], args);
+    return ESP_OK;
+}
+
+esp_err_t set_lights(bool on)
+{
+    put(p_lights, on);
+    return ESP_OK;
+}
+
+esp_err_t set_light(int index, const char *name, bool on)
+{
+    ESP_RETURN_ON_FALSE(index >= 0 && index < kLightCount, ESP_ERR_INVALID_ARG, TAG, "light %d",
+                        index);
+    LightArgs args{};
+    args.name.set(name);
+    args.on = on;
+    put(p_light[index], args);
+    return ESP_OK;
+}
+
+esp_err_t set_room_lit(bool lit)
+{
+    put(p_room_lit, lit);
+    return ESP_OK;
+}
+
+esp_err_t set_dial_toggle(int index, const char *label, bool on)
+{
+    ESP_RETURN_ON_FALSE(index >= 0 && index < kDialToggleCount, ESP_ERR_INVALID_ARG, TAG,
+                        "toggle %d", index);
+    ToggleArgs args{};
+    args.label.set(label);
+    args.on = on;
+    put(p_toggle[index], args);
+    return ESP_OK;
+}
+
+esp_err_t set_thermostat_range(float min_c, float max_c, float step_c)
+{
+    put(p_range, RangeArgs{min_c, max_c, step_c});
+    return ESP_OK;
+}
+
+esp_err_t set_thermostat(float current_c, float target_c, const char *mode, Hvac state)
+{
+    ThermostatArgs args{};
+    args.current_c = current_c;
+    args.target_c  = target_c;
+    args.mode.set(mode);
+    args.state = state;
+    put(p_thermostat, args);
+    return ESP_OK;
+}
+
+esp_err_t set_presence(bool has_key, bool present)
+{
+    put(p_presence, PresenceArgs{has_key, present});
+    return ESP_OK;
+}
+
+esp_err_t set_time(const char *text)
+{
+    TimeText args{};
+    args.set(text);
+    put(p_time, args);
+    return ESP_OK;
+}
+
+esp_err_t set_links(bool wifi)
+{
+    put(p_wifi, wifi);
+    return ESP_OK;
+}
+
+esp_err_t set_laptops(int count)
+{
+    put(p_laptops, count);
+    return ESP_OK;
+}
+
+esp_err_t set_battery(bool present, int percent, bool on_battery)
+{
+    put(p_battery, BatteryArgs{present, percent, on_battery});
+    return ESP_OK;
+}
+
+void set_cards(const Card *cards, int count)
+{
+    s_cards      = cards;
+    s_card_count = std::min(count, kMaxCards);
+    if (p_rows == nullptr) {
+        p_rows = static_cast<Slot<InfoArgs> *>(heap_caps_calloc(
+            kMaxCards * kMaxRows, sizeof(Slot<InfoArgs>), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    }
+}
+
+esp_err_t set_card(int card, const char *summary, Level level)
+{
+    ESP_RETURN_ON_FALSE(card >= 0 && card < s_card_count, ESP_ERR_INVALID_ARG, TAG, "card %d",
+                        card);
+    InfoArgs args{};
+    args.value.set(summary);
+    args.level = level;
+    put(p_card[card], args);
+    return ESP_OK;
+}
+
+esp_err_t set_row(int card, int row, const char *value, Level level)
+{
+    ESP_RETURN_ON_FALSE(card >= 0 && card < s_card_count && row >= 0 &&
+                            row < std::min(s_cards[card].row_count, kMaxRows),
+                        ESP_ERR_INVALID_ARG, TAG, "card %d row %d", card, row);
+    ESP_RETURN_ON_FALSE(p_rows != nullptr, ESP_ERR_NO_MEM, TAG, "rows");
+    InfoArgs args{};
+    args.value.set(value);
+    args.level = level;
+    put(p_rows[card * kMaxRows + row], args);
+    return ESP_OK;
+}
+
+esp_err_t set_calendar()
+{
+    put(p_calendar, true);
+    return ESP_OK;
+}
+
+esp_err_t set_focus(const Focus &focus)
+{
+    put(p_focus, focus);
+    return ESP_OK;
+}
+
+esp_err_t set_update(const UpdateState &state)
+{
+    put(p_update, state);
+    return ESP_OK;
+}
+
+esp_err_t set_claude()
+{
+    put(p_claude, true);
+    return ESP_OK;
+}
+
+esp_err_t set_radar(const radar::Snapshot &snapshot)
+{
+    (void)snapshot;  // too big to copy here; the page takes radar's own copy
+    put(p_radar, true);
+    return ESP_OK;
+}
+
+esp_err_t set_radar_details(const char *hex, const radar::Details &details)
+{
+    static DetailsArgs args;
+    portENTER_CRITICAL(&s_pending_lock);
+    copy_text(args.hex, sizeof(args.hex), hex);
+    args.details    = details;
+    p_details.value = args;
+    p_details.dirty = true;
+    portEXIT_CRITICAL(&s_pending_lock);
+    s_pending.store(true, std::memory_order_release);
+    return ESP_OK;
+}
+
+esp_err_t set_radar_photo(const char *hex, const void *pixels, int width, int height, const char *credit)
+{
+    PhotoArgs args{};
+    copy_text(args.hex, sizeof(args.hex), hex);
+    copy_text(args.credit, sizeof(args.credit), credit);
+    args.pixels = pixels;
+    args.width  = width;
+    args.height = height;
+    put(p_photo, args);
+    return ESP_OK;
+}
+
+esp_err_t set_media_hold_preset(int preset)
+{
+    put(p_media_hold, preset);
+    return ESP_OK;
+}
+
+esp_err_t set_notification_volume(int percent)
+{
+    put(p_notification_volume, percent);
+    return ESP_OK;
+}
+
+esp_err_t set_screen(bool on)
+{
+    put(p_screen, on);
+    return ESP_OK;
+}
+
+esp_err_t set_setting(Setting setting, bool on)
+{
+    const int index = static_cast<int>(setting);
+    ESP_RETURN_ON_FALSE(index >= 0 && index < SETTING_COUNT, ESP_ERR_INVALID_ARG, TAG, "setting %d",
+                        index);
+    put(p_setting[index], on);
+    return ESP_OK;
+}
+
+bool diagnostics_open()
+{
+    return s_setup_visible.load(std::memory_order_relaxed);
+}
+
+esp_err_t notify(const char *source, const char *title, const char *message, Level level,
+                 int timeout_ms, const char *key)
+{
+    portENTER_CRITICAL(&s_pending_lock);
+    if (s_inbox_count == NOTICE_INBOX_LEN) {
+        drop_oldest(s_inbox, s_inbox_count);
+    }
+    s_inbox[s_inbox_count].withdraw = false;
+    Notice &slot = s_inbox[s_inbox_count++].notice;
+    copy_text(slot.source, sizeof(slot.source), source);
+    copy_text(slot.title, sizeof(slot.title), title);
+    copy_text(slot.message, sizeof(slot.message), message);
+    slot.level = level;
+    slot.timeout_ms = timeout_ms;
+    copy_text(slot.key, sizeof(slot.key), key != nullptr ? key : "");
+    portEXIT_CRITICAL(&s_pending_lock);
+    s_pending.store(true, std::memory_order_release);
+    return ESP_OK;
+}
+
+esp_err_t withdraw(const char *key)
+{
+    ESP_RETURN_ON_FALSE(key != nullptr && key[0] != '\0', ESP_ERR_INVALID_ARG, TAG, "no key");
+    portENTER_CRITICAL(&s_pending_lock);
+    if (s_inbox_count == NOTICE_INBOX_LEN) {
+        drop_oldest(s_inbox, s_inbox_count);
+    }
+    Posted &slot  = s_inbox[s_inbox_count++];
+    slot          = Posted{};
+    slot.withdraw = true;
+    copy_text(slot.notice.key, sizeof(slot.notice.key), key);
+    portEXIT_CRITICAL(&s_pending_lock);
+    s_pending.store(true, std::memory_order_release);
+    return ESP_OK;
+}
+
+esp_err_t init(const Handlers &handlers, int initial_brightness, std::uint32_t accent,
+               Orientation orientation)
+{
+    ESP_RETURN_ON_FALSE(lvgl_port_lock(LOCK_TIMEOUT_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
+    s_orientation        = orientation;
+    s_handlers           = handlers;
+    s_initial_brightness = initial_brightness;
+    for (lv_indev_t *dev = lv_indev_get_next(nullptr); dev != nullptr; dev = lv_indev_get_next(dev)) {
+        lv_indev_add_event_cb(dev, wake_on_touch, LV_EVENT_PRESSED, nullptr);
+    }
+    front::init(accent);
+    lv_refr_now(nullptr);
+    lvgl_port_unlock();
+    return ESP_OK;
+}
+
+esp_err_t build()
+{
+    constexpr TickType_t BETWEEN_PARTS = pdMS_TO_TICKS(20);
+    constexpr int        SCREEN_STUCK_MS = 20 * 1000;
+    const std::uint32_t  from          = lv_tick_get();
+    // The screen's first frames are drawn between the parts, and on the panel
+    // one can hold the lock for longer than any later frame does.
+    constexpr std::uint32_t BUILD_LOCK_MS = 5000;
+    for (bool more = true; more;) {
+        const std::uint32_t asked = lv_tick_get();
+        ESP_RETURN_ON_FALSE(lvgl_port_lock(BUILD_LOCK_MS), ESP_ERR_TIMEOUT, TAG, "lvgl lock");
+        if (lv_tick_elaps(asked) > 100) {
+            ESP_LOGW(TAG, "build waited %u ms for the screen", static_cast<unsigned>(lv_tick_elaps(asked)));
+        }
+        more = front::build_next_part();
+        lv_obj_update_layout(lv_screen_active());
+        if (!more) {
+            lv_timer_create(apply_pending, APPLY_PERIOD_MS, nullptr);
+#if defined(ESP_PLATFORM)
+            // The screen's own beat, renewed each second from its task: stuck,
+            // with LVGL's lock held, it froze the screen and left no trace;
+            // now the watchdog names it and crashes, keeping where it was.
+            static const watchdog::Beat beat = watchdog::add("screen", SCREEN_STUCK_MS);
+            watchdog::busy(beat, "drawing");
+            lv_timer_create([](lv_timer_t *) {
+                watchdog::idle(beat);
+                watchdog::busy(beat, "drawing");
+            }, 1000, nullptr);
+#endif
+        }
+        lvgl_port_unlock();
+        vTaskDelay(BETWEEN_PARTS);
+    }
+    ESP_LOGI(TAG, "built in %u ms", static_cast<unsigned>(lv_tick_elaps(from)));
+    return ESP_OK;
+}
+
+}  // namespace ui

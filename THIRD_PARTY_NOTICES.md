@@ -15,8 +15,10 @@ This project's own code, documents and board are copyright 2026 Wouter ten Brink
 | libjpeg-turbo | managed component | IJG, BSD-3-Clause and zlib |
 | Montserrat, drawn into the fonts in [components/ui/fonts](components/ui/fonts) and LVGL's own | | SIL Open Font License 1.1 |
 | Font Awesome Free 5's icons, in LVGL's built-in fonts | managed component | SIL Open Font License 1.1 |
+| Instrument Sans, drawn into the design kit's fonts in [components/ui/fonts](components/ui/fonts) | [tools/make_fonts.py](tools/make_fonts.py) | SIL Open Font License 1.1 |
+| Material Symbols Rounded, drawn into the design kit's icon fonts in [components/ui/fonts](components/ui/fonts) | [tools/make_fonts.py](tools/make_fonts.py) | Apache-2.0 |
 | Natural Earth, drawn into the map | [tools/make_map.py](tools/make_map.py) | public domain |
-| mediaremote-adapter, built into Desk Link | [desklink/Vendor/mediaremote-adapter](https://github.com/ungive/mediaremote-adapter), a submodule | BSD-3-Clause, its [LICENSE](https://github.com/ungive/mediaremote-adapter/blob/master/LICENSE) |
+| mediaremote-adapter, built into Desk Link | [desklink/macos/Vendor/mediaremote-adapter](https://github.com/ungive/mediaremote-adapter), a submodule | BSD-3-Clause, its [LICENSE](https://github.com/ungive/mediaremote-adapter/blob/master/LICENSE) |
 
 Not this project's, and not under its licence either:
 
@@ -140,6 +142,14 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 ## Font Awesome Free 5
 
 Copyright Fonticons, Inc. (https://fontawesome.com), with Reserved Font Name "Font Awesome". Its font is under the SIL Open Font License 1.1, as Montserrat's above; see https://fontawesome.com/license/free.
+
+## Instrument Sans
+
+Copyright 2022 The Instrument Sans Project Authors (https://github.com/Instrument/instrument-sans). Its font is under the SIL Open Font License 1.1, as Montserrat's above; see https://github.com/google/fonts/blob/main/ofl/instrumentsans/OFL.txt.
+
+## Material Symbols Rounded
+
+Copyright 2026 Google LLC (https://github.com/google/material-design-icons). Its font is under the Apache License 2.0, the same text as this project's [LICENSE](LICENSE).
 
 ## protobuf-c
 
