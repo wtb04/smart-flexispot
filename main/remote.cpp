@@ -23,6 +23,7 @@
 #include "lwip/sockets.h"
 #include "ota.h"
 #include "power.h"
+#include "settings.h"
 #include "kit.h"
 #include "lab.h"
 #include "ui.h"
@@ -801,9 +802,38 @@ esp_err_t bench_page(httpd_req_t *req)
     }
     EXT_RAM_BSS_ATTR static char text[28000];
     int         n = 0;
+    char        query[24] = "";
+    httpd_req_get_url_query_str(req, query, sizeof(query));
+    // nap: dark and asleep for 3 s and lit again, as a knock wakes it; napl
+    // for 20 s, with the battery current asleep. Outside the lock, which
+    // waking waits on.
+    if (std::strncmp(query, "nap", 3) == 0) {
+        const bool long_nap = query[3] == 'l';
+        ESP_ERROR_CHECK_WITHOUT_ABORT(board::display_off());
+        const bool slept = board::display_sleep();
+        vTaskDelay(pdMS_TO_TICKS(long_nap ? 10000 : 3000));
+        float amps = 0.0f;
+        int   reads = 0;
+        for (int i = 0; long_nap && i < 20; ++i) {
+            power::State st{};
+            if (power::read(st) == ESP_OK && st.present) {
+                amps += st.current_amps;
+                ++reads;
+            }
+            vTaskDelay(pdMS_TO_TICKS(500));
+        }
+        ESP_ERROR_CHECK_WITHOUT_ABORT(board::display_on(settings::get(settings::Key::Brightness)));
+        vTaskDelay(pdMS_TO_TICKS(500));
+        n = std::snprintf(text, sizeof(text), "%s", slept ? "napped" : "dark but not asleep");
+        if (reads > 0) {
+            n += std::snprintf(text + n, sizeof(text) - n, ", %d mA from %d reads", static_cast<int>(amps / reads * 1000.0f), reads);
+        }
+        n += std::snprintf(text + n, sizeof(text) - n, "\n");
+        n += board::scan_report(text + n, sizeof(text) - n, false);
+        httpd_resp_set_type(req, "text/plain");
+        return httpd_resp_send(req, text, n);
+    }
     if (lvgl_port_lock(STATS_LOCK_MS)) {
-        char query[24] = "";
-        httpd_req_get_url_query_str(req, query, sizeof(query));
         if (std::strcmp(query, "lab") == 0) {
             if (!ui::lab::built()) {
                 ui::lab::build([]() { return static_cast<std::uint64_t>(esp_timer_get_time()); });
@@ -837,6 +867,8 @@ esp_err_t bench_page(httpd_req_t *req)
             } else {
                 n = std::snprintf(text, sizeof(text), "not internal RAM\n");
             }
+        } else if (std::strcmp(query, "scan") == 0 || std::strcmp(query, "scanr") == 0) {  // the stream against its frames; scanr restarts it
+            n = board::scan_report(text, sizeof(text), query[4] == 'r');
         } else if (std::strcmp(query, "fp") == 0 || std::strcmp(query, "fpc") == 0) {  // each frame and touch lately; fpc starts over
             n = board::frame_report(text, sizeof(text), query[2] == 'c');
 #if LV_USE_PROFILER
