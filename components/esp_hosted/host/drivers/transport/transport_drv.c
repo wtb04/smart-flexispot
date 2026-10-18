@@ -17,6 +17,8 @@
 #include <inttypes.h>
 
 #include "esp_wifi.h"
+#include "esp_heap_caps.h"
+#include "esp_dma_utils.h"
 #include "transport_drv.h"
 #include "esp_hosted_transport.h"
 #include "esp_hosted_transport_init.h"
@@ -197,14 +199,34 @@ static esp_err_t transport_drv_sta_tx(void *h, void *buffer, transport_free_cb_t
 }
 #endif
 
+/* Smart Flexispot patch: each packet sent is copied into a buffer of its own,
+ * in PSRAM, which the SDMMC host reads from as well as into. Upstream takes
+ * them from a pool of internal DMA memory that never gives back: with the
+ * link's own (sdio_drv.c) it came to some 38 KB kept for good, and with that
+ * gone Bluetooth, the power monitor and the IMU failed until the panel was
+ * restarted for being stuck. */
+static void *tx_packet_alloc(void)
+{
+	esp_dma_mem_info_t info = {
+		.extra_heap_caps = MALLOC_CAP_SPIRAM,
+		.dma_alignment_bytes = MEMPOOL_ALIGNMENT_BYTES,
+	};
+	void *buf = NULL;
+	size_t actual_size = 0;
+	if (esp_dma_capable_malloc(MAX_TRANSPORT_BUFFER_SIZE, &info, &buf, &actual_size) != ESP_OK)
+		return NULL;
+	g_h.funcs->_h_memset(buf, 0, MAX_TRANSPORT_BUFFER_SIZE);
+	return buf;
+}
+
 static void transport_sta_free_cb(void *buf)
 {
-	mempool_free(chan_arr[ESP_STA_IF]->memp, buf);
+	heap_caps_free(buf);
 }
 
 static void transport_ap_free_cb(void *buf)
 {
-	mempool_free(chan_arr[ESP_AP_IF]->memp, buf);
+	heap_caps_free(buf);
 }
 
 static void transport_serial_free_cb(void *buf)
@@ -235,8 +257,9 @@ static esp_err_t transport_drv_sta_tx(void *h, void *buffer, size_t len)
 	assert(h && h==chan_arr[ESP_STA_IF]->api_chan);
 
 	/*  Prepare transport buffer directly consumable */
-	copy_buff = mempool_alloc(((struct mempool*)chan_arr[ESP_STA_IF]->memp), MAX_TRANSPORT_BUFFER_SIZE, true);
-	assert(copy_buff);
+	copy_buff = tx_packet_alloc();
+	if (!copy_buff)
+		return ESP_ERR_NO_MEM;
 	g_h.funcs->_h_memcpy(copy_buff+H_ESP_PAYLOAD_HEADER_OFFSET, buffer, len);
 
 	return esp_hosted_tx(ESP_STA_IF, 0, copy_buff, len, H_BUFF_ZEROCOPY, transport_sta_free_cb);
@@ -252,8 +275,9 @@ static esp_err_t transport_drv_ap_tx(void *h, void *buffer, size_t len)
 	assert(h && h==chan_arr[ESP_AP_IF]->api_chan);
 
 	/*  Prepare transport buffer directly consumable */
-	copy_buff = mempool_alloc(((struct mempool*)chan_arr[ESP_AP_IF]->memp), MAX_TRANSPORT_BUFFER_SIZE, true);
-	assert(copy_buff);
+	copy_buff = tx_packet_alloc();
+	if (!copy_buff)
+		return ESP_ERR_NO_MEM;
 	g_h.funcs->_h_memcpy(copy_buff+H_ESP_PAYLOAD_HEADER_OFFSET, buffer, len);
 
 	return esp_hosted_tx(ESP_AP_IF, 0, copy_buff, len, H_BUFF_ZEROCOPY, transport_ap_free_cb);
