@@ -6,6 +6,7 @@
 #include "esp_flash.h"
 #include "esp_heap_caps.h"
 #include "esp_lvgl_port.h"
+#include "esp_memory_utils.h"
 #include "esp_timer.h"
 #include "esp_http_server.h"
 #include "esp_private/freertos_debug.h"
@@ -29,6 +30,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -818,6 +820,23 @@ esp_err_t bench_page(httpd_req_t *req)
             n = std::snprintf(text, sizeof(text), "backdrop %c\n", query[2]);
         } else if (std::strcmp(query, "socks") == 0) {  // every socket open, to find one that leaks
             n = list_sockets(text, sizeof(text));
+        } else if (std::strncmp(query, "peek=", 5) == 0) {  // peek=4ff54980: what a block on /heap holds, to tell whose it is
+            const auto *at = reinterpret_cast<const std::uint8_t *>(std::strtoul(query + 5, nullptr, 16));
+            constexpr int PEEK_BYTES = 128;
+            if (esp_ptr_internal(at) && esp_ptr_internal(at + PEEK_BYTES - 1)) {
+                for (int row = 0; row < PEEK_BYTES; row += 16) {
+                    n += std::snprintf(text + n, sizeof(text) - n, "%p ", at + row);
+                    for (int i = 0; i < 16; ++i) {
+                        n += std::snprintf(text + n, sizeof(text) - n, "%02x ", at[row + i]);
+                    }
+                    for (int i = 0; i < 16; ++i) {
+                        text[n++] = std::isprint(at[row + i]) ? static_cast<char>(at[row + i]) : '.';
+                    }
+                    text[n++] = '\n';
+                }
+            } else {
+                n = std::snprintf(text, sizeof(text), "not internal RAM\n");
+            }
         } else if (std::strcmp(query, "fp") == 0 || std::strcmp(query, "fpc") == 0) {  // each frame and touch lately; fpc starts over
             n = board::frame_report(text, sizeof(text), query[2] == 'c');
 #if LV_USE_PROFILER
