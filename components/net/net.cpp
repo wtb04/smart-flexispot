@@ -218,9 +218,7 @@ esp_http_client_handle_t open_client(const HostConfig &config, Connection &conne
     cfg.user_agent        = config.agent;
     cfg.buffer_size       = HTTP_BUFFER;
     cfg.keep_alive_enable = config.keep_open;
-    if (url.rfind("https://", 0) == 0) {
-        cfg.crt_bundle_attach = esp_crt_bundle_attach;
-    }
+    cfg.crt_bundle_attach = esp_crt_bundle_attach;  // also for http, which may be sent on to https
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
     if (client != nullptr) {
         add_headers(client, config.headers);
