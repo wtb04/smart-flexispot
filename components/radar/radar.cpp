@@ -181,7 +181,7 @@ void add_hosts()
     // again but rested, and the other asked.
     net::HostConfig lol{};
     lol.name        = "adsb.lol";
-    lol.base        = "http://api.adsb.lol";
+    lol.base        = "https://api.adsb.lol";  // plain http, a handshake less, is now only a redirect here
     lol.timeout_ms  = 6 * units::kMsPerSecond;
     lol.connections = 1;
     lol.gzip        = true;
