@@ -45,7 +45,7 @@ esp_err_t display_on(int percent);
 esp_err_t display_off();
 
 /** After display_off(), darker still: the panel's picture and its stream
- *  stopped and the CPU at 40 MHz, a third less from the battery. Its touch
+ *  stopped. Its touch
  *  is timed off the stream and stops too, so whoever calls this wakes the
  *  screen some other way; display_on() wakes it. False, and nothing done,
  *  if the screen was lit again meanwhile. */
@@ -86,6 +86,9 @@ FlushTimes take_flush_times();
  *  frame took to its first area and its last, and its turning, catching up and
  *  waiting; with `clear`, it starts over. For a development build's bench. */
 int frame_report(char *out, std::size_t size, bool clear);
+/** Where the panel's stream is against its frames, for the bench; restart
+ *  stops it at a frame's end and starts it again. */
+int scan_report(char *out, std::size_t size, bool restart);
 
 /** A zoom drawn past LVGL, which is to draw nothing until zoom_end(): each
  *  frame is the picture LVGL shows, magnified by the PPA as it turns it onto

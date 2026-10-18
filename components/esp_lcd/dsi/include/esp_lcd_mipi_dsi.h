@@ -158,6 +158,16 @@ esp_err_t esp_lcd_dpi_panel_set_pattern(esp_lcd_panel_handle_t dpi_panel, mipi_d
 esp_err_t esp_lcd_dpi_panel_set_streaming(esp_lcd_panel_handle_t dpi_panel, bool on);
 
 /**
+ * @brief Where the stream is: how far into its frame buffer the DMA was at the
+ *        last vertical sync, in bytes, which is about what the bridge holds
+ *        ahead while the frames keep in step and far more once they have
+ *        slipped; and how often the bridge has run out of pixels.
+ *
+ * @note Not in ESP-IDF: the DMA goes round its frames by itself here.
+ */
+esp_err_t esp_lcd_dpi_panel_get_scan(esp_lcd_panel_handle_t dpi_panel, uint32_t *vsync_offset, uint32_t *underruns);
+
+/**
  * @brief Set color conversion configuration for DPI panel
  *
  * @param[in] dpi_panel MIPI DPI panel handle, returned from esp_lcd_new_panel_dpi()

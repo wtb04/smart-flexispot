@@ -120,12 +120,12 @@ esp_lcd_panel_handle_t s_panel = nullptr;
 esp_lcd_panel_io_handle_t s_panel_io = nullptr;  // the panel's own commands
 bool                   s_streaming = true;
 
-// One speed at a time, set here and never changed by itself: below the
-// PSRAM's 200 MHz each change puts it in its slow mode with the other core
-// held, and IDF's own switching, round every idle, deadlocked doing so within
-// a minute. 40 MHz is the crystal's, while nothing needs more.
-constexpr int SLOW_CPU_MHZ = 40;
-
+// One speed, set here and never changed by itself: below the PSRAM's 200 MHz
+// each change puts it in its slow mode with the other core held, and IDF's own
+// switching, round every idle, deadlocked doing so within a minute. Asleep it
+// once went to the crystal's 40 MHz, 23 mA less, but the panel works on while
+// dark: TLS handshakes then took over 90 s, I2C reads seconds, Bluetooth lost
+// the desk's link and dropped what it heard, and the watchdogs restarted it.
 void set_cpu_mhz(int mhz)
 {
     const esp_pm_config_t pm{mhz, mhz, false};
@@ -1295,6 +1295,35 @@ void dark_from_the_start()
     hold_dark();
 }
 
+// The DMA goes round its frames by itself (components/esp_lcd), and once lit
+// again after the screen slept the picture came back with part of its bottom
+// at the top until the next sleep: the frames had slipped against the panel's
+// sync. In step, the DMA is at a frame's edge as the sync comes, give or take
+// what it fetches ahead; seen elsewhere twice in a row, the stream is
+// restarted, a frame's blink.
+namespace {
+void keep_in_step(lv_timer_t *)
+{
+    constexpr std::uint32_t ROW_BYTES = BSP_LCD_H_RES * sizeof(std::uint16_t);
+    static int              slipped   = 0;
+    std::uint32_t           offset = 0, underruns = 0;
+    if (!s_streaming || esp_lcd_dpi_panel_get_scan(s_panel, &offset, &underruns) != ESP_OK ||
+        std::min(offset, FRAME_BYTES - std::min(offset, FRAME_BYTES)) <= 2 * ROW_BYTES) {
+        slipped = 0;
+        return;
+    }
+    if (++slipped < 2) {
+        return;
+    }
+    slipped = 0;
+    ESP_LOGW(TAG, "the stream slipped %u rows against its frames, %u underruns so far: restarting it",
+             static_cast<unsigned>(offset / ROW_BYTES), static_cast<unsigned>(underruns));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_lcd_dpi_panel_set_streaming(s_panel, false));
+    s_frame_at_us = 0;
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_lcd_dpi_panel_set_streaming(s_panel, true));
+}
+}  // namespace
+
 esp_err_t init(bool flipped)
 {
     ESP_LOGI(TAG, "backlight %s", s_held_through_restart ? "held dark through the restart" : "not held at the restart");
@@ -1308,6 +1337,11 @@ esp_err_t init(bool flipped)
 
     s_disp = disp;
     set_flipped(flipped);
+    constexpr std::uint32_t STEP_LOOK_MS = 1000;
+    if (lvgl_port_lock(DRAWING_LOCK_MS)) {
+        lv_timer_create(keep_in_step, STEP_LOOK_MS, nullptr);
+        lvgl_port_unlock();
+    }
 
     ESP_RETURN_ON_ERROR(bsp_display_backlight_off(), TAG, "backlight");
     set_cpu_mhz(CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ);
@@ -1378,9 +1412,7 @@ void set_asleep(bool asleep)
     if (asleep) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(esp_lcd_panel_io_tx_param(s_panel_io, LCD_CMD_DISPOFF, nullptr, 0));
         ESP_ERROR_CHECK_WITHOUT_ABORT(esp_lcd_dpi_panel_set_streaming(s_panel, false));
-        set_cpu_mhz(SLOW_CPU_MHZ);
     } else {
-        set_cpu_mhz(CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ);  // the stream needs the PSRAM at full speed first
         s_frame_at_us = 0;                             // the time asleep was no late frame
         ESP_ERROR_CHECK_WITHOUT_ABORT(esp_lcd_dpi_panel_set_streaming(s_panel, true));
         ESP_ERROR_CHECK_WITHOUT_ABORT(esp_lcd_panel_io_tx_param(s_panel_io, LCD_CMD_DISPON, nullptr, 0));
@@ -1414,6 +1446,28 @@ esp_err_t display_off()
     const esp_err_t err = bsp_display_backlight_off();
     set_drawing(false);
     return err;
+}
+
+int scan_report(char *out, std::size_t size, bool restart)
+{
+    std::uint32_t offset = 0, underruns = 0;
+    if (s_panel == nullptr) {
+        return std::snprintf(out, size, "no panel\n");
+    }
+    esp_lcd_dpi_panel_get_scan(s_panel, &offset, &underruns);
+    int n = std::snprintf(out, size, "at vsync %u bytes into the buffer (row %u), %u underruns\n",
+                          static_cast<unsigned>(offset), static_cast<unsigned>(offset / (BSP_LCD_H_RES * 2)),
+                          static_cast<unsigned>(underruns));
+    if (restart && lvgl_port_lock(DRAWING_LOCK_MS)) {
+        if (s_streaming) {
+            ESP_ERROR_CHECK_WITHOUT_ABORT(esp_lcd_dpi_panel_set_streaming(s_panel, false));
+            s_frame_at_us = 0;
+            ESP_ERROR_CHECK_WITHOUT_ABORT(esp_lcd_dpi_panel_set_streaming(s_panel, true));
+            n += std::snprintf(out + n, size - n, "stream restarted\n");
+        }
+        lvgl_port_unlock();
+    }
+    return n;
 }
 
 bool display_sleep()

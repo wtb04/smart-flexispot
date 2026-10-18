@@ -142,15 +142,16 @@ frame, and the panel's interrupts run through flash writes. The backlight is
 held dark through a restart, and lit only once there is a drawn frame to show.
 
 While the screen is dark, the panel stops its stream at the end of a frame,
-tells the panel its picture is off and drops the CPU to 40 MHz, and the desk's
-Bluetooth link slows to one event every half second (`main/dark.cpp`). That
-takes the dark panel from about 120 mA to 88 mA from the battery. The touch is
+tells the panel its picture is off, and the desk's Bluetooth link slows to one
+event every half second (`main/dark.cpp`). Dark with the backlight alone took
+about 120 mA from the battery, asleep 111 mA measured with the desk's link at
+its full pace. The CPU stays at full speed: at 40 MHz it drew 88 mA, but the panel goes on working while dark, and TLS handshakes then
+took over 90 s, I2C reads seconds, and the watchdogs restarted it. The touch is
 timed off the stream and stops with it, so a knock on the glass wakes the
 screen instead: the IMU keeps its readings at 800 a second and the panel looks
 at them every 150 ms for a jump past 0.3 g. A light tap is about 0.9 g,
-stillness under 0.1. The CPU's speed is set once at each change rather than by
-IDF's own switching, which deadlocked within a minute with the PSRAM at
-200 MHz.
+stillness under 0.1. The CPU's speed is set once at the start, never by IDF's
+own switching, which deadlocked within a minute with the PSRAM at 200 MHz.
 
 PSRAM's bandwidth, which the panel's own reading takes a good share of, is
 what a frame costs: a whole screen is about 88 ms, of which turning it onto
