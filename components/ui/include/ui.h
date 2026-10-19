@@ -240,10 +240,11 @@ esp_err_t set_media_remote(bool remote);
 esp_err_t set_media_tracks(bool back, bool on);
 
 /** Whether the player could ever take a volume, and subtitles, from here,
- *  which are left out rather than faded when it cannot; and whether its volume
+ *  which are left out rather than faded when it cannot; whether its volume
  *  only steps, with no level to show, as a display's does through
- *  MonitorControl. A volume and subtitles until said otherwise. */
-esp_err_t set_media_takes(bool volume, bool subtitles, bool steps = false);
+ *  MonitorControl; and whether it seeks, which a live stream with no length
+ *  may. A volume, subtitles and seeking until said otherwise. */
+esp_err_t set_media_takes(bool volume, bool subtitles, bool steps = false, bool seek = true);
 
 /** Whether a pause waits a moment before it shows: a speaker says it paused
  *  between two songs, Jellyfin and a laptop only when they did. */

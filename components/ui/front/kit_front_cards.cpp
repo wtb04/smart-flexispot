@@ -28,9 +28,7 @@ using namespace kit;
 
 void set_text_if(lv_obj_t *label, const char *value)
 {
-    if (std::strcmp(lv_label_get_text(label), value) != 0) {
-        lv_label_set_text(label, value);
-    }
+    kit::set_words(label, value);
 }
 
 void set_hidden_if(lv_obj_t *obj, bool hidden)
@@ -440,8 +438,9 @@ void paint_lights_card()
         ++named;
         on += lights.light_on[i] ? 1 : 0;
         lv_obj_t *name = lv_obj_get_child(lv_obj_get_child(tile, 1), 0);
-        if (std::strcmp(lv_label_get_text(name), light.name) != 0) {
-            lv_label_set_text(name, light.name);
+        std::string room;
+        if (const char *words = kit::fit_words(name, light.name, room); std::strcmp(lv_label_get_text(name), words) != 0) {
+            lv_label_set_text(name, words);
             set_icon(lv_obj_get_child(tile, 0), lamp_glyph(light.name), lights.light_on[i]);
         }
         if (lv_obj_has_state(tile, LV_STATE_CHECKED) != lights.light_on[i]) {

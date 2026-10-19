@@ -67,9 +67,7 @@ bool is_guest(int index) { return index == GUESTS[0] || index == GUESTS[1]; }
 
 void set_text(lv_obj_t *label, const char *value)
 {
-    if (std::strcmp(lv_label_get_text(label), value) != 0) {
-        lv_label_set_text(label, value);
-    }
+    kit::set_words(label, value);
 }
 
 // What the desk does, beside the card's name: where it is, or where it goes.

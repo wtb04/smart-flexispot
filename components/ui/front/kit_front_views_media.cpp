@@ -50,6 +50,8 @@ lv_obj_t *line(lv_obj_t *parent, Role role, Ink ink, std::int32_t w)
 // A title of one line or two, as it needs, so what is under it sits close.
 void set_title(lv_obj_t *label, const char *value)
 {
+    std::string room;
+    value = kit::fit_words(label, value, room);
     if (std::strcmp(lv_label_get_text(label), value) == 0) {
         return;
     }
@@ -130,7 +132,7 @@ std::int32_t progress_steps()
 {
     const std::int64_t whole = static_cast<std::int64_t>(media_state().duration_s) * 1000;
     // in 64 bits: past three and a half minutes the milliseconds times the steps outgrow 32
-    return whole > 0 ? static_cast<std::int32_t>(static_cast<std::int64_t>(detail::media_position_ms_now()) * RAIL_SPAN / whole)
+    return whole > 0 ? static_cast<std::int32_t>(detail::media_position_ms_now() * RAIL_SPAN / whole)
                      : 0;
 }
 
@@ -474,12 +476,13 @@ void show()
     tick(nullptr);
     set_icon(lv_obj_get_child(s_play, 0), media.playing ? ic::pause : ic::play_arrow, true);
     s_still->set_paused(!media.playing);
-    for (lv_obj_t *control : {s_back, s_play, s_on}) {
-        lv_obj_set_hidden(control, !media.remote);
+    lv_obj_set_hidden(s_play, !media.remote);
+    for (lv_obj_t *control : {s_back, s_on}) {
+        lv_obj_set_hidden(control, !media.remote || !media.takes_seek);
+        // faded until the position is known, so the row stays as it is; a
+        // live stream has no length and skips from where it is
+        set_usable(control, media.duration_s > 0 || media.position_s > 0);
     }
-    // faded until the position is known, so the row stays as it is
-    set_usable(s_back, media.duration_s > 0);
-    set_usable(s_on, media.duration_s > 0);
     show_volume(*s_volume);
     lv_obj_set_hidden(s_subtitles, !detail::media_shows_subtitles());
     set_usable(s_subtitles, media.subtitles_available);

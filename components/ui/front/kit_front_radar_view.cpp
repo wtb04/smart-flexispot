@@ -76,8 +76,8 @@ std::int32_t text_width(const char *value, const lv_font_t *font)
 
 void set_text(lv_obj_t *label, const char *value)
 {
-    if (label != nullptr && value != nullptr && std::strcmp(lv_label_get_text(label), value) != 0) {
-        lv_label_set_text(label, value);
+    if (value != nullptr) {
+        kit::set_words(label, value);
     }
 }
 
@@ -98,9 +98,9 @@ void set_text_color(lv_obj_t *obj, std::uint32_t colour)
 lv_obj_t *make_label(lv_obj_t *parent, const char *value, std::uint32_t colour, const lv_font_t *font)
 {
     lv_obj_t *label = lv_label_create(parent);
-    lv_label_set_text(label, value);
     lv_obj_set_style_text_color(label, lv_color_hex(colour), 0);
     lv_obj_set_style_text_font(label, font, 0);
+    kit::set_words(label, value);
     return label;
 }
 

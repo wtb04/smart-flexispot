@@ -231,7 +231,7 @@ Slot<const void *>   p_pick_art[media::kPickCount];
 Slot<SegmentsArgs>   p_segments;
 Slot<bool>           p_media_seeks;
 Slot<bool>           p_media_remote;
-Slot<std::uint8_t>   p_media_takes;  // bit 0 a volume, bit 1 subtitles, bit 2 a volume that steps
+Slot<std::uint8_t>   p_media_takes;  // bit 0 a volume, bit 1 subtitles, bit 2 a volume that steps, bit 3 seeking
 Slot<bool>           p_pause_settles;
 Slot<std::uint8_t>   p_subtitles;  // 1 for some to show, 2 for shown
 Slot<const void *>   p_still;
@@ -507,7 +507,7 @@ void apply_media_updates()
         media_take_pause_settles(settles);
     }
     if (std::uint8_t takes = 0; take(p_media_takes, takes)) {
-        media_take_takes((takes & 1) != 0, (takes & 2) != 0, (takes & 4) != 0);
+        media_take_takes((takes & 1) != 0, (takes & 2) != 0, (takes & 4) != 0, (takes & 8) != 0);
     }
     if (bool seeks = false; take(p_media_seeks, seeks)) {
         media_take_video(seeks);
@@ -786,9 +786,10 @@ esp_err_t set_media_pause_settles(bool settles)
     return ESP_OK;
 }
 
-esp_err_t set_media_takes(bool volume, bool subtitles, bool steps)
+esp_err_t set_media_takes(bool volume, bool subtitles, bool steps, bool seek)
 {
-    put(p_media_takes, static_cast<std::uint8_t>((volume ? 1 : 0) | (subtitles ? 2 : 0) | (steps ? 4 : 0)));
+    put(p_media_takes,
+        static_cast<std::uint8_t>((volume ? 1 : 0) | (subtitles ? 2 : 0) | (steps ? 4 : 0) | (seek ? 8 : 0)));
     return ESP_OK;
 }
 

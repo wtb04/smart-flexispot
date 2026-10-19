@@ -26,6 +26,7 @@ struct MediaState {
     bool takes_volume    = true;
     bool takes_subtitles = true;
     bool steps_volume    = false;  // up and down only, with no level
+    bool takes_seek      = true;   // skipping back and on, also a live stream with no length
     bool tracks_back  = true;   // takes a track back, and on, as most players do
     bool tracks_on    = true;
     bool video        = false;  // it seeks, as a film or an episode does
@@ -59,10 +60,6 @@ struct MediaState {
 /** Read anywhere; written only here. */
 const MediaState &media_state();
 
-/** What the screen's fonts can draw, set once by the front: the text taken is
- *  fitted to it (glyph_fit.h). Until then, taken as it comes. */
-void media_set_glyphs(bool (*has)(std::uint32_t code_point));
-
 // ---- Updates, from ui.cpp's intake. Each publishes Topic::Media. ----
 void media_take_track(const char *source, const char *title, const char *artist, const char *state,
                       bool playing);
@@ -71,7 +68,7 @@ void media_take_large_cover(const void *pixels);
 void media_take_progress(int position_s, int duration_s, bool playing);
 void media_take_volume(int percent);
 void media_take_remote(bool remote);
-void media_take_takes(bool volume, bool subtitles, bool steps);
+void media_take_takes(bool volume, bool subtitles, bool steps, bool seek);
 void media_take_pause_settles(bool settles);
 void media_take_video(bool seeks);
 void media_take_segments(const MediaSegment *segments, int count);
@@ -84,7 +81,7 @@ void media_take_hold_preset(int preset);
 // ---- What follows from it. ----
 /** Seconds, and milliseconds, into what plays, carried on while it plays. */
 int  media_position_now();
-int  media_position_ms_now();
+std::int64_t media_position_ms_now();  // a live stream's can be the time of day, past an int of milliseconds
 bool media_is_video();
 /** A player only followed shows the volume and the subtitles only where it
  *  takes them: what it never takes is left out rather than faded. */

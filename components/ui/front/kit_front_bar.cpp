@@ -32,9 +32,7 @@ lv_timer_t   *s_retry  = nullptr;
 
 void set_text_if(lv_obj_t *label, const char *value)
 {
-    if (std::strcmp(lv_label_get_text(label), value) != 0) {
-        lv_label_set_text(label, value);
-    }
+    kit::set_words(label, value);
 }
 
 void paint_status()

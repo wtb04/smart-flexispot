@@ -200,7 +200,7 @@ void show_takes(const PlayerView &view)
     }
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_remote(view.remote));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_tracks(view.tracks_back, view.tracks_on));
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_takes(view.takes_volume, view.takes_subtitles, view.steps_volume));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_takes(view.takes_volume, view.takes_subtitles, view.steps_volume, view.takes_seek));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_pause_settles(view.pause_settles));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_seeks(view.kind == Kind::Video));
 }
