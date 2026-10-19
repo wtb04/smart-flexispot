@@ -6,6 +6,8 @@
 #include "esp_timer.h"
 #endif
 
+#include "kit_fonts.h"
+#include "media_model.h"
 #include "screenshot.h"
 #include "settings_model.h"
 #include "status_model.h"
@@ -117,6 +119,11 @@ void init(std::uint32_t accent)
         kit::set_accent(accent);
     }
     kit::screen(lv_screen_active());
+    // Every text font of the kit holds the same characters (tools/make_fonts.py).
+    detail::media_set_glyphs([](std::uint32_t c) {
+        lv_font_glyph_dsc_t glyph;
+        return lv_font_get_glyph_dsc(kit::fonts::body(), &glyph, c, 0);
+    });
     // Asked for a frame twice a refresh rather than about once: at 16 ms the
     // timer drifted against the panel's 60 Hz, and frames came one refresh
     // apart, then two, so a moving mark stuttered. Each still waits for the

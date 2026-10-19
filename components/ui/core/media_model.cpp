@@ -1,5 +1,6 @@
 #include "media_model.h"
 
+#include "glyph_fit.h"
 #include "topics.h"
 #include "ui_core.h"
 
@@ -36,9 +37,21 @@ struct Gone {
     bool        still_told   = false;  // and the still
 } s_gone;
 
+bool (*s_has_glyph)(std::uint32_t) = nullptr;
+
 void copy(char *to, std::size_t size, const char *from)
 {
     std::snprintf(to, size, "%s", from != nullptr ? from : "");
+}
+
+// A page's or a player's words, in what the fonts can draw.
+void copy_words(char *to, std::size_t size, const char *from)
+{
+    if (s_has_glyph == nullptr) {
+        copy(to, size, from);
+    } else {
+        glyph_fit::fit(from, to, size, s_has_glyph);
+    }
 }
 
 void cancel_pause_settle()
@@ -105,6 +118,8 @@ void apply_gone(lv_timer_t *)
 }
 }  // namespace
 
+void media_set_glyphs(bool (*has)(std::uint32_t code_point)) { s_has_glyph = has; }
+
 void media_take_track(const char *source, const char *title, const char *artist, const char *state,
                       bool playing)
 {
@@ -136,9 +151,9 @@ void media_apply_track(const char *source, const char *title, const char *artist
                        bool playing)
 {
     const bool has_track = title != nullptr && title[0] != '\0';
-    copy(s_media.source, sizeof(s_media.source), source != nullptr && source[0] != '\0' ? source : "SPEAKER");
-    copy(s_media.title, sizeof(s_media.title), has_track ? title : "");
-    copy(s_media.artist, sizeof(s_media.artist), has_track ? artist : "");
+    copy_words(s_media.source, sizeof(s_media.source), source != nullptr && source[0] != '\0' ? source : "SPEAKER");
+    copy_words(s_media.title, sizeof(s_media.title), has_track ? title : "");
+    copy_words(s_media.artist, sizeof(s_media.artist), has_track ? artist : "");
     copy(s_media.state, sizeof(s_media.state), state != nullptr ? state : "--");
     s_media.has_track    = has_track;
     if (playing || !has_track || !s_media.pause_settles) {
