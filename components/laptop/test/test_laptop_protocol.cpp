@@ -49,6 +49,13 @@ TEST(LaptopProtocol, an_empty_title_is_nothing_playing)
     EXPECT_FALSE(now.playing) << "nothing to be playing";
 }
 
+TEST(LaptopProtocol, a_length_near_infinity_is_none)
+{
+    const NowPlaying now = read(R"({"port":47801,"title":"RTL 5","playing":true,"position":1433307,"duration":1.8e308})");
+    EXPECT_EQ(now.duration_s, 0) << "a live stream in a browser, not 596523 hours";
+    EXPECT_EQ(now.position_s, 0);
+}
+
 TEST(LaptopProtocol, paused_and_without_a_length)
 {
     const NowPlaying now = read(R"({"port":47801,"title":"Live","playing":false,"duration":-1})");
