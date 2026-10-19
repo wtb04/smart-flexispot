@@ -14,10 +14,15 @@ std::string text_of(const cJSON *object, const char *key)
     return cJSON_IsString(item) ? item->valuestring : "";
 }
 
+// A live stream in a browser can tell a length near infinity, which as an int
+// came out as 596523 hours; past a week, it is taken to have none.
 int seconds_of(const cJSON *object, const char *key)
 {
-    const cJSON *item = cJSON_GetObjectItemCaseSensitive(object, key);
-    return cJSON_IsNumber(item) && item->valuedouble > 0 ? static_cast<int>(item->valuedouble) : 0;
+    constexpr double LONGEST_S = 7 * 24 * 3600;
+    const cJSON     *item      = cJSON_GetObjectItemCaseSensitive(object, key);
+    return cJSON_IsNumber(item) && item->valuedouble > 0 && item->valuedouble <= LONGEST_S
+               ? static_cast<int>(item->valuedouble)
+               : 0;
 }
 
 std::string print_and_free(cJSON *root)
