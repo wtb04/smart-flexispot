@@ -59,6 +59,10 @@ struct MediaState {
 /** Read anywhere; written only here. */
 const MediaState &media_state();
 
+/** What the screen's fonts can draw, set once by the front: the text taken is
+ *  fitted to it (glyph_fit.h). Until then, taken as it comes. */
+void media_set_glyphs(bool (*has)(std::uint32_t code_point));
+
 // ---- Updates, from ui.cpp's intake. Each publishes Topic::Media. ----
 void media_take_track(const char *source, const char *title, const char *artist, const char *state,
                       bool playing);
