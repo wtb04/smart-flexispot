@@ -379,9 +379,7 @@ lv_obj_t *one_line(lv_obj_t *parent, Role role, const char *value, Ink ink, std:
 
 void set_text_if(lv_obj_t *label, const char *value)
 {
-    if (label != nullptr && std::strcmp(lv_label_get_text(label), value != nullptr ? value : "") != 0) {
-        lv_label_set_text(label, value != nullptr ? value : "");
-    }
+    set_words(label, value);
 }
 
 }  // namespace
@@ -615,7 +613,7 @@ lv_obj_t *badge(lv_obj_t *parent, const char *value, Ink ink, const char *glyph,
     }
     lv_obj_t *t = lv_label_create(b);
     lv_obj_add_style(t, &s_badge_text, 0);
-    lv_label_set_text(t, value);
+    set_words(t, value);
     const std::int32_t text_w = width > 0 ? width - 2 * BADGE_PAD - inner : widest(Role::Small, {value});
     lv_obj_set_size(t, std::max<std::int32_t>(text_w, 1), fonts::small()->line_height);
     lv_obj_set_style_text_align(t, LV_TEXT_ALIGN_CENTER, 0);

@@ -1588,8 +1588,8 @@ lv_obj_t *notice(const char *source, const char *glyph, const char *title, const
 void set_notice_aside(lv_obj_t *notice, const char *aside)
 {
     const NoticeParts *parts = notice != nullptr ? parts_of(notice) : nullptr;
-    if (parts != nullptr && std::strcmp(lv_label_get_text(parts->aside), aside) != 0) {
-        lv_label_set_text(parts->aside, aside);
+    if (parts != nullptr) {
+        set_words(parts->aside, aside);
     }
 }
 

@@ -12,6 +12,8 @@
 
 #include "lvgl.h"
 
+#include <string>
+
 #if defined(ESP_PLATFORM)
 #include "esp_attr.h"
 // For big zeroed statics: the internal RAM they would take is what Wi-Fi's
@@ -153,6 +155,15 @@ enum class Glass : std::uint8_t { Small, Large, Dock, Notice };
 lv_obj_t *glass(lv_obj_t *parent, Glass kind = Glass::Small);
 
 lv_obj_t *text(lv_obj_t *parent, Role role, const char *value, Ink ink = Ink::Primary);
+
+/** Words for a label, set only when they differ: a dot between words as a
+ *  comma, as the screen joins with commas, and what the label's font cannot
+ *  draw put right or left out rather than shown as an empty box (glyph_fit.h).
+ *  For anything from outside; text that is plain ASCII goes as it is. */
+void set_words(lv_obj_t *label, const char *value);
+
+/** The words set_words() would set: `value` itself, or a copy in `room`. */
+const char *fit_words(lv_obj_t *label, const char *value, std::string &room);
 lv_obj_t *icon(lv_obj_t *parent, const char *glyph, std::int32_t px = 28, bool filled = false,
                Ink ink = Ink::Primary);
 void      set_ink(lv_obj_t *label, Ink ink);

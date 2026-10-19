@@ -37,6 +37,7 @@ struct PlayerView {
     bool tracks_on       = true;
     bool takes_volume    = true;
     bool steps_volume    = false;  // up and down only, with no level to show
+    bool takes_seek      = true;   // a skip back and on, also without a length
     bool takes_subtitles = false;
 
     // A video's extras, where its player knows them.

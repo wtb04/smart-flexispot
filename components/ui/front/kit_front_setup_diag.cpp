@@ -78,9 +78,7 @@ Ink ink_of(Level level, Ink neutral)
 
 void set_text_if(lv_obj_t *label, const char *value)
 {
-    if (std::strcmp(lv_label_get_text(label), value) != 0) {
-        lv_label_set_text(label, value);
-    }
+    kit::set_words(label, value);
 }
 
 const char *or_dash(const char *value) { return value[0] != '\0' ? value : "--"; }
