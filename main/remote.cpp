@@ -829,7 +829,7 @@ esp_err_t bench_page(httpd_req_t *req)
             n += std::snprintf(text + n, sizeof(text) - n, ", %d mA from %d reads", static_cast<int>(amps / reads * 1000.0f), reads);
         }
         n += std::snprintf(text + n, sizeof(text) - n, "\n");
-        n += board::scan_report(text + n, sizeof(text) - n, false);
+        n += board::scan_report(text + n, sizeof(text) - n, 0);
         httpd_resp_set_type(req, "text/plain");
         return httpd_resp_send(req, text, n);
     }
@@ -867,8 +867,8 @@ esp_err_t bench_page(httpd_req_t *req)
             } else {
                 n = std::snprintf(text, sizeof(text), "not internal RAM\n");
             }
-        } else if (std::strcmp(query, "scan") == 0 || std::strcmp(query, "scanr") == 0) {  // the stream against its frames; scanr restarts it
-            n = board::scan_report(text, sizeof(text), query[4] == 'r');
+        } else if (std::strncmp(query, "scan", 4) == 0) {  // the stream: scanr, scanp restart it, see board.h
+            n = board::scan_report(text, sizeof(text), query[4]);
         } else if (std::strcmp(query, "fp") == 0 || std::strcmp(query, "fpc") == 0) {  // each frame and touch lately; fpc starts over
             n = board::frame_report(text, sizeof(text), query[2] == 'c');
 #if LV_USE_PROFILER

@@ -1295,35 +1295,6 @@ void dark_from_the_start()
     hold_dark();
 }
 
-// The DMA goes round its frames by itself (components/esp_lcd), and once lit
-// again after the screen slept the picture came back with part of its bottom
-// at the top until the next sleep: the frames had slipped against the panel's
-// sync. In step, the DMA is at a frame's edge as the sync comes, give or take
-// what it fetches ahead; seen elsewhere twice in a row, the stream is
-// restarted, a frame's blink.
-namespace {
-void keep_in_step(lv_timer_t *)
-{
-    constexpr std::uint32_t ROW_BYTES = BSP_LCD_H_RES * sizeof(std::uint16_t);
-    static int              slipped   = 0;
-    std::uint32_t           offset = 0, underruns = 0;
-    if (!s_streaming || esp_lcd_dpi_panel_get_scan(s_panel, &offset, &underruns) != ESP_OK ||
-        std::min(offset, FRAME_BYTES - std::min(offset, FRAME_BYTES)) <= 2 * ROW_BYTES) {
-        slipped = 0;
-        return;
-    }
-    if (++slipped < 2) {
-        return;
-    }
-    slipped = 0;
-    ESP_LOGW(TAG, "the stream slipped %u rows against its frames, %u underruns so far: restarting it",
-             static_cast<unsigned>(offset / ROW_BYTES), static_cast<unsigned>(underruns));
-    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_lcd_dpi_panel_set_streaming(s_panel, false));
-    s_frame_at_us = 0;
-    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_lcd_dpi_panel_set_streaming(s_panel, true));
-}
-}  // namespace
-
 esp_err_t init(bool flipped)
 {
     ESP_LOGI(TAG, "backlight %s", s_held_through_restart ? "held dark through the restart" : "not held at the restart");
@@ -1337,11 +1308,6 @@ esp_err_t init(bool flipped)
 
     s_disp = disp;
     set_flipped(flipped);
-    constexpr std::uint32_t STEP_LOOK_MS = 1000;
-    if (lvgl_port_lock(DRAWING_LOCK_MS)) {
-        lv_timer_create(keep_in_step, STEP_LOOK_MS, nullptr);
-        lvgl_port_unlock();
-    }
 
     ESP_RETURN_ON_ERROR(bsp_display_backlight_off(), TAG, "backlight");
     set_cpu_mhz(CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ);
@@ -1448,25 +1414,42 @@ esp_err_t display_off()
     return err;
 }
 
-int scan_report(char *out, std::size_t size, bool restart)
+int scan_report(char *out, std::size_t size, char how)
 {
-    std::uint32_t offset = 0, underruns = 0;
     if (s_panel == nullptr) {
         return std::snprintf(out, size, "no panel\n");
     }
-    esp_lcd_dpi_panel_get_scan(s_panel, &offset, &underruns);
-    int n = std::snprintf(out, size, "at vsync %u bytes into the buffer (row %u), %u underruns\n",
-                          static_cast<unsigned>(offset), static_cast<unsigned>(offset / (BSP_LCD_H_RES * 2)),
-                          static_cast<unsigned>(underruns));
-    if (restart && lvgl_port_lock(DRAWING_LOCK_MS)) {
-        if (s_streaming) {
-            ESP_ERROR_CHECK_WITHOUT_ABORT(esp_lcd_dpi_panel_set_streaming(s_panel, false));
-            s_frame_at_us = 0;
-            ESP_ERROR_CHECK_WITHOUT_ABORT(esp_lcd_dpi_panel_set_streaming(s_panel, true));
-            n += std::snprintf(out + n, size - n, "stream restarted\n");
-        }
-        lvgl_port_unlock();
+    static std::uint32_t host_errors = 0;  // kept, as reading clears them
+    host_errors |= esp_lcd_dpi_panel_take_host_errors(s_panel);
+    int n = std::snprintf(out, size, "%u underruns, host errors 0x%03x%s\n",
+                          static_cast<unsigned>(esp_lcd_dpi_panel_get_underruns(s_panel)),
+                          static_cast<unsigned>(host_errors), (host_errors & (1u << 7)) ? " (pixel FIFO overflowed)" : "");
+    if ((how != 'r' && how != 'p' && how != 'h') || !lvgl_port_lock(DRAWING_LOCK_MS)) {
+        return n;
     }
+    if (s_streaming) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_lcd_dpi_panel_set_streaming(s_panel, false));
+        if (how == 'p') {
+            // The panel's controller through its own sleep and out meanwhile.
+            constexpr TickType_t SLEEP_SETTLE = pdMS_TO_TICKS(120);
+            ESP_ERROR_CHECK_WITHOUT_ABORT(esp_lcd_panel_io_tx_param(s_panel_io, LCD_CMD_SLPIN, nullptr, 0));
+            vTaskDelay(SLEEP_SETTLE);
+            ESP_ERROR_CHECK_WITHOUT_ABORT(esp_lcd_panel_io_tx_param(s_panel_io, LCD_CMD_SLPOUT, nullptr, 0));
+            vTaskDelay(SLEEP_SETTLE);
+        }
+        if (how == 'h') {
+            esp_lcd_dpi_panel_reset_host(s_panel);
+        }
+        s_frame_at_us = 0;
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_lcd_dpi_panel_set_streaming(s_panel, true));
+        if (how == 'p') {
+            ESP_ERROR_CHECK_WITHOUT_ABORT(esp_lcd_panel_io_tx_param(s_panel_io, LCD_CMD_DISPON, nullptr, 0));
+        }
+        n += std::snprintf(out + n, size - n, how == 'p' ? "panel slept and woke, stream restarted\n"
+                                           : how == 'h' ? "DSI host reset, stream restarted\n"
+                                                        : "stream restarted\n");
+    }
+    lvgl_port_unlock();
     return n;
 }
 

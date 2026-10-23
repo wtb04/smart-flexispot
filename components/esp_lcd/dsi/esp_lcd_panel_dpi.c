@@ -59,7 +59,6 @@ struct esp_lcd_dpi_panel_t {
     SemaphoreHandle_t draw_sem;            // A semaphore used to synchronize the draw operations when DMA2D is used
     esp_pm_lock_handle_t pm_lock;          // Power management lock
     volatile bool stopping;                // the ring left to run out, at a frame's end
-    volatile uint32_t vsync_offset;        // how far into its buffer the DMA was at the last vertical sync
     volatile uint32_t underruns;           // times the bridge ran out of pixels
     esp_lcd_dpi_panel_color_trans_done_cb_t on_color_trans_done; // Callback invoked when color data transfer has finished
     esp_lcd_dpi_panel_frame_buf_complete_cb_t on_frame_buf_complete; // Callback invoked when the frame buffer can be reused safely
@@ -176,13 +175,6 @@ void mipi_dsi_bridge_isr_handler(void *args)
         ESP_DRAM_LOGE(TAG, "can't fetch data from external memory fast enough, underrun happens");
     }
     if (intr_status & MIPI_DSI_BRG_LL_EVENT_VSYNC) {
-        const uint32_t at = DW_GDMA.ch[dpi_panel->dma_chan_id].sar0.val;
-        for (int i = 0; i < dpi_panel->num_fbs; i++) {
-            const uint32_t from = (uint32_t)dpi_panel->fbs[i];
-            if (at >= from && at < from + dpi_panel->fb_size) {
-                dpi_panel->vsync_offset = at - from;
-            }
-        }
         if (dpi_panel->on_vsync) {
             if (dpi_panel->on_vsync(&dpi_panel->base, NULL, dpi_panel->user_ctx)) {
                 portYIELD_FROM_ISR();
@@ -751,17 +743,23 @@ esp_err_t esp_lcd_dpi_panel_set_streaming(esp_lcd_panel_handle_t panel, bool on)
     return ESP_OK;
 }
 
-esp_err_t esp_lcd_dpi_panel_get_scan(esp_lcd_panel_handle_t panel, uint32_t *vsync_offset, uint32_t *underruns)
+uint32_t esp_lcd_dpi_panel_get_underruns(esp_lcd_panel_handle_t panel)
 {
-    ESP_RETURN_ON_FALSE(panel, ESP_ERR_INVALID_ARG, TAG, "invalid argument");
-    esp_lcd_dpi_panel_t *dpi_panel = __containerof(panel, esp_lcd_dpi_panel_t, base);
-    if (vsync_offset) {
-        *vsync_offset = dpi_panel->vsync_offset;
-    }
-    if (underruns) {
-        *underruns = dpi_panel->underruns;
-    }
-    return ESP_OK;
+    return __containerof(panel, esp_lcd_dpi_panel_t, base)->underruns;
+}
+
+uint32_t esp_lcd_dpi_panel_take_host_errors(esp_lcd_panel_handle_t panel)
+{
+    mipi_dsi_hal_context_t *hal = &__containerof(panel, esp_lcd_dpi_panel_t, base)->bus->hal;
+    return hal->host->int_st1.val;  // cleared by reading
+}
+
+void esp_lcd_dpi_panel_reset_host(esp_lcd_panel_handle_t panel)
+{
+    mipi_dsi_hal_context_t *hal = &__containerof(panel, esp_lcd_dpi_panel_t, base)->bus->hal;
+    mipi_dsi_host_ll_power_on_off(hal->host, false);
+    esp_rom_delay_us(100);
+    mipi_dsi_host_ll_power_on_off(hal->host, true);
 }
 
 esp_err_t esp_lcd_dpi_panel_register_event_callbacks(esp_lcd_panel_handle_t panel, const esp_lcd_dpi_panel_event_callbacks_t *cbs, void *user_ctx)
