@@ -13,7 +13,6 @@ enum class MessageType {
     AuthInvalid,
     Result,
     Event,
-    Pong,
     Unknown,
 };
 
@@ -27,8 +26,6 @@ std::string auth_message(const std::string &token);
 
 /** Empty entity_ids returns "": omitting the list would subscribe to everything. */
 std::string subscribe_entities_message(int id, const std::vector<std::string> &entity_ids);
-
-std::string ping_message(int id);
 
 std::string call_service_message(int id, const std::string &domain, const std::string &service,
                                  const std::string &entity_id);

@@ -19,7 +19,7 @@ struct Log {
     Done done(const std::string &name)
     {
         return [this, name](const Response &response) {
-            static const char *OUTCOMES[] = {"answered", "failed", "resting", "replaced", "expired", "cancelled"};
+            static const char *OUTCOMES[] = {"answered", "failed", "resting", "replaced", "expired"};
             said.push_back(name + " " + OUTCOMES[static_cast<int>(response.outcome)]);
         };
     }
@@ -269,6 +269,26 @@ TEST(NetCore, rest)
     EXPECT_EQ(core.status(host, 1000 * MS).failures_in_row, 0) << "an answer ends the run of failures";
 }
 
+TEST(NetCore, our_failure_spares_the_host)
+{
+    Core       core;
+    HostConfig config;
+    config.rest = Rest{1, 1000, 500};
+    Host    host = core.add_host(config);
+    Tells   tells;
+    Log     log;
+    Running running;
+    core.submit(make(host, "x", Priority::Now, log.done("x")), 0, tells);
+    next_path(core, 0, running, tells);
+    Exchange no_room = failure();
+    no_room.ours     = true;
+    core.finish(running, no_room, 0, tells);
+    run(tells);
+    EXPECT_TRUE(log.has("x failed")) << "it failed all the same";
+    EXPECT_FALSE(core.status(host, 0).resting) << "but for want of memory here, which is not the host's doing";
+    EXPECT_EQ(core.status(host, 0).failures_in_row, 0);
+}
+
 TEST(NetCore, busy)
 {
     Core       core;
@@ -288,23 +308,16 @@ TEST(NetCore, busy)
     EXPECT_TRUE(core.status(host, 1999 * MS).resting && !core.status(host, 2000 * MS).resting) << "and rests the host as long as its Retry-After says";
 }
 
-TEST(NetCore, cancel)
+TEST(NetCore, buffer_growth)
 {
-    Core    core;
-    Host    host = core.add_host(HostConfig{});
-    Tells   tells;
-    Log     log;
-    Running running;
-    const Ticket waiting = core.submit(make(host, "waiting", Priority::Now, log.done("waiting")), 0, tells);
-    core.submit(make(host, "sent", Priority::Tap, log.done("sent")), 0, tells);
-    next_path(core, 0, running, tells);
-    core.cancel(waiting, tells);
-    core.cancel(running.ticket, tells);
-    run(tells);
-    EXPECT_TRUE(log.has("waiting cancelled") && !log.has("sent cancelled")) << "a waiting one is told at once";
-    core.finish(running, answer(), 1, tells);
-    run(tells);
-    EXPECT_TRUE(log.has("sent cancelled") && !log.has("sent answered")) << "one under way when its answer comes";
+    constexpr std::size_t KB = 1024;
+    EXPECT_EQ(grown_size(5 * KB, 4 * KB, 640 * KB, 300 * KB), 300 * KB) << "grown once, to what Content-Length says";
+    EXPECT_EQ(grown_size(5 * KB, 4 * KB, 256 * KB, 300 * KB), 256 * KB) << "never past what the request takes";
+    EXPECT_EQ(grown_size(5 * KB, 4 * KB, 640 * KB, 0), kKeepBytes) << "unsaid, a step of what is kept the least";
+    EXPECT_EQ(grown_size(65 * KB, 64 * KB, 640 * KB, 0), 256 * KB) << "and then four times as much";
+    EXPECT_EQ(grown_size(257 * KB, 256 * KB, 640 * KB, 0), 640 * KB) << "up to the limit";
+    EXPECT_EQ(grown_size(70 * KB, 64 * KB, 640 * KB, 60 * KB), 256 * KB) << "a Content-Length that was wrong is grown past";
+    EXPECT_EQ(grown_size(3 * KB, 2 * KB, 3 * KB, 0), 3 * KB) << "a small limit is all that is made";
 }
 }  // namespace
 

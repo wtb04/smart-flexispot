@@ -72,21 +72,21 @@ adds pages to the panel's web server, all asking for the update key.
 | `/jobs` | Each shared worker's jobs; `?poke=N` runs one now |
 | `/restart` | Why this run started, and what the last one left behind |
 | `/coredump` | The last crash, whole, for `idf.py coredump-info` with the build's ELF |
-| `/bench` | The radar's map timed: whole frames, a tile, a trail growing, a zoom; `?map` and `?back` leave the Radar page open and put it back; `?desk` the desk card coming out, frame by frame; `?pages` each page switched to, with the work before its frame, the frame, its drawing and what follows |
+| `/bench` | The radar's map timed: whole frames, a tile, a trail growing, a zoom; `?map` and `?back` leave the Radar page open and put it back |
 | `/desk` | What the desk heard and was asked lately, a line each with its milliseconds since boot; `?tap=N` taps preset N as a finger on its button would, `?clear` starts the trace over |
 
 ## How it is put together
 
-`app_main` brings up the board, puts up the splash, builds the rest of the UI
-behind it while the radio joins, starts the desk link and the network clients,
-and returns; everything after that runs on tasks of its own.
+`app_main` brings up the board, builds the screen a part at a time while the
+radio joins, starts the desk link and the network clients, and returns;
+everything after that runs on tasks of its own.
 
 | Path | Purpose |
 | --- | --- |
 | `main/` | `app_main` and the glue: handlers, what goes to Home Assistant, diagnostics, the clock, the development pages |
 | `components/board/` | Power rails, panel, touch, the LVGL port, the backlight |
 | `components/esp_lcd/` | ESP-IDF's panel driver with the display DMA running round a ring of frames |
-| `components/ui/` | The screen: `ui.h` is its interface, one file per part, every update applied on the LVGL task |
+| `components/ui/` | The screen: `ui.h` is its interface, `core/` the state and models under it, `kit/` the design kit, `front/` the screen built from it, `lab/` the kit's test bench; every update applied on the LVGL task |
 | `components/net/` | Every request the panel makes, and the live connections |
 | `components/jobs/` | The shared workers periodic work runs on |
 | `components/app_state/` | What the whole panel goes by: the screen lit, the network up |
@@ -142,15 +142,16 @@ frame, and the panel's interrupts run through flash writes. The backlight is
 held dark through a restart, and lit only once there is a drawn frame to show.
 
 While the screen is dark, the panel stops its stream at the end of a frame,
-tells the panel its picture is off and drops the CPU to 40 MHz, and the desk's
-Bluetooth link slows to one event every half second (`main/dark.cpp`). That
-takes the dark panel from about 120 mA to 88 mA from the battery. The touch is
+tells the panel its picture is off, and the desk's Bluetooth link slows to one
+event every half second (`main/dark.cpp`). Dark with the backlight alone took
+about 120 mA from the battery, asleep 111 mA measured with the desk's link at
+its full pace. The CPU stays at full speed: at 40 MHz it drew 88 mA, but the panel goes on working while dark, and TLS handshakes then
+took over 90 s, I2C reads seconds, and the watchdogs restarted it. The touch is
 timed off the stream and stops with it, so a knock on the glass wakes the
 screen instead: the IMU keeps its readings at 800 a second and the panel looks
 at them every 150 ms for a jump past 0.3 g. A light tap is about 0.9 g,
-stillness under 0.1. The CPU's speed is set once at each change rather than by
-IDF's own switching, which deadlocked within a minute with the PSRAM at
-200 MHz.
+stillness under 0.1. The CPU's speed is set once at the start, never by IDF's
+own switching, which deadlocked within a minute with the PSRAM at 200 MHz.
 
 PSRAM's bandwidth, which the panel's own reading takes a good share of, is
 what a frame costs: a whole screen is about 88 ms, of which turning it onto
@@ -189,7 +190,11 @@ since nobody's finger is on it.
 Presets 1 to 4 are the box's own: a tap sends the desk there, and the box runs
 the move itself and ignores a plain stop while it does, so tapping the same
 preset again is what cancels it. A long press stores the current height there,
-as the M key followed by the preset key. Presets 5 and 6 are the panel's own: a
+as the M key followed by the preset key. The box keeps its presets' heights to
+itself, so the panel learns each from one clean run: a tap from a desk at rest,
+the desk leaving within 4 s, going one way, and asked nothing else on the way.
+The lesson ends at the first rest, learned or not, so nothing the desk does
+afterwards is taken for the preset. Presets 5 and 6 are the panel's own: a
 tap has the desk driven there by whichever board holds the wire, with one
 steering decision per height the box reports rather than on a clock. The desk
 runs on after the last key frame, so the keys are let go early by a run-on
@@ -226,7 +231,7 @@ all rejected rather than decoded into a bogus number.
 
 ## In Home Assistant
 
-Everything in the control bar and on Home is one of Home Assistant's own entities, read and set over its websocket. The panel is a device of its own there too, over MQTT:
+Everything in the bar and on Home is one of Home Assistant's own entities, read and set over its websocket. The panel is a device of its own there too, over MQTT:
 
 | In Home Assistant | Entities |
 |---|---|

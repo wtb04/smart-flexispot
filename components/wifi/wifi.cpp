@@ -18,7 +18,6 @@
 #include "units.h"
 
 #include "freertos/FreeRTOS.h"
-#include "freertos/event_groups.h"
 #include "freertos/task.h"
 
 #include <algorithm>
@@ -43,10 +42,7 @@ constexpr char HOSTNAME[] = "smart-flexispot";  // what the router lists, and to
 
 std::atomic<bool> s_connected{false};
 
-constexpr EventBits_t GOT_IP_BIT = BIT0;
-StaticEventGroup_t    s_events_ctrl;
-EventGroupHandle_t    s_events = nullptr;
-bool              s_sntp_started = false;
+bool s_sntp_started = false;
 
 constexpr char TIMEZONE[] = CONFIG_PANEL_TIMEZONE;
 
@@ -214,9 +210,6 @@ void on_wifi_event(void *, esp_event_base_t base, std::int32_t id, void *data)
         const auto *event = static_cast<wifi_event_sta_disconnected_t *>(data);
         s_connected.store(false, std::memory_order_relaxed);
         app::set(app::Fact::Online, false);
-        if (s_events != nullptr) {
-            xEventGroupClearBits(s_events, GOT_IP_BIT);
-        }
         ESP_LOGW(TAG, "disconnected from '%s' (reason %d)", WIFI_SSID, event->reason);
         // The driver finds the next access point itself while roaming.
         if (event->reason != WIFI_REASON_ROAMING) {
@@ -229,9 +222,6 @@ void on_wifi_event(void *, esp_event_base_t base, std::int32_t id, void *data)
         const auto *event = static_cast<ip_event_got_ip_t *>(data);
         s_connected.store(true, std::memory_order_relaxed);
         s_got_ip.store(true, std::memory_order_relaxed);
-        if (s_events != nullptr) {
-            xEventGroupSetBits(s_events, GOT_IP_BIT);
-        }
         ESP_LOGI(TAG, "joined '%s', ip " IPSTR, WIFI_SSID, IP2STR(&event->ip_info.ip));
         start_time_sync();
         wake_task();
@@ -460,8 +450,6 @@ esp_err_t start()
     setenv("TZ", TIMEZONE, 1);
     tzset();
 
-    s_events = xEventGroupCreateStatic(&s_events_ctrl);
-
     if (std::strlen(WIFI_SSID) == 0) {
         ESP_LOGW(TAG, "no SSID compiled in, not starting - see wifi_secrets.example.h");
         return ESP_OK;
@@ -507,16 +495,6 @@ Info info()
     Info copy = s_info;
     portEXIT_CRITICAL(&s_info_lock);
     return copy;
-}
-
-bool wait_for_ip(int timeout_ms)
-{
-    if (s_events == nullptr) {
-        return false;
-    }
-    const EventBits_t bits =
-        xEventGroupWaitBits(s_events, GOT_IP_BIT, pdFALSE, pdTRUE, pdMS_TO_TICKS(timeout_ms));
-    return (bits & GOT_IP_BIT) != 0;
 }
 
 }  // namespace wifi

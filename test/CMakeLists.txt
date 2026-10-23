@@ -74,7 +74,9 @@ host_test(jellyfin_protocol_test COMPONENT jellyfin SOURCES test/test_jellyfin_p
 host_test(laptop_protocol_test COMPONENT laptop SOURCES test/test_laptop_protocol.cpp laptop_protocol.cpp
     LIBS cjson)
 host_test(link_envelope_test COMPONENT laptop SOURCES test/test_link_envelope.cpp link_envelope.cpp)
+host_test(laptops_test COMPONENT laptop SOURCES test/test_laptops.cpp laptops.cpp)
 host_test(job_core_test COMPONENT jobs SOURCES test/test_job_core.cpp job_core.cpp)
+host_test(desk_lesson_test COMPONENT desk SOURCES test/test_lesson.cpp lesson.cpp)
 host_test(loctek_proto_test COMPONENT loctek SOURCES test/test_loctek_proto.cpp loctek_proto.cpp INCLUDES ${UNITS})
 host_test(net_core_test COMPONENT net SOURCES test/test_net_core.cpp net_core.cpp)
 host_test(stream_core_test COMPONENT net SOURCES test/test_stream_core.cpp stream_core.cpp)
@@ -83,7 +85,9 @@ host_test(radar_parse_test COMPONENT radar SOURCES test/test_radar_parse.cpp rad
 host_test(picks_test COMPONENT room SOURCES test/test_picks.cpp picks.cpp LIBS cjson)
 host_test(segments_test COMPONENT room SOURCES test/test_segments.cpp segments.cpp LIBS cjson)
 host_test(clock_math_test COMPONENT rtc SOURCES test/test_clock_math.cpp)
-host_test(screen_rules_test COMPONENT ui SOURCES test/test_screen_rules.cpp)
+host_test(screen_rules_test COMPONENT ui SOURCES test/test_screen_rules.cpp INCLUDES ${COMPONENTS}/ui/core)
+host_test(notice_queue_test COMPONENT ui SOURCES test/test_notice_queue.cpp INCLUDES ${COMPONENTS}/ui/core)
+host_test(glyph_fit_test COMPONENT ui SOURCES test/test_glyph_fit.cpp INCLUDES ${COMPONENTS}/ui/core)
 host_test(travel_parse_test COMPONENT travel SOURCES test/test_travel_parse.cpp)
 host_test(watchdog_core_test COMPONENT watchdog SOURCES test/test_watchdog_core.cpp watchdog_core.cpp)
 

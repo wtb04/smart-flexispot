@@ -1,0 +1,20 @@
+# A profiling build: what LVGL spends on each step, added up on the panel and
+# read at /bench?prof (start) and /bench?profd (the table). Appended to a copy
+# of a development build's sdkconfig in build/prof:
+#   cp build/fw/sdkconfig build/prof/sdkconfig && cat main/prof/sdkconfig.prof >> build/prof/sdkconfig
+#   idf.py -B build/prof -DSDKCONFIG=build/prof/sdkconfig -DCMAKE_CXX_FLAGS="-DREMOTE_ENABLED=1" build
+# The include is found from LVGL's own lv_profiler.h, hence the path back out.
+CONFIG_LV_USE_PROFILER=y
+# CONFIG_LV_USE_PROFILER_BUILTIN is not set
+CONFIG_LV_PROFILER_INCLUDE="../../../../../../main/prof/draw_profile.h"
+CONFIG_LV_PROFILER_LAYOUT=y
+CONFIG_LV_PROFILER_REFR=y
+CONFIG_LV_PROFILER_DRAW=y
+# CONFIG_LV_PROFILER_INDEV is not set
+CONFIG_LV_PROFILER_DECODER=y
+CONFIG_LV_PROFILER_FONT=y
+# CONFIG_LV_PROFILER_FS is not set
+# CONFIG_LV_PROFILER_STYLE is not set
+# CONFIG_LV_PROFILER_TIMER is not set
+# CONFIG_LV_PROFILER_CACHE is not set
+# CONFIG_LV_PROFILER_EVENT is not set

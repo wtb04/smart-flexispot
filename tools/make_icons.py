@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Rasterises the panel's icons into an LVGL A8 header.
+"""Rasterises the panel's own marks into an LVGL A8 header.
 
-There is no icon font here with a train or a bus in it, and building one needs a
-node toolchain that is not on this machine. These are a few rectangles and
-circles instead, sampled sixteen times a pixel so the curves do not stair-step.
+The few the design kit's Material Symbols have no match for: the bar's Wi-Fi,
+phone and laptop marks, and the radar's planes and missing photo. A few
+rectangles, circles and polygons, sampled sixteen times a pixel so the curves
+do not stair-step.
 Alpha only: the panel recolours them, the same way it recolours the map.
 """
 import pathlib
 
-SIDE = 22
 SUB = 4
 
 
@@ -61,7 +61,7 @@ def struck(layers, x0, y0, x1, y1):
     return layers + [(stroke(x0, y0, x1, y1, 7), False), (stroke(x0, y0, x1, y1, 2.5), True)]
 
 
-def paint(layers, side=SIDE, height=None):
+def paint(layers, side, height=None):
     """Each layer is (shape, ink), later ones over earlier: ink paints it in, True
     fully and a fraction faintly, and no ink cuts it out. `side` wide, `height`
     tall when not square."""
@@ -82,41 +82,6 @@ def paint(layers, side=SIDE, height=None):
     return bytes(out)
 
 
-def scaled(layers, factor):
-    """The same layers drawn `factor` times larger."""
-    return [(lambda x, y, shape=shape: shape(x / factor, y / factor), ink) for shape, ink in layers]
-
-
-def render(solid, holes):
-    return paint([(s, True) for s in solid] + [(h, False) for h in holes])
-
-
-# A carriage seen from the side: a rounded roof, a deep windscreen, a skirt over
-# the bogies, and a gap under it so the wheels read as wheels.
-TRAIN = render(
-    solid=[rounded(5, 1, 17, 15, 4),       # body, roof rounded
-           rounded(4, 14, 18, 16.5, 1),    # skirt
-           rounded(6.5, 18, 9.5, 20.5, 1), # near bogie
-           rounded(12.5, 18, 15.5, 20.5, 1)],
-    holes=[rounded(6.5, 3.5, 15.5, 9, 2),  # windscreen
-           rounded(10.6, 3, 11.4, 9.5, 0), # its centre pillar
-           rounded(7, 10.5, 9, 13, 0.5),   # door
-           rounded(13, 10.5, 15, 13, 0.5)],
-)
-
-# A bus is longer, flatter and sits lower, with a row of windows rather than one
-# screen: that difference is what has to read at this size.
-BUS = render(
-    solid=[rounded(1, 4, 21, 15, 2),
-           rounded(1, 14, 21, 16.5, 1),
-           rounded(4, 18, 7, 20.5, 1),
-           rounded(15, 18, 18, 20.5, 1)],
-    holes=[rounded(2.5, 5.5, 8, 9.5, 1),
-           rounded(9.5, 5.5, 15, 9.5, 1),
-           rounded(16.5, 5.5, 19.5, 9.5, 1),
-           rounded(2.5, 11, 19.5, 11.8, 0)],
-)
-
 NO_PHOTO_SIDE = 40
 NO_PHOTO = paint(struck([(rounded(3, 11, 37, 34, 5), True),
                          (rounded(13, 6, 27, 13, 2), True),
@@ -135,15 +100,18 @@ PHONE_LAYERS = [(rounded(6.5, 2, 21.5, 26, 2.8), True),
                 (rounded(7.6, 3.1, 20.4, 24.9, 1.9), 0.28),
                 (rounded(11.8, 4.1, 16.2, 5.6, 0.75), True),
                 (rounded(11.3, 22.9, 16.7, 23.8, 0.45), True)]
-CALENDAR = paint([(rounded(3, 5, 25, 25.5, 3.5), True),
-                  (rounded(5.5, 11.5, 22.5, 23, 1.5), False),
-                  (stroke(9.5, 2.5, 9.5, 7.5, 3.2), False),
-                  (stroke(18.5, 2.5, 18.5, 7.5, 3.2), False),
-                  (stroke(9.5, 2.5, 9.5, 7.5, 2), True),
-                  (stroke(18.5, 2.5, 18.5, 7.5, 2), True)]
-                 + [(rounded(x, y, x + 3.2, y + 3.2, 0.8), True)
-                    for x in (7.6, 12.4, 17.2) for y in (13.6, 18.2)],
-                 28)
+# A MacBook open, in the same hand: the lid's hairline round a faintly lit
+# screen, on a base a little wider than the lid. No notch: the screen holds
+# how many laptops share when more than one does.
+LAPTOP_LAYERS = [(rounded(3, 4, 25, 21, 2.4), True),
+                 (rounded(4.1, 5.1, 23.9, 21, 1.5), 0.28),
+                 (rounded(1, 20.5, 27, 23.2, 1.1), True)]
+WIFI = paint(WIFI_LAYERS, STATUS_SIDE)
+WIFI_OFF = paint(struck(WIFI_LAYERS, 4, 3, 24, 26), STATUS_SIDE)
+PHONE = paint(PHONE_LAYERS, STATUS_SIDE)
+PHONE_OFF = paint(struck(PHONE_LAYERS, 4, 3, 24, 26), STATUS_SIDE)
+LAPTOP = paint(LAPTOP_LAYERS, STATUS_SIDE)
+LAPTOP_OFF = paint(struck(LAPTOP_LAYERS, 4, 3, 24, 26), STATUS_SIDE)
 
 PLANE_SIDE = 28
 
@@ -163,252 +131,9 @@ PLANE = paint(plane_layers(1), PLANE_SIDE)
 # The same plane, faint behind the radar's spinner while a photo is on its way.
 PLANE_LARGE_SIDE = 70
 PLANE_LARGE = paint(plane_layers(PLANE_LARGE_SIDE / PLANE_SIDE), PLANE_LARGE_SIDE)
-DESK = paint([(rounded(2, 5, 26, 9, 2), True),
-              (rounded(7, 8, 10, 23, 0), True),
-              (rounded(18, 8, 21, 23, 0), True),
-              (rounded(3.5, 22, 13.5, 25, 1.5), True),
-              (rounded(14.5, 22, 24.5, 25, 1.5), True)],
-             STATUS_SIDE)
-# One geometry for the chips' and screws' marks, so every plus is the same plus.
-MARK_SIDE = 16
-MARK_ARM = 6.5
-MARK_STROKE = 2.6
-PLUS = paint([(stroke(8 - MARK_ARM, 8, 8 + MARK_ARM, 8, MARK_STROKE), True),
-              (stroke(8, 8 - MARK_ARM, 8, 8 + MARK_ARM, MARK_STROKE), True)], MARK_SIDE)
-MINUS = paint([(stroke(8 - MARK_ARM, 8, 8 + MARK_ARM, 8, MARK_STROKE), True)], MARK_SIDE)
-TIMES = paint([(stroke(4.2, 4.2, 11.8, 11.8, 2.0), True),
-               (stroke(4.2, 11.8, 11.8, 4.2, 2.0), True)], MARK_SIDE)
-# Following on its own: a sight, its ring and the four ticks out from it.
-TRACK = paint([(disc(8, 8, 5.0), True), (disc(8, 8, 3.2), False), (disc(8, 8, 1.3), True),
-               (stroke(8, 0.6, 8, 3.4, 2.0), True), (stroke(8, 12.6, 8, 15.4, 2.0), True),
-               (stroke(0.6, 8, 3.4, 8, 2.0), True), (stroke(12.6, 8, 15.4, 8, 2.0), True)], MARK_SIDE)
-WIFI = paint(WIFI_LAYERS, STATUS_SIDE)
-WIFI_OFF = paint(struck(WIFI_LAYERS, 4, 3, 24, 26), STATUS_SIDE)
-PHONE = paint(PHONE_LAYERS, STATUS_SIDE)
-PHONE_OFF = paint(struck(PHONE_LAYERS, 4, 3, 24, 26), STATUS_SIDE)
 
 
-WALK = paint([(disc(12.5, 3.2, 2.4), True),
-              (stroke(11.5, 7.5, 10, 13.5, 3.2), True),
-              (stroke(10.8, 9, 15, 11.5, 2.2), True),
-              (stroke(11, 9, 7.2, 12, 2.2), True),
-              (stroke(10, 13.5, 13.5, 17, 2.8), True),
-              (stroke(13.5, 17, 14.5, 21, 2.8), True),
-              (stroke(10, 13.5, 7.5, 21, 2.8), True)])
-
-
-def ring(cx, cy, outer, inner):
-    return [(disc(cx, cy, outer), True), (disc(cx, cy, inner), False)]
-
-
-BIKE = paint(ring(5.2, 14.5, 4.4, 2.8) + ring(16.8, 14.5, 4.4, 2.8)
-             + [(stroke(5.2, 14.5, 9.5, 8, 1.8), True),
-                (stroke(9.5, 8, 15.5, 8, 1.8), True),
-                (stroke(15.5, 8, 16.8, 14.5, 1.8), True),
-                (stroke(9.5, 8, 11, 14.5, 1.8), True),
-                (stroke(5.2, 14.5, 11, 14.5, 1.8), True),
-                (stroke(11, 14.5, 15.5, 8, 1.8), True),
-                (stroke(8, 5.5, 11, 5.5, 2), True),
-                (stroke(9.5, 5.5, 9.5, 8, 1.8), True),
-                (stroke(14.5, 4.5, 15.5, 8, 1.8), True),
-                (stroke(13.5, 4.5, 16.5, 4.5, 2), True)])
-
-
-# A stopwatch: the dial, the crown it is started by, and one hand.
-TIMER = paint(ring(14, 16, 10.5, 8) +
-              [(rounded(11, 1.5, 17, 4.5, 1), True),
-               (rounded(12.8, 4, 15.2, 6.5, 0), True),
-               (stroke(21.2, 6.2, 23.4, 8.4, 2.4), True),
-               (stroke(14, 16, 14, 10.5, 2.4), True),
-               (disc(14, 16, 1.8), True)],
-              28)
-
-
-# An update on its way in: an arrow down into what it is for, the screen or
-# the companion's little box with its cable.
-def arrow_down(cx, top, bottom):
-    return [(stroke(cx, top, cx, bottom - 3.5, 2.6), True),
-            (polygon((cx - 5, bottom - 5), (cx + 5, bottom - 5), (cx, bottom)), True)]
-
-
-UPDATE_PANEL = paint([(rounded(2, 4, 26, 21, 3), True),
-                      (rounded(4.5, 6.5, 23.5, 18.5, 1.5), False),
-                      (rounded(10, 23, 18, 25.5, 1.2), True)]
-                     + arrow_down(14, 8, 17.5), STATUS_SIDE)
-UPDATE_COMPANION = paint([(rounded(6, 3, 22, 20, 3), True),
-                          (rounded(8.5, 5.5, 19.5, 17.5, 1.5), False),
-                          (stroke(14, 20, 14, 26, 2.6), True)]
-                         + arrow_down(14, 7, 16.5), STATUS_SIDE)
-
-# The image going on to the companion, over Bluetooth: its box filled, with the
-# rune cut out, so it reads apart from the outlined boxes of an image arriving.
-def rune(cx, top, bottom, width):
-    mid, reach = (top + bottom) / 2, (bottom - top) / 4
-    return [stroke(cx, top, cx, bottom, width),
-            stroke(cx, top, cx + reach * 1.3, top + reach, width),
-            stroke(cx + reach * 1.3, top + reach, cx - reach * 1.3, mid + reach, width),
-            stroke(cx - reach * 1.3, mid - reach, cx + reach * 1.3, bottom - reach, width),
-            stroke(cx + reach * 1.3, bottom - reach, cx, bottom, width)]
-
-
-INSTALL_COMPANION = paint([(rounded(6, 3, 22, 20, 3), True),
-                           (stroke(14, 20, 14, 26, 2.6), True)]
-                          + [(part, False) for part in rune(14, 5, 18, 1.6)], STATUS_SIDE)
-
-
-# A bulb in two layers over the same ground, the glass and the base, so each can
-# take its own colour: a globe narrowing into its neck over a threaded base.
-BULB_W, BULB_H = 34, 48
-BULB_GLASS = paint([(disc(17, 15, 14.5), True),
-                    (polygon((5.2, 21), (28.8, 21), (23.6, 33), (10.4, 33)), True)],
-                   BULB_W, BULB_H)
-BULB_BASE = paint([(rounded(10, 34.5, 24, 45, 2), True),
-                   (stroke(10, 39.8, 24, 39.8, 1.4), False)], BULB_W, BULB_H)
-# The two as one, for a chip that is a single mark.
-BULB = paint([(disc(17, 15, 14.5), True),
-              (polygon((5.2, 21), (28.8, 21), (23.6, 33), (10.4, 33)), True),
-              (rounded(10, 34.5, 24, 45, 2), True),
-              (stroke(10, 39.8, 24, 39.8, 1.4), False)], BULB_W, BULB_H)
-
-
-# A standing desk: its top, the long feet, and legs of three telescoping tubes,
-# each slimmer out of the one below. Sitting they are shorter, never all the
-# way in.
-DESK_W, DESK_H = 58, 56
-LEG_X = (13, 45)
-FOOT_TOP = 50
-TUBES = ((2.1, 0.0), (2.8, 0.3), (3.6, 0.6))  # half-width, and where it starts down the leg
-RAISED_TOP, LOWERED_TOP, LOWEST_TOP = 5, 20, 32
-
-
-def desk_layers(top):
-    layers = [(rounded(1, top, 57, top + 6.5, 2.5), True),
-              (rounded(3, 49.5, 23, 54, 2.2), True),
-              (rounded(35, 49.5, 55, 54, 2.2), True)]
-    leg_top = top + 6
-    span = FOOT_TOP - leg_top
-    for x in LEG_X:
-        for half, start in TUBES:
-            layers.append((rounded(x - half, leg_top + span * start, x + half, FOOT_TOP, 0.5), True))
-    return layers
-
-
-DESK_UP = paint(desk_layers(RAISED_TOP), DESK_W, DESK_H)
-DESK_DOWN = paint(desk_layers(LOWERED_TOP), DESK_W, DESK_H)
-DESK_LOWEST = paint(desk_layers(LOWEST_TOP), DESK_W, DESK_H)
-
-
-# Ten seconds back or on: a circle turning the one way or the other, its arrow
-# at the top, and the 10 inside it.
-SEEK_SIDE = 56
-
-
-def arc(cx, cy, outer, inner, gap_from, gap_to):
-    """A ring less the part between two angles, clockwise from straight up."""
-    import math
-    def inside(x, y):
-        dx, dy = x - cx, y - cy
-        if not inner * inner <= dx * dx + dy * dy <= outer * outer:
-            return False
-        angle = math.degrees(math.atan2(dx, -dy)) % 360
-        return not (gap_from <= angle <= gap_to)
-    return inside
-
-
-def seek_layers(forward):
-    import math
-    cx, cy, r, w = 28, 29, 21, 3.4
-    # The gap sits just past the top, where the arrow turns into it.
-    gap = (20, 58) if forward else (302, 340)
-    tip = gap[0] if forward else gap[1]
-    ax = cx + r * math.sin(math.radians(tip - (6 if forward else -6)))
-    ay = cy - r * math.cos(math.radians(tip - (6 if forward else -6)))
-    head = 7.5
-    along = 1 if forward else -1  # the way the arrow points, along the circle
-    tx, ty = ax + along * head, ay
-    layers = [(arc(cx, cy, r + w / 2, r - w / 2, *gap), True),
-              (polygon((tx, ty), (ax - along * 1.5, ay - head * 0.85), (ax - along * 1.5, ay + head * 0.85)), True)]
-    # The 10, drawn rather than set, so it sits in the circle's middle.
-    layers += [(stroke(21.5, 23, 21.5, 36, 3), True), (stroke(21.5, 23, 18.5, 25.8, 2.6), True)]
-    layers += [(disc(31.5, 29.5, 6.8), True), (rounded(29.2, 25.6, 33.8, 33.4, 2.3), False)]
-    return layers
-
-
-SEEK_BACK = paint(seek_layers(False), SEEK_SIDE)
-SEEK_ON = paint(seek_layers(True), SEEK_SIDE)
-
-
-# The screen turning itself off after a while: a screen on its stand, and a
-# clock at its corner, cut clear of it.
-CINEMA_SIDE = 40  # the cinema view's square buttons, drawn on the status grid
-SCREEN_TIMER = paint(scaled([(rounded(2, 4, 22, 18, 2.2), True),
-                      (rounded(4, 6, 20, 16, 1), False),
-                      (rounded(9, 20, 15, 22.5, 1), True),
-                      (disc(21, 20, 7.5), False),
-                      (disc(21, 20, 6), True), (disc(21, 20, 4.3), False),
-                      (stroke(21, 20, 21, 17, 1.6), True), (stroke(21, 20, 23, 21, 1.6), True)],
-                            CINEMA_SIDE / STATUS_SIDE),
-                     CINEMA_SIDE)
-
-
-# A screen with two lines of text along its foot.
-SUBTITLES = paint(scaled([(rounded(2, 5, 26, 23, 3), True), (rounded(4.2, 7.2, 23.8, 20.8, 1.4), False)] +
-                         [(stroke(x0, y, x1, y, 2), True) for x0, x1, y in (
-                             (8, 13, 14), (16, 20, 14), (8, 16, 18), (19, 20, 18))],
-                         CINEMA_SIDE / STATUS_SIDE),
-                  CINEMA_SIDE)
-
-
-# The four corners pulled in again, as a picture leaving fullscreen.
-COLLAPSE = paint([(stroke(x0, y0, x1, y1, 2.6), True) for x0, y0, x1, y1 in (
-    (4, 11, 11, 11), (11, 4, 11, 11), (24, 11, 17, 11), (17, 4, 17, 11),
-    (4, 17, 11, 17), (11, 24, 11, 17), (24, 17, 17, 17), (17, 24, 17, 17))], STATUS_SIDE)
-
-
-# Four corners pulled out, as a picture going fullscreen.
-EXPAND = paint([(stroke(x0, y0, x1, y1, 2.6), True) for x0, y0, x1, y1 in (
-    (4, 4, 11, 4), (4, 4, 4, 11), (24, 4, 17, 4), (24, 4, 24, 11),
-    (4, 24, 11, 24), (4, 24, 4, 17), (24, 24, 17, 24), (24, 24, 24, 17))], STATUS_SIDE)
-
-# The laptops' Claude Code sessions. A shell's prompt, a chevron and the cursor
-# after it, for a command run.
-def prompt(x, y, k, width):
-    return [stroke(x, y, x + 4.5 * k, y + 4 * k, width), stroke(x + 4.5 * k, y + 4 * k, x, y + 8 * k, width),
-            stroke(x + 7 * k, y + 8 * k, x + 13 * k, y + 8 * k, width)]
-
-# Each session's state, as a solid disc with its sign cut out: waiting on you,
-# working, done, failed.
-SESSION_DISC = (disc(14, 14, 12.5), True)
-SESSION_ASKS = paint([SESSION_DISC, (stroke(14, 7.5, 14, 15, 3.2), False), (disc(14, 20, 2), False)], STATUS_SIDE)
-SESSION_WORKS = paint([SESSION_DISC] + [(disc(x, 14, 2.1), False) for x in (8.3, 14, 19.7)], STATUS_SIDE)
-SESSION_DONE = paint([SESSION_DISC, (stroke(8.3, 14.5, 12.3, 18.5, 2.8), False),
-                      (stroke(12.3, 18.5, 19.8, 10.2, 2.8), False)], STATUS_SIDE)
-SESSION_FAILED = paint([SESSION_DISC, (stroke(9.5, 9.5, 18.5, 18.5, 2.8), False),
-                        (stroke(9.5, 18.5, 18.5, 9.5, 2.8), False)], STATUS_SIDE)
-
-
-def ellipse(cx, cy, a, b):
-    return lambda x, y: ((x - cx) / a) ** 2 + ((y - cy) / b) ** 2 <= 1
-
-
-# What a session does, beside its lines; editing and reading are LVGL's own.
-RUN = paint([(part, True) for part in prompt(3.5, 6, 1.15, 2.6)])
-SEARCH = paint(ring(9, 9, 7, 4.6) + [(stroke(13.8, 13.8, 19.5, 19.5, 3.2), True)])
-# Two people, the nearer cut clear of the one behind.
-AGENTS = paint([(disc(14.5, 6.5, 3.4), True), (rounded(9, 11.5, 20.5, 22, 5.5), True),
-                (disc(8, 8.5, 4.6), False), (rounded(1.5, 13.5, 15, 23, 6.5), False),
-                (disc(8, 8.5, 3.4), True), (rounded(2.5, 14.5, 13.5, 24, 5.5), True)])
-WEB = paint(ring(11, 11, 9.5, 7.7) + [(ellipse(11, 11, 4.6, 9.5), True), (ellipse(11, 11, 2.9, 7.7), False),
-                                      (stroke(2, 11, 20, 11, 1.8), True)])
-
-# A step done, the one under way, one to come.
-STEP_SIDE = 16
-STEP_DONE = paint([(stroke(2.5, 8.5, 6.2, 12.2, 2.4), True), (stroke(6.2, 12.2, 13.5, 3.8, 2.4), True)], STEP_SIDE)
-STEP_NOW = paint([(disc(8, 8, 5), True)], STEP_SIDE)
-STEP_NEXT = paint(ring(8, 8, 5.2, 3.6), STEP_SIDE)
-
-
-def emit(name, data, side=SIDE, height=None):
+def emit(name, data, side, height=None):
     rows = []
     for at in range(0, len(data), 16):
         rows.append("    " + " ".join(f"0x{b:02x}," for b in data[at:at + 16]))
@@ -434,7 +159,7 @@ const lv_image_dsc_t {name.lower()}_icon = {{
 """
 
 
-out = pathlib.Path(__file__).resolve().parent.parent / "components/ui/icons.h"
+out = pathlib.Path(__file__).resolve().parent.parent / "components/ui/fonts/icons.h"
 out.write_text(f"""#pragma once
 
 // Generated by tools/make_icons.py -- do not edit.
@@ -445,7 +170,7 @@ out.write_text(f"""#pragma once
 
 namespace ui {{
 namespace icons {{
-{emit("train", TRAIN)}{emit("bus", BUS)}{emit("walk", WALK)}{emit("bike", BIKE)}{emit("no_photo", NO_PHOTO, NO_PHOTO_SIDE)}{emit("wifi", WIFI, STATUS_SIDE)}{emit("wifi_off", WIFI_OFF, STATUS_SIDE)}{emit("phone", PHONE, STATUS_SIDE)}{emit("phone_off", PHONE_OFF, STATUS_SIDE)}{emit("plane", PLANE, PLANE_SIDE)}{emit("plane_large", PLANE_LARGE, PLANE_LARGE_SIDE)}{emit("calendar", CALENDAR, 28)}{emit("desk", DESK, STATUS_SIDE)}{emit("timer", TIMER, 28)}{emit("update_panel", UPDATE_PANEL, STATUS_SIDE)}{emit("update_companion", UPDATE_COMPANION, STATUS_SIDE)}{emit("install_companion", INSTALL_COMPANION, STATUS_SIDE)}{emit("bulb_glass", BULB_GLASS, BULB_W, BULB_H)}{emit("bulb_base", BULB_BASE, BULB_W, BULB_H)}{emit("desk_up", DESK_UP, DESK_W, DESK_H)}{emit("desk_down", DESK_DOWN, DESK_W, DESK_H)}{emit("desk_lowest", DESK_LOWEST, DESK_W, DESK_H)}{emit("bulb", BULB, BULB_W, BULB_H)}{emit("expand", EXPAND, STATUS_SIDE)}{emit("collapse", COLLAPSE, STATUS_SIDE)}{emit("screen_timer", SCREEN_TIMER, CINEMA_SIDE)}{emit("subtitles", SUBTITLES, CINEMA_SIDE)}{emit("seek_back", SEEK_BACK, SEEK_SIDE)}{emit("seek_on", SEEK_ON, SEEK_SIDE)}{emit("plus", PLUS, MARK_SIDE)}{emit("minus", MINUS, MARK_SIDE)}{emit("times", TIMES, MARK_SIDE)}{emit("track", TRACK, MARK_SIDE)}{emit("session_asks", SESSION_ASKS, STATUS_SIDE)}{emit("session_works", SESSION_WORKS, STATUS_SIDE)}{emit("session_done", SESSION_DONE, STATUS_SIDE)}{emit("session_failed", SESSION_FAILED, STATUS_SIDE)}{emit("run", RUN)}{emit("search", SEARCH)}{emit("agents", AGENTS)}{emit("web", WEB)}{emit("step_done", STEP_DONE, STEP_SIDE)}{emit("step_now", STEP_NOW, STEP_SIDE)}{emit("step_next", STEP_NEXT, STEP_SIDE)}
+{emit("no_photo", NO_PHOTO, NO_PHOTO_SIDE)}{emit("wifi", WIFI, STATUS_SIDE)}{emit("wifi_off", WIFI_OFF, STATUS_SIDE)}{emit("phone", PHONE, STATUS_SIDE)}{emit("phone_off", PHONE_OFF, STATUS_SIDE)}{emit("laptop", LAPTOP, STATUS_SIDE)}{emit("laptop_off", LAPTOP_OFF, STATUS_SIDE)}{emit("plane", PLANE, PLANE_SIDE)}{emit("plane_large", PLANE_LARGE, PLANE_LARGE_SIDE)}
 }}  // namespace icons
 }}  // namespace ui
 """)

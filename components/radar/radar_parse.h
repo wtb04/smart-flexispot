@@ -47,7 +47,6 @@ struct Aircraft {
 struct Details {
     char flight_iata[kFlightLen];  // the flight number as sold, "EK147", rather than the callsign
     char airline[kAirlineLen];
-    char airline_country[kCountryLen];
     char origin_code[kAirportCodeLen];  // IATA
     char origin_city[kCityLen];
     char dest_code[kAirportCodeLen];
@@ -62,11 +61,8 @@ struct Details {
     char owner_country[kCountryLen];  // where it is registered
     char manufacturer[kManufacturerLen];
     char model[kModelLen];
-    char photo_url[kPhotoUrlLen];
-    char photographer[kPhotographerLen];  // to credit, as Planespotters asks
     bool has_route;
     bool has_aircraft;
-    bool photo_checked;  // the photo database has been asked, whatever it said
 };
 
 /** Reads /v0/callsign/{callsign}. Leaves the aircraft half of `out` alone. */

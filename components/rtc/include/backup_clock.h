@@ -12,9 +12,6 @@ namespace rtc {
  *  the moment main power goes. */
 esp_err_t start();
 
-/** Whether the chip is there and its time survived the last power cut. */
-bool holding_time();
-
 /** Written back whenever the network settles the time, so the next cold boot
  *  starts from something better than 1970. */
 esp_err_t store(std::time_t when);

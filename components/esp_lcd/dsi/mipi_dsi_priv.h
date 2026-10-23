@@ -33,7 +33,7 @@
 #define DSI_MEM_ALLOC_CAPS      MALLOC_CAP_DEFAULT
 #endif
 
-#define DPI_PANEL_MAX_FB_NUM             3 // maximum number of frame buffers that can be maintained by the driver
+#define DPI_PANEL_MAX_FB_NUM             4 // maximum number of frame buffers that can be maintained by the driver
 #define DPI_PANEL_MIN_DMA_NODES_PER_LINK 1 // NOTE: we assume 1 DMA link item can carry the WHOLE image
 
 ///!< Logging settings

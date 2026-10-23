@@ -15,16 +15,19 @@ std::int64_t now_ms()
     return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
 }
 
-bool take(const char *json, std::size_t length, Session &asked, bool &was_asked)
+bool take(const char *json, std::size_t length, Session &asked, bool &was_asked, Session &answered,
+          bool &was_answered)
 {
     Event event;
     if (!parse({json, length}, event)) {
         return false;
     }
     const std::lock_guard<std::mutex> hold(s_lock);
-    asked = Session{};
-    s_table.apply(event, now_ms(), &asked);
-    was_asked = asked.id[0] != '\0';
+    asked    = Session{};
+    answered = Session{};
+    s_table.apply(event, now_ms(), &asked, &answered);
+    was_asked    = asked.id[0] != '\0';
+    was_answered = answered.id[0] != '\0';
     return true;
 }
 

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Desk Link
+Comment=Share what plays with the desk panel
+Exec=desklink
+Icon=nl.w-tb.desklink
+Categories=AudioVideo;Utility;
+StartupNotify=false

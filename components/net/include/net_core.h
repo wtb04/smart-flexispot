@@ -7,7 +7,7 @@
 #include <vector>
 
 // Which request goes when, and what becomes of each: priorities with aging,
-// deduplication, retries after a delay, rests, deadlines and cancelling. Pure:
+// deduplication, retries after a delay, rests and deadlines. Pure:
 // it is given the time and what came back, and says what to send and whom to
 // tell, so the host tests run it as the panel does and the simulator can too.
 // Not thread-safe; whoever drives it keeps it under a lock.
@@ -20,6 +20,7 @@ struct Exchange {
     bool        timed_out      = false;
     int         ms             = 0;
     int         retry_after_ms = 0;   // from a Retry-After header, 0 for none
+    bool        ours           = false;  // it failed here, as for want of memory: not held against the host
     const char *body           = "";
     std::size_t length         = 0;
 };
@@ -39,6 +40,16 @@ struct Tell {
     Response          response;
 };
 using Tells = std::vector<Tell>;
+
+/** The most a worker keeps between answers; a bigger buffer is given back. */
+inline constexpr std::size_t kKeepBytes = 64 * 1024;
+
+/** How many bytes a worker's buffer of `have` grows to when `need` no longer
+ *  fit: what Content-Length said is coming, when it said and that covers
+ *  `need`, or else four times as much with kKeepBytes the least, so that a big
+ *  answer leaves few holes behind it; never past `limit`, what the request
+ *  takes. None of them count the end of text. */
+std::size_t grown_size(std::size_t need, std::size_t have, std::size_t limit, std::size_t expected);
 
 class Core {
 public:
@@ -61,10 +72,6 @@ public:
      *  be tried again. */
     void finish(const Running &running, const Exchange &exchange, std::int64_t now, Tells &tells);
 
-    /** Told Cancelled at once when waiting, and when its answer comes if under way. */
-    void cancel(Ticket ticket, Tells &tells);
-    void cancel(Host host, const std::string &key, Tells &tells);
-
     HostStatus  status(Host host, std::int64_t now) const;
     std::size_t waiting() const;
 
@@ -78,16 +85,12 @@ private:
         std::int64_t      ready_us    = 0;  // not before, as after a failure
         std::int64_t      deadline_us = 0;
         bool              running     = false;
-        bool              cancelled   = false;
     };
     struct HostState {
         HostConfig        config;
         std::vector<bool> busy;
         std::int64_t      rest_until      = 0;
         int               failures_in_row = 0;
-        int               last_ms         = 0;
-        std::uint32_t     requests        = 0;
-        std::uint32_t     failures        = 0;
     };
 
     Job *find(Ticket ticket);

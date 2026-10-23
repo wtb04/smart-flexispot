@@ -4,7 +4,7 @@ build_remote/
 build_test/
 build_tests/
 __pycache__/
-managed_components/
+managed_components
 sdkconfig
 sdkconfig.old
 .vscode/
@@ -17,8 +17,15 @@ sdkconfig.old
 
 # Natural Earth downloads for tools/make_map.py.
 .map-cache/
+# The fonts tools/make_fonts.py downloads, and the static instances it cuts from them.
+.font-cache/
 
 # Your own Home Assistant entities and preset names; room_config.example.h and the
-# defaults in ui_internal.h are what everyone else gets.
+# defaults in components/ui/core/ui_core.h are what everyone else gets.
 components/room/room_config.h
 components/ui/ui_presets.h
+build_new/
+build_kit/
+
+# The conformance tool's build, with the mbedTLS and cJSON it fetches.
+desklink/conformance/build/

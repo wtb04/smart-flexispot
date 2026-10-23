@@ -1,0 +1,375 @@
+{
+	"key":	"000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+	"now_ms":	1791223792000,
+	"bodies":	{
+		"ping":	"{\"type\":\"ping\",\"at\":1791223792000}",
+		"ok":	"{\"type\":\"ok\",\"at\":1791223792000}",
+		"cover":	"{\"type\":\"cover\",\"at\":1791223792000,\"art\":\"3f2a1b0c9d8e\"}",
+		"pong":	"{\"type\":\"pong\",\"at\":1791223792000,\"panel\":\"smart-flexispot\",\"firmware\":\"v0.9.0\",\"reaches\":true}",
+		"pong_untried":	"{\"type\":\"pong\",\"at\":1791223792000,\"panel\":\"smart-flexispot\",\"firmware\":\"v0.9.0\"}",
+		"command_play":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"play\"}",
+		"command_pause":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"pause\"}",
+		"command_next":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"next\"}",
+		"command_previous":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"previous\"}",
+		"command_seek":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"seek\",\"position\":167}",
+		"command_volume":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"volume\",\"level\":40}",
+		"command_mute":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"mute\",\"muted\":true}",
+		"command_volume_up":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"volume_up\"}",
+		"command_volume_down":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"volume_down\"}"
+	},
+	"sealed":	[{
+			"name":	"ping on /link",
+			"path":	"/link",
+			"opens_on":	"/link",
+			"body":	"444c31d101010101010101010101016f90e3d63d118aa47fc4303039dfc7dc0524e78ea45c4e66d9c3bd0f4f8548529ef32d04d338c60a6d95898841387aaeca87",
+			"result":	"ok",
+			"plain":	"{\"type\":\"ping\",\"at\":1791223792000}"
+		}, {
+			"name":	"ping on /link reply",
+			"path":	"/link reply",
+			"opens_on":	"/link reply",
+			"body":	"444c31d1020202020202020202020271cc00c156a2eb729f000e955198aab977479b3a4b443b9d340da1d6024f4f140fc7f85c06985a128540eed18aa86bb549ac",
+			"result":	"ok",
+			"plain":	"{\"type\":\"ping\",\"at\":1791223792000}"
+		}, {
+			"name":	"ping on /cover reply",
+			"path":	"/cover reply",
+			"opens_on":	"/cover reply",
+			"body":	"444c31d103030303030303030303030110a62bad3526e761642fcc9223bc7d0c151d3ed4a5a0f16ae237f672b2225d27fb715f55d207b5ea800bb64e0608dbafd9",
+			"result":	"ok",
+			"plain":	"{\"type\":\"ping\",\"at\":1791223792000}"
+		}, {
+			"name":	"ok on /link",
+			"path":	"/link",
+			"opens_on":	"/link",
+			"body":	"444c31d1040404040404040404040401539faf4bc9cdddbd64f18b9d0b45f2501783af7554fc1f3e95753af9d3173407a803009f857bfc2ef1132b4d47735d",
+			"result":	"ok",
+			"plain":	"{\"type\":\"ok\",\"at\":1791223792000}"
+		}, {
+			"name":	"ok on /link reply",
+			"path":	"/link reply",
+			"opens_on":	"/link reply",
+			"body":	"444c31d1050505050505050505050548fe851c94b239fa2af2b7f86f4da51ecd71fa57684bbde039b9ed2de3e77514fa7d32beb8448014fc74c3a97fea0d5e",
+			"result":	"ok",
+			"plain":	"{\"type\":\"ok\",\"at\":1791223792000}"
+		}, {
+			"name":	"ok on /cover reply",
+			"path":	"/cover reply",
+			"opens_on":	"/cover reply",
+			"body":	"444c31d10606060606060606060606eeb2102d1764b8da81ffc175617af59e5a52d4e9adb9884659042e324ecca59b54cd7b077c25d51c9dc7f3542eaf55d5",
+			"result":	"ok",
+			"plain":	"{\"type\":\"ok\",\"at\":1791223792000}"
+		}, {
+			"name":	"cover on /link",
+			"path":	"/link",
+			"opens_on":	"/link",
+			"body":	"444c31d107070707070707070707076f3e8e8fc04b5fe5443dfadac1a629a6a36895abf46d9cac2005ba90b1f07e21c5f5c01272062a5c47a8b4fc2e0d8befe81d723af878d30f44fe6a8f487eab9ac82d1df4d7b747b1",
+			"result":	"ok",
+			"plain":	"{\"type\":\"cover\",\"at\":1791223792000,\"art\":\"3f2a1b0c9d8e\"}"
+		}, {
+			"name":	"cover on /link reply",
+			"path":	"/link reply",
+			"opens_on":	"/link reply",
+			"body":	"444c31d1080808080808080808080854ff0022985cfcd368ce8ca8b385cd40eab0a23ba37df955bdfffb1294fbb6b70547e299daa2ac597e7d55d90254e5d3bca8ba7ce9e9b62525f35bd3ba3c0eb8710ae3ed541665da",
+			"result":	"ok",
+			"plain":	"{\"type\":\"cover\",\"at\":1791223792000,\"art\":\"3f2a1b0c9d8e\"}"
+		}, {
+			"name":	"cover on /cover reply",
+			"path":	"/cover reply",
+			"opens_on":	"/cover reply",
+			"body":	"444c31d109090909090909090909098b768b4229ef59cc3d369cd9d1b11499b3d12d0cced8b6cc2acf3d24c94a5b70b85fceefc7621e6b8d92b74469fcb692dea424ebde94d3841550c310cf1cb2dbdc7723f5f4c4273d",
+			"result":	"ok",
+			"plain":	"{\"type\":\"cover\",\"at\":1791223792000,\"art\":\"3f2a1b0c9d8e\"}"
+		}, {
+			"name":	"pong on /link",
+			"path":	"/link",
+			"opens_on":	"/link",
+			"body":	"444c31d10a0a0a0a0a0a0a0a0a0a0ae5c4aabc68003741ae4cf0ee20ed5902871653ad1329a74a024503c9987656675af246c3b4d7c54968fb8e1de40ca7dcd27307612daf3167ee003ef52444179350c4b2253f12129c48a3523cd7aa9c2eaba50ddc0ef211d7efbb78ee5e4f56794e49173da32c40e4006a88c0992a71",
+			"result":	"ok",
+			"plain":	"{\"type\":\"pong\",\"at\":1791223792000,\"panel\":\"smart-flexispot\",\"firmware\":\"v0.9.0\",\"reaches\":true}"
+		}, {
+			"name":	"pong on /link reply",
+			"path":	"/link reply",
+			"opens_on":	"/link reply",
+			"body":	"444c31d10b0b0b0b0b0b0b0b0b0b0b184c0c77757fecbe49d9f2fb9ec9892038bd524b242dcd11ace3c0d55e157e70444c221f241110e9df066f356ba26fe3fd747d8988882dedc885935ff59e5ae690eddb99615901e3852ae1d25818e6aa443f026c5ec91b51f1308799eaa09ac9a875fba2eb42e541e504ebef4366d5",
+			"result":	"ok",
+			"plain":	"{\"type\":\"pong\",\"at\":1791223792000,\"panel\":\"smart-flexispot\",\"firmware\":\"v0.9.0\",\"reaches\":true}"
+		}, {
+			"name":	"pong on /cover reply",
+			"path":	"/cover reply",
+			"opens_on":	"/cover reply",
+			"body":	"444c31d10c0c0c0c0c0c0c0c0c0c0ceafe69676cf0c55b30babff2f24ca9b3523f09ea558da925f87a6d9a40f0391785cf8c317ffd2e93a6ff619ada9d47049db499369103c82f79151dccd4fd3608ef2cc781e8426fa3d981c0822e12b1df86933539b3f80c51844c6b0d1c978a2f4cb68a638a6bf969d7eedc160a3f79",
+			"result":	"ok",
+			"plain":	"{\"type\":\"pong\",\"at\":1791223792000,\"panel\":\"smart-flexispot\",\"firmware\":\"v0.9.0\",\"reaches\":true}"
+		}, {
+			"name":	"pong_untried on /link",
+			"path":	"/link",
+			"opens_on":	"/link",
+			"body":	"444c31d10d0d0d0d0d0d0d0d0d0d0d2f7426425a96d1fb90cb10b8e00415640ad0d4688f141495f49cd4664a488b32f32218d664aa8abbdbe38cad384e4033288b9c7a1a5887065848db6a0c3f23aa90da2e12c19ccee7901487075eda619c478d1269f6b2b82fea2ac89277234bc3",
+			"result":	"ok",
+			"plain":	"{\"type\":\"pong\",\"at\":1791223792000,\"panel\":\"smart-flexispot\",\"firmware\":\"v0.9.0\"}"
+		}, {
+			"name":	"pong_untried on /link reply",
+			"path":	"/link reply",
+			"opens_on":	"/link reply",
+			"body":	"444c31d10e0e0e0e0e0e0e0e0e0e0ea0f01c063e5fa119b3ea32eb7ded54000cbe98c585b4c56a3d42385a96c4b95a476faf6bc1638a25e79b63ea94fe0d35baeb4bdacc3c51b7adc55dbfff155eca24af2f2bdd83923fa636a221cdb3f0fd75a1163d5d6a573c284a7c73500c6c56",
+			"result":	"ok",
+			"plain":	"{\"type\":\"pong\",\"at\":1791223792000,\"panel\":\"smart-flexispot\",\"firmware\":\"v0.9.0\"}"
+		}, {
+			"name":	"pong_untried on /cover reply",
+			"path":	"/cover reply",
+			"opens_on":	"/cover reply",
+			"body":	"444c31d10f0f0f0f0f0f0f0f0f0f0fb245907ec5b1ad7ddf34c9ed36b81cee5e58c6682cc693184b39d8eaee4eef1cabb1306d2dee3fe7bd27bda650e16225a41fdcd0b8b71a3f20936fe3081c4906dbf53cfff1276edb8221cbddf269021b34d22f235a5bdae52d74f6b6b1403ec5",
+			"result":	"ok",
+			"plain":	"{\"type\":\"pong\",\"at\":1791223792000,\"panel\":\"smart-flexispot\",\"firmware\":\"v0.9.0\"}"
+		}, {
+			"name":	"command_play on /link",
+			"path":	"/link",
+			"opens_on":	"/link",
+			"body":	"444c31d1101010101010101010101006f92db2cd3a41a723498ce65ef387120b6c72e65ba6f589115703d7a119403640fb227ab47f68d6a5080648ff6acf1c140db080d58e11f20a54556f4faf32d6714defae9739",
+			"result":	"ok",
+			"plain":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"play\"}"
+		}, {
+			"name":	"command_play on /link reply",
+			"path":	"/link reply",
+			"opens_on":	"/link reply",
+			"body":	"444c31d1111111111111111111111192a94911a6301f4327cb0fedd5b7184b8f856681bea3479866e6eb7f66e607ece98ae3792b4de02f6ad279fee2ca8100d4a81634b7dcf72a0632674736faed4426ecd3263e38",
+			"result":	"ok",
+			"plain":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"play\"}"
+		}, {
+			"name":	"command_play on /cover reply",
+			"path":	"/cover reply",
+			"opens_on":	"/cover reply",
+			"body":	"444c31d112121212121212121212123881184d45858590bc03f59754b655955dc11d453682b6423d2559b002722b79b211feb4cb68b924b7cab90e4fb85b12ecd3a008cf45a40ae66229c3d8d891e655f9fa9b68f9",
+			"result":	"ok",
+			"plain":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"play\"}"
+		}, {
+			"name":	"command_pause on /link",
+			"path":	"/link",
+			"opens_on":	"/link",
+			"body":	"444c31d11313131313131313131313d21f25d48869c0b187c2386620715cc27cd5b284566dbc4a5d5b133bf0a6acc7d7e5fe07ae77c14d0285ca80e95a33a69ed41ae1f49be4b4eca8515364b1457daa25670a268b57",
+			"result":	"ok",
+			"plain":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"pause\"}"
+		}, {
+			"name":	"command_pause on /link reply",
+			"path":	"/link reply",
+			"opens_on":	"/link reply",
+			"body":	"444c31d114141414141414141414144707bc869f8b927e6851c2ace84971aa55546579c576e267a652c95c006663a51db9dd4c100e69e748ecd42f0cc09a1e7d7328c25a5c6981ca0038e0cfc5f8e8cf087e6a9a7f31",
+			"result":	"ok",
+			"plain":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"pause\"}"
+		}, {
+			"name":	"command_pause on /cover reply",
+			"path":	"/cover reply",
+			"opens_on":	"/cover reply",
+			"body":	"444c31d11515151515151515151515214d7167461d018088c763dd01c6d83c13dba82349bb155acf6b57c018acf9ef4b8166c36a943f4e6898848e3c068d88b5c8d9da3c3cb9963026b7dc4a5def116116daa1d66291",
+			"result":	"ok",
+			"plain":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"pause\"}"
+		}, {
+			"name":	"command_next on /link",
+			"path":	"/link",
+			"opens_on":	"/link",
+			"body":	"444c31d116161616161616161616160d39222d4a53c726f149d4aa6d0682cdd77c436b2abf0de4bbe5deceacaf3f1bfe2dcdb1f41e50844b533dba280788b812c2229dbc94a4e367d73696666ddd7f7883e99eaa80",
+			"result":	"ok",
+			"plain":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"next\"}"
+		}, {
+			"name":	"command_next on /link reply",
+			"path":	"/link reply",
+			"opens_on":	"/link reply",
+			"body":	"444c31d117171717171717171717173f38c3ae7470877a4e93f69f15eee5c9396a8868f740f6a4ce4e467eaf5dbbf9ea6e456aed8a33a4fdd49cd38c71bdb4ea06292dce54fb38c34c17fad2800f42aea88ae436a2",
+			"result":	"ok",
+			"plain":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"next\"}"
+		}, {
+			"name":	"command_next on /cover reply",
+			"path":	"/cover reply",
+			"opens_on":	"/cover reply",
+			"body":	"444c31d11818181818181818181818ffcf1f7dc9c88926469198aa11552f1a257a452ce7111a829087aeacd10d8ab4c4042d292df409a0db900d30c518a62341e36569267702c451bbc8a7f44e8236fa1d355c09a2",
+			"result":	"ok",
+			"plain":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"next\"}"
+		}, {
+			"name":	"command_previous on /link",
+			"path":	"/link",
+			"opens_on":	"/link",
+			"body":	"444c31d1191919191919191919191960690c08ee0ac8d9c3c4fe9168868c07208cffbd2d7ab37765155f1275f01b07876228595e3b708195a846ae7b1c1685c70ebd64cd28179d39f9af48124a7555cc4b71bc322c8745db98",
+			"result":	"ok",
+			"plain":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"previous\"}"
+		}, {
+			"name":	"command_previous on /link reply",
+			"path":	"/link reply",
+			"opens_on":	"/link reply",
+			"body":	"444c31d11a1a1a1a1a1a1a1a1a1a1a742189431137e2c48995361dacdca6fa2e5df4a30405e63fb5264cbe991980bc588edff7acef5a3fa60cf1ec088c5f0f024697343dd9acad28c6871368693c38c17292322fa5a51e3ab2",
+			"result":	"ok",
+			"plain":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"previous\"}"
+		}, {
+			"name":	"command_previous on /cover reply",
+			"path":	"/cover reply",
+			"opens_on":	"/cover reply",
+			"body":	"444c31d11b1b1b1b1b1b1b1b1b1b1b05ad006c087ba1cca035c1e128ba8ea7cd84d61cc2f617e8eee9df62302fdf3ecb9a3f1e6afbd43dc24dfa851a2e5d2ffb38930f5ddcd5c91facb7ac478079ebefd1784820c8f85ac876",
+			"result":	"ok",
+			"plain":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"previous\"}"
+		}, {
+			"name":	"command_seek on /link",
+			"path":	"/link",
+			"opens_on":	"/link",
+			"body":	"444c31d11c1c1c1c1c1c1c1c1c1c1c0addb47190808d03f03608a771b58c911b12f77a911aac40c68dd95790c00a32a8f0892c947b7a6b0cf444537f7092256e9481c90474d1572273633cc815f16e6ef5a84657b331e8a3fb59307811940e622231a43c",
+			"result":	"ok",
+			"plain":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"seek\",\"position\":167}"
+		}, {
+			"name":	"command_seek on /link reply",
+			"path":	"/link reply",
+			"opens_on":	"/link reply",
+			"body":	"444c31d11d1d1d1d1d1d1d1d1d1d1d10ed299f26ecd8f7a54f58ec6a27c03c3a8da1d1ab5a531322ad5f1c33417a7565da80b44484b3f140fa47cbd38f41c598d73a85441c8d52540e9eed55f51e68a8c92aff71eb2e96a360f279d47bf7fd949e2bedf9",
+			"result":	"ok",
+			"plain":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"seek\",\"position\":167}"
+		}, {
+			"name":	"command_seek on /cover reply",
+			"path":	"/cover reply",
+			"opens_on":	"/cover reply",
+			"body":	"444c31d11e1e1e1e1e1e1e1e1e1e1e6fff0d76c4e992f4a1cc873bfd096578521b6971fe6c6c816173191f113e2b7e104c133698a17a92381ec4bb51ded798508a8cbf2fab8cbdfea02135f718473808a456d3df078d3661fa97225fcfd2f48e930f7fac",
+			"result":	"ok",
+			"plain":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"seek\",\"position\":167}"
+		}, {
+			"name":	"command_volume on /link",
+			"path":	"/link",
+			"opens_on":	"/link",
+			"body":	"444c31d11f1f1f1f1f1f1f1f1f1f1f58b3f565da1aa88fce6ad2d1738245ee410514070f3238a09f1e15162c335bf4339a2d7b7c22c826b7faa62e046665895fb7704f6dfd121b10bb6c82c8156234c51734acb3bdfccf20788ead5a5511ef773624",
+			"result":	"ok",
+			"plain":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"volume\",\"level\":40}"
+		}, {
+			"name":	"command_volume on /link reply",
+			"path":	"/link reply",
+			"opens_on":	"/link reply",
+			"body":	"444c31d12020202020202020202020f31fafb51568634d217a8fa0533981c10ac32fb5d93dcc960fe1807bca04a59ab01e2e93925dd71f425fcae0e98bcddf1225af6a7b499da4cb2e008bf2e9fa190db35fb27e72fdc7b5b7a761a6e4237819b356",
+			"result":	"ok",
+			"plain":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"volume\",\"level\":40}"
+		}, {
+			"name":	"command_volume on /cover reply",
+			"path":	"/cover reply",
+			"opens_on":	"/cover reply",
+			"body":	"444c31d1212121212121212121212142f477dab970633ba59af45d10b42b74bf3d6e09d05d8661412f49a3d5289477fd5479750fb1526f31cb707dfd9a6a8d881dc9d306c4c096dec023cd0ec16f355a0b035ec4ff184abf05d61c3b9bc88b9452c5",
+			"result":	"ok",
+			"plain":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"volume\",\"level\":40}"
+		}, {
+			"name":	"command_mute on /link",
+			"path":	"/link",
+			"opens_on":	"/link",
+			"body":	"444c31d12222222222222222222222d8015018b02c693294d68adebf7ac8b9ba6552a44cfacde7c4b57923c536206b98a28fb944252e906d11d8663a4dd3bb6c482146a84ddf1332c84edd5421a2b24cc9b1d41979435c47edee4f10cb101edb0d38",
+			"result":	"ok",
+			"plain":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"mute\",\"muted\":true}"
+		}, {
+			"name":	"command_mute on /link reply",
+			"path":	"/link reply",
+			"opens_on":	"/link reply",
+			"body":	"444c31d12323232323232323232323041b4b1ca88da2268782bb84615d399d083164ef8f4104dc23a976cf9a708bf68db435b081cbda44fabcebae52c4c3764ee82b291176ca66bc06a6945185d627b47970e7ffb88ac520bba27262470d5a907d1d",
+			"result":	"ok",
+			"plain":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"mute\",\"muted\":true}"
+		}, {
+			"name":	"command_mute on /cover reply",
+			"path":	"/cover reply",
+			"opens_on":	"/cover reply",
+			"body":	"444c31d1242424242424242424242498227ef8ee0cc7beb605b6cf2b0a7a5bb509c2905f5755f99a9253d7a83c1b6bab5eedb9bc22d1290a8d3a6e801a5c1026638edcaa5b0179641f74c215d5d5e17759bb7212d31cc191b18fff829e0b164f3c70",
+			"result":	"ok",
+			"plain":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"mute\",\"muted\":true}"
+		}, {
+			"name":	"command_volume_up on /link",
+			"path":	"/link",
+			"opens_on":	"/link",
+			"body":	"444c31d12525252525252525252525a560cdd0e3ce16bdf14991777f75a3e54dab5b3d5dd7fa9651381da5a7a30675d20a8fbba52036c2f08407d0c9292002d8070b553c40f794c003b1e0e4e17be17c28342096efed31f75294",
+			"result":	"ok",
+			"plain":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"volume_up\"}"
+		}, {
+			"name":	"command_volume_up on /link reply",
+			"path":	"/link reply",
+			"opens_on":	"/link reply",
+			"body":	"444c31d12626262626262626262626ae545d8b30c0a9abaa2a45648a76b06357cf73f316046c9fc5088cc7c9bc88e5209b393ae544ca20e7483669d90d25f169447b88c439c5257b0e3695650ab5380d3282c568bc7e4c3eb95c",
+			"result":	"ok",
+			"plain":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"volume_up\"}"
+		}, {
+			"name":	"command_volume_up on /cover reply",
+			"path":	"/cover reply",
+			"opens_on":	"/cover reply",
+			"body":	"444c31d127272727272727272727270a49daef3522aa445603bd51e4d3deb0371a95e94f9e7eb0556c4fff9b3758d1bf067011fa6942a691009534c6ae2b6532f4275bed439e12b3c68bdb1fcddea752b99b1257d65d0dbc560d",
+			"result":	"ok",
+			"plain":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"volume_up\"}"
+		}, {
+			"name":	"command_volume_down on /link",
+			"path":	"/link",
+			"opens_on":	"/link",
+			"body":	"444c31d1282828282828282828282822502f6c90e2230252ec6b82d5c7ddfd54b5bac5ad574af89a76a148ce3c3e44348ffc5cdf5e8251c09bd54f737dacce78f32757d11f08b98cb248e620208532e771f2d90e5a8035179f8ac01d",
+			"result":	"ok",
+			"plain":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"volume_down\"}"
+		}, {
+			"name":	"command_volume_down on /link reply",
+			"path":	"/link reply",
+			"opens_on":	"/link reply",
+			"body":	"444c31d129292929292929292929292578ee9988d848f2abb0b85c977fb6d47c095eb3724802483fb3a4ee938852f16b0120294c7ba6017951555dc92293264dfd5c38c320b1ac8a7fcfe9eff144f9b91d038c3ee54d0fcef53a6124",
+			"result":	"ok",
+			"plain":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"volume_down\"}"
+		}, {
+			"name":	"command_volume_down on /cover reply",
+			"path":	"/cover reply",
+			"opens_on":	"/cover reply",
+			"body":	"444c31d12a2a2a2a2a2a2a2a2a2a2af3d552e2e7d72b8ef7003a6edccbbb9fab1a223fb501ee0a487851b227beba370402b3b1b5aef895ce01e923737b0dee9b2ee13fb1252c06ab975a857cd21ad3798ef2d7f7e1d72969c5dc82e1",
+			"result":	"ok",
+			"plain":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"volume_down\"}"
+		}, {
+			"name":	"wrong key",
+			"path":	"/link",
+			"opens_on":	"/link",
+			"body":	"444c31d1c8c8c8c8c8c8c8c8c8c8c80cfe83d4445551617a1ec483d7ffebaa6926f3cb2bdfbe047cb179e36c4713925fc23d05cc8bbf7b8e3b15083487d15333af",
+			"result":	"forged",
+			"plain":	null
+		}, {
+			"name":	"wrong path",
+			"path":	"/cover",
+			"opens_on":	"/link",
+			"body":	"444c31d1c9c9c9c9c9c9c9c9c9c9c9a5164c6ffdbf2bef0fc559f5b95cb37da4132c98b7fe2c6ab64970d04be2f7cf85c0e2b25be0281fb288f7d3042087d77801",
+			"result":	"forged",
+			"plain":	null
+		}, {
+			"name":	"changed byte",
+			"path":	"/link",
+			"opens_on":	"/link",
+			"body":	"444c31d1cacacacacacacacacacacaf23d2aa5a9ecfdfc300c9820cd4baa0884f38fd6d794ae6c221974b432f5bef8de2f10b35252200a8f56dd6e53628dabc3cd",
+			"result":	"forged",
+			"plain":	null
+		}, {
+			"name":	"too short",
+			"path":	"/link",
+			"opens_on":	"/link",
+			"body":	"444c31d1cbcbcbcbcbcbcbcbcbcbcbfc9520c0d1667f9d39d8506c705a96",
+			"result":	"malformed",
+			"plain":	null
+		}, {
+			"name":	"bad magic",
+			"path":	"/link",
+			"opens_on":	"/link",
+			"body":	"584c31d1cccccccccccccccccccccc53abc8e1514b8a6263fcf33681fce176fdf1352da97bf331b69e42cb44034183be039cc5f3bc52806363945d20268715e13a",
+			"result":	"malformed",
+			"plain":	null
+		}],
+	"fresh":	[{
+			"nonce":	"d10101010101010101010101",
+			"at":	1791223792000,
+			"taken":	true
+		}, {
+			"nonce":	"d10101010101010101010101",
+			"at":	1791223792000,
+			"taken":	false
+		}, {
+			"nonce":	"d10202020202020202020202",
+			"at":	1791223732000,
+			"taken":	true
+		}, {
+			"nonce":	"d10303030303030303030303",
+			"at":	1791223731999,
+			"taken":	false
+		}, {
+			"nonce":	"d10404040404040404040404",
+			"at":	1791223852001,
+			"taken":	false
+		}, {
+			"nonce":	"d10505050505050505050505",
+			"at":	1791223852000,
+			"taken":	true
+		}]
+}
