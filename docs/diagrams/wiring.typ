@@ -70,8 +70,8 @@
   let rows = (
     ("VIN", "8  +5 V", [PTC fuse 500 mA, SS14], "left"),
     ("GND", "7  GND", none, none),
-    ("GPIO16  RX2", "6  box TX", [10k / 15k divider, BAT54S], "left"),
-    ("GPIO17  TX2", "5  box RX", [220 Ω], "right"),
+    ("GPIO17  TX2", "6  box RX", [220 Ω], "right"),
+    ("GPIO16  RX2", "5  box TX", [10k / 15k divider, BAT54S], "left"),
     ("GPIO23", "4  wake", [220 Ω], "right"),
     ("GPIO32", "LED  BT, yellow", [220 Ω], "right"),
     ("GPIO33", "LED  LINK, green", [220 Ω], "right"),
@@ -88,4 +88,4 @@
 })
 
 #v(4pt)
-#block(width: 15.8cm, text(fill: muted)[Pins 4 to 8 measured on my control box. The two LEDs are inside the jack. Arrows show which way each signal goes.])
+#block(width: 15.8cm, text(fill: muted)[The rev2 board. Pins 4 to 8 as my control box uses them: it sends on pin 5. The two LEDs are inside the jack. Arrows show which way each signal goes.])

@@ -13,17 +13,18 @@ from kiutils.items.common import Position
 from kiutils.items.brditems import Segment, Via
 
 PCB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tab5-desk-ctrl.kicad_pcb")
-W, H, GRID = 60.0, 35.2, 0.1
+W, H, GRID = 80.0, 35.2, 0.1
 NX, NY = int(W / GRID) + 1, int(H / GRID) + 1
 EDGE = 0.5                      # board rule: copper-to-edge clearance
 CLEAR = 0.25                     # router clearance (DRC rule is 0.20)
-KEEPOUT = (19.5, 7.1, 33.0, 28.4)
+KEEPOUT = (39.5, 7.1, 53.0, 28.4)
 # An M3 pan head with a washer is about 6 mm across and clamps down on whatever
 # is under it, with only soldermask between steel and copper. DRC only knows
 # about the drill, so it happily routes to 0.37 mm of a mounting hole -- keep
 # copper a washer radius clear instead.
 SCREW_KEEP = 3.0
 POWER = {"+5V", "DESK_5V", "D5V_F"}
+JACK_GND_HALO = 1.6
 VIA_D, VIA_DRILL = 0.6, 0.3
 HOLE2HOLE = 0.3                 # board rule is 0.2495; keep a margin
 VIA_COST = 700                   # ~7 mm of track: keeps the via count down
@@ -31,7 +32,7 @@ LAYERS = ["F.Cu", "B.Cu"]
 # ESP_P20 goes early: it is the longest awkward run (row A pin 1 sits at the far
 # end, past the antenna keepout) and it loses if the top channel fills up first
 ORDER = ["ESP_P20", "+5V", "DESK_5V", "D5V_F", "+3V3", "DESK_TX",
-         "LED_BT", "LED_BT_A", "LED_DESK", "LED_DESK_A",
+         "BT_LED", "BT_A", "LINK_LED", "LINK_A",
          "RX_DIV", "DESK_RX", "ESP_TX", "PIN20", "GND"]
 
 
@@ -42,7 +43,7 @@ def rot_offset(px, py, deg):
 
 board = Board.from_file(PCB)
 netname = {n.number: n.name for n in board.nets}
-netnum = {n.name: n.number for n in board.nets}
+netnum = {n.name.lstrip("/"): n.number for n in board.nets}  # "/DESK_TX" is DESK_TX
 
 pads = []   # dict(ref, num, net, x, y, w, h, layers, tht)
 for fp in board.footprints:
@@ -53,7 +54,7 @@ for fp in board.footprints:
         sx, sy = (p.size.Y, p.size.X) if rot in (90, 270) else (p.size.X, p.size.Y)
         tht = p.type in ("thru_hole", "np_thru_hole")
         pads.append(dict(ref=fp.properties.get("Reference", "?"), num=str(p.number or ""),
-                         net=(p.net.name if p.net else ""), x=fx + ox, y=fy + oy,
+                         net=(p.net.name.lstrip("/") if p.net else ""), x=fx + ox, y=fy + oy,
                          w=sx, h=sy, tht=tht,
                          mount=(p.type == "np_thru_hole"
                                 and fp.properties.get("Reference", "").startswith("H")),
@@ -102,6 +103,14 @@ def build_obstacles(net, hw):
         for L in p["lay"]:
             rect_mask(m[L], p["x"] - pw - infl, p["y"] - ph - infl,
                       p["x"] + pw + infl, p["y"] + ph + infl)
+    # The jack's pin 7 is GND among signal pins, and a B.Cu track hugging it
+    # leaves its thermal relief one spoke. Keep other nets off the copper
+    # around it there, so the pour reaches it from the free side.
+    if net != "GND":
+        for p in pads:
+            if p["ref"] == "RJ45_1" and p["num"] == "7":
+                rect_mask(m[1], p["x"] - JACK_GND_HALO - hw, p["y"] - JACK_GND_HALO - hw,
+                          p["x"] + JACK_GND_HALO + hw, p["y"] + JACK_GND_HALO + hw)
     for (L, x0, y0, x1, y1, w, n) in routed:
         if n == net:
             continue
