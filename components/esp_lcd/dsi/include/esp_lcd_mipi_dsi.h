@@ -158,14 +158,19 @@ esp_err_t esp_lcd_dpi_panel_set_pattern(esp_lcd_panel_handle_t dpi_panel, mipi_d
 esp_err_t esp_lcd_dpi_panel_set_streaming(esp_lcd_panel_handle_t dpi_panel, bool on);
 
 /**
- * @brief Where the stream is: how far into its frame buffer the DMA was at the
- *        last vertical sync, in bytes, which is about what the bridge holds
- *        ahead while the frames keep in step and far more once they have
- *        slipped; and how often the bridge has run out of pixels.
+ * @brief How often the DSI bridge has run out of pixels since the start.
  *
  * @note Not in ESP-IDF: the DMA goes round its frames by itself here.
  */
-esp_err_t esp_lcd_dpi_panel_get_scan(esp_lcd_panel_handle_t dpi_panel, uint32_t *vsync_offset, uint32_t *underruns);
+uint32_t esp_lcd_dpi_panel_get_underruns(esp_lcd_panel_handle_t dpi_panel);
+
+/** @brief The DSI host's errors since last asked (its INT_ST1, which reading
+ *         clears); bit 7 is its pixel FIFO overflowing. Not in ESP-IDF. */
+uint32_t esp_lcd_dpi_panel_take_host_errors(esp_lcd_panel_handle_t dpi_panel);
+
+/** @brief A soft reset of the DSI host, which keeps its configuration. With
+ *         the stream stopped. Not in ESP-IDF. */
+void esp_lcd_dpi_panel_reset_host(esp_lcd_panel_handle_t dpi_panel);
 
 /**
  * @brief Set color conversion configuration for DPI panel

@@ -86,9 +86,10 @@ FlushTimes take_flush_times();
  *  frame took to its first area and its last, and its turning, catching up and
  *  waiting; with `clear`, it starts over. For a development build's bench. */
 int frame_report(char *out, std::size_t size, bool clear);
-/** Where the panel's stream is against its frames, for the bench; restart
- *  stops it at a frame's end and starts it again. */
-int scan_report(char *out, std::size_t size, bool restart);
+/** The panel's stream, for the bench: how often it ran short and the DSI
+ *  host's errors; how is 'r' to restart it, 'p' to also take the panel's
+ *  controller through its sleep, 'h' to also reset the DSI host. */
+int scan_report(char *out, std::size_t size, char how);
 
 /** A zoom drawn past LVGL, which is to draw nothing until zoom_end(): each
  *  frame is the picture LVGL shows, magnified by the PPA as it turns it onto
