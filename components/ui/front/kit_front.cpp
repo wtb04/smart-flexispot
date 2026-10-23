@@ -117,6 +117,7 @@ void init(std::uint32_t accent)
         kit::set_accent(accent);
     }
     kit::screen(lv_screen_active());
+    kitfront::build_splash();
     // Asked for a frame twice a refresh rather than about once: at 16 ms the
     // timer drifted against the panel's 60 Hz, and frames came one refresh
     // apart, then two, so a moving mark stuttered. Each still waits for the

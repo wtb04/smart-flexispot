@@ -21,8 +21,10 @@
 #include "units.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
 #include <utility>
 
 namespace ui::detail {
@@ -1089,6 +1091,35 @@ esp_err_t init(const Handlers &handlers, int initial_brightness, std::uint32_t a
     front::init(accent);
     lv_refr_now(nullptr);
     lvgl_port_unlock();
+    return ESP_OK;
+}
+
+namespace detail {
+namespace {
+std::atomic<int>  s_splash_steps{0};
+std::atomic<bool> s_splash_done{false};
+}  // namespace
+
+int  splash_steps_wanted() { return s_splash_steps.load(std::memory_order_relaxed); }
+bool splash_done_wanted() { return s_splash_done.load(std::memory_order_relaxed); }
+}  // namespace detail
+
+esp_err_t splash_step(const char *step)
+{
+    constexpr const char *STEPS[] = {"desk", "network"};
+    for (int i = 0; step != nullptr && i < static_cast<int>(std::size(STEPS)); ++i) {
+        if (std::strcmp(step, STEPS[i]) == 0) {
+            int seen = detail::s_splash_steps.load(std::memory_order_relaxed);
+            while (seen < i + 1 && !detail::s_splash_steps.compare_exchange_weak(seen, i + 1)) {
+            }
+        }
+    }
+    return ESP_OK;
+}
+
+esp_err_t splash_done()
+{
+    detail::s_splash_done.store(true, std::memory_order_relaxed);
     return ESP_OK;
 }
 

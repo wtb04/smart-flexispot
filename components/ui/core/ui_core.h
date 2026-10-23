@@ -95,6 +95,12 @@ void start_screen_schedule();
 
 // What the screen schedule asks of the views on show (screen_rules.h).
 bool notice_on_show();
+
+/** How far start-up has said it is, for the start-up screen: steps done, and
+ *  whether all is up. */
+int  splash_steps_wanted();
+bool splash_done_wanted();
+bool splash_showing();  // the front's, still over the screen
 /** Takes back the notices sent with `key`, waiting or on show. */
 void withdraw_notice(const char *key);
 /** How long the open film leaves the screen lit untouched: 0 with none open,

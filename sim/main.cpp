@@ -507,6 +507,18 @@ int main(int argc, char **argv)
     ui::set_cards(CARDS, static_cast<int>(std::size(CARDS)));
     ESP_ERROR_CHECK(ui::init(handlers(), 80, 0, ui::Orientation::Normal));
     ESP_ERROR_CHECK(ui::build());
+    // Nothing to start up here: the start-up screen goes at once, unless
+    // SIM_SPLASH asks to see it, as a start that takes its time.
+    if (std::getenv("SIM_SPLASH") == nullptr) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("desk"));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("network"));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_done());
+        while (ui::detail::splash_showing()) {
+            run_for(20);  // its taps for the screen under it, not for it
+        }
+    } else {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("desk"));
+    }
     // SIM_CLOCK=9:41: the top bar shows that rather than the time, for pictures.
     ui::pin_clock(std::getenv("SIM_CLOCK"));
     // The settings as a panel fresh from the factory has them, from settings.cpp.
