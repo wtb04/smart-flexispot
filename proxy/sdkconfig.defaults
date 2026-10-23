@@ -1,9 +1,10 @@
 CONFIG_IDF_TARGET="esp32"
 
-# The desk hangs off UART2, as the carrier board in pcb/ wires it: GPIO17 (TX2)
-# to RJ45 pin 5, where the box listens, GPIO16 (RX2) from the divider off pin 6,
-# where it sends, and wake on 23. Wired by hand with the pins the other way
-# round, swap TX and RX; the wrong way looks exactly like a dead control box.
+# The desk hangs off UART2, as the rev2 carrier board in pcb/ wires it: GPIO17
+# (TX2) to RJ45 pin 6, where the box listens, GPIO16 (RX2) from the divider off
+# pin 5, where it sends, and wake on 23. A rev1 board, or one wired by hand the
+# other way round, needs TX and RX swapped; the wrong way looks exactly like a
+# dead control box.
 CONFIG_LOCTEK_UART_NUM=2
 CONFIG_LOCTEK_TX_GPIO=17
 CONFIG_LOCTEK_RX_GPIO=16
@@ -45,3 +46,14 @@ CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 CONFIG_PARTITION_TABLE_FILENAME="partitions.csv"
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# Powered from the desk alone, the 5 V reaches the module through the box, a
+# PTC, a Schottky and the DevKit's AMS1117, and the radio's calibration at boot
+# pulled 3V3 under the brownout level every time: a restart loop that only USB
+# power broke. So the radio starts from the calibration it stored on an earlier
+# boot instead of calibrating again (a missing or bad copy still gets a full
+# one), drops its transmit power after a brownout, and the CPU runs at half
+# speed, which this companion never needs.
+CONFIG_ESP_PHY_RF_CAL_NONE=y
+CONFIG_ESP_PHY_REDUCE_TX_POWER=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_80=y

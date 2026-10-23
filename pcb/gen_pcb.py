@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate tab5-desk-ctrl.kicad_pcb : FlexiSpot / LoctekMotion BLE desk companion.
 
-rev1 -- Wouter ten Brinke.
+rev2 -- Wouter ten Brinke.
 An ESP32 DevKit V1 socketed onto a carrier that speaks the control box's 5 V
 UART over RJ45, driven over BLE by the Tab5 panel.
 
@@ -23,7 +23,7 @@ LIB = os.environ.get("KICAD9_FOOTPRINT_DIR", "/Applications/KiCad/KiCad.app/Cont
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "tab5-desk-ctrl.kicad_pcb")
 
-W, H = 60.0, 35.2
+W, H = 80.0, 35.2
 PINS_PER_ROW = 15          # measured: 30-pin board, 2x15
 PITCH = 2.54
 ROW_SPACING = 25.4        # 1.0 in -- confirmed: on a breadboard the module
@@ -33,14 +33,18 @@ ROW_SPACING = 25.4        # 1.0 in -- confirmed: on a breadboard the module
 # inboard, so that pin 15 -- the USB end -- reaches the RIGHT board edge and stays
 # accessible. Headers are at rot 90, so pin n sits at PIN1_X + (n-1)*PITCH.
 # The RF cost of this is real and accepted.
-PIN1_X = 21.5
+# rev2 moved the module 20 mm further from the jack: on rev1 the DevKit's end
+# sat right over the jack and left no room to get an iron in. The space it
+# frees takes the 5 V input, F1, D1 and the bulk capacitor C3, with room to
+# spare for however far the DevKit reaches past its first pin.
+PIN1_X = 41.5
 # Row inset is set by MOUNTING, not by the silk. The RJ45's courtyard reaches
 # +/- 10.70 about the module axis and an M3 needs 3.45 of courtyard plus a
 # margin, so the pocket above the jack only becomes usable once the axis sits at
 # y >= 18.4 -- which is what puts the rows here and makes H 35.2.
 ROW_A_Y = 4.9
 ROW_B_Y = ROW_A_Y + ROW_SPACING          # 30.3, module centred on y = 17.6
-PINEND_X = PIN1_X + (PINS_PER_ROW - 1) * PITCH  # 57.06, USB end at the right edge
+PINEND_X = PIN1_X + (PINS_PER_ROW - 1) * PITCH  # 77.06, USB end at the right edge
 HDR = f"PinSocket_1x{PINS_PER_ROW}_P{PITCH}mm_Vertical"   # female: the devboard slots in
 
 # RJ45_1 faces out of the LEFT board edge, on the module's centreline.
@@ -58,12 +62,18 @@ RJ_X, RJ_Y = 7.92, 21.17
 
 # The antenna now sits over the board, so this keepout is load-bearing rather
 # than belt-and-braces: it holds copper out from under the antenna end.
-KEEPOUT = (19.5, 7.1, 33.0, 28.4)
+KEEPOUT = (39.5, 7.1, 53.0, 28.4)
 
-NETS = ["", "GND", "+5V", "DESK_5V", "D5V_F", "DESK_TX", "LED_BT", "LED_BT_A",
-        "LED_DESK", "LED_DESK_A",
+NETS = ["", "GND", "+5V", "DESK_5V", "D5V_F", "DESK_TX", "BT_LED", "BT_A",
+        "LINK_LED", "LINK_A",
         "RX_DIV", "DESK_RX", "ESP_TX", "PIN20", "ESP_P20", "+3V3"]
 NETIDX = {n: i for i, n in enumerate(NETS)}
+# The schematic names its signal nets with plain labels, which on the root sheet
+# KiCad calls "/DESK_TX"; the board's nets carry the same names so parity holds.
+# Power nets come from power symbols and have no sheet path.
+POWER_NETS = {"", "GND", "+5V", "+3V3"}
+def kname(n):
+    return n if n in POWER_NETS else "/" + n
 
 # DOIT ESP32 DevKit V1, 30-pin. Read off the module itself (photo), not assumed.
 # The module's silkscreen has USB on the LEFT; our board has USB on the RIGHT, so
@@ -72,11 +82,12 @@ NETIDX = {n: i for i, n in enumerate(NETS)}
 #   row A (y=4.0)  D23 D22 TX0 RX0 D21 D19 D18  D5 TX2 RX2  D4  D2 D15 GND 3V3
 #   row B (y=29.4)  EN  VP  VN D34 D35 D32 D33 D25 D26 D27 D14 D12 D13 GND VIN
 #
-# RJ45 direction, measured on a real control box. The published LoctekMotion
-# tables have pins 5 and 6 the other way round, written from the keypad's side.
-# On this board:
-#   pin 6 = control box TX, 5 V  -> R1/R2 divider + BAT54S clamp -> our RX
-#   pin 5 = control box RX       <- R3 220R <- our TX
+# RJ45 direction, as the published LoctekMotion tables have it. rev1 swapped
+# pins 5 and 6 after a meter reading, and on the box itself that turned out
+# wrong: the box sends height frames on pin 5, and through R1's 10k on pin 6 it
+# never saw a key. On this board:
+#   pin 5 = control box TX, 5 V  -> R1/R2 divider + BAT54S clamp -> our RX
+#   pin 6 = control box RX       <- R3 220R <- our TX
 #   pin 4 = wake ("PIN 20")      <- R4 220R <- our GPIO23
 #
 # Signals land on the module pins whose silkscreen matches their role:
@@ -89,7 +100,7 @@ U1A_NETS = {"1": "ESP_P20",
             "9": "ESP_TX", "10": "RX_DIV", "14": "GND", "15": "+3V3"}
 # LEDs on row B pins 6/7 (D32=GPIO32, D33=GPIO33). Row B is the bottom row, so
 # these runs use the empty bottom channel instead of the crowded top one.
-U1B_NETS = {"6": "LED_BT", "7": "LED_DESK", "14": "GND", "15": "+5V"}
+U1B_NETS = {"6": "BT_LED", "7": "LINK_LED", "14": "GND", "15": "+5V"}
 
 PARTS = [
     # Chanklement R-RJ45R08P-C000 (LCSC C386757). Footprint verified against the
@@ -98,41 +109,47 @@ PARTS = [
     # Pins 9/10 are the left LED, 11/12 the right; + is the lower-numbered pin.
     ("RJ45_1", "Connector_RJ", "RJ45_Connfly_DS1128-09-S8xx-S_Horizontal",
      RJ_X, RJ_Y, 90, "RJ45 8P8C 2xLED",
-     {"4": "PIN20", "5": "DESK_RX", "6": "DESK_TX", "7": "GND", "8": "DESK_5V",
-      "9": "GND", "10": "LED_DESK_A", "11": "GND", "12": "LED_BT_A", "SH": "GND"}),
-    # F1/D1 live under the module (nothing to reach); only the test pads
-    # need to stay accessible, so only they sit in the top strip.
-    # D1 (SS14) already blocks back-feed from the module toward the desk, so the
-    # old JP1 enable jumper was redundant and has been removed.
-    ("F1", "Resistor_SMD", "R_1206_3216Metric", 37.0, 24.9, 0, "PTC 500mA",
+     {"4": "PIN20", "5": "DESK_TX", "6": "DESK_RX", "7": "GND", "8": "DESK_5V",
+      "9": "GND", "10": "LINK_A", "11": "GND", "12": "BT_A", "SH": "GND"}),
+    # The 5 V input sits behind the jack, where pin 8 brings it in: F1, then D1,
+    # then the bulk capacitor. D1 (SS14) blocks back-feed from the module's USB
+    # toward the desk.
+    ("F1", "Resistor_SMD", "R_1206_3216Metric", 19.3, 8.0, 0, "PTC 500mA",
      {"1": "DESK_5V", "2": "D5V_F"}),
-    ("D1", "Diode_SMD", "D_SMA", 44.0, 24.9, 180, "SS14", {"2": "D5V_F", "1": "+5V"}),
+    ("D1", "Diode_SMD", "D_SMA", 25.8, 8.0, 180, "SS14", {"2": "D5V_F", "1": "+5V"}),
+    # Powered from the desk alone, the radio's calibration at boot pulled 3V3
+    # under the brownout level on rev1, through the box, F1, D1 and the DevKit's
+    # AMS1117: a restart loop only USB power broke. C3 carries that surge. It
+    # stands outside the module's outline, since it is taller than the gap
+    # under the DevKit, and with + (pad 1) toward D1.
+    ("C3", "Capacitor_THT", "CP_Radial_D8.0mm_P3.50mm", 25.25, 17.6, 180, "470uF 10V",
+     {"1": "+5V", "2": "GND"}),
     # decoupling next to the module's 5V pin (row B pin 15, VIN, at the USB end)
     # 22uF, not the 100uF inherited from revA: at 5V across it a 10V-rated
     # X5R derates to a fraction of nominal anyway, the devkit carries its own
     # input bulk, and 100uF/1206 is a pricey non-stocked part for no benefit.
-    ("C1", "Capacitor_SMD", "C_1206_3216Metric", 52.0, 19.2, 0, "22uF 25V", {"1": "+5V", "2": "GND"}),
-    ("C2", "Capacitor_SMD", "C_0805_2012Metric", 48.0, 20.9, 0, "100nF 50V", {"1": "+5V", "2": "GND"}),
+    ("C1", "Capacitor_SMD", "C_1206_3216Metric", 72.0, 19.2, 0, "22uF 25V", {"1": "+5V", "2": "GND"}),
+    ("C2", "Capacitor_SMD", "C_0805_2012Metric", 68.0, 20.9, 0, "100nF 50V", {"1": "+5V", "2": "GND"}),
     # signal passives under the module, ordered to match their row B pins
-    ("R4", "Resistor_SMD", "R_0805_2012Metric", 36.0, 10.9, 0, "220R",
+    ("R4", "Resistor_SMD", "R_0805_2012Metric", 56.0, 10.9, 0, "220R",
      {"1": "ESP_P20", "2": "PIN20"}),
-    ("R3", "Resistor_SMD", "R_0805_2012Metric", 47.0, 10.9, 0, "220R",
+    ("R3", "Resistor_SMD", "R_0805_2012Metric", 67.0, 10.9, 0, "220R",
      {"1": "ESP_TX", "2": "DESK_RX"}),
-    ("R1", "Resistor_SMD", "R_0805_2012Metric", 42.0, 10.9, 0, "10k",
+    ("R1", "Resistor_SMD", "R_0805_2012Metric", 62.0, 10.9, 0, "10k",
      {"1": "DESK_TX", "2": "RX_DIV"}),
-    ("R2", "Resistor_SMD", "R_0805_2012Metric", 42.0, 14.9, 0, "15k",
+    ("R2", "Resistor_SMD", "R_0805_2012Metric", 62.0, 14.9, 0, "15k",
      {"1": "RX_DIV", "2": "GND"}),
     # LED series limits. The LEDs live inside the jack; these sit near the module
     # so the GPIO runs stay short.
     ("R5", "Resistor_SMD", "R_0805_2012Metric", 18.2, 11.9, 90, "220R",
-     {"1": "LED_BT", "2": "LED_BT_A"}),
+     {"1": "BT_LED", "2": "BT_A"}),
     ("R6", "Resistor_SMD", "R_0805_2012Metric", 18.2, 22.9, 90, "220R",
-     {"1": "LED_DESK", "2": "LED_DESK_A"}),
-    ("D2", "Package_TO_SOT_SMD", "SOT-23", 48.0, 14.9, 0, "BAT54S",
+     {"1": "LINK_LED", "2": "LINK_A"}),
+    ("D2", "Package_TO_SOT_SMD", "SOT-23", 68.0, 14.9, 0, "BAT54S",
      {"1": "GND", "2": "+3V3", "3": "RX_DIV"}),
     ("U1A", "Connector_PinSocket_2.54mm", HDR, PIN1_X, ROW_A_Y, 90, "Socket 1x15 2.54mm", U1A_NETS),
     ("U1B", "Connector_PinSocket_2.54mm", HDR, PIN1_X, ROW_B_Y, 90, "Socket 1x15 2.54mm", U1B_NETS),
-    # Four M3, spanning 51.8 x 29.2 -- this board screws to the underside of a desk
+    # Four M3, spanning 71.8 x 28.8 -- this board screws to the underside of a desk
 # and carries its own load, so the mounting pattern drives the outline rather
 # than the other way round. H1/H2 are true corners, in the pockets the jack
 # leaves once the test pads move off the left flank. H3/H4 are as far apart as
@@ -141,8 +158,8 @@ PARTS = [
 # and standoff under the antenna would detune it far worse than copper.
     ("H1", "MountingHole", "MountingHole_3.2mm_M3",  4.2,  3.2, 0, "M3", {}),
     ("H2", "MountingHole", "MountingHole_3.2mm_M3",  4.2, 32.0, 0, "M3", {}),
-    ("H3", "MountingHole", "MountingHole_3.2mm_M3", 56.0, 10.7, 0, "M3", {}),
-    ("H4", "MountingHole", "MountingHole_3.2mm_M3", 56.0, 24.7, 0, "M3", {}),
+    ("H3", "MountingHole", "MountingHole_3.2mm_M3", 76.0, 10.7, 0, "M3", {}),
+    ("H4", "MountingHole", "MountingHole_3.2mm_M3", 76.0, 24.7, 0, "M3", {}),
 ]
 
 # all six probe points in one row along the bottom edge, in signal order
@@ -157,6 +174,7 @@ MPN = {
     "F1":  "SMD1206P050TF/15", # PTTC PTC, 500 mA hold, 1206
     "D1":  "SS14-E3/61T",      # Vishay Schottky 40 V 1 A, SMA
     "D2":  "BAT54S,215",       # Nexperia dual Schottky, SOT-23
+    "C3":  "EEU-FR1A471",      # Panasonic 470 uF 10 V radial, 8 x 11.5 mm
 }
 # JLCPCB catalogue numbers. Everything except C1 and F1 is JLCPCB's OWN match
 # from an earlier upload of this BOM, so those are authoritative for their
@@ -186,13 +204,13 @@ NO_BOM = {"H1", "H2", "H3", "H4"}
 # not in their catalogue, a 1x15 socket is an odd length, and the only RJ45 they
 # matched was a modular PLUG (male, cable-end) with no stock -- the wrong part.
 # Tagged on the board so the BOM/CPL split stays in step with the design.
-HAND_SOLDER = {"RJ45_1", "U1A", "U1B"}   # F1 moved to assembly, see LCSC below
+HAND_SOLDER = {"RJ45_1", "U1A", "U1B", "C3"}   # F1 moved to assembly, see LCSC below
 
 # four signal pads hug the jack, where those signals enter; power refs below it
 # No test pads. Every net they carried is already on a through-hole pad that is
 # exposed on the underside and named on the top silk: GND at U1A.14/U1B.14/
 # RJ45_1.7/9/11/SH, +5V at U1B.15, RX_DIV at U1A.10, and DESK_TX/DESK_RX/PIN20
-# at RJ45_1 pins 6/5/4. Six more pads bought nothing but board height.
+# at RJ45_1 pins 5/6/4. Six more pads bought nothing but board height.
 TESTPADS = []
 
 
@@ -204,7 +222,7 @@ def rot_offset(px, py, deg):
 
 
 board = Board.create_new()
-board.nets = [Net(i, n) for i, n in enumerate(NETS)]
+board.nets = [Net(i, kname(n)) for i, n in enumerate(NETS)]
 PADS = {}   # (ref, padnum) -> (x, y, w, h, layerset)
 
 
@@ -247,7 +265,7 @@ def place(ref, lib, fpname, x, y, rot, value, netmap):
         pad.keepEndLayers = False
         if pad.number and str(pad.number) in netmap:
             n = netmap[str(pad.number)]
-            pad.net = Net(NETIDX[n], n)
+            pad.net = Net(NETIDX[n], kname(n))
         if rot:
             pad.position.angle = (pad.position.angle or 0) + rot
         ox, oy = rot_offset(pad.position.X, pad.position.Y, rot)
@@ -326,23 +344,41 @@ JACK_TOP, JACK_BOT = RJ_Y - 11.88, RJ_Y + 4.99
 SILK = [("BT",   18.2, JACK_TOP + 0.4, "F.SilkS", 0.8, 0),   # 0.4 = half text height
         ("LINK", 18.2, JACK_BOT - 0.4, "F.SilkS", 0.8, 0),
         ("DESK", 17.2, 17.6, "F.SilkS", 0.8, 90),
-        ("ANTENNA", 26.25, 16.5, "F.SilkS", 1.1, 0),
-        ("KEEP CLEAR", 26.25, 19.3, "F.SilkS", 0.8, 0),
+        ("ANTENNA", 46.25, 16.5, "F.SilkS", 1.1, 0),
+        ("KEEP CLEAR", 46.25, 19.3, "F.SilkS", 0.8, 0),
         # identity block on the back, where the module does not cover it
-        ("FlexiSpot / LoctekMotion", 36.0, 10.0, "B.SilkS", 1.0, 0),
-        ("BLE desk companion", 36.0, 14.5, "B.SilkS", 1.4, 0),
-        ("woutertenbrinke.nl", 36.0, 19.0, "B.SilkS", 1.0, 0),
-        ("ESP32 DevKit V1 30-pin", 36.0, 23.5, "B.SilkS", 0.9, 0),
+        ("FlexiSpot / LoctekMotion", 56.0, 10.0, "B.SilkS", 1.0, 0),
+        ("BLE desk companion", 56.0, 14.5, "B.SilkS", 1.4, 0),
+        ("woutertenbrinke.nl", 56.0, 19.0, "B.SilkS", 1.0, 0),
+        ("ESP32 DevKit V1 30-pin", 56.0, 23.5, "B.SilkS", 0.9, 0),
         # B.SilkS mirrors, so the item at the HIGHER x appears on the left when
         # you look at the back -- swap them to read "name ... rev" the normal way.
-        ("Wouter ten Brinke", 45.0, 27.0, "B.SilkS", 1.0, 0),
-        ("rev1", 28.5, 27.0, "B.SilkS", 1.0, 0)]
+        ("Wouter ten Brinke", 65.0, 27.0, "B.SilkS", 1.0, 0),
+        ("rev2", 48.5, 27.0, "B.SilkS", 1.0, 0),
+        # what each jack pin is, read where you hold the probe: from the back,
+        # with the jack on the right
+        ("8 5V   7 GND", 22.5, 27.6, "B.SilkS", 0.8, 0),
+        ("6 box RX   5 box TX", 22.5, 29.4, "B.SilkS", 0.8, 0),
+        ("4 wake", 22.5, 31.2, "B.SilkS", 0.8, 0),
+        # beside the jack's LED pads and C3's + pad, read from the back too
+        ("BT", 16.7, 11.9, "B.SilkS", 0.8, 0),
+        ("LINK", 17.4, 23.3, "B.SilkS", 0.8, 0),
+        ("+", 25.25, 15.6, "B.SilkS", 1.0, 0)]
+
+# The jack's pin numbers beside its pads on the back, odd pins to one side of
+# their row and even pins to the other, so each number sits clear of the pads.
+for n in range(1, 9):
+    px, py = (n - 1) * 1.02, (0.0 if n % 2 else 1.78)
+    x, y = RJ_X + py, RJ_Y - px
+    SILK.append((str(n), x - 1.45 if n % 2 else x + 1.45, y, "B.SilkS", 0.8, 0))
 
 
-for n, nm in enumerate(ROW_A_NAMES):
-    SILK.append((nm, PIN1_X + n * PITCH, 2.75, "F.SilkS", 0.8, 0))
-for n, nm in enumerate(ROW_B_NAMES):
-    SILK.append((nm, PIN1_X + n * PITCH, 32.45, "F.SilkS", 0.8, 0))
+# On both sides: on the back they are what you read with a probe on the joints.
+for side in ("F.SilkS", "B.SilkS"):
+    for n, nm in enumerate(ROW_A_NAMES):
+        SILK.append((nm, PIN1_X + n * PITCH, 2.75, side, 0.8, 0))
+    for n, nm in enumerate(ROW_B_NAMES):
+        SILK.append((nm, PIN1_X + n * PITCH, 32.45, side, 0.8, 0))
 
 for txt, x, y, layer, size, ang in SILK:
     t = GrText(text=txt, position=Position(x, y, ang), layer=layer)
