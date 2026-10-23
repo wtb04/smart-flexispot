@@ -54,6 +54,8 @@ void      build_calendar(lv_obj_t *page);
 void      build_radar(lv_obj_t *page);
 void      build_setup(lv_obj_t *page);
 void      build_views(lv_obj_t *screen);  // the fullscreen views, the favourites, the notices
+void      build_splash();                 // the start-up screen, over everything until all is up
+bool      splash_showing();
 
 // Setup's own, in kit_front_setup*.cpp.
 /** A row of Setup's: room round each, on a panel read from an arm's length. */

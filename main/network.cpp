@@ -214,6 +214,12 @@ void show_links(const ble::Stats &radio)
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_links(wifi::connected()));
     ESP_ERROR_CHECK_WITHOUT_ABORT(
         ui::set_presence(radio.has_key, radio.phone_present));
+    if (wifi::connected()) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("network"));
+    }
+    if (links_up()) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_done());
+    }
 }
 
 void log_heap_baseline_once()

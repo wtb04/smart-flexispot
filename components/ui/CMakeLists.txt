@@ -7,6 +7,7 @@ idf_component_register(
     INCLUDE_DIRS "include" "fonts"
     PRIV_INCLUDE_DIRS "." "core" "kit" "front" "lab"
     REQUIRES claude esp_driver_ppa lvgl__lvgl espressif__esp_lvgl_port board media radar ical travel deskproto units watchdog
+    PRIV_REQUIRES esp_app_format
 )
 
 # The allocator is only referred to by LVGL, which links after this component;

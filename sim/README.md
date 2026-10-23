@@ -68,6 +68,7 @@ SIM_HOME=lat,lon   # the radar's centre, in place of zone.home
 SIM_ZOOM=0.75      # the window's scale, for a smaller screen
 SIM_LOOK=light     # the light look, as Setup can choose it
 SIM_CLOCK=9:41     # the top bar shows that rather than the time
+SIM_SPLASH=1       # the start-up screen stays, as a slow start, until it gives up at 15 s
 ```
 
 `--page N` opens a page (0 Home to 3 Setup), `--press KEYS` presses keys as

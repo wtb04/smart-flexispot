@@ -337,6 +337,13 @@ void pin_clock(const char *text);
  *  frames drawn between. Nothing set before this returns is drawn until it has. */
 esp_err_t build();
 
+/** The start-up screen's steps, from any task: "desk" once the desk has been
+ *  started, "network" once Wi-Fi has joined; done once Home Assistant is
+ *  reached, which sends it on its way. Each said again does nothing. Gone
+ *  after 15 s whatever was said. */
+esp_err_t splash_step(const char *step);
+esp_err_t splash_done();
+
 /** Height in millimetres, or negative for "unknown". */
 esp_err_t set_height(int height_mm);
 

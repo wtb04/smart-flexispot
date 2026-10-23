@@ -476,6 +476,7 @@ extern "C" void app_main(void)
     ESP_ERROR_CHECK_WITHOUT_ABORT(focus::start(on_focus_change));
     focus::set_plan(stored_plan());  // which shows it too
     focus::restore(kept_focus);
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::splash_step("desk"));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ota::start({
         .busy    = desk_moving,
         .status  = show_update,

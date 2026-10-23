@@ -488,6 +488,9 @@ void show_next_notice()
 // The next as it comes; while one shows, how many wait behind it.
 void follow_notices()
 {
+    if (splash_showing()) {
+        return;  // kept until it has gone, as one shown under it would go unseen
+    }
     if (s_on_show) {
         char side[32];
         aside(side, sizeof side);
