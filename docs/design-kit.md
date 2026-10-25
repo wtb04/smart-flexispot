@@ -12,8 +12,8 @@ gets what was learned about drawing fast on the panel.
 Things that stay are solid. Things you touch or that float are glass.
 
 - **Solid:** a flat fill lifted by one soft shadow (`tile`, raised a little
-  more with `Lift::High`), or sunk into the surface (`well`). No gradients on
-  solid surfaces.
+  more with `Lift::High`), or a flat, faint fill inside a tile (`well`). No
+  gradients on solid surfaces.
 - **Glass:** the dock, the bar's capsules, popovers and notices. It is a flat
   tint with a rim, over a blurred picture of what lies behind.
 - **Tick marks and zone bands:** tick marks only where a value is read off a
@@ -24,9 +24,11 @@ worked out in code and dithered, so its soft glows don't band.
 
 Sizes, spacing, radii and durations are tokens (`space::`, `radius::`,
 `size::`, `motion::`). Text has roles (`Role::Label` up to `Role::ReadXXL`) and
-inks (`Ink::Primary`, `Secondary`, `Tertiary`, `Accent`, `Green`, `Amber`,
-`Red`), and never a font or colour of its own. Figures are tabular, so a
-changing number doesn't shift.
+inks (`Ink::Primary`, `Secondary`, `Tertiary`, `Accent`, `OnAccent`, `Green`,
+`Amber`, `Red`), and never a font or colour of its own. Figures are tabular, so
+a changing number doesn't shift. Words from outside, a page's, a player's or a
+feed's, are set with `set_words`: a dot between words becomes a comma, and what
+the label's font cannot draw is put right or left out, never an empty box.
 
 ## Layers
 
@@ -52,7 +54,9 @@ right one with `kit::layer(Layer::...)`. Don't fake depth with a bigger shadow.
 | `button` | `Raised`, `Accent`, `Flat` or `Soft`, with a glyph and/or a label, round or not, checkable or not |
 | `lamp_tile`, `toggle`, `segmented` | on/off things and choices |
 | `capsule`, `capsule_item` | the bar's glass pills |
-| `Dial` | the one instrument for readings: needle, zones, a target knob, lit ticks for a timer |
+| `Dial` | a bold arc and a figure in its middle, with a target knob for a setting, run backwards for a timer, a dot for a second reading |
+| `Scale`, `Reading` | a thin bar of zones with a dot at the reading; and a reading's name, big figure, zone word and scale together |
+| `fill_slider` | a thick level slider, a capsule filled up to the level with its glyph in it |
 | `Rail` | a straight scale, slider or progress, with notches for presets |
 | `popover`, `popover_source` | a glass card that grows out of what was tapped |
 | `notice` | a slab that drops from under the bar and leaves on its own |
@@ -62,7 +66,7 @@ right one with `kit::layer(Layer::...)`. Don't fake depth with a bigger shadow.
 | `badge`, `empty` | a small pill in an ink, and what shows where a feed is missing |
 | `Readout`, `Stepper` | a big figure, and minus, value, plus, both a size that never changes |
 | `sheet`, `sheet_row` | a big centred popover whose body scrolls, and a label with its value on it |
-| `dot`, `status` | a state at a glance, and the bar's clock with the panel's own Wi-Fi and phone marks |
+| `dot`, `status` | a state at a glance, and the bar's clock with the panel's own Wi-Fi, phone and Desk Link laptop marks |
 | `Cover`, `Backdrop` | a picture in a rounded rectangle or a circle, its corners cut once as it arrives, and the blurred backdrop the music and cinema views lay behind everything |
 | `page`, `widget_grid`, `widget` | a page on the Content plane, and Home's grid of widgets that only show |
 | `dock_item`, `show_page` | the dock's choices, its mark sliding to the chosen one, and the change from one page to the next |
@@ -92,8 +96,9 @@ cd sim && cmake -S . -B build -G Ninja -DLVGL_DIR=<lvgl> && ninja -C build
 ./build/sim --lab
 ```
 
-The lab shows every part of the kit in every state, on sheets picked with keys
-1 to 6:
+The lab shows every part of the kit in every state, on eight sheets picked
+with keys 1 to 8 (Surfaces, Controls, Readings, Glass, Layers, Pictures, Lists,
+Pages):
 
 | Key | Does |
 |---|---|
@@ -104,6 +109,14 @@ The lab shows every part of the kit in every state, on sheets picked with keys
 | `c` | closes it |
 | `p` | runs the bench |
 | `v` | runs the list study: one long list built several ways, each scrolled and timed |
+| `f` | switches a popover's backdrop between frozen and live |
+| `m` | switches popovers between growing and rising |
+| `n` | drops a notice |
+| `b` | switches the blurred scrim |
+| `k` | measures the pictures' cut corners |
+| `t` | taps the next of the dock's items |
+| `j` | scrolls the open sheet, or else the calendar, a little further on |
+| `h` | lights the first and last rows of a group, or puts them out, to look at their corners |
 
 The bench drives each kind of change in turn and prints the milliseconds per
 frame, and on the panel it splits each frame into drawing, rotating onto the
@@ -146,8 +159,9 @@ the screen changes, so:
 4. **Set only on change.** Setting a style or a text redraws the object even
    when the value is the same. The kit's setters check first, and page code
    should too.
-5. **Many still parts become one picture.** A dial's scale is drawn once into a
-   picture, and only its needle redraws.
+5. **Many still parts become one picture.** The tiles' shadows are painted
+   once into the ground beneath them, and a dial's arc steps without a spring,
+   so a change redraws only the bit of arc it moved.
 6. **No live blur.** A popover's backdrop is a picture of the screen, taken and
    blurred once on the other core. That work starts as the finger lands on the
    popover's source (`popover_source`), so the card can open on the next
@@ -184,7 +198,6 @@ What that buys, measured on the panel:
 |---|---|
 | a button press | 5 to 12 |
 | a segmented control | 2 to 5 |
-| dial needles | 13 to 19 |
 | a popover growing | 27 to 36, after a first frame of 56 to 76 |
 | a popover closing | 8 bands of 25 to 30 |
 | a notice | 13 to 18 |
