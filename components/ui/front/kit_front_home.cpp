@@ -919,7 +919,12 @@ void build_home(lv_obj_t *page)
 namespace ui {
 void overhead_pin(const char *hex)
 {
-    std::snprintf(kitfront::s_pinned, sizeof kitfront::s_pinned, "%s", hex != nullptr ? hex : "");
+    hex = hex != nullptr ? hex : "";
+    if (std::strcmp(kitfront::s_pinned, hex) == 0) {
+        return;  // asked again while the radar page has yet to take it: its photo is on its way
+    }
+    std::snprintf(kitfront::s_pinned, sizeof kitfront::s_pinned, "%s", hex);
+    kitfront::s_asked[0] = '\0';  // its photo at once, not after the closest's half minute
     kitfront::paint_overhead();
 }
 }  // namespace ui

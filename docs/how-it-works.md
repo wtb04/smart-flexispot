@@ -29,7 +29,9 @@ renders the main views, offline and the same each time, to
 The parts that decide and parse (the request scheduler, the stream and job
 schedulers, the watchdog, the desk and companion protocols, the Home Assistant
 and Jellyfin protocols, the calendar, journey and radar parsers, the battery
-gauge, the focus timer, the Claude Code sessions' table) are plain C++ with no ESP-IDF in them, and are tested
+gauge, the focus timer, the Claude Code sessions' table, Desk Link's protocol and
+its sealing, the desk presets' lesson, the screen's rules, its notice queue and
+the fitting of outside text to the fonts, the clock's maths) are plain C++ with no ESP-IDF in them, and are tested
 on the host under GoogleTest:
 
 ```sh
@@ -44,14 +46,17 @@ them.
 
 ### CI
 
-Every pull request and every push to main runs [three jobs](../.github/workflows/ci.yml): the host tests with
-coverage, whose table ends up in the run's summary; the firmware, both the
+Every pull request and every push to main runs [five jobs](../.github/workflows/ci.yml): the host tests with
+coverage, whose table ends up in the run's summary; a check that no picture
+carries metadata (`tools/strip_metadata.sh`); the firmware, both the
 normal build and the development one, in Espressif's image for ESP-IDF 5.5.5,
 from `sdkconfig.defaults` alone and the secrets' templates; and the simulator
-on Linux, whose screenshots are kept with the run. Each firmware build keeps
+on Linux, whose screenshots are kept with the run; and the companion's
+firmware in `proxy/`. Each firmware build keeps
 its images: `smart_flexispot-full.bin` for the whole flash at 0x0, and
 `smart_flexispot.bin` for an update. A tag such as `v1.2.0` also puts the
-release build's two on a GitHub release, with LICENSE, NOTICE and
+release build's two on a GitHub release, as `smart_flexispot-v1.2.0-full.bin`
+and `smart_flexispot-v1.2.0-ota.bin`, with LICENSE, NOTICE and
 THIRD_PARTY_NOTICES.md beside them.
 
 ### The development build
@@ -66,20 +71,24 @@ adds pages to the panel's web server, all asking for the update key.
 | Page | What it gives |
 | --- | --- |
 | `/log` | The recent log |
-| `/screen` | A picture of the screen |
+| `/screen` | A picture of the screen, drawn again for it |
+| `/panel` | The frame the panel is showing, as it is in its buffer |
+| `/frozen` | The last popover's frozen backdrop |
 | `/heap`, `/power` | Memory, and the pack's draw on battery |
 | `/streams` | Each live connection and how it is doing; `?restart=N` begins one again |
 | `/jobs` | Each shared worker's jobs; `?poke=N` runs one now |
 | `/restart` | Why this run started, and what the last one left behind |
 | `/coredump` | The last crash, whole, for `idf.py coredump-info` with the build's ELF |
-| `/bench` | The radar's map timed: whole frames, a tile, a trail growing, a zoom; `?map` and `?back` leave the Radar page open and put it back |
+| `/bench` | The radar's map timed: whole frames, a tile, a trail growing, a zoom; `?map` and `?back` leave the Radar page open and put it back. Also `?t=X,Y,MS` presses the screen there, `?kr` the last page change and popover, `?fp` each frame lately and `?fpc` from now, `?lab` and `?report` the design kit's lab, `?socks` the sockets open, `?peek=ADDR` a block of internal RAM, `?scan` the display stream's underruns and errors, `?scanr`, `?scanp` and `?scanh` restarting it, and `?nap` and `?napl` a sleep and wake as a knock gives |
 | `/desk` | What the desk heard and was asked lately, a line each with its milliseconds since boot; `?tap=N` taps preset N as a finger on its button would, `?clear` starts the trace over |
 
 ## How it is put together
 
 `app_main` brings up the board, builds the screen a part at a time while the
 radio joins, starts the desk link and the network clients, and returns;
-everything after that runs on tasks of its own.
+everything after that runs on tasks of its own. Meanwhile the start-up screen
+shows the dock and the bar as they come, builds the pages after Home one at a
+time, and gives way to Home once Home Assistant is up, or after 15 s.
 
 | Path | Purpose |
 | --- | --- |
@@ -96,11 +105,14 @@ everything after that runs on tasks of its own.
 | `components/hass/`, `room/` | Home Assistant, and the home page's presenter |
 | `components/jellyfin/`, `media/`, `jpeg/` | Jellyfin, cover art, the JPEG engine and its software fallback |
 | `components/radar/`, `ical/`, `travel/` | Planes overhead, calendars, journeys |
-| `components/claude/` | The laptops' Claude Code sessions, as `tools/claude-hook` posts them to `/claude` |
+| `components/claude/` | The laptops' Claude Code sessions, as `tools/claude-hook` hands them to Desk Link, which passes them on sealed |
+| `components/laptop/` | Desk Link: the laptops' Now Playing and Claude Code events, sealed both ways |
+| `components/units/` | The units and conversions everything shares |
 | `components/ble/`, `wifi/`, `ota/` | Presence and the companion's link, Wi-Fi, updates |
 | `components/power/`, `rtc/`, `sound/`, `logbuf/`, `focus/`, `imu/` | Battery, backup clock, chime, the log ring, the focus timer, the accelerometer |
-| `components/esp_hosted/` | The Wi-Fi co-processor's driver, with one change to its receive buffers |
+| `components/esp_hosted/` | The Wi-Fi co-processor's driver, with its send and receive buffers moved to PSRAM |
 | `proxy/` | The companion's firmware |
+| `desklink/` | Desk Link for macOS and for Linux |
 | `sim/`, `test/` | The simulator and the host tests |
 
 ### The network
@@ -142,8 +154,9 @@ frame, and the panel's interrupts run through flash writes. The backlight is
 held dark through a restart, and lit only once there is a drawn frame to show.
 
 While the screen is dark, the panel stops its stream at the end of a frame,
-tells the panel its picture is off, and the desk's Bluetooth link slows to one
-event every half second (`main/dark.cpp`). Dark with the backlight alone took
+tells the panel its picture is off, the desk's Bluetooth link slows to one
+event every half second and the phone is listened for every 3 s
+(`components/ble`). Dark with the backlight alone took
 about 120 mA from the battery, asleep 111 mA measured with the desk's link at
 its full pace. The CPU stays at full speed: at 40 MHz it drew 88 mA, but the panel goes on working while dark, and TLS handshakes then
 took over 90 s, I2C reads seconds, and the watchdogs restarted it. The touch is
@@ -156,8 +169,9 @@ own switching, which deadlocked within a minute with the PSRAM at 200 MHz.
 PSRAM's bandwidth, which the panel's own reading takes a good share of, is
 what a frame costs: a whole screen is about 88 ms, of which turning it onto
 the portrait panel with the PPA is 42. So as little as possible is drawn
-again. There are three frame buffers, so a frame is drawn while the panel is
-still taking up the last, which it does a frame or two after it is asked to;
+again. There are four frame buffers, so a frame drawn while the panel is
+still taking up an earlier one, which it does a frame or two after it is asked
+to, replaces the one asked for rather than waiting;
 each buffer is brought up to date only where it is behind, by the CPU, which
 copies PSRAM faster than the PPA. The radar's map keeps track of which
 32 px tiles of its picture the planes and the trail were drawn into, puts the
@@ -231,7 +245,7 @@ all rejected rather than decoded into a bogus number.
 
 ## In Home Assistant
 
-Everything in the bar and on Home is one of Home Assistant's own entities, read and set over its websocket. The panel is a device of its own there too, over MQTT:
+The lights, the heating, the air and the speaker in the bar and on Home are Home Assistant's own entities, read and set over its websocket; what plays on Jellyfin or a laptop, and the desk, come from those directly. The panel is a device of its own there too, over MQTT:
 
 | In Home Assistant | Entities |
 |---|---|
