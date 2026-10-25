@@ -824,6 +824,16 @@ bool glide(int from, int to)
 }
 #endif
 
+bool build_page(int index)
+{
+    if (index < 0 || index >= s_page_count || s_pages[index].build == nullptr) {
+        return false;
+    }
+    build(s_pages[index]);
+    lv_obj_update_layout(s_pages[index].obj);
+    return true;
+}
+
 void show_page(int index, bool animate)
 {
     if (index < 0 || index >= s_page_count) {

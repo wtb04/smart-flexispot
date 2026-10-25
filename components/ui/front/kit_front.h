@@ -54,7 +54,8 @@ void      build_calendar(lv_obj_t *page);
 void      build_radar(lv_obj_t *page);
 void      build_setup(lv_obj_t *page);
 void      build_views(lv_obj_t *screen);  // the fullscreen views, the favourites, the notices
-void      build_splash();                 // the start-up screen, over everything until all is up
+void      build_splash();                 // the start-up screen, the frame building itself
+void      splash_frame_built(const DockItems &items);  // once the dock and the pages are there to be filled
 bool      splash_showing();
 
 // Setup's own, in kit_front_setup*.cpp.

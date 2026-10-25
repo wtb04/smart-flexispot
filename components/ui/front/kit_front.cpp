@@ -150,6 +150,7 @@ bool build_next_part()
             // to come taking 400 ms to draw and each frame of it 45
             kit::set_change(kit::Change::Instant);
             kit::show_page(HOME, false);
+            splash_frame_built(s_items);
             return true;
         case 2:
             build_views(lv_screen_active());
