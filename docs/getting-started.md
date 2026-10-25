@@ -4,9 +4,9 @@ Everything to build the panel for your own desk, from the hardware to the first 
 
 ## 1. Get the hardware
 
-- An M5Stack Tab5. Early units have an ESP32-P4 v1.x chip, which `sdkconfig.defaults` targets, and so do the release images. Check yours with `esptool.py --port <port> chip_id`. On a v3.x chip, take the two `ESP32P4_REV` lines out of `sdkconfig.defaults` and run `idf.py fullclean`; I have not tried that. Both display revisions (ILI9881C and ST7123) work.
+- An M5Stack Tab5. Early units have an ESP32-P4 v1.x chip, which `sdkconfig.defaults` targets, and so do the release images. Check yours with `esptool.py --port <port> chip_id`. On a v3.x chip, take the `ESP32P4_SELECTS_REV_LESS_V3` and `ESP32P4_REV_MIN_100` lines out of `sdkconfig.defaults` and run `idf.py fullclean`; I have not tried that. Both display revisions (ILI9881C and ST7123) work.
 - A Flexispot with a supported control box (see [Will it work with my desk?](../README.md#will-it-work-with-my-desk)) and an RJ45 cable you do not mind cutting.
-- Optionally, any ESP32 as the companion.
+- Optionally, an ESP32 DevKit as the companion: the original ESP32, which its firmware is built for, as the S2, S3 and C-series lack some of the pins it uses.
 
 ## 2. Connect the desk
 
@@ -27,7 +27,7 @@ There are two ways to reach the control box. Either the Tab5 is wired to it dire
   <img alt="Option 1 wiring: the Tab5's M5-Bus pins to RJ45 pins 4 to 7" src="diagrams/wiring-1-light.svg">
 </picture>
 
-The panel starts out talking to a companion over Bluetooth. With the cable, set Setup, Behaviour, Desk link to **WIRE** once it is running.
+The panel starts out talking to a companion over Bluetooth. With the cable, set Setup, Panel, Desk link to **Wire** once it is running.
 
 ### Option 2: over Bluetooth, with a companion
 
@@ -84,7 +84,7 @@ git clone https://github.com/wtb04/smart-flexispot ~/smart-flexispot && cd ~/sma
 
 Everything the panel talks to has a `*_secrets.example.h` template next to where its real one goes. Copy each to `*_secrets.h` in the same folder and fill in what you have. Anything left empty is just not started, so the desk alone works with no secrets at all.
 
-Every one of them ends up as plain text in the firmware, in `build/` and on the panel's flash, where anyone holding the panel can read it over USB. So keep your build to yourself, and give Home Assistant and the MQTT broker users of their own with no more rights than the panel needs. For the update and Claude keys, something like `openssl rand -hex 16` makes a good one; they go over the network in plain HTTP, so they are only as private as your home network.
+Every one of them ends up as plain text in the firmware, in `build/` and on the panel's flash, where anyone holding the panel can read it over USB. So keep your build to yourself, and give Home Assistant and the MQTT broker users of their own with no more rights than the panel needs. For the update key, something like `openssl rand -hex 16` makes a good one; it goes over the network in plain HTTP, so it is only as private as your home network. The Desk Link key is 32 bytes, from `openssl rand -hex 32`, and never goes over the network itself: what it seals does.
 
 | File | What goes in it |
 |---|---|
@@ -105,7 +105,7 @@ A few things are mine in the code rather than secrets, and are worth a look befo
 - Your favourite playlists, in the same file, for the music card's popup.
 - Your desk's height range, in `idf.py menuconfig`, *Loctek desk control*: 660 to 1310 mm is mine.
 - Your time zone, in `idf.py menuconfig`, *Panel time*. Central European Time is the default.
-- What the presets are called on the screen: copy the list in `components/ui/ui_internal.h` to `components/ui/ui_presets.h`, which git ignores, and rename them there.
+- What the presets are called on the screen: copy the list in `components/ui/core/ui_core.h` to `components/ui/ui_presets.h`, which git ignores, and rename them there.
 - The radar's map covers the Channel to Berlin, 48.5 to 56 N and 0.5 to 13 E. For your own part of the world, `tools/make_map.py --out components/radar/map_data.h --box <south> <west> <north> <east>` draws a new one from Natural Earth; keep the box modest, as every line on it costs memory to draw.
 
 ## 5. Flash it
@@ -119,7 +119,7 @@ idf.py -p /dev/cu.usbmodem* flash monitor
 
 Ctrl-] leaves the monitor. If the port does not show up, hold BOOT while plugging in.
 
-It boots into a splash that shows the desk, the network and Home Assistant coming up, and is on the home page in about ten seconds.
+It starts by building its dock and bar while it says what it is doing, and the home page follows once Home Assistant answers, or after 15 seconds without it.
 
 Every [release](https://github.com/wtb04/smart-flexispot/releases) has a `smart_flexispot-<version>-full.bin` that can be written at 0x0 without building anything:
 
@@ -144,16 +144,23 @@ An update waits on the Setup page until you tap it, and is refused while the des
 
 ## 7. Desk Link on your Mac
 
-Optional. [Desk Link](../desklink/) is a menu bar app that tells the panel what plays on the Mac and takes its play, pause, seek and volume back, and passes Claude Code's events on, every message sealed with the key in `desk_link_secrets.h`. It needs macOS 26, Xcode's command line tools and CMake:
+Optional. [Desk Link](../desklink/macos/) is a menu bar app that tells the panel what plays on the Mac and takes its play, pause, seek and volume back, and passes Claude Code's events on, every message sealed with the key in `desk_link_secrets.h`. It needs macOS 26, Xcode's command line tools and CMake:
 
 ```sh
 git submodule update --init
-cd desklink && make install
+cd desklink/macos && make install
 ```
 
-Then give it the key from its menu, under Panel, or before its first start with `defaults write nl.w-tb.desklink key <DESK_LINK_KEY>`, which it moves into the keychain. The menu says whether the panel answers, and whether the panel reaches the Mac back; a firewall that lets Desk Link out but keeps port 47801 shut stops the commands.
+Then give it the key in its settings, opened from its menu, under Panel, or before its first start with `defaults write nl.w-tb.desklink key <DESK_LINK_KEY>`, which it moves into the keychain. The menu says whether the panel answers, and whether the panel reaches the Mac back; a firewall that lets Desk Link out but keeps port 47801 shut stops the commands.
 
-For Claude Code, each laptop also needs `jq` and `curl`, which macOS has, and this repository's `tools/claude-hook`. In `~/.claude/settings.json`, run it on every event that changes what the panel shows; `async` keeps Claude Code from ever waiting on it:
+On Linux, [Desk Link for Linux](../desklink/linux/) does the same from the bar. It needs Python 3 with PyGObject, GTK 4, libadwaita, gtk4-layer-shell, libsoup 3 and libsecret, python3-cryptography, Pillow, `wpctl` and `inotifywait`, and `~/.local/bin` on your `PATH`:
+
+```sh
+cd desklink/linux && make install
+desklink set-key <DESK_LINK_KEY>
+```
+
+For Claude Code, each laptop also needs `jq` and `curl`, which macOS has and most Linux systems do, and this repository's `tools/claude-hook`. In `~/.claude/settings.json`, run it on every event that changes what the panel shows; `async` keeps Claude Code from ever waiting on it:
 
 ```json
 {
@@ -162,6 +169,7 @@ For Claude Code, each laptop also needs `jq` and `curl`, which macOS has, and th
     "UserPromptSubmit":  [{ "hooks": [{ "type": "command", "command": "~/smart-flexispot/tools/claude-hook", "async": true }] }],
     "PreToolUse":        [{ "hooks": [{ "type": "command", "command": "~/smart-flexispot/tools/claude-hook", "async": true }] }],
     "PostToolUse":       [{ "hooks": [{ "type": "command", "command": "~/smart-flexispot/tools/claude-hook", "async": true }] }],
+    "PostToolUseFailure": [{ "hooks": [{ "type": "command", "command": "~/smart-flexispot/tools/claude-hook", "async": true }] }],
     "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "~/smart-flexispot/tools/claude-hook", "async": true }] }],
     "SubagentStart":     [{ "hooks": [{ "type": "command", "command": "~/smart-flexispot/tools/claude-hook", "async": true }] }],
     "SubagentStop":      [{ "hooks": [{ "type": "command", "command": "~/smart-flexispot/tools/claude-hook", "async": true }] }],

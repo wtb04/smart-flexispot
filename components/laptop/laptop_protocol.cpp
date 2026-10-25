@@ -1,5 +1,6 @@
 #include "laptop_protocol.h"
 
+#include <climits>
 #include <cstring>
 
 #include "cJSON.h"
@@ -14,10 +15,14 @@ std::string text_of(const cJSON *object, const char *key)
     return cJSON_IsString(item) ? item->valuestring : "";
 }
 
-int seconds_of(const cJSON *object, const char *key)
+// A live stream in a browser can tell a length near infinity, which as an int
+// came out as 596523 hours: past `longest_s`, none.
+int seconds_of(const cJSON *object, const char *key, double longest_s)
 {
     const cJSON *item = cJSON_GetObjectItemCaseSensitive(object, key);
-    return cJSON_IsNumber(item) && item->valuedouble > 0 ? static_cast<int>(item->valuedouble) : 0;
+    return cJSON_IsNumber(item) && item->valuedouble > 0 && item->valuedouble <= longest_s
+               ? static_cast<int>(item->valuedouble)
+               : 0;
 }
 
 std::string print_and_free(cJSON *root)
@@ -107,8 +112,11 @@ bool read(const char *body, std::size_t length, NowPlaying &out)
     out.video      = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "video"));
     out.active     = !out.title.empty();
     out.playing    = out.active && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "playing"));
-    out.position_s = seconds_of(root, "position");
-    out.duration_s = seconds_of(root, "duration");
+    // A live stream's position in a browser is the time of day, in seconds
+    // since 1970, and skips from there.
+    constexpr double LONGEST_LENGTH_S = 7 * 24 * 3600;
+    out.position_s = seconds_of(root, "position", INT_MAX);
+    out.duration_s = seconds_of(root, "duration", LONGEST_LENGTH_S);
     const cJSON *volume = cJSON_GetObjectItemCaseSensitive(root, "volume");
     out.volume     = cJSON_IsNumber(volume) && volume->valuedouble >= 0 ? static_cast<int>(volume->valuedouble + 0.5) : -1;
     out.muted      = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "muted"));
@@ -120,11 +128,11 @@ bool read(const char *body, std::size_t length, NowPlaying &out)
         }
         const char *name   = take->valuestring;
         out.takes_pause    = out.takes_pause || std::strcmp(name, "pause") == 0;
-        out.takes_seek     = out.takes_seek || std::strcmp(name, "seek") == 0;
         out.takes_next     = out.takes_next || std::strcmp(name, "next") == 0;
         out.takes_previous = out.takes_previous || std::strcmp(name, "previous") == 0;
         out.takes_volume   = out.takes_volume || std::strcmp(name, "volume") == 0;
         out.takes_volume_step = out.takes_volume_step || std::strcmp(name, "volume_step") == 0;
+        out.takes_seek     = out.takes_seek || std::strcmp(name, "seek") == 0;
     }
     cJSON_Delete(root);
     return true;

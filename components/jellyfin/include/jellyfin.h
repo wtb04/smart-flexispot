@@ -17,9 +17,6 @@ using Handler = void (*)(const NowPlaying &now);
  *  jellyfin_secrets.h. */
 esp_err_t start(Handler on_change);
 
-/** True while its sessions are being followed. */
-bool connected();
-
 /** For the session being followed; from any task, returning at once. */
 void play_pause();
 void seek(int position_s);

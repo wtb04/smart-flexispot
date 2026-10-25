@@ -59,6 +59,7 @@ struct esp_lcd_dpi_panel_t {
     SemaphoreHandle_t draw_sem;            // A semaphore used to synchronize the draw operations when DMA2D is used
     esp_pm_lock_handle_t pm_lock;          // Power management lock
     volatile bool stopping;                // the ring left to run out, at a frame's end
+    volatile uint32_t underruns;           // times the bridge ran out of pixels
     esp_lcd_dpi_panel_color_trans_done_cb_t on_color_trans_done; // Callback invoked when color data transfer has finished
     esp_lcd_dpi_panel_frame_buf_complete_cb_t on_frame_buf_complete; // Callback invoked when the frame buffer can be reused safely
     esp_lcd_dpi_panel_vsync_cb_t on_vsync; // VSYNC event callback
@@ -167,6 +168,7 @@ void mipi_dsi_bridge_isr_handler(void *args)
     mipi_dsi_brg_ll_clear_interrupt_status(hal->bridge, intr_status);
 
     if (intr_status & MIPI_DSI_BRG_LL_EVENT_UNDERRUN) {
+        dpi_panel->underruns++;
         // when an underrun happens, the LCD display may already becomes blue
         // it's too late to recover the display, so we just print an error message
         // as a hint to the user that he should optimize the memory bandwidth (with AXI-ICM)
@@ -482,6 +484,15 @@ esp_err_t esp_lcd_dpi_panel_get_frame_buffer(esp_lcd_panel_handle_t panel, uint3
     return ESP_OK;
 }
 
+esp_err_t esp_lcd_dpi_panel_add_frame_buffer(esp_lcd_panel_handle_t panel, void *fb)
+{
+    ESP_RETURN_ON_FALSE(panel && fb, ESP_ERR_INVALID_ARG, TAG, "invalid argument");
+    esp_lcd_dpi_panel_t *dpi_panel = __containerof(panel, esp_lcd_dpi_panel_t, base);
+    ESP_RETURN_ON_FALSE(dpi_panel->num_fbs < DPI_PANEL_MAX_FB_NUM, ESP_ERR_INVALID_STATE, TAG, "no room for another frame buffer");
+    dpi_panel->fbs[dpi_panel->num_fbs++] = fb;
+    return ESP_OK;
+}
+
 static esp_err_t dpi_panel_init(esp_lcd_panel_t *panel)
 {
     esp_lcd_dpi_panel_t *dpi_panel = __containerof(panel, esp_lcd_dpi_panel_t, base);
@@ -549,18 +560,16 @@ static esp_err_t dpi_panel_draw_bitmap(esp_lcd_panel_t *panel, int x_start, int 
     y_start = MAX(y_start, 0);
     y_end = MIN(y_end, v_res);
 
-    bool do_copy = false;
+    bool do_copy = true;
     uint8_t draw_buf_fb_index = 0;
     // check if the user draw buffer resides in any frame buffer's memory range
     // if so, we don't need to copy the data, just do cache write back
-    if (draw_buffer >= dpi_panel->fbs[0] && draw_buffer < dpi_panel->fbs[0] + fb_size) {
-        draw_buf_fb_index = 0;
-    } else if (draw_buffer >= dpi_panel->fbs[1] && draw_buffer < dpi_panel->fbs[1] + fb_size) {
-        draw_buf_fb_index = 1;
-    } else if (draw_buffer >= dpi_panel->fbs[2] && draw_buffer < dpi_panel->fbs[2] + fb_size) {
-        draw_buf_fb_index = 2;
-    } else {
-        do_copy = true;
+    for (int i = 0; i < dpi_panel->num_fbs; i++) {
+        if (draw_buffer >= dpi_panel->fbs[i] && draw_buffer < dpi_panel->fbs[i] + fb_size) {
+            draw_buf_fb_index = i;
+            do_copy = false;
+            break;
+        }
     }
 
     if (!do_copy) { // no copy, just do cache memory write back
@@ -732,6 +741,25 @@ esp_err_t esp_lcd_dpi_panel_set_streaming(esp_lcd_panel_handle_t panel, bool on)
     mipi_dsi_brg_ll_enable_dpi_output(hal->bridge, true);
     mipi_dsi_brg_ll_update_dpi_config(hal->bridge);
     return ESP_OK;
+}
+
+uint32_t esp_lcd_dpi_panel_get_underruns(esp_lcd_panel_handle_t panel)
+{
+    return __containerof(panel, esp_lcd_dpi_panel_t, base)->underruns;
+}
+
+uint32_t esp_lcd_dpi_panel_take_host_errors(esp_lcd_panel_handle_t panel)
+{
+    mipi_dsi_hal_context_t *hal = &__containerof(panel, esp_lcd_dpi_panel_t, base)->bus->hal;
+    return hal->host->int_st1.val;  // cleared by reading
+}
+
+void esp_lcd_dpi_panel_reset_host(esp_lcd_panel_handle_t panel)
+{
+    mipi_dsi_hal_context_t *hal = &__containerof(panel, esp_lcd_dpi_panel_t, base)->bus->hal;
+    mipi_dsi_host_ll_power_on_off(hal->host, false);
+    esp_rom_delay_us(100);
+    mipi_dsi_host_ll_power_on_off(hal->host, true);
 }
 
 esp_err_t esp_lcd_dpi_panel_register_event_callbacks(esp_lcd_panel_handle_t panel, const esp_lcd_dpi_panel_event_callbacks_t *cbs, void *user_ctx)

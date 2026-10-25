@@ -42,8 +42,8 @@ constexpr float HOME_GRID_DEG = 0.01f;
 
 constexpr int PHOTO_MAX_W = 320;
 constexpr int PHOTO_MAX_H = 240;
-// Decoded photos kept, so a plane tapped again shows at once; one of them is
-// always the photo on screen, which the page draws straight from here.
+// Decoded photos kept, so a plane asked about again shows at once, whoever
+// asks; each is copied as it is handed on, so none needs keeping for a screen.
 constexpr int PHOTO_SLOTS   = 6;
 constexpr int PHOTO_ENTRIES = 64;  // what is known of a photo: where it is, or that there is none
 
@@ -118,13 +118,21 @@ float        s_home_lat   = 0.0f;
 float        s_home_lon   = 0.0f;
 bool         s_has_home   = false;
 
-// What was tapped last: only its answers reach the page.
-std::atomic<std::uint32_t> s_tap{0};
-char                       s_tap_hex[kHexLen]       = {};
-char                       s_tap_flight[kFlightLen] = {};
-std::int64_t               s_tap_at_us              = 0;
+// The aircraft asked about lately, each with its own tap: Home's widget and
+// the radar page ask for theirs, and with only the last tap answered the two
+// cancelled each other's photos.
+constexpr int ASKS_KEPT = 4;
+struct Ask {
+    char         hex[kHexLen];
+    char         flight[kFlightLen];
+    std::int64_t at_us;
+};
+Ask                        s_asks[ASKS_KEPT] = {};  // under the lock
+std::atomic<std::uint32_t> s_ask_taps[ASKS_KEPT] = {};
+std::uint32_t              s_last_tap = 0;  // under the lock
 // The page asks on every redraw until the details are in; once asked, the
-// same aircraft is not asked about again this soon.
+// same aircraft is not fetched for again this soon, only answered from what
+// is in hand.
 constexpr std::int64_t TAP_REPEAT_US = 5 * units::kUsPerSecond;
 
 int ms_since(std::int64_t began_us)
@@ -134,7 +142,15 @@ int ms_since(std::int64_t began_us)
 
 bool tapped(std::uint32_t tap)
 {
-    return tap == s_tap.load();
+    if (tap == 0) {
+        return false;  // a prefetch's
+    }
+    for (const std::atomic<std::uint32_t> &asked : s_ask_taps) {
+        if (asked.load() == tap) {
+            return true;
+        }
+    }
+    return false;
 }
 
 // ---- hosts
@@ -165,7 +181,7 @@ void add_hosts()
     // again but rested, and the other asked.
     net::HostConfig lol{};
     lol.name        = "adsb.lol";
-    lol.base        = "http://api.adsb.lol";
+    lol.base        = "https://api.adsb.lol";  // plain http, a handshake less, is now only a redirect here
     lol.timeout_ms  = 6 * units::kMsPerSecond;
     lol.connections = 1;
     lol.gzip        = true;
@@ -412,7 +428,7 @@ void details_done(const DetailsJobPtr &job)
     ESP_LOGI(TAG, "%s: %s%s%s in %d ms", job->hex, job->details.has_aircraft ? job->details.model : "unknown type",
              job->details.has_route ? ", " : "", job->details.has_route ? job->details.origin_code : "",
              ms_since(job->began_us));
-    if (job->tap != 0 && tapped(job->tap) && s_on_details != nullptr) {
+    if (tapped(job->tap) && s_on_details != nullptr) {
         s_on_details(job->hex, job->details);
     }
 }
@@ -606,7 +622,7 @@ struct PhotoSlot {
 };
 PhotoEntry *s_photo_entries = nullptr;
 PhotoSlot   s_photo_slots[PHOTO_SLOTS];
-int         s_shown_slot = -1;  // the page draws straight from it, so it is never reused
+int         s_shown_slot = -1;  // the last handed on, kept while whoever asked copies it
 
 // Under the lock: the entry for `hex`, taking the least used one when there is none.
 int photo_entry(const char *hex)
@@ -688,22 +704,29 @@ void ask_image(const std::string &hex, const std::string &url, std::uint32_t tap
     request.host        = s_photo_host;
     request.path        = url;
     request.priority    = net::Priority::Tap;
-    request.key         = "photo";
-    request.dedupe      = net::Dedupe::Replace;
+    // Keyed by the aircraft: a photo waiting for one was replaced by
+    // another's, and the first told there was none.
+    request.key         = "photo:" + hex;
+    request.dedupe      = net::Dedupe::Join;
     request.deadline_ms = TAP_DEADLINE_MS;
     request.max_body    = PHOTO_BODY_MAX;
     request.what        = "photo";
     request.done        = [hex, tap](const net::Response &answer) {
-        int slot = -1;
+        int  slot = -1;
+        bool made = false;  // by a request this one joined
         {
             Lock hold;
             const int entry = photo_entry(hex.c_str());
-            if (answer.status == HTTP_OK) {
+            if (s_photo_entries[entry].slot >= 0) {
+                slot         = s_photo_entries[entry].slot;
+                made         = true;
+                s_shown_slot = slot;
+            } else if (answer.status == HTTP_OK) {
                 slot = photo_slot_for(entry);
             }
         }
-        if (slot < 0) {
-            show_photo(hex.c_str(), tap, -1);
+        if (slot < 0 || made) {
+            show_photo(hex.c_str(), tap, slot);
             return;
         }
         PhotoSlot &photo = s_photo_slots[slot];
@@ -714,7 +737,10 @@ void ask_image(const std::string &hex, const std::string &url, std::uint32_t tap
             Lock hold;
             const int entry = photo_entry(hex.c_str());
             photo.filling   = false;
-            if (decoded) {
+            if (decoded && s_photo_entries[entry].slot >= 0) {
+                photo.entry = -1;  // a twin decoded it meanwhile
+                slot        = s_photo_entries[entry].slot;
+            } else if (decoded) {
                 photo.width                   = width;
                 photo.height                  = height;
                 s_photo_entries[entry].slot   = slot;
@@ -766,7 +792,7 @@ void ask_photo_lookup(const char *hex, net::Priority priority, std::uint32_t tap
             std::snprintf(entry.url, sizeof(entry.url), "%s", url.c_str());
             std::snprintf(entry.credit, sizeof(entry.credit), "%s", credit);
         }
-        if (tap == 0 || !tapped(tap)) {
+        if (!tapped(tap)) {
             return;
         }
         if (has) {
@@ -778,7 +804,8 @@ void ask_photo_lookup(const char *hex, net::Priority priority, std::uint32_t tap
     net::submit(std::move(request));
 }
 
-void photo_for_tap(const char *hex, std::uint32_t tap)
+// What is in hand is handed on at once; `fetch` is whether to go out for the rest.
+void photo_for_tap(const char *hex, std::uint32_t tap, bool fetch)
 {
     int         slot = -1;
     Photo       state;
@@ -795,6 +822,8 @@ void photo_for_tap(const char *hex, std::uint32_t tap)
     }
     if (slot >= 0 || state == Photo::None) {
         show_photo(hex, tap, slot);
+    } else if (!fetch) {
+        return;
     } else if (state == Photo::Found) {
         ask_image(hex, url, tap);
     } else {
@@ -818,8 +847,8 @@ void ask_trace(const char *hex)
     request.host        = s_trace_host;
     request.path        = path;
     request.priority    = net::Priority::Now;
-    request.key         = "trace";
-    request.dedupe      = net::Dedupe::Replace;
+    request.key         = std::string("trace:") + hex;
+    request.dedupe      = net::Dedupe::Join;
     request.deadline_ms = TAP_DEADLINE_MS;
     request.max_body    = TRACE_BODY_MAX;
     request.what        = "trace";
@@ -910,10 +939,13 @@ int               s_next_feed = 0;
 
 void feed_failed()
 {
+    int kept = 0;
     {
         Lock hold;
         s_ok = false;
+        kept = s_count;
     }
+    ESP_LOGW(TAG, "both feeds failed; the last %d aircraft kept", kept);
     s_feed_out.store(false);
     publish();
 }
@@ -933,6 +965,21 @@ void take_feed(const net::Response &answer, int feed, int tried, float lat, floa
         return;
     }
     int count = parse(answer.body, answer.length, s_scratch, kMaxAircraft);
+    // An empty sky is a reading gone wrong, a refusal sent as a success: it
+    // emptied the radar, as the few seconds a missing aircraft is kept ran out
+    // across a few of them. The other is asked, and what was seen stays.
+    if (count == 0) {
+        ESP_LOGW(TAG, "%s: no aircraft in %u bytes: %.*s", s_feeds[feed].name, static_cast<unsigned>(answer.length),
+                 answer.body != nullptr ? static_cast<int>(std::min<std::size_t>(answer.length, 80)) : 0,
+                 answer.body != nullptr ? answer.body : "");
+        const int other = (feed + 1) % FEED_COUNT;
+        if ((tried & (1 << other)) == 0) {
+            ask_feed(other, tried, lat, lon);
+        } else {
+            feed_failed();
+        }
+        return;
+    }
     {
         Lock hold;
         count = merge_reading(s_scratch, count, kMaxAircraft, s_list, s_count, esp_timer_get_time(), KEEP_UNSEEN_US);
@@ -1112,21 +1159,37 @@ void request_details(const char *hex, const char *callsign)
     const char        *flight = callsign != nullptr ? callsign : "";
     const std::int64_t now    = esp_timer_get_time();
     std::uint32_t      tap    = 0;
+    bool               again  = false;  // on its way already
     bool               known  = false;
     Details            details{};
     {
         Lock hold;
-        if (std::strcmp(s_tap_hex, hex) == 0 && std::strcmp(s_tap_flight, flight) == 0 &&
-            now - s_tap_at_us < TAP_REPEAT_US) {
-            return;  // already on its way
+        int  at     = -1;
+        int  oldest = 0;
+        for (int i = 0; i < ASKS_KEPT; ++i) {
+            if (std::strcmp(s_asks[i].hex, hex) == 0) {
+                at = i;
+                break;
+            }
+            if (s_asks[i].at_us < s_asks[oldest].at_us) {
+                oldest = i;
+            }
         }
-        tap = s_tap.fetch_add(1) + 1;
-        if (tap == 0) {
-            tap = s_tap.fetch_add(1) + 1;  // 0 is a prefetch's
+        again = at >= 0 && std::strcmp(s_asks[at].flight, flight) == 0 && now - s_asks[at].at_us < TAP_REPEAT_US;
+        at    = at >= 0 ? at : oldest;
+        if (again) {
+            tap = s_ask_taps[at].load();
+        } else {
+            tap = ++s_last_tap;
+            if (tap == 0) {
+                tap = ++s_last_tap;  // 0 is a prefetch's
+            }
+            Ask &ask = s_asks[at];
+            std::snprintf(ask.hex, sizeof(ask.hex), "%s", hex);
+            std::snprintf(ask.flight, sizeof(ask.flight), "%s", flight);
+            ask.at_us = now;
+            s_ask_taps[at].store(tap);
         }
-        std::snprintf(s_tap_hex, sizeof(s_tap_hex), "%s", hex);
-        std::snprintf(s_tap_flight, sizeof(s_tap_flight), "%s", flight);
-        s_tap_at_us = now;
         if (const CacheEntry *entry = cache_find(hex, flight); entry != nullptr && entry->state == Known::Known) {
             known   = true;
             details = entry->details;
@@ -1137,11 +1200,13 @@ void request_details(const char *hex, const char *callsign)
         if (s_on_details != nullptr) {
             s_on_details(hex, details);
         }
-    } else {
+    } else if (!again) {
         ask_details(hex, flight, net::Priority::Tap, tap);
     }
-    photo_for_tap(hex, tap);
-    ask_trace(hex);
+    photo_for_tap(hex, tap, !again);
+    if (!again) {
+        ask_trace(hex);
+    }
 }
 
 

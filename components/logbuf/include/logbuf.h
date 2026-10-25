@@ -25,14 +25,6 @@ using Router = int (*)(const char *tag);
  *  not kept. */
 esp_err_t start(int channels, Router router);
 
-/** How many lines a channel is holding. */
-int count(int channel);
-
-/** Reads one of a channel's lines, index 0 being the oldest it still holds.
- *  False if there is no such line. Taken one at a time so that showing them
- *  costs one Entry rather than a buffer of them. */
-bool at(int channel, int index, Entry &out);
-
 /** The most recent lines across the channels in `mask`, one bit each, merged
  *  into the order they were logged, oldest first; with `warnings`, only E and
  *  W. Returns how many were written to `out`, at most `max`. */

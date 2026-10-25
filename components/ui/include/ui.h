@@ -78,7 +78,7 @@ enum class Setting : std::uint8_t {
     Charging,
     PresenceGate,
     DeskBluetooth,
-    Screen,
+    Light,  // the screen in its light look
     Count,
 };
 
@@ -98,8 +98,6 @@ using PrimaryHandler = void (*)(std::uint32_t colour);
  *  only asks; what that means for the backlight is the board's business. */
 using ScreenHandler = void (*)(bool on);
 
-/** True while the dock is against the right edge. */
-using DockSideHandler = void (*)(bool right);
 using RadarZoomHandler = void (*)(int km);  // the radar zoomed to, to keep
 
 /** True while the panel is hung the other way up. */
@@ -190,12 +188,11 @@ struct LogLine {
 using LogHandler = int (*)(int card, bool warnings, LogLine *out, int max);
 
 /** An empty title means nothing is playing; the card then shows the state.
- *  `controllable` is whether holding the card has anything to act on. Strings
- *  are copied. */
+ *  Strings are copied. */
 /** With art_coming the text waits for the cover asked for with it, so the two
  *  change together, though never for long. */
 esp_err_t set_media(const char *source, const char *title, const char *artist, const char *state,
-                    bool playing, bool controllable, bool art_coming = false);
+                    bool playing, bool art_coming = false);
 
 /** What holding the media card does: -1 opens the media panel, as for the
  *  speaker; a preset index sends the desk there instead, as for Jellyfin. */
@@ -243,10 +240,11 @@ esp_err_t set_media_remote(bool remote);
 esp_err_t set_media_tracks(bool back, bool on);
 
 /** Whether the player could ever take a volume, and subtitles, from here,
- *  which are left out rather than faded when it cannot; and whether its volume
+ *  which are left out rather than faded when it cannot; whether its volume
  *  only steps, with no level to show, as a display's does through
- *  MonitorControl. A volume and subtitles until said otherwise. */
-esp_err_t set_media_takes(bool volume, bool subtitles, bool steps = false);
+ *  MonitorControl; and whether it seeks, which a live stream with no length
+ *  may. A volume, subtitles and seeking until said otherwise. */
+esp_err_t set_media_takes(bool volume, bool subtitles, bool steps = false, bool seek = true);
 
 /** Whether a pause waits a moment before it shows: a speaker says it paused
  *  between two songs, Jellyfin and a laptop only when they did. */
@@ -275,10 +273,10 @@ esp_err_t set_pick_art(int index, const void *pixels);
 esp_err_t set_pill(int index, const char *label, const char *value, Level level);
 
 /** The bulbs drawn on the button come from set_light(), so both have to be pushed. */
-esp_err_t set_lights(const char *label, const char *state, bool on);
+esp_err_t set_lights(bool on);
 
 /** An empty name hides that button, so fewer lights than slots is fine. */
-esp_err_t set_light(int index, const char *name, const char *state, bool on);
+esp_err_t set_light(int index, const char *name, bool on);
 
 /** The big light or the light scene on: someone is in the room, so the screen
  *  stays lit. Not the bed light, which is on for sleeping too. */
@@ -309,7 +307,6 @@ struct Handlers {
     RadarHandler       radar;
     LogHandler         log;
     PrimaryHandler     primary;
-    DockSideHandler    dock_side;
     OrientationHandler orientation;
     ScreenHandler      screen;
     DetailsHandler     details;
@@ -323,11 +320,10 @@ struct Handlers {
 };
 
 /** Requires the LVGL port to be running. A zero accent keeps the built-in
- *  colour; dock_right puts the dock against the right edge instead of the left.
- *  orientation only tells the page which choice to show; board::init() has
- *  already turned the display, and turns it again as the choice asks. */
+ *  colour. orientation only tells the page which choice to show; board::init()
+ *  has already turned the display, and turns it again as the choice asks. */
 esp_err_t init(const Handlers &handlers, int initial_brightness, std::uint32_t accent,
-               bool dock_right, Orientation orientation);
+               Orientation orientation);
 
 /** The radar's range as it was last left, in km, the nearest of its steps;
  *  between init() and build(). */
@@ -337,14 +333,15 @@ void set_radar_range(int km);
  *  for the time again. Only the clock: everything else keeps the real time. */
 void pin_clock(const char *text);
 
-/** After init() has put up the splash and the screen is lit: everything else,
- *  built behind the splash a part at a time so that it keeps moving. Nothing
- *  set before this returns is drawn until it has. */
+/** After init() and the screen is lit: the screen, built a part at a time with
+ *  frames drawn between. Nothing set before this returns is drawn until it has. */
 esp_err_t build();
 
-/** A part of the boot has finished: "desk" or "network". */
-esp_err_t splash_step(const char *label);
-
+/** The start-up screen's steps, from any task: "desk" once the desk has been
+ *  started, "network" once Wi-Fi has joined; done once Home Assistant is
+ *  reached, which sends it on its way. Each said again does nothing. Gone
+ *  after 15 s whatever was said. */
+esp_err_t splash_step(const char *step);
 esp_err_t splash_done();
 
 /** Height in millimetres, or negative for "unknown". */
@@ -354,17 +351,22 @@ esp_err_t set_preset_active(int index, bool active);
 
 /** Unavailable dims and disables every desk control, so nothing can be pressed in vain. */
 esp_err_t set_desk_available(bool available);
+/** How high a preset takes the desk, in tenths of a centimetre; negative while it has none. */
+esp_err_t set_preset_height(int index, int height_mm);
 
 /** Pass nullptr while the time is unknown. */
 esp_err_t set_time(const char *text);
 
-esp_err_t set_links(bool wifi, bool mqtt);
+esp_err_t set_links(bool wifi);
 
-/** Once the phone has been recognised at least once, this also gates which pages appear. */
-esp_err_t set_presence(bool has_key, bool present, bool ever_seen);
+/** How many laptops share through Desk Link. */
+esp_err_t set_laptops(int count);
 
-/** The pack: there, how full, charging, and whether the panel runs on it, unplugged. */
-esp_err_t set_battery(bool present, int percent, bool charging, bool on_battery);
+/** The owner's phone here or not, which also gates which pages appear. */
+esp_err_t set_presence(bool has_key, bool present);
+
+/** The pack: there, how full, and whether the panel runs on it, unplugged. */
+esp_err_t set_battery(bool present, int percent, bool on_battery);
 
 /** Before init(): the diagnostics view's cards, in order, kept by pointer. */
 void set_cards(const Card *cards, int count);
@@ -377,12 +379,6 @@ esp_err_t set_card(int card, const char *summary, Level level);
 /** One row of a card, by its place in Card::rows. The level colours the value;
  *  null shows "--". Strings are copied. */
 esp_err_t set_row(int card, int row, const char *value, Level level = Level::Neutral);
-
-/** The readings Setup's Diagnostics tile shows at a glance, each a few
- *  characters; null shows "--". */
-enum class Glance : std::uint8_t { Uptime, Wifi, DeskLink };
-inline constexpr int kGlanceCount = 3;
-esp_err_t set_glance(Glance which, const char *value);
 
 
 /** Re-reads the calendar and redraws its page. Thread-safe. */
@@ -421,27 +417,25 @@ esp_err_t set_update(const UpdateState &state);
 /** Queued rather than shown at once: they arrive in bursts. A full queue drops the oldest.
  *  `source` says where it came from, over the title, which is the headline; the
  *  message goes under it, or is the headline itself when there is no title.
- *  A negative timeout keeps it until it is tapped. */
+ *  A negative timeout keeps it until it is tapped. With a `key`, withdraw() can
+ *  take it back before then. */
 esp_err_t notify(const char *source, const char *title, const char *message, Level level,
-                 int timeout_ms);
+                 int timeout_ms, const char *key = "");
+/** Takes back the notices sent with `key`, as an answered question does the one asking it. */
+esp_err_t withdraw(const char *key);
 
 /** A development build's: how long the radar takes to go from Home to its page,
  *  draw, zoom and go back, written to `out`. With the LVGL lock. */
 int bench_radar(char *out, std::size_t size);
 
-/** A development build's: Home shown with the radar for bench_radar, with the
- *  phone away too, and whether its feed has answered yet. With the LVGL lock. */
+/** A development build's: Home shown for bench_radar, the radar's feed running
+ *  with the phone away too, and whether it has answered yet. With the LVGL lock. */
 int bench_radar_open(char *out, std::size_t size);
 
 /** A development build's: the radar page left open, running as it does,
  *  following the nearest aircraft; or, with `open` false, the screen put back
  *  as it was before. */
 int bench_radar_map(char *out, std::size_t size, bool open);
-/** A development build's: what each frame of the desk's card unfolding costs. */
-int bench_desk_card(char *out, std::size_t size);
-/** A development build's: each page switched to in turn, what the switch, its
- *  frame and what follows cost. With the LVGL lock. */
-int bench_pages(char *out, std::size_t size);
 
 /** A development build's: preset `index` tapped, as a finger on its button. With the LVGL lock. */
 void desk_tap(int index);

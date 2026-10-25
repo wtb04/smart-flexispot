@@ -56,9 +56,4 @@ esp_err_t start()
     return ESP_OK;
 }
 
-bool synced()
-{
-    return s_synced.load(std::memory_order_relaxed);
-}
-
 }  // namespace wallclock

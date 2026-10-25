@@ -238,7 +238,7 @@ std::vector<std::uint16_t> fetch_photo(const char *hex, int &width, int &height,
     char url[128];
     std::snprintf(url, sizeof(url), "%s/pub/photos/hex/%s", radar::PHOTO_HOST, hex);
     const Answer lookup = get(url, {}, net::Priority::Tap, radar::PHOTO_AGENT);
-    char         found[sizeof(radar::Details::photo_url)];
+    char         found[radar::kPhotoUrlLen];
     char         by[radar::kPhotographerLen] = "";
     if (lookup.status != 200 ||
         !radar::parse_photo(lookup.body.data(), lookup.body.size(), found, sizeof(found), by, sizeof(by))) {

@@ -177,36 +177,6 @@ esp_err_t start(int channels, Router router)
     return ESP_OK;
 }
 
-int count(int channel)
-{
-    if (s_lines == nullptr || channel < 0 || channel >= s_channels) {
-        return 0;
-    }
-    portENTER_CRITICAL(&s_lock);
-    const int held = s_held[channel];
-    portEXIT_CRITICAL(&s_lock);
-    return held;
-}
-
-bool at(int channel, int index, Entry &out)
-{
-    if (s_lines == nullptr || channel < 0 || channel >= s_channels || index < 0) {
-        return false;
-    }
-
-    portENTER_CRITICAL(&s_lock);
-    const int held = s_held[channel];
-    const int next = s_next[channel];
-    portEXIT_CRITICAL(&s_lock);
-
-    if (index >= held) {
-        return false;
-    }
-
-    format(s_lines[channel * LINES_PER_CHANNEL + slot_before(next, held - index)], channel, out);
-    return true;
-}
-
 namespace {
 // One bit of the mask each.
 constexpr int CHANNELS_MAX = 32;

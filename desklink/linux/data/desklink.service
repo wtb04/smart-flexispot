@@ -1,0 +1,11 @@
+[Unit]
+Description=Desk Link, this laptop's link to the desk panel
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+ExecStart=%h/.local/bin/desklink
+Restart=on-failure
+
+[Install]
+WantedBy=graphical-session.target

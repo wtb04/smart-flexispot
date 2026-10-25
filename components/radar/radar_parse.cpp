@@ -517,8 +517,7 @@ bool parse_route(const char *json, std::size_t length, Details &out)
             handled = read_text(in, out.flight_iata, sizeof(out.flight_iata));
         } else if (in.peek('{')) {
             if (key_is(key, key_len, "airline")) {
-                const Field fields[] = {{"name", out.airline, sizeof(out.airline)},
-                                        {"country", out.airline_country, sizeof(out.airline_country)}};
+                const Field fields[] = {{"name", out.airline, sizeof(out.airline)}};
                 handled              = in.take('{') && read_fields(in, fields);
             } else if (key_is(key, key_len, "origin")) {
                 const Place place{out.origin_code, sizeof(out.origin_code), out.origin_city,
@@ -601,7 +600,6 @@ bool parse_aircraft(const char *json, std::size_t length, Details &out)
         {"type", out.model, sizeof(out.model)},
         {"registered_owner", out.owner, sizeof(out.owner)},
         {"registered_owner_country_name", out.owner_country, sizeof(out.owner_country)},
-        {"url_photo_thumbnail", out.photo_url, sizeof(out.photo_url)},
     };
     if (!read_fields(in, fields)) {
         return false;

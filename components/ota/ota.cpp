@@ -555,6 +555,15 @@ esp_err_t start(const Hooks &hooks)
     config.max_uri_handlers  = MAX_ROUTES;
     config.task_priority     = SERVER_PRIORITY;
     config.core_id           = SERVER_CORE;
+    // A laptop that sleeps or leaves the network keeps its connection open in
+    // name: kept-alive, its session would hold a socket for good, and seven of
+    // them shut everyone out, Desk Link first. Gone within 45 s, and when the
+    // sessions are full the longest idle makes room.
+    config.lru_purge_enable    = true;
+    config.keep_alive_enable   = true;
+    config.keep_alive_idle     = 30;
+    config.keep_alive_interval = 5;
+    config.keep_alive_count    = 3;
     ESP_RETURN_ON_ERROR(httpd_start(&s_server, &config), TAG, "server");
 
     const httpd_uri_t routes[] = {

@@ -97,7 +97,6 @@ void lookups()
         }
         radar::Details details{};
         fetch_details(hex.c_str(), callsign.c_str(), details);
-        details.photo_checked = true;
         {
             std::lock_guard<std::mutex> hold(s_lookup_lock);
             s_found_hex     = hex;

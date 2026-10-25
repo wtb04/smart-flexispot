@@ -75,7 +75,6 @@ enum class Outcome : std::uint8_t {
     Resting,    // the host rests past this one's deadline
     Replaced,   // a newer one with its key took its place
     Expired,    // its deadline came before it could go
-    Cancelled,  // cancel() asked
 };
 
 inline const char *outcome_name(Outcome outcome)
@@ -86,7 +85,6 @@ inline const char *outcome_name(Outcome outcome)
         case Outcome::Resting: return "host resting";
         case Outcome::Replaced: return "replaced";
         case Outcome::Expired: return "expired";
-        case Outcome::Cancelled: return "cancelled";
     }
     return "?";
 }
@@ -98,7 +96,6 @@ struct Response {
     const char *body     = "";      // inflated, NUL-terminated, and valid only in the callback
     std::size_t length   = 0;
     int         ms       = 0;       // on the wire, the last attempt
-    int         attempts = 0;
 
     bool ok() const { return outcome == Outcome::Answered && status >= 200 && status < 300; }
 };
@@ -121,18 +118,19 @@ struct Request {
     std::optional<Retry> retry;                 // the host's when not given
     bool                 repeatable = true;     // safe to send twice: a retry, or once more on a fresh connection
     std::size_t          max_body = 64 * 1024;
+    // Where the answer is written as it comes, rather than in a worker's own
+    // buffer: room for into_size - 1 bytes and the end of text, kept until
+    // done is called. Gzipped, it is inflated elsewhere. As fetch() gives it.
+    char                *into      = nullptr;
+    std::size_t          into_size = 0;
     const char          *what     = "";         // in the log
     Done                 done;                  // always called, once, on a worker
 };
 
-/** How a host is doing, for diagnostics and for choosing another. */
+/** How a host is doing, for choosing another. */
 struct HostStatus {
-    bool          resting         = false;
-    int           rest_left_ms    = 0;
-    int           failures_in_row = 0;
-    int           last_ms         = 0;
-    std::uint32_t requests        = 0;
-    std::uint32_t failures        = 0;
+    bool resting         = false;
+    int  failures_in_row = 0;
 };
 
 }  // namespace net

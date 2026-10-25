@@ -176,14 +176,21 @@ static inline void sdio_mempool_destroy(void)
 	mempool_destroy(buf_mp_g);
 }
 
+/* Smart Flexispot patch: what is sent without a buffer of its own, the
+ * requests to the slave and Bluetooth, is copied into one of these, in PSRAM
+ * like the stream buffers. From the pool, which never gives back, those sent
+ * as the link came up held some 23 KB of internal DMA memory for good. */
 static inline void *sdio_buffer_alloc(uint need_memset)
 {
-	return mempool_alloc(buf_mp_g, MAX_SDIO_BUFFER_SIZE, need_memset);
+	void *buf = stream_buffer_alloc(MAX_SDIO_BUFFER_SIZE);
+	if (buf && need_memset)
+		memset(buf, 0, MAX_SDIO_BUFFER_SIZE);
+	return buf;
 }
 
 static inline void sdio_buffer_free(void *buf)
 {
-	mempool_free(buf_mp_g, buf);
+	heap_caps_free(buf);
 }
 
 #if H_SDIO_HOST_RX_MODE == H_SDIO_HOST_STREAMING_MODE

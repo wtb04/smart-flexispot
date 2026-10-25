@@ -1,5 +1,6 @@
 #include "imu.h"
 
+#include "esp_attr.h"
 #include "bmi270.h"
 #include "bsp/m5stack_tab5.h"
 #include "esp_check.h"
@@ -52,17 +53,13 @@ esp_err_t start()
     return ESP_OK;
 }
 
-bool gravity(float &x, float &y, float &z)
-{
-    return s_imu != nullptr && bmi270_get_acce_data(s_imu, &x, &y, &z) == ESP_OK;
-}
-
 namespace {
 // The BMI270's own registers, which its driver keeps to itself: its FIFO.
 constexpr std::uint8_t FIFO_LENGTH   = 0x24;
 constexpr std::uint8_t FIFO_DATA     = 0x26;
 constexpr std::uint8_t FIFO_DOWNS    = 0x45;
 constexpr std::uint8_t FIFO_CONFIG_1 = 0x49;
+constexpr std::uint8_t ACC_X_LSB     = 0x0C;
 constexpr std::uint8_t CMD           = 0x7E;
 constexpr std::uint8_t FIFO_FILTERED = 0x80;  // as the data registers have it, not downsampled
 constexpr std::uint8_t FIFO_ACC_ONLY = 0x40;  // no headers: frames of the three axes alone
@@ -71,6 +68,11 @@ constexpr std::uint16_t FIFO_LENGTH_MASK = 0x3FFF;
 constexpr std::size_t  FIFO_BYTES    = 2048;
 constexpr std::size_t  FRAME_BYTES   = 6;
 constexpr float        LSB_PER_G     = 16384.0f;  // at the 2 g range
+// The driver's own reads wait for ever: once the bus stopped answering, the
+// jobs lane hung on a look at gravity until the watchdog restarted the panel,
+// where the power monitor's reads, timed, only failed. A whole FIFO takes
+// some 50 ms at 400 kHz.
+constexpr int          I2C_TIMEOUT_MS = 200;
 
 std::int16_t s_last[3]  = {};
 bool         s_have_last = false;
@@ -78,14 +80,26 @@ bool         s_have_last = false;
 esp_err_t write(std::uint8_t reg, std::uint8_t value)
 {
     const std::uint8_t out[2] = {reg, value};
-    return i2c_master_transmit(s_imu->i2c_handle, out, sizeof(out), -1);
+    return i2c_master_transmit(s_imu->i2c_handle, out, sizeof(out), I2C_TIMEOUT_MS);
 }
 
 esp_err_t read(std::uint8_t reg, std::uint8_t *data, std::size_t length)
 {
-    return i2c_master_transmit_receive(s_imu->i2c_handle, &reg, 1, data, length, -1);
+    return i2c_master_transmit_receive(s_imu->i2c_handle, &reg, 1, data, length, I2C_TIMEOUT_MS);
 }
 }  // namespace
+
+bool gravity(float &x, float &y, float &z)
+{
+    std::int16_t axes[3];
+    if (s_imu == nullptr || read(ACC_X_LSB, reinterpret_cast<std::uint8_t *>(axes), sizeof(axes)) != ESP_OK) {
+        return false;
+    }
+    x = axes[0] / LSB_PER_G;
+    y = axes[1] / LSB_PER_G;
+    z = axes[2] / LSB_PER_G;
+    return true;
+}
 
 esp_err_t watch_knocks()
 {
@@ -113,7 +127,7 @@ float sharpest_jolt()
     if (s_imu == nullptr || read(FIFO_LENGTH, length_bytes, 2) != ESP_OK) {
         return 0.0f;
     }
-    static std::uint8_t frames[FIFO_BYTES];
+    EXT_RAM_BSS_ATTR static std::uint8_t frames[FIFO_BYTES];  // in PSRAM, as internal RAM is short
     std::size_t length = std::min<std::size_t>((length_bytes[0] | (length_bytes[1] << 8)) & FIFO_LENGTH_MASK,
                                                sizeof(frames));
     length -= length % FRAME_BYTES;

@@ -30,6 +30,7 @@ public:
             view.duration_s   = now.duration_s;
             view.position_key = now.title + ':' + std::to_string(now.position_s) + (now.playing ? "" : "p");
             view.remote       = now.takes_pause;
+            view.takes_seek   = now.takes_seek;
             view.tracks_back  = now.takes_previous;
             view.tracks_on    = now.takes_next;
             view.before       = now.video && now.takes_previous;

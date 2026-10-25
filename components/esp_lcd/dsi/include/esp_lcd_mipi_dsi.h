@@ -131,6 +131,12 @@ esp_err_t esp_lcd_new_panel_dpi(esp_lcd_dsi_bus_handle_t bus, const esp_lcd_dpi_
 esp_err_t esp_lcd_dpi_panel_get_frame_buffer(esp_lcd_panel_handle_t dpi_panel, uint32_t fb_num, void **fb0, ...);
 
 /**
+ * @brief Take on one more frame buffer, of the panel's size, allocated by the caller from DMA-capable PSRAM
+ *        (this copy's addition: the BSP creates at most three).
+ */
+esp_err_t esp_lcd_dpi_panel_add_frame_buffer(esp_lcd_panel_handle_t dpi_panel, void *fb);
+
+/**
  * @brief Set pre-defined pattern to the screen for testing or debugging purpose
  *
  * @param[in] dpi_panel MIPI DPI panel handle, returned from esp_lcd_new_panel_dpi()
@@ -150,6 +156,21 @@ esp_err_t esp_lcd_dpi_panel_set_pattern(esp_lcd_panel_handle_t dpi_panel, mipi_d
  * @note Not in ESP-IDF: for a panel that is dark.
  */
 esp_err_t esp_lcd_dpi_panel_set_streaming(esp_lcd_panel_handle_t dpi_panel, bool on);
+
+/**
+ * @brief How often the DSI bridge has run out of pixels since the start.
+ *
+ * @note Not in ESP-IDF: the DMA goes round its frames by itself here.
+ */
+uint32_t esp_lcd_dpi_panel_get_underruns(esp_lcd_panel_handle_t dpi_panel);
+
+/** @brief The DSI host's errors since last asked (its INT_ST1, which reading
+ *         clears); bit 7 is its pixel FIFO overflowing. Not in ESP-IDF. */
+uint32_t esp_lcd_dpi_panel_take_host_errors(esp_lcd_panel_handle_t dpi_panel);
+
+/** @brief A soft reset of the DSI host, which keeps its configuration. With
+ *         the stream stopped. Not in ESP-IDF. */
+void esp_lcd_dpi_panel_reset_host(esp_lcd_panel_handle_t dpi_panel);
 
 /**
  * @brief Set color conversion configuration for DPI panel

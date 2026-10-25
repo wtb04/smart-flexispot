@@ -43,11 +43,11 @@ struct NowPlaying {
     int         volume     = -1;  // percent, -1 when it has none
     bool        muted      = false;
     bool        takes_pause    = false;
-    bool        takes_seek     = false;
     bool        takes_next     = false;
     bool        takes_previous = false;
     bool        takes_volume   = false;
     bool        takes_volume_step = false;  // up and down, with no level to show
+    bool        takes_seek     = false;     // also a live stream's, which has no length
 };
 
 /** A message's type and when it was sent; false when it has neither. */

@@ -135,13 +135,16 @@ void move_desk(std::int64_t now)
 void start()
 {
     std::copy(std::begin(HEIGHTS_MM), std::end(HEIGHTS_MM), s_heights);
+    for (int i = 0; i < ui::kPresetCount; ++i) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_preset_height(i, s_heights[i]));
+    }
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_desk_available(s_linked));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_height(s_height_mm));
     show_presets();
     const Battery &b = BATTERIES[s_battery];
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_battery(b.present, b.percent, b.charging, b.on_battery));
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_presence(true, s_phone, true));
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_links(s_wifi, s_wifi && s_hass));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_battery(b.present, b.percent, b.on_battery));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_presence(true, s_phone));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_links(s_wifi));
     show_focus();
 }
 
@@ -185,6 +188,7 @@ void on_preset(int index, bool store)
     }
     if (store) {
         s_heights[index] = s_height_mm;
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_preset_height(index, s_height_mm));
         show_presets();
         desk_notice("Preset saved", true, SAVED_NOTICE_MS);
     } else if (s_heights[index] < 0) {
@@ -243,19 +247,19 @@ void next_battery()
 {
     s_battery = (s_battery + 1) % static_cast<int>(std::size(BATTERIES));
     const Battery &b = BATTERIES[s_battery];
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_battery(b.present, b.percent, b.charging, b.on_battery));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_battery(b.present, b.percent, b.on_battery));
 }
 
 void toggle_phone()
 {
     s_phone = !s_phone;
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_presence(true, s_phone, true));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_presence(true, s_phone));
 }
 
 void toggle_wifi()
 {
     s_wifi = !s_wifi;
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_links(s_wifi, s_wifi && s_hass));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_links(s_wifi));
 }
 
 namespace {
@@ -294,7 +298,6 @@ void diagnostics()
     row(WIFI, 0, s_wifi ? "the simulator's" : "not joined", s_wifi ? Level::Neutral : Level::Bad);
     row(WIFI, 1, s_wifi ? text : nullptr, Level::Good);
     row(WIFI, 2, s_wifi ? "127.0.0.1" : nullptr);
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_glance(ui::Glance::Wifi, s_wifi ? text : "offline"));
 
     card(HASS, s_hass ? "connected" : "offline", s_hass ? Level::Good : Level::Bad);
     row(HASS, 0, s_hass ? "connected" : "offline", s_hass ? Level::Good : Level::Bad);
@@ -313,7 +316,6 @@ void diagnostics()
     card(LINK, s_linked ? "wire" : "box silent", s_linked ? Level::Good : Level::Bad);
     row(LINK, 0, "wire");
     row(LINK, 1, s_linked ? "answering" : "silent", s_linked ? Level::Good : Level::Bad);
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_glance(ui::Glance::DeskLink, s_linked ? "wire" : nullptr));
 
     const Battery &battery = BATTERIES[s_battery];
     if (!battery.present) {
@@ -364,7 +366,6 @@ void diagnostics()
 
     const auto up = static_cast<unsigned>(now_ms() / 1000);
     std::snprintf(text, sizeof(text), "%um %us", up / 60, up % 60);
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_glance(ui::Glance::Uptime, text));
     card(SYSTEM, "simulator", Level::Good);
     row(SYSTEM, 0, "simulator");
     row(SYSTEM, 2, text);
@@ -373,6 +374,5 @@ void diagnostics()
 void set_home_assistant(bool up)
 {
     s_hass = up;
-    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_links(s_wifi, s_wifi && s_hass));
 }
 }  // namespace hardware
