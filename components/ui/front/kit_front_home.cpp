@@ -462,12 +462,18 @@ std::int32_t s_track_x = 0, s_track_w = 0, s_track_y = 0;
 std::int32_t s_rose_d = 0, s_rose_r = 0;
 constexpr std::int32_t ROSE_PLANE = 22;  // the plane on the rose, smaller than the route's so the ring has room
 
-// The closest aircraft in the air.
+char s_pinned[radar::kHexLen] = "";  // overhead_pin()'s
+
+// The closest aircraft in the air, or the one pinned while it is.
 const radar::Aircraft *pick_overhead()
 {
     const radar::Aircraft *closest = nullptr;
     for (int i = 0; i < s_sky.count; ++i) {
         const radar::Aircraft &a = s_sky.list[i];
+        if (s_pinned[0] != '\0' && std::strcmp(a.hex, s_pinned) == 0 && !a.on_ground) {
+            closest = &a;
+            break;
+        }
         if (a.on_ground || a.distance_nm * KM_PER_NM > OVERHEAD_KM) {
             continue;
         }
@@ -909,3 +915,11 @@ void build_home(lv_obj_t *page)
 }
 
 }  // namespace ui::kitfront
+
+namespace ui {
+void overhead_pin(const char *hex)
+{
+    std::snprintf(kitfront::s_pinned, sizeof kitfront::s_pinned, "%s", hex != nullptr ? hex : "");
+    kitfront::paint_overhead();
+}
+}  // namespace ui

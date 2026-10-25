@@ -40,7 +40,7 @@ I am not affiliated with, or endorsed by, any of the products or services named 
 - What plays on Jellyfin, with a cinema view that has the lights and the desk within reach.
 - A live radar of the planes overhead: who is flying, where to, their photo and their trail.
 - The next lecture, a countdown, and when to leave to get there on time.
-- Desk Link, a menu bar app that connects my Mac to the panel: what plays there shows on the panel and is steered from it, and Claude Code's sessions come through it.
+- Desk Link, a small app that connects my laptops to the panel, on macOS and on Linux: what plays there shows on the panel and is steered from it, and Claude Code's sessions come through it.
 - A pill in the bar while a Claude Code session on a laptop works, amber when one waits on you.
 - A focus timer, a presence sensor from your phone, and diagnostics for every part, on the panel itself.
 - A simulator that runs the real UI on a Mac, and host tests with coverage in CI.
@@ -79,7 +79,7 @@ When something plays on Jellyfin the bar follows it, and holding it there sends 
 
 ![A video from the laptop in the cinema view](docs/screenshots/laptop.png)
 
-[Desk Link](desklink/macos/), a small menu bar app on my Mac, connects the laptop to the panel. Whatever plays on the Mac shows on the panel with its cover, a video in the cinema view and music on the media card, and the panel's buttons pause, seek, skip and change the volume there. Claude Code's sessions come through it too. Jellyfin comes first, then the speaker, then the laptop. Everything the two send each other is encrypted with a key they share, and each regularly checks that the other is still there.
+[Desk Link](desklink/), a small app in the menu bar on my Mac ([macOS](desklink/macos/)) and in the bar on Linux ([Linux](desklink/linux/), any MPRIS player), connects a laptop to the panel. Whatever plays there shows on the panel with its cover, a video in the cinema view and music on the media card, and the panel's buttons pause, seek, skip and change the volume there. Claude Code's sessions come through it too. The speaker comes first, then Jellyfin, then the laptop, and whatever plays before whatever is paused. Everything the two send each other is encrypted with a key they share, and each regularly checks that the other is still there.
 
 <p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="desklink/macos/shots/menu-dark.png"><img src="desklink/macos/shots/menu-light.png" alt="Desk Link's menu, under its icon in the menu bar" width="407"></picture></p>
 
@@ -123,7 +123,7 @@ The panel knows my phone over Bluetooth. While it is away, the personal pages ar
 |---|---|
 | ![Setup](docs/screenshots/setup.png) | ![Diagnostics](docs/screenshots/diagnostics.png) |
 
-Brightness, the dark or light look, the accent colour, the focus lengths, which way up the panel hangs, and a card for every part with a log, so when something is off you can see why without a laptop.
+Setup is a sidebar: Screen and sound for the brightness, the dark or light look and the accent colour; Focus for its lengths; Panel for which way up it hangs, whether the personal pages hide while I am away, charging, and the desk by cable or Bluetooth; System for updates and restarting; and Diagnostics, every part with its state and a log, so when something is off you can see why without a laptop.
 
 ## Will it work with my desk?
 

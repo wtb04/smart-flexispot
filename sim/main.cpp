@@ -453,7 +453,11 @@ bool pick_plane(int above_ft)
             best = &plane;
         }
     }
-    return best != nullptr && ui::radar_choose(best->hex);
+    if (best == nullptr) {
+        return false;
+    }
+    ui::overhead_pin(best->hex);
+    return ui::radar_choose(best->hex);
 }
 }  // namespace
 
