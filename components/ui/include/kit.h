@@ -534,6 +534,9 @@ lv_obj_t *dock_item(lv_obj_t *dock, const char *glyph);
 /** A page and the dock item that chooses it; `build` fills it in a pause ahead of its first visit. */
 int       add_page(lv_obj_t *item, void (*build)(lv_obj_t *page));
 void      show_page(int index, bool animate = true);
+/** A page built ahead of being shown, as it otherwise is the first time it
+ *  is; true if it was built now. */
+bool      build_page(int index);
 int       shown_page();
 /** No page shows, for a screen with other content of its own; showing one brings them back. */
 void      hide_pages();
