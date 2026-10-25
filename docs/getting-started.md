@@ -6,7 +6,7 @@ Everything to build the panel for your own desk, from the hardware to the first 
 
 - An M5Stack Tab5. Early units have an ESP32-P4 v1.x chip, which `sdkconfig.defaults` targets, and so do the release images. Check yours with `esptool.py --port <port> chip_id`. On a v3.x chip, take the `ESP32P4_SELECTS_REV_LESS_V3` and `ESP32P4_REV_MIN_100` lines out of `sdkconfig.defaults` and run `idf.py fullclean`; I have not tried that. Both display revisions (ILI9881C and ST7123) work.
 - A Flexispot with a supported control box (see [Will it work with my desk?](../README.md#will-it-work-with-my-desk)) and an RJ45 cable you do not mind cutting.
-- Optionally, any ESP32 as the companion.
+- Optionally, an ESP32 DevKit as the companion: the original ESP32, which its firmware is built for, as the S2, S3 and C-series lack some of the pins it uses.
 
 ## 2. Connect the desk
 
