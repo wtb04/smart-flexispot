@@ -32,4 +32,9 @@ void radar_open_on(const char *hex);
  *  For the simulator's screenshots. LVGL lock held. */
 bool radar_choose(const char *hex);
 
+/** Home's Overhead shows that aircraft while it is in the sky, rather than the
+ *  closest, so a screenshot of Home and one of the radar have the same. For
+ *  the simulator's screenshots. LVGL lock held. */
+void overhead_pin(const char *hex);
+
 }  // namespace ui
