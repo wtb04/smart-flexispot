@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <cstdlib>
 #include <mutex>
 #include <utility>
@@ -27,11 +28,19 @@ constexpr float VOLUME_STEP = 0.05f;  // of full scale, per press, where there i
 constexpr std::int64_t VOLUME_HOLD_US    = 10 * units::kUsPerSecond;
 constexpr int          VOLUME_AGREES     = 1;  // percent either way, for rounding
 constexpr std::int64_t MEDIA_GONE_US     = 3 * units::kUsPerSecond;
+// Jellyfin says nothing plays while it goes on to the next episode, which in
+// a browser takes a few seconds: the card stays on it meanwhile.
+constexpr std::int64_t BETWEEN_EPISODES_US = 10 * units::kUsPerSecond;
+// The laptop's Now Playing of a video Jellyfin plays in its browser: as far
+// into it, and as long, give or take its reports' lag.
+constexpr int SAME_PLACE_S  = 20;
+constexpr int SAME_LENGTH_S = 5;
 constexpr std::int64_t VOLUME_MIN_GAP_US = 250 * units::kUsPerMs;
 
 // The sources tell their players from tasks of their own, one at a time.
 std::mutex            s_lock;
 std::atomic<Player *> s_on{nullptr};  // what the card shows, and so steers
+std::atomic<Player *> s_sound{nullptr};  // whose volume it steers: the laptop's, for Jellyfin in its browser
 std::atomic<bool>     s_muted{false};
 std::atomic<bool>     s_steps{false};
 std::atomic<int>      s_volume_pct{-1};  // negative until the player reports one
@@ -52,21 +61,77 @@ Player &steered()
     return player != nullptr ? *player : speaker_player();
 }
 
+Player &sounded()
+{
+    Player *player = s_sound.load(std::memory_order_relaxed);
+    return player != nullptr ? *player : steered();
+}
+
+// Letters and digits only, in lower case, as a browser's tab and Jellyfin
+// may write a title each its own way.
+std::string plain(const std::string &text)
+{
+    std::string out;
+    for (const char c : text) {
+        if (std::isalnum(static_cast<unsigned char>(c)) != 0) {
+            out += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+    }
+    return out;
+}
+
+/** Whether the laptop plays what Jellyfin does, in its browser: the same
+ *  title, one in the other, or as far into something as long. */
+bool on_laptop_too(const PlayerView &jellyfin, const PlayerView &laptop)
+{
+    if (!jellyfin.going() || !laptop.going()) {
+        return false;
+    }
+    const std::string a = plain(jellyfin.title), b = plain(laptop.title);
+    if (!a.empty() && !b.empty() && (a.find(b) != std::string::npos || b.find(a) != std::string::npos)) {
+        return true;
+    }
+    return jellyfin.duration_s > 0 && std::abs(jellyfin.duration_s - laptop.duration_s) <= SAME_LENGTH_S &&
+           std::abs(jellyfin.position_s - laptop.position_s) <= SAME_PLACE_S;
+}
+
 /** The player the card shows and steers: anything playing before anything
  *  paused, and in each the speaker before Jellyfin before the laptop; the
  *  speaker while none has anything. The laptop's Spotify shows the speaker's
- *  own track, so the laptop with what the speaker has is passed over: paused
- *  on the speaker, the card stayed on that copy of it. */
+ *  own track, and its browser what Jellyfin plays in it, so a laptop with
+ *  either is passed over: paused on the speaker, the card stayed on that
+ *  copy of it. Jellyfin going on to its next episode keeps the card a while,
+ *  unless the speaker starts meanwhile. */
 Player &choose(PlayerView &view)
 {
     Player *const     order[] = {&speaker_player(), &jellyfin_player(), &laptop_player()};
-    const PlayerView  speaker = speaker_player().view();
-    const auto        mirrors = [&speaker](const PlayerView &v) {
-        return speaker.going() && !v.title.empty() && v.title == speaker.title && v.artist == speaker.artist;
+    const PlayerView  speaker  = speaker_player().view();
+    const PlayerView  jellyfin = jellyfin_player().view();
+    const auto        mirrors  = [&](const PlayerView &v) {
+        return (speaker.going() && !v.title.empty() && v.title == speaker.title && v.artist == speaker.artist) ||
+               on_laptop_too(jellyfin, v);
     };
+
+    static PlayerView   s_last_jellyfin;
+    static std::int64_t s_jellyfin_gone_us = 0;
+    if (jellyfin.going()) {
+        s_last_jellyfin    = jellyfin;
+        s_jellyfin_gone_us = 0;
+    } else if (s_on.load(std::memory_order_relaxed) == &jellyfin_player() && s_last_jellyfin.going() &&
+               !(speaker.going() && speaker.state != "paused")) {
+        const std::int64_t now = esp_timer_get_time();
+        if (s_jellyfin_gone_us == 0) {
+            s_jellyfin_gone_us = now;
+        }
+        if (now - s_jellyfin_gone_us < BETWEEN_EPISODES_US) {
+            view = s_last_jellyfin;
+            return jellyfin_player();
+        }
+    }
+
     for (const bool want_playing : {true, false}) {
         for (Player *player : order) {
-            PlayerView candidate = player->view();
+            PlayerView candidate = player == &jellyfin_player() ? jellyfin : player == &speaker_player() ? speaker : player->view();
             if (!candidate.going() || (candidate.state == "paused") == want_playing) {
                 continue;
             }
@@ -79,6 +144,24 @@ Player &choose(PlayerView &view)
     }
     view = speaker;
     return speaker_player();
+}
+
+/** Jellyfin in the laptop's browser is heard at the laptop's volume, not its
+ *  own player's: the card's volume, mute and steps are the laptop's then. */
+Player &sound_for(Player &player, PlayerView &view)
+{
+    if (&player != &jellyfin_player()) {
+        return player;
+    }
+    const PlayerView laptop = laptop_player().view();
+    if (!laptop.takes_volume || !on_laptop_too(view, laptop)) {
+        return player;
+    }
+    view.takes_volume = laptop.takes_volume;
+    view.steps_volume = laptop.steps_volume;
+    view.volume       = laptop.volume;
+    view.muted        = laptop.muted;
+    return laptop_player();
 }
 
 /** A player that vanishes or loses its title for a moment is not shown as
@@ -234,8 +317,10 @@ void show()
 {
     PlayerView    view;
     Player       &player = choose(view);
-    Player *const before = s_on.exchange(&player);
-    const bool    moved  = before != &player;
+    Player       &sound  = sound_for(player, view);
+    const bool    shown_moved = s_on.exchange(&player) != &player;
+    const bool    sound_moved = s_sound.exchange(&sound) != &sound;
+    const bool    moved       = shown_moved || sound_moved;
     static int    s_hold = -2;
     if (std::exchange(s_hold, view.hold_preset) != view.hold_preset) {
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_media_hold_preset(view.hold_preset));
@@ -274,7 +359,7 @@ void send_volume(void *)
         return;
     }
     s_volume_sent_us.store(esp_timer_get_time(), std::memory_order_relaxed);
-    steered().set_volume(percent);
+    sounded().set_volume(percent);
 }
 
 void nudge_volume(float delta)
@@ -378,14 +463,14 @@ void on_media(ui::MediaAction action)
         case ui::MediaAction::VolumeUp: {
             const bool up = action == ui::MediaAction::VolumeUp;
             if (s_steps.load(std::memory_order_relaxed)) {
-                player.step_volume(up);
+                sounded().step_volume(up);
             } else {
                 nudge_volume(up ? VOLUME_STEP : -VOLUME_STEP);
             }
             break;
         }
         case ui::MediaAction::Mute:
-            player.set_muted(!s_muted.load(std::memory_order_relaxed));
+            sounded().set_muted(!s_muted.load(std::memory_order_relaxed));
             break;
         case ui::MediaAction::Subtitles:
             player.toggle_subtitles();
