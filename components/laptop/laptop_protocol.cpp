@@ -51,6 +51,9 @@ void add_desk(cJSON *root, DeskState desk)
     if (desk.going != Desk::None) {
         cJSON_AddStringToObject(root, "going", desk_name(desk.going));
     }
+    if (desk.height_mm >= 0) {
+        cJSON_AddNumberToObject(root, "height", desk.height_mm);
+    }
 }
 
 const char *command_name(Command command)

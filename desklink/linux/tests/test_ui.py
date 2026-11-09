@@ -10,6 +10,10 @@ class StatusLineTest(unittest.TestCase):
         self.assertEqual(ui.status_line(link, "port 47801 in use"), "port 47801 in use")
         self.assertEqual(ui.status_line(link, None), "Connected to smart-flexispot")
 
+    def test_the_desks_height_as_the_panel_shows_it(self):
+        self.assertEqual(ui.height_text(1125), "112.5 cm")
+        self.assertEqual(ui.height_text(None), "")
+
     def test_subtitle(self):
         self.assertEqual(ui.subtitle(SimpleNamespace(artist="Ubiquiti", identity="Google Chrome")),
                          "Ubiquiti, Google Chrome")

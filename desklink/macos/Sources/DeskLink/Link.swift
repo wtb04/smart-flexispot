@@ -19,6 +19,7 @@ final class Link: ObservableObject {
     @Published private(set) var firmware = ""
     @Published private(set) var desk: Desk?       // where it stands, as the panel last said; nil without a desk
     @Published private(set) var deskGoing: Desk?  // stand or sit while the panel takes it there
+    @Published private(set) var deskHeightMM: Int?
 
     @Published var sharesClaude: Bool {
         didSet { defaults.set(sharesClaude, forKey: "claude") }
@@ -313,7 +314,7 @@ final class Link: ObservableObject {
     }
 
     private func deskSaid(_ answer: [String: Any]) {
-        (desk, deskGoing) = Desk.said(answer)
+        (desk, deskGoing, deskHeightMM) = Desk.said(answer)
         if deskGoing == nil {
             stopFollowing()
         } else if following == nil {

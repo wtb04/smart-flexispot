@@ -253,6 +253,16 @@ class LinkTest(unittest.TestCase):
         self.timers.advance(10)
         self.assertIsNone(self.link.desk, "an older panel, or no desk linked")
 
+    def test_the_desks_height_is_the_pongs(self):
+        self.make(desk="stand")
+        self.assertIsNone(self.link.desk_height_mm, "not said yet")
+        self.client.height = 1125
+        self.timers.advance(10)
+        self.assertEqual(self.link.desk_height_mm, 1125)
+        self.client.height = True
+        self.timers.advance(10)
+        self.assertIsNone(self.link.desk_height_mm, "only a number of millimetres")
+
     def test_no_desk_while_the_panel_does_not_answer(self):
         self.make(desk="sit")
         self.client.status = None

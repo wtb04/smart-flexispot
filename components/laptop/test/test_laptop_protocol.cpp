@@ -184,4 +184,6 @@ TEST(LaptopProtocol, a_tap_is_answered_with_where_the_desk_now_goes)
     EXPECT_EQ(laptop::desk_body({laptop::Desk::Sit, laptop::Desk::Stand}, 7),
               R"({"type":"desk","at":7,"desk":"sit","going":"stand"})");
     EXPECT_EQ(laptop::desk_body({}, 7), R"({"type":"desk","at":7})") << "no desk linked";
+    EXPECT_EQ(laptop::desk_body({laptop::Desk::Between, laptop::Desk::Sit, 1043}, 7),
+              R"({"type":"desk","at":7,"desk":"between","going":"sit","height":1043})");
 }

@@ -140,8 +140,8 @@ int fixtures()
         {"command_mute", command_body(Command::Mute, 1, AT)},
         {"command_volume_up", command_body(Command::VolumeUp, 0, AT)},
         {"command_volume_down", command_body(Command::VolumeDown, 0, AT)},
-        {"pong_desk", pong_body("smart-flexispot", "v0.9.0", 1, AT, {Desk::Sit, Desk::Stand})},
-        {"desk", desk_body({Desk::Between, Desk::Stand}, AT)},
+        {"pong_desk", pong_body("smart-flexispot", "v0.9.0", 1, AT, {Desk::Sit, Desk::Stand, 742})},
+        {"desk", desk_body({Desk::Between, Desk::Stand, 1043}, AT)},
     };
     for (const auto &[name, body] : named) {
         cJSON_AddStringToObject(bodies, name, body.c_str());

@@ -376,7 +376,8 @@ laptop::DeskState desk_for_laptop(laptop::Desk tap)
         }
     }
     return {.at    = stand_or_sit(desk::active_preset_index(), laptop::Desk::Between),
-            .going = stand_or_sit(ui::desk_travelling(), laptop::Desk::None)};
+            .going = stand_or_sit(ui::desk_travelling(), laptop::Desk::None),
+            .height_mm = desk::height_mm()};
 }
 
 // Once for each update that did not take; kept until tapped, as it will be

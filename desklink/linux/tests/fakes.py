@@ -63,6 +63,7 @@ class FakeClient:
         self.pending = []
         self.reaches, self.status, self.defer = reaches, status, defer
         self.desk, self.going, self.desk_status, self.pong = desk, going, desk_status, pong
+        self.height = None
         self.panel = seal.Envelope(KEY, clock_ms=clock.wall_ms)
 
     def post(self, url, body, done):
@@ -89,7 +90,8 @@ class FakeClient:
     def desk_fields(self):
         if self.desk is None:
             return {}
-        return {"desk": self.desk, **({"going": self.going} if self.going else {})}
+        return {"desk": self.desk, **({"going": self.going} if self.going else {}),
+                **({"height": self.height} if self.height is not None else {})}
 
     def states(self):
         return [m for _, m in self.posts if m and m["type"] == "state"]

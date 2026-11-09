@@ -27,7 +27,8 @@
 // "stand" or "sit", taps that preset as the screen's button does, and without
 // one only asks. It is answered "desk", and "pong" says the same, whenever
 // there is a desk to move: where it stands, "desk": "stand", "sit" or
-// "between", and "going": "stand" or "sit" while on its way. The panel sends the laptop's /link
+// "between", "going": "stand" or "sit" while on its way, and "height" in
+// millimetres once the desk has said it. The panel sends the laptop's /link
 // "ping", and "command": "pause", "seek" with a "position", "volume" with a
 // "level", "mute" with "muted". What answers is sealed as well: "pong", "ok",
 // and for a cover the picture itself.
@@ -78,6 +79,7 @@ const char *desk_name(Desk desk);
 struct DeskState {
     Desk at    = Desk::None;  // None without a desk linked
     Desk going = Desk::None;  // Stand or Sit while it is on its way there
+    int  height_mm = -1;      // negative while the desk has not said
 };
 
 /** Which preset a "desk" message taps, into `out`: Stand, Sit, or None when it

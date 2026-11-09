@@ -135,6 +135,7 @@ class Link:
         self.firmware = ""
         self.desk: str | None = None  # stand, sit or between, as the panel last said; None without a desk
         self.desk_going: str | None = None  # stand or sit while the panel takes it there
+        self.desk_height_mm: int | None = None
         self._following = None
         self._follow_until = 0.0
         self._beat = None
@@ -324,6 +325,9 @@ class Link:
         desk, going = answer.get("desk"), answer.get("going")
         self.desk = desk if desk in DESK_PLACES else None
         self.desk_going = going if self.desk is not None and going in DESK_PRESETS else None
+        height = answer.get("height")
+        ok = self.desk is not None and isinstance(height, int) and not isinstance(height, bool) and 0 <= height < 3000
+        self.desk_height_mm = height if ok else None
         if self.desk_going is None:
             self._stop_following()
         elif self._following is None:

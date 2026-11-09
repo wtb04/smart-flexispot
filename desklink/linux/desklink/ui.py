@@ -56,6 +56,11 @@ class ToggleGuard:
         return self._hidden_at < 0 or self._clock() - self._hidden_at > self.QUIET_S
 
 
+def height_text(height_mm: int | None) -> str:
+    """The desk's height as the panel shows it, "74.0 cm"; empty while unknown."""
+    return f"{height_mm / 10:.1f} cm" if height_mm is not None else ""
+
+
 def desk_look(link, preset: str) -> list[str]:
     if link.desk == preset:
         return ["desklink-desk", "suggested-action"]
@@ -132,10 +137,12 @@ class Dropdown:
         self._now.append(self._progress)
         self._nothing = Gtk.Label(label="Nothing plays", css_classes=["dim-label"], margin_top=6, margin_bottom=6)
 
-        self._desk = Gtk.Box(spacing=8, homogeneous=True)
+        self._desk = Gtk.Box(spacing=8)
+        self._height = Gtk.Label(css_classes=["dim-label", "numeric"], width_chars=8)
+        self._desk.append(self._height)
         self._presets = {}
         for preset, label, icon in (("stand", "Stand", "go-up-symbolic"), ("sit", "Sit", "go-down-symbolic")):
-            button = Gtk.Button(child=Adw.ButtonContent(label=label, icon_name=icon))
+            button = Gtk.Button(child=Adw.ButtonContent(label=label, icon_name=icon), hexpand=True)
             button.connect("clicked", lambda _b, p=preset: self._link.go_to(p))
             self._presets[preset] = button
             self._desk.append(button)
@@ -212,6 +219,7 @@ class Dropdown:
             self._cover.set_from_paintable(texture)
             self._cover.set_visible(texture is not None)
         self._desk.set_visible(link.desk is not None)
+        self._height.set_label(height_text(link.desk_height_mm))
         for preset, button in self._presets.items():
             button.set_css_classes(desk_look(link, preset))
             button.set_tooltip_text("On its way: tap to stop it" if link.desk_going else None)

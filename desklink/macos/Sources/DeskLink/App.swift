@@ -230,12 +230,17 @@ private struct DeskButtons: View {
     @ObservedObject var link: Link
 
     private var words: String {
-        if let going = link.deskGoing { return going == .stand ? "Going to Stand" : "Going to Sit" }
-        switch link.desk {
-        case .stand: return "Standing"
-        case .sit: return "Sitting"
-        default: return "Between"
+        let place: String
+        if let going = link.deskGoing {
+            place = going == .stand ? "Going to Stand" : "Going to Sit"
+        } else {
+            switch link.desk {
+            case .stand: place = "Standing"
+            case .sit: place = "Sitting"
+            default: place = "Between"
+            }
         }
+        return link.deskHeightMM.map { "\(place), \(Desk.height($0))" } ?? place
     }
 
     var body: some View {
