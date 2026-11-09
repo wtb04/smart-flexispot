@@ -2,7 +2,7 @@
 
 Desk Link connects a laptop to the desk panel. What plays on the laptop shows on the panel with
 its cover, the panel's buttons control it, and the laptop's Claude Code sessions reach the panel.
-On Linux, the desk goes to Stand or Sit from the laptop too.
+The desk goes to Stand or Sit from the laptop too.
 
 - [macOS](macos/), a menu bar app
 - [Linux](linux/), for Wayland desktops, in a tray or a Wayle bar

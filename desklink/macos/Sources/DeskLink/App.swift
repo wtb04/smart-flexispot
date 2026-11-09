@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct DeskLinkApp: App {
+    @NSApplicationDelegateAdaptor private var opener: Opener
     @StateObject private var link = Link()
 
     var body: some Scene {
@@ -16,6 +17,18 @@ struct DeskLinkApp: App {
             SettingsView(link: link)
         }
         .windowResizability(.contentSize)
+    }
+}
+
+extension Notification.Name {
+    static let openURL = Notification.Name("nl.w-tb.desklink.openURL")
+}
+
+/// Hands desklink:// on to the Link, which is made before the first one comes,
+/// also when one is what starts Desk Link.
+final class Opener: NSObject, NSApplicationDelegate {
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls { NotificationCenter.default.post(name: .openURL, object: url) }
     }
 }
 
@@ -113,6 +126,9 @@ private struct Menu: View {
             if link.sharing {
                 Playing(link: link)
             }
+            if link.desk != nil {
+                DeskButtons(link: link)
+            }
             HStack(spacing: 8) {
                 Circle().fill(link.dot).frame(width: 7, height: 7)
                 Text(link.status).font(.callout).foregroundStyle(.secondary).lineLimit(1)
@@ -207,6 +223,37 @@ private struct Bar: View {
     }
 }
 
+/// Stand and Sit, as the panel screen's own buttons: lit where the desk stands,
+/// ringed where it goes, and either, tapped while it moves, stops it.
+private struct DeskButtons: View {
+    @ObservedObject var link: Link
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(Desk.presets, id: \.self) { preset in
+                let look = preset.look(at: link.desk, going: link.deskGoing)
+                let button = Button {
+                    link.go(to: preset)
+                } label: {
+                    Label(preset == .stand ? "Stand" : "Sit", systemImage: preset == .stand ? "arrow.up" : "arrow.down")
+                        .frame(maxWidth: .infinity)
+                }
+                Group {
+                    if look == .lit { button.buttonStyle(.glassProminent) } else { button.buttonStyle(.glass) }
+                }
+                .buttonBorderShape(.roundedRectangle(radius: 12))
+                .controlSize(.large)
+                .overlay {
+                    if look == .ringed {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.orange, lineWidth: 2)
+                    }
+                }
+                .help(link.deskGoing != nil ? "On its way: tap to stop it" : "")
+            }
+        }
+    }
+}
+
 /// A row's icon, as System Settings has them: a white symbol on a colour.
 private struct Tile: View {
     let symbol: String
@@ -266,6 +313,15 @@ private struct SettingsView: View {
                 Toggle(isOn: $link.sharesClaude) {
                     Label { Text("Claude Code sessions") } icon: { Tile(symbol: "terminal.fill", colour: .purple) }
                 }
+                Toggle(isOn: $link.pings) {
+                    Label {
+                        Text("Ping when a session needs you")
+                        Text("The panel's chime and notice; off, the sessions still show")
+                    } icon: {
+                        Tile(symbol: "bell.fill", colour: .red)
+                    }
+                }
+                .disabled(!link.sharesClaude)
             }
 
             Section {

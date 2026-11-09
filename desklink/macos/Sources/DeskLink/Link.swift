@@ -17,9 +17,14 @@ final class Link: ObservableObject {
     @Published private(set) var reach = Reach.unknown
     @Published private(set) var reachesBack: Bool?  // the panel's commands get here, as it last said
     @Published private(set) var firmware = ""
+    @Published private(set) var desk: Desk?       // where it stands, as the panel last said; nil without a desk
+    @Published private(set) var deskGoing: Desk?  // stand or sit while the panel takes it there
 
     @Published var sharesClaude: Bool {
         didSet { defaults.set(sharesClaude, forKey: "claude") }
+    }
+    @Published var pings: Bool {  // off, the panel shows the sessions without its chime and notice
+        didSet { defaults.set(pings, forKey: "pings") }
     }
     @Published var sharing: Bool {
         didSet {
@@ -58,6 +63,9 @@ final class Link: ObservableObject {
     // The panel forgets a laptop it has not heard from in 30 seconds. It is
     // told how this one is this often whatever plays, which is the ping.
     private static let heartbeat: TimeInterval = 10
+    private static let follow: TimeInterval = 2  // where the desk stands is asked this often while it goes
+    // Longer than it takes from one end to the other, should the panel never say it arrived.
+    private static let followFor: TimeInterval = 60
 
     private let defaults = UserDefaults.standard
     private let source: NowPlayingSource
@@ -65,6 +73,8 @@ final class Link: ObservableObject {
     private var server: CommandServer!
     private var artwork: Artwork?
     private var beat: Timer?
+    private var following: Timer?
+    private var followUntil = Date()
     private var awake: NSObjectProtocol?
     private var pendingReport: DispatchWorkItem?
     private var vanishing: DispatchWorkItem?  // nothing playing, passed on once it has lasted
@@ -84,9 +94,10 @@ final class Link: ObservableObject {
     private var toldAway = false
 
     init() {
-        defaults.register(defaults: ["sharing": true, "panel": "smart-flexispot", "claude": true])
+        defaults.register(defaults: ["sharing": true, "panel": "smart-flexispot", "claude": true, "pings": true])
         sharing = defaults.bool(forKey: "sharing")
         sharesClaude = defaults.bool(forKey: "claude")
+        pings = defaults.bool(forKey: "pings")
         panel = defaults.string(forKey: "panel") ?? "smart-flexispot"
         // A key handed over with `defaults write nl.w-tb.desklink key ...` is
         // moved into the keychain at once.
@@ -120,6 +131,10 @@ final class Link: ObservableObject {
                 MainActor.assumeIsolated { self?.sleeping = false; self?.report() }
             }
         }
+        NotificationCenter.default.addObserver(forName: .openURL, object: nil, queue: .main) { [weak self] opened in
+            guard let url = opened.object as? URL else { return }
+            MainActor.assumeIsolated { self?.open(url) }
+        }
         source.clearLeftovers()
         if sharing { begin() }
     }
@@ -134,6 +149,7 @@ final class Link: ObservableObject {
         generation += 1
         reach = .unknown
         reachesBack = nil
+        deskSaid([:])
     }
 
     private func begin() {
@@ -166,6 +182,7 @@ final class Link: ObservableObject {
         report()  // nothing playing, so the panel lets go at once
         reach = .unknown
         reachesBack = nil
+        deskSaid([:])
     }
 
     // Safari lets go of Now Playing for a moment around a pause or a play;
@@ -282,15 +299,69 @@ final class Link: ObservableObject {
         }
         log.info("state \(track?.title ?? (away ? "nothing, away" : "nothing"), privacy: .public), art \(self.artwork?.version ?? "none", privacy: .public), square \(self.square?.version ?? "none", privacy: .public)")
         let generation = self.generation
-        send(state) { [weak self] reach, pong in
+        send(state) { [weak self] reach, answer in
             guard let self, self.sharing, self.generation == generation else { return }
             self.reach = reach
-            if let pong {
+            if let pong = answer, pong["type"] as? String == "pong" {
                 self.heard = Date()
                 self.firmware = pong["firmware"] as? String ?? ""
                 self.reachesBack = pong["reaches"] as? Bool
+                self.deskSaid(pong)
+            }
+            if reach != .answering { self.deskSaid([:]) }
+        }
+    }
+
+    private func deskSaid(_ answer: [String: Any]) {
+        (desk, deskGoing) = Desk.said(answer)
+        if deskGoing == nil {
+            stopFollowing()
+        } else if following == nil {
+            followUntil = Date() + Self.followFor
+            following = Timer.scheduledTimer(withTimeInterval: Self.follow, repeats: true) { [weak self] _ in
+                Task { @MainActor in self?.followDesk() }
             }
         }
+    }
+
+    /// Taps the panel screen's own button for `preset`, so a tap while the desk
+    /// moves stops it. Sent before the panel says of a desk, so desklink://stand
+    /// works as Desk Link starts.
+    @discardableResult
+    func go(to preset: Desk) -> Bool {
+        guard Desk.presets.contains(preset), sharing, seal != nil else { return false }
+        askDesk(["type": "desk", "preset": preset.rawValue])
+        return true
+    }
+
+    private func askDesk(_ message: [String: Any]) {
+        let generation = self.generation
+        send(message) { [weak self] reach, answer in
+            guard let self, self.sharing, self.generation == generation else { return }
+            guard let answer, answer["type"] as? String == "desk" else {
+                return log.warning("the panel did not answer for the desk: \(String(describing: reach), privacy: .public)")
+            }
+            self.deskSaid(answer)
+        }
+    }
+
+    private func followDesk() {
+        if Date() < followUntil { return askDesk(["type": "desk"]) }
+        deskGoing = nil
+        stopFollowing()
+    }
+
+    private func stopFollowing() {
+        following?.invalidate()
+        following = nil
+    }
+
+    /// desklink://stand and desklink://sit, for a Shortcut or a key binding.
+    private func open(_ url: URL) {
+        guard let preset = url.host().flatMap(Desk.init(rawValue:)), Desk.presets.contains(preset) else {
+            return log.warning("not a desk link: \(url.absoluteString, privacy: .public)")
+        }
+        if !go(to: preset) { log.warning("the desk is not sent anywhere: \(self.status, privacy: .public)") }
     }
 
     /// To the panel's /link, sealed; `done` hears how it went and, when the
@@ -311,7 +382,7 @@ final class Link: ObservableObject {
                 guard status == 200, let data, let answer = opener.message(data, from: "/link reply") else {
                     return done(.refused, nil)  // the wrong key, or whatever answers is not the panel
                 }
-                done(.answering, answer["type"] as? String == "pong" ? answer : nil)
+                done(.answering, answer)
             }
         }.resume()
     }
@@ -321,7 +392,9 @@ final class Link: ObservableObject {
         guard sharesClaude, let object = try? JSONSerialization.jsonObject(with: event) as? [String: Any] else {
             return .noContent
         }
-        send(["type": "claude", "event": object])
+        var message: [String: Any] = ["type": "claude", "event": object]
+        if !pings { message["quiet"] = true }
+        send(message)
         return .noContent
     }
 
