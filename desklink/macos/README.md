@@ -54,7 +54,8 @@ here to say whether it reaches the Mac back. The panel sends its commands to
 `/link` here and asks `/cover` for the picture. tools/claude-hook hands its
 events to `/claude` here, which only this Mac may reach, and Desk Link passes
 them on. Stand and Sit go to the panel's `/link` as well, and while the desk
-moves Desk Link asks it every half second where the desk is. The messages are
+moves, or the menu is open, Desk Link asks it every half second where the desk
+is and how high. The messages are
 in `components/laptop/include/laptop_protocol.h`.
 
 Since macOS 15.4 Apple only lets its own apps read Now Playing; Desk Link reads

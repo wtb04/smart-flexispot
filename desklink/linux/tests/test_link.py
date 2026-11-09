@@ -320,6 +320,21 @@ class LinkTest(unittest.TestCase):
         self.timers.advance(2 * link.FOLLOW_S)
         self.assertEqual(self.client.asked(), 2, "the desk is followed, though what plays is not told")
 
+    def test_followed_while_the_dropdown_is_open(self):
+        self.make(desk="sit")
+        self.link.set_watching(True)
+        self.timers.advance(4 * link.FOLLOW_S)
+        self.assertEqual(self.client.asked(), 4, "where it is and its height, every half second while open")
+        self.link.set_watching(False)
+        self.timers.advance(4 * link.FOLLOW_S)
+        self.assertEqual(self.client.asked(), 4, "and no more once it is shut")
+
+    def test_not_followed_open_without_a_desk(self):
+        self.make()
+        self.link.set_watching(True)
+        self.timers.advance(4 * link.FOLLOW_S)
+        self.assertEqual(self.client.asked(), 0, "an older panel, or no desk linked")
+
     def test_following_gives_up(self):
         self.make(desk="between")
         self.link.go_to("sit")

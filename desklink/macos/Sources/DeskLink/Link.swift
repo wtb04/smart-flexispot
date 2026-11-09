@@ -76,6 +76,7 @@ final class Link: ObservableObject {
     private var beat: Timer?
     private var following: Timer?
     private var followUntil = Date()
+    private var watching = false  // the menu open, so the desk is asked after as while it goes
     private var awake: NSObjectProtocol?
     private var pendingReport: DispatchWorkItem?
     private var vanishing: DispatchWorkItem?  // nothing playing, passed on once it has lasted
@@ -314,11 +315,22 @@ final class Link: ObservableObject {
     }
 
     private func deskSaid(_ answer: [String: Any]) {
+        let wasGoing = deskGoing
         (desk, deskGoing, deskHeightMM) = Desk.said(answer)
-        if deskGoing == nil {
+        if deskGoing != nil && wasGoing == nil { followUntil = Date() + Self.followFor }
+        keepFollowing()
+    }
+
+    /// The menu open or shut: open, where the desk is and its height are asked every half second.
+    func watchDesk(_ open: Bool) {
+        watching = open
+        keepFollowing()
+    }
+
+    private func keepFollowing() {
+        if deskGoing == nil && !(watching && desk != nil) {
             stopFollowing()
         } else if following == nil {
-            followUntil = Date() + Self.followFor
             following = Timer.scheduledTimer(withTimeInterval: Self.follow, repeats: true) { [weak self] _ in
                 Task { @MainActor in self?.followDesk() }
             }
@@ -347,9 +359,9 @@ final class Link: ObservableObject {
     }
 
     private func followDesk() {
-        if Date() < followUntil { return askDesk(["type": "desk"]) }
-        deskGoing = nil
-        stopFollowing()
+        if deskGoing != nil && Date() >= followUntil { deskGoing = nil }
+        keepFollowing()
+        if following != nil { askDesk(["type": "desk"]) }
     }
 
     private func stopFollowing() {

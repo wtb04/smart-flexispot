@@ -186,11 +186,13 @@ class Dropdown:
             Layer.set_monitor(self.window, monitor)
         self.refresh()
         self.window.present()
+        self._link.set_watching(True)
         from .link import GLibTimers
         self._ticker = GLibTimers().every(1, self._tick)
 
     def hide(self) -> None:
         self.window.set_visible(False)
+        self._link.set_watching(False)
         if self._ticker:
             self._ticker.cancel()
             self._ticker = None

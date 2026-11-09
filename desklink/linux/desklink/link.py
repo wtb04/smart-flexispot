@@ -136,6 +136,7 @@ class Link:
         self.desk: str | None = None  # stand, sit or between, as the panel last said; None without a desk
         self.desk_going: str | None = None  # stand or sit while the panel takes it there
         self.desk_height_mm: int | None = None
+        self._watching = False  # the dropdown open, so the desk is asked after as while it goes
         self._following = None
         self._follow_until = 0.0
         self._beat = None
@@ -322,16 +323,26 @@ class Link:
         self._changed()
 
     def _desk_said(self, answer: dict) -> None:
+        was_going = self.desk_going
         desk, going = answer.get("desk"), answer.get("going")
         self.desk = desk if desk in DESK_PLACES else None
         self.desk_going = going if self.desk is not None and going in DESK_PRESETS else None
         height = answer.get("height")
         ok = self.desk is not None and isinstance(height, int) and not isinstance(height, bool) and 0 <= height < 3000
         self.desk_height_mm = height if ok else None
-        if self.desk_going is None:
+        if self.desk_going is not None and was_going is None:
+            self._follow_until = self._clock.monotonic() + FOLLOW_FOR_S
+        self._keep_following()
+
+    def set_watching(self, watching: bool) -> None:
+        """The dropdown open or shut: open, where the desk is and its height are asked every half second."""
+        self._watching = watching
+        self._keep_following()
+
+    def _keep_following(self) -> None:
+        if self.desk_going is None and not (self._watching and self.desk is not None):
             self._stop_following()
         elif self._following is None:
-            self._follow_until = self._clock.monotonic() + FOLLOW_FOR_S
             self._following = self._timers.every(FOLLOW_S, self._follow)
 
     # settings
@@ -430,12 +441,12 @@ class Link:
         self._changed()
 
     def _follow(self) -> None:
-        if self._clock.monotonic() < self._follow_until:
+        if self.desk_going is not None and self._clock.monotonic() >= self._follow_until:
+            self.desk_going = None
+            self._changed()
+        self._keep_following()
+        if self._following is not None:
             self._ask_desk({"type": "desk"})
-            return
-        self.desk_going = None
-        self._stop_following()
-        self._changed()
 
     def _stop_following(self) -> None:
         if self._following:

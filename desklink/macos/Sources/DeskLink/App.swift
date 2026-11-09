@@ -158,6 +158,8 @@ private struct Menu: View {
         }
         .padding(10)
         .frame(width: 300)
+        .onAppear { link.watchDesk(true) }
+        .onDisappear { link.watchDesk(false) }
     }
 }
 
