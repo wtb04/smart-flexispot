@@ -223,34 +223,53 @@ private struct Bar: View {
     }
 }
 
-/// Stand and Sit, as the panel screen's own buttons: lit where the desk stands,
-/// ringed where it goes, and either, tapped while it moves, stops it.
+/// The desk as a card beside what plays: where it is, and Stand and Sit as the
+/// panel screen's own buttons, filled where the desk stands, turning where it
+/// goes; either, tapped while it moves, stops it.
 private struct DeskButtons: View {
     @ObservedObject var link: Link
 
+    private var words: String {
+        if let going = link.deskGoing { return going == .stand ? "Going to Stand" : "Going to Sit" }
+        switch link.desk {
+        case .stand: return "Standing"
+        case .sit: return "Sitting"
+        default: return "Between"
+        }
+    }
+
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(.quaternary)
+                .overlay(Image(systemName: "table.furniture").foregroundStyle(.secondary))
+                .frame(width: 44, height: 44)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Desk").font(.callout.weight(.semibold))
+                Text(words).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 0)
             ForEach(Desk.presets, id: \.self) { preset in
                 let look = preset.look(at: link.desk, going: link.deskGoing)
                 let button = Button {
                     link.go(to: preset)
                 } label: {
-                    Label(preset == .stand ? "Stand" : "Sit", systemImage: preset == .stand ? "arrow.up" : "arrow.down")
-                        .frame(maxWidth: .infinity)
-                }
-                Group {
-                    if look == .lit { button.buttonStyle(.glassProminent) } else { button.buttonStyle(.glass) }
-                }
-                .buttonBorderShape(.roundedRectangle(radius: 12))
-                .controlSize(.large)
-                .overlay {
-                    if look == .ringed {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.orange, lineWidth: 2)
+                    Group {
+                        if look == .ringed {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: preset == .stand ? "arrow.up" : "arrow.down")
+                        }
                     }
+                    .frame(width: 16, height: 16)
                 }
-                .help(link.deskGoing != nil ? "On its way: tap to stop it" : "")
+                .buttonBorderShape(.circle)
+                .help(link.deskGoing != nil ? "On its way: tap to stop it" : preset == .stand ? "Stand" : "Sit")
+                if look == .lit { button.buttonStyle(.glassProminent) } else { button.buttonStyle(.glass) }
             }
         }
+        .padding(10)
+        .glassEffect(.regular, in: .rect(cornerRadius: 14))
     }
 }
 
