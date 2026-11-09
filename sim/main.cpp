@@ -547,6 +547,9 @@ int main(int argc, char **argv)
     if (std::getenv("SIM_OFFLINE") == nullptr) {
         live::start();
     }
+    if (live::read_weather()) {
+        ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_weather());
+    }
     notices::listen();
 
     run_for(2000);  // what start-up set, the presence gate and the phone among it, applied

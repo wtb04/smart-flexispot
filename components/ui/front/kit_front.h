@@ -13,6 +13,10 @@
 namespace ical {
 struct Event;
 }
+namespace weather {
+struct RainStep;
+struct Warning;
+}
 
 namespace ui::kitfront {
 
@@ -83,6 +87,19 @@ void open_now_playing();
  *  finger is on; nothing while there are none. */
 void open_favourites();
 void open_favourites(lv_obj_t *source);
+
+// The weather's words and marks, for Home's widget. kit_front_weather_words.cpp
+/** The sky's glyph for a WMO code, by day or by night. */
+const char *sky_glyph(int code, bool day);
+/** "13°", "−3°": whole degrees, a true minus. */
+void degrees_text(float celsius, char *out, std::size_t size);
+/** Beside "Rain": "Dry for 2 hours", "Light, 17:10 to 17:30", "Steady until 17:45";
+ *  false with nothing to go on. */
+bool rain_words(const weather::RainStep *steps, int count, std::int64_t now, char *out, std::size_t size);
+/** KNMI's warning as a pill in its code's colour, "Code yellow, wind until 22:00",
+ *  hidden while there is none. */
+lv_obj_t *warning_pill(lv_obj_t *parent);
+void      set_warning_pill(lv_obj_t *pill, const weather::Warning *warning, std::int64_t now);
 
 // The radar's own, in kit_front_radar.cpp.
 /** As Home's Overhead opens the radar page: that aircraft chosen, and on the scope. */

@@ -31,7 +31,7 @@ Smart Flexispot is firmware for an [M5Stack Tab5](https://docs.m5stack.com/en/co
 
 Issues are welcome; for pull requests, expect slow answers, as this is a project for my own desk.
 
-I am not affiliated with, or endorsed by, any of the products or services named here: Flexispot, LoctekMotion, M5Stack, Espressif, Home Assistant, Jellyfin, Anthropic, Planespotters or the flight data sites. Their names are trademarks of their owners.
+I am not affiliated with, or endorsed by, any of the products or services named here: Flexispot, LoctekMotion, M5Stack, Espressif, Home Assistant, Jellyfin, Anthropic, Planespotters or the flight and weather data sites. Their names are trademarks of their owners.
 
 ## Highlights
 
@@ -57,7 +57,7 @@ Once the screen was there, the extra features kept coming, each one making it a 
 
 ![The home page with music on the speaker](docs/screenshots/home-music.png)
 
-What the panel shows most of the day. The dock at the side holds the desk: its height and one button for Stand and Sit, then Home, Calendar and Radar, and the focus timer at its foot. The bar along the top holds what gets touched every day: the time with the Wi-Fi and the phone, the lights and the heating, and what is playing, each opening a card when tapped. Home itself is for looking at: the air, what comes next, the aircraft overhead, the desk and the focus timer.
+What the panel shows most of the day. The dock at the side holds the desk: its height and one button for Stand and Sit, then Home, Calendar and Radar, and the focus timer at its foot. The bar along the top holds what gets touched every day: the time with the Wi-Fi and the phone, the lights and the heating, and what is playing, each opening a card when tapped. Home itself is for looking at: the weather, what comes next, the aircraft overhead and the air. The weather is [Open-Meteo](https://open-meteo.com)'s forecast for home, with the next two hours of rain from [Buienradar](https://www.buienradar.nl) and KNMI's warnings through [MeteoAlarm](https://meteoalarm.org).
 
 ### The room
 
@@ -175,6 +175,7 @@ How the panel is put together inside, the desk protocol, and how to run the test
 
 - [iMicknl/LoctekMotion_IoT](https://github.com/iMicknl/LoctekMotion_IoT) for working out the control box protocol and pinouts. This project would not exist without it.
 - [adsb.lol](https://adsb.lol), [adsb.fi](https://adsb.fi), [adsbdb](https://www.adsbdb.com), [hexdb.io](https://hexdb.io) and [Planespotters](https://www.planespotters.net) for the planes, and the photographers for their photos.
+- [Open-Meteo](https://open-meteo.com), [Buienradar](https://www.buienradar.nl), and KNMI through [MeteoAlarm](https://meteoalarm.org), for the weather.
 - [Natural Earth](https://www.naturalearthdata.com) for the map.
 - [ungive/mediaremote-adapter](https://github.com/ungive/mediaremote-adapter), through which Desk Link reads macOS's Now Playing.
 

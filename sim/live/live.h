@@ -12,6 +12,9 @@ void pump();
 /** The radar page on screen: its feed polled fast, as the panel does. */
 void set_radar_showing(bool showing);
 
+/** The weather recorded in SIM_WEATHER_FILES, read once; false without it. */
+bool read_weather();
+
 /** A plane tapped on the radar: who it is, where it flies, and its photo. */
 void look_up(const char *hex, const char *callsign);
 

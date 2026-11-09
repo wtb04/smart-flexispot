@@ -1,19 +1,18 @@
 // Home: a fixed grid of widgets that only show, a tap on some opening their
-// page. The air from Home Assistant, the next event, the aircraft overhead,
-// the desk and the focus timer.
+// page. The weather, the next event, the aircraft overhead and the air from
+// Home Assistant.
 
 #include "kit_front.h"
 
-#include "focus_model.h"
 #include "home_model.h"
 #include "icons.h"
 #include "ical.h"
 #include "kit_fonts.h"
 #include "radar.h"
 #include "radar_model.h"
-#include "room_model.h"
 #include "topics.h"
 #include "units.h"
+#include "weather.h"
 
 #include <algorithm>
 #include <cctype>
@@ -103,6 +102,7 @@ struct Air {
     lv_obj_t *cell = nullptr, *caption = nullptr, *word = nullptr;
     Dial     *gauge = nullptr;
     bool      row = false;  // laid out four in a row
+    int       size = -1;    // the figure's: 0 in the gauge's middle, 1 big in a row, 2 small in a short row
 };
 Air       s_air[kPillCount];
 lv_obj_t *s_air_none = nullptr;
@@ -237,7 +237,10 @@ lv_obj_t *s_air_body = nullptr;
 
 void place_cell(Air &air, std::int32_t w, std::int32_t h, bool row)
 {
-    const std::int32_t cap_h = fonts::small()->line_height, word_h = fonts::h3()->line_height;
+    const std::int32_t cap_h = fonts::small()->line_height;
+    // Home's one-row strip leaves the gauges small: a smaller figure and word, no unit.
+    const bool         short_row = row && std::min(w, h - cap_h - space::s) < 120;
+    const std::int32_t word_h    = short_row ? fonts::small()->line_height : fonts::h3()->line_height;
     if (row) {
         // the name over the gauge, the word in its open foot
         const std::int32_t d = std::min(w, h - cap_h - space::s);
@@ -263,10 +266,16 @@ void place_cell(Air &air, std::int32_t w, std::int32_t h, bool row)
             lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_LEFT, 0);
         }
     }
-    if (air.row != row) {
-        air.row = row;
-        lv_obj_set_style_text_font(air.gauge->figure(), row ? fonts::read_l() : fonts::read_m(), 0);
-        lv_obj_set_width(air.gauge->figure(), widest(row ? Role::ReadL : Role::ReadM, {"8888.8"}));
+    air.row          = row;
+    const int size   = short_row ? 2 : row ? 1 : 0;
+    if (air.size != size) {
+        air.size         = size;
+        const Role read  = size == 2 ? Role::ReadS : size == 1 ? Role::ReadL : Role::ReadM;
+        lv_obj_set_style_text_font(air.gauge->figure(), size == 2 ? fonts::read_s() : size == 1 ? fonts::read_l() : fonts::read_m(), 0);
+        lv_obj_set_width(air.gauge->figure(), widest(read, {"8888.8"}));
+        lv_obj_set_hidden(air.gauge->caption(), size == 2);
+        lv_obj_set_style_text_font(air.word, size == 2 ? fonts::small() : fonts::h3(), 0);
+        lv_obj_set_height(air.word, word_h);
     }
 }
 
@@ -289,7 +298,7 @@ void place_air()
 
 void build_air(lv_obj_t *grid)
 {
-    s_air_body = widget(grid, Span::Big, "Air");
+    s_air_body = widget(grid, Span::Wide, "Air");
     for (int i = 0; i < kPillCount; ++i) {
         Air &air = s_air[i];
         air.cell = plain(s_air_body);
@@ -682,7 +691,7 @@ void build_overhead(lv_obj_t *grid)
     s_call = line(s_sky_some, Role::Small, Ink::Secondary, text_w);
     lv_obj_set_pos(s_call, x0, route_y + (fonts::body()->line_height - fonts::small()->line_height) / 2);
 
-    // at the foot, as the desk's and the focus timer's figures are
+    // at the foot
     const std::int32_t foot   = h - fonts::read_s()->line_height;
     const std::int32_t unit_w = widest(Role::Body, {"ft"});
     s_alt      = line(s_sky_some, Role::ReadS, Ink::Primary, widest(Role::ReadS, {"88,888"}));
@@ -732,136 +741,184 @@ void build_overhead(lv_obj_t *grid)
     widget_opens(body, RADAR);
 }
 
-// --- desk ------------------------------------------------------------------------
+// --- weather ---------------------------------------------------------------------
 
-lv_obj_t *s_desk = nullptr, *s_desk_unit = nullptr, *s_desk_at = nullptr;
+// The weather at home in one fixed shape: the sky and the temperature, the
+// hours to come, and four facts in a ruled grid, the wind, the rain in the
+// next two hours, the sun and the day's range.
+constexpr int HOURS_SHOWN = 6;
+constexpr int FACTS       = 4;
 
-void paint_desk()
+struct WeatherWidget {
+    lv_obj_t *body = nullptr, *none = nullptr, *warning = nullptr;
+    lv_obj_t *sky = nullptr, *temp = nullptr, *words = nullptr, *feels = nullptr;
+    lv_obj_t *hour_time[HOURS_SHOWN] = {}, *hour_sky[HOURS_SHOWN] = {}, *hour_temp[HOURS_SHOWN] = {};
+    lv_obj_t *rules[3] = {};
+    lv_obj_t *fact_name[FACTS] = {}, *fact_value[FACTS] = {};
+};
+WeatherWidget s_wx;
+KIT_IN_PSRAM weather::Forecast s_wx_forecast;
+weather::RainStep s_wx_rain[weather::kRainMax];
+
+void place_weather()
+{
+    WeatherWidget     &w     = s_wx;
+    const std::int32_t width = lv_obj_get_content_width(w.body), h = lv_obj_get_content_height(w.body);
+    // the reading
+    const std::int32_t read_h = fonts::read_l()->line_height;
+    lv_obj_set_pos(w.sky, 0, (read_h - 34) / 2);
+    lv_obj_set_pos(w.temp, 34 + space::m, 0);
+    const std::int32_t words_x = 34 + space::m + widest(Role::ReadL, {"\xe2\x88\x92" "88\xc2\xb0"}) + space::l;
+    const std::int32_t two     = fonts::small()->line_height * 2;
+    lv_obj_set_pos(w.words, words_x, (read_h - two) / 2);
+    lv_obj_set_pos(w.feels, words_x, (read_h - two) / 2 + fonts::small()->line_height);
+    for (lv_obj_t *label : {w.words, w.feels}) {
+        lv_obj_set_width(label, width - words_x);
+    }
+
+    // the facts at the foot, two by two between rules; the hours between the reading and them
+    constexpr std::int32_t FACT_H = 40;
+    const std::int32_t     facts_y = h - 2 * FACT_H;
+    for (int i = 0; i < 3; ++i) {
+        lv_obj_set_width(w.rules[i], width);
+        lv_obj_set_pos(w.rules[i], 0, facts_y + i * FACT_H);
+    }
+    // the wind and the sun's time are short; the rain and the day's range have the rest
+    const std::int32_t name_w = widest(Role::Small, {"Sunrise", "Today", "Wind", "Rain"});
+    const std::int32_t left   = name_w + space::m + widest(Role::Small, {"188 km/h NW", "88:88"});
+    for (int i = 0; i < FACTS; ++i) {
+        const std::int32_t x   = (i % 2) * (left + space::xl);
+        const std::int32_t w_i = i % 2 == 0 ? left : width - left - space::xl;
+        const std::int32_t mid = facts_y + (i / 2) * FACT_H + (FACT_H - fonts::small()->line_height) / 2;
+        lv_obj_set_pos(w.fact_name[i], x, mid);
+        lv_obj_set_width(w.fact_name[i], name_w);
+        lv_obj_set_pos(w.fact_value[i], x + name_w + space::m, mid);
+        lv_obj_set_width(w.fact_value[i], w_i - name_w - space::m);
+    }
+    const std::int32_t hours_h = fonts::label()->line_height + space::xs + 28 + space::xs + fonts::small()->line_height;
+    const std::int32_t hours_y = read_h + (facts_y - read_h - hours_h) / 2;
+    const std::int32_t item_w  = widest(Role::Small, {"00:00"});
+    for (int i = 0; i < HOURS_SHOWN; ++i) {
+        const std::int32_t x = i * (width - item_w) / (HOURS_SHOWN - 1);
+        lv_obj_set_pos(w.hour_time[i], x, hours_y);
+        lv_obj_set_pos(w.hour_sky[i], x + (item_w - 28) / 2, hours_y + fonts::label()->line_height + space::xs);
+        lv_obj_set_pos(w.hour_temp[i], x, hours_y + fonts::label()->line_height + space::xs + 28 + space::xs);
+        for (lv_obj_t *label : {w.hour_time[i], w.hour_temp[i]}) {
+            lv_obj_set_width(label, item_w);
+            lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+        }
+    }
+    lv_obj_set_size(w.none, width, h);
+}
+
+void paint_weather()
 {
     if (!on_home()) {
         return;
     }
-    const detail::DeskState &desk = detail::desk_state();
-    char                     text[48] = "--";
-    if (desk.height_mm >= 0) {
-        std::snprintf(text, sizeof(text), "%d.%d", desk.height_mm / 10, desk.height_mm % 10);
+    WeatherWidget &w    = s_wx;
+    const bool     have = weather::forecast(s_wx_forecast);
+    for (lv_obj_t *child = lv_obj_get_child(w.body, 0); child != nullptr; child = lv_obj_get_sibling(child, 1)) {
+        lv_obj_set_hidden(child, child == w.none ? have : !have);
     }
-    set_text_if(s_desk, text);
-    lv_obj_set_x(s_desk_unit, widest(Role::ReadL, {text}) + space::xs);
-    ink_if(s_desk, desk.available ? Ink::Primary : Ink::Tertiary);
-
-    text[0] = '\0';
-    if (!desk.available) {
-        std::snprintf(text, sizeof(text), "Not answering");
-    } else if (desk.moving != 0) {
-        std::snprintf(text, sizeof(text), "%s", desk.moving > 0 ? "Going up" : "Going down");
-    } else {
-        for (int i = 0; i < kPresetCount; ++i) {
-            if (desk.preset_active[i]) {
-                std::snprintf(text, sizeof(text), "At %s", detail::PRESET_NAMES[i]);
-                break;
-            }
-        }
-    }
-    set_text_if(s_desk_at, text);
-}
-
-// A big figure at the foot of a small widget, and a line under it.
-std::int32_t figure_y(std::int32_t h) { return h - fonts::small()->line_height - fonts::read_l()->line_height; }
-
-lv_obj_t *figure_at_foot(lv_obj_t *body, std::int32_t w, std::int32_t h, lv_obj_t *&detail_line)
-{
-    const std::int32_t detail_h = fonts::small()->line_height;
-    lv_obj_t          *figure   = line(body, Role::ReadL, Ink::Primary, widest(Role::ReadL, {"888.8", "88:88"}));
-    lv_obj_set_y(figure, figure_y(h));
-    detail_line = line(body, Role::Small, Ink::Secondary, w);
-    lv_obj_set_y(detail_line, h - detail_h);
-    return figure;
-}
-
-lv_obj_t *s_desk_body = nullptr;
-
-void place_desk()
-{
-    const std::int32_t w = lv_obj_get_content_width(s_desk_body), h = lv_obj_get_content_height(s_desk_body);
-    lv_obj_set_y(s_desk, figure_y(h));
-    lv_obj_set_y(s_desk_unit, figure_y(h) + baseline_y(Role::ReadL, Role::Body));
-    lv_obj_set_y(s_desk_at, h - fonts::small()->line_height);
-    lv_obj_set_width(s_desk_at, w);
-}
-
-void build_desk(lv_obj_t *grid)
-{
-    s_desk_body = widget(grid, Span::One, "Desk");
-    lv_obj_update_layout(grid);
-    const std::int32_t w = lv_obj_get_content_width(s_desk_body), h = lv_obj_get_content_height(s_desk_body);
-    s_desk      = figure_at_foot(s_desk_body, w, h, s_desk_at);
-    s_desk_unit = line(s_desk_body, Role::Body, Ink::Secondary, widest(Role::Body, {"cm"}));
-    lv_label_set_text(s_desk_unit, "cm");
-    place_desk();
-    subscribe(Topic::Desk, detail::kNoView, paint_desk);
-}
-
-// --- focus ---------------------------------------------------------------------
-
-lv_obj_t *s_focus_tile = nullptr, *s_focus = nullptr, *s_focus_ready = nullptr, *s_focus_state = nullptr;
-
-void paint_focus()
-{
-    lv_obj_set_hidden(s_focus_tile, owner_away());  // as the dock's timer is
-    if (!on_home()) {
+    weather::Warning warning;
+    set_warning_pill(w.warning, have && weather::warnings(&warning, 1) > 0 ? &warning : nullptr, detail::wall_now());
+    if (!have) {
         return;
     }
-    const Focus &focus   = detail::focus_state();
-    const bool   waiting = detail::focus_waiting(focus);
-    char         text[48];
-    detail::focus_clock_text(focus, text, sizeof(text));
-    lv_obj_set_hidden(s_focus, waiting);
-    lv_obj_set_hidden(s_focus_ready, !waiting);
-    if (!waiting) {
-        set_text_if(s_focus, text);
-    }
-    const bool idle = detail::focus_idle(focus);
-    ink_if(s_focus, idle ? Ink::Tertiary : detail::focus_resting(focus) ? Ink::Green : Ink::Primary);
+    const weather::Forecast &f = s_wx_forecast;
+    char                     text[64], value[48];
+    set_icon(w.sky, sky_glyph(f.now.code, f.now.day), false);
+    degrees_text(f.now.temp_c, text, sizeof(text));
+    set_text_if(w.temp, text);
+    set_text_if(w.words, weather::words_of(f.now.code));
+    degrees_text(f.now.feels_c, value, sizeof(value));
+    std::snprintf(text, sizeof(text), "Feels like %s", value);
+    set_text_if(w.feels, text);
 
-    const char *part = detail::focus_resting(focus) ? "Break" : "Focus";
-    if (idle) {
-        std::snprintf(text, sizeof(text), "Not running");
-    } else if (waiting) {
-        std::snprintf(text, sizeof(text), "%s, round %d of %d", part, focus.round, focus.rounds);
-    } else if (!focus.running) {
-        std::snprintf(text, sizeof(text), "%s, paused", part);
-    } else {
-        const std::time_t ends = detail::wall_now() + detail::whole_seconds_up(detail::focus_left_ms(focus));
-        std::tm           at{};
-        localtime_r(&ends, &at);
-        std::snprintf(text, sizeof(text), "%s, until %02d:%02d", part, at.tm_hour, at.tm_min);
+    // the next whole hours
+    const std::int64_t now   = detail::wall_now();
+    int                first = 0;
+    while (first < f.hour_count && f.hours[first].time <= now) {
+        ++first;
     }
-    set_text_if(s_focus_state, text);
-}
-
-void build_focus(lv_obj_t *grid)
-{
-    lv_obj_t *body = widget(grid, Span::One, "Focus");
-    s_focus_tile   = lv_obj_get_parent(body);
-    lv_obj_update_layout(grid);
-    const std::int32_t w = lv_obj_get_content_width(body), h = lv_obj_get_content_height(body);
-    s_focus       = figure_at_foot(body, w, h, s_focus_state);
-    s_focus_ready = line(body, Role::H1, Ink::Accent, w);
-    lv_label_set_text(s_focus_ready, "Ready");
-    lv_obj_set_y(s_focus_ready, figure_y(h) + baseline_y(Role::ReadL, Role::H3) -
-                                    (fonts::h1()->line_height - fonts::h3()->line_height));
-    lv_obj_set_hidden(s_focus_ready, true);
-    subscribe(Topic::Focus, detail::kNoView, paint_focus);
-    subscribe(Topic::Second, detail::kNoView, [] {
-        if (detail::focus_state().running) {
-            paint_focus();
+    for (int i = 0; i < HOURS_SHOWN; ++i) {
+        const bool some = first + i < f.hour_count;
+        if (!some) {
+            set_text_if(w.hour_time[i], "--");
+            set_text_if(w.hour_temp[i], "");
+            continue;
         }
-    });
+        const weather::Hour &hour = f.hours[first + i];
+        std::tm              at{};
+        const auto           stamp = static_cast<std::time_t>(hour.time);
+        localtime_r(&stamp, &at);
+        std::snprintf(text, sizeof(text), "%02d:00", at.tm_hour);
+        set_text_if(w.hour_time[i], text);
+        set_icon(w.hour_sky[i], sky_glyph(hour.code, hour.day), false);
+        degrees_text(hour.temp_c, text, sizeof(text));
+        set_text_if(w.hour_temp[i], text);
+    }
+
+    // the facts
+    std::snprintf(value, sizeof(value), "%ld km/h %s", std::lround(f.now.wind_kmh), weather::compass_short_of(f.now.wind_from_deg));
+    set_text_if(w.fact_value[0], value);
+    const int steps = weather::rain(s_wx_rain, weather::kRainMax);
+    if (!rain_words(s_wx_rain, steps, now, value, sizeof(value))) {
+        std::snprintf(value, sizeof(value), "--");
+    }
+    set_text_if(w.fact_value[1], value);
+    if (f.day_count > 0) {
+        const bool          set_yet = now >= f.days[0].sunset;
+        const std::int64_t  at      = set_yet && f.day_count > 1 ? f.days[1].sunrise : f.days[0].sunset;
+        std::tm             when{};
+        const auto          stamp = static_cast<std::time_t>(at);
+        localtime_r(&stamp, &when);
+        set_text_if(w.fact_name[2], set_yet ? "Sunrise" : "Sunset");
+        std::snprintf(value, sizeof(value), "%02d:%02d", when.tm_hour, when.tm_min);
+        set_text_if(w.fact_value[2], value);
+        char lo[16], hi[16];
+        degrees_text(f.days[0].low_c, lo, sizeof(lo));
+        degrees_text(f.days[0].high_c, hi, sizeof(hi));
+        std::snprintf(value, sizeof(value), "%s to %s", lo, hi);
+        set_text_if(w.fact_value[3], value);
+    }
 }
 
-// Away, with the calendar's, the radar's and the timer's widgets gone, the
-// air and the desk widen to fill the rows rather than leave holes where those were.
+void build_weather_widget(lv_obj_t *grid)
+{
+    WeatherWidget &w = s_wx;
+    w.body           = widget(grid, Span::Big, "Weather");
+    // KNMI's warning for home, in the title's row
+    w.warning = warning_pill(lv_obj_get_parent(w.body));
+    lv_obj_set_ignore_layout(w.warning, true);
+    lv_obj_align(w.warning, LV_ALIGN_TOP_RIGHT, 0, -6);
+    w.sky   = icon(w.body, ic::cloud, 34, false, Ink::Secondary);
+    w.temp  = line(w.body, Role::ReadL, Ink::Primary, widest(Role::ReadL, {"\xe2\x88\x92" "88\xc2\xb0"}));
+    w.words = line(w.body, Role::Small, Ink::Primary, 1);
+    w.feels = line(w.body, Role::Small, Ink::Secondary, 1);
+    for (int i = 0; i < HOURS_SHOWN; ++i) {
+        w.hour_time[i] = line(w.body, Role::Label, Ink::Tertiary, 1);
+        w.hour_sky[i]  = icon(w.body, ic::cloud, 28, false, Ink::Secondary);
+        w.hour_temp[i] = line(w.body, Role::Small, Ink::Primary, 1);
+    }
+    for (lv_obj_t *&rule : w.rules) {
+        rule = hairline(w.body, false, 100);
+    }
+    static const char *const NAMES[FACTS] = {"Wind", "Rain", "Sunset", "Today"};
+    for (int i = 0; i < FACTS; ++i) {
+        w.fact_name[i] = line(w.body, Role::Small, Ink::Secondary, 1);
+        lv_label_set_text(w.fact_name[i], NAMES[i]);
+        w.fact_value[i] = line(w.body, Role::Small, Ink::Primary, 1);
+    }
+    w.none = empty(w.body, ic::partly_cloudy_day, "No forecast from Open-Meteo");
+    lv_obj_update_layout(grid);
+    place_weather();
+    subscribe(Topic::Weather, detail::kNoView, paint_weather);
+}
+
+// Away, with the calendar's and the radar's widgets gone, the weather and the
+// air each take half of the page rather than leave holes where those were.
 void lay_out()
 {
     static int s_away = -1;
@@ -869,10 +926,10 @@ void lay_out()
     if (std::exchange(s_away, away ? 1 : 0) == (away ? 1 : 0)) {
         return;
     }
-    widget_place(s_air_body, 0, 0, away ? 4 : 2, 2);
-    widget_place(s_desk_body, away ? 0 : 2, 2, away ? 4 : 1, 1);
+    widget_place(s_wx.body, 0, 0, 2, away ? 3 : 2);
+    widget_place(s_air_body, 2, away ? 0 : 2, 2, away ? 3 : 1);
+    place_weather();
     place_air();
-    place_desk();
 }
 
 void paint_all()
@@ -880,19 +937,17 @@ void paint_all()
     paint_air();
     paint_next();
     paint_overhead();
-    paint_desk();
-    paint_focus();
+    paint_weather();
 }
 }  // namespace
 
 void build_home(lv_obj_t *page)
 {
     lv_obj_t *grid = widget_grid(page);
-    build_air(grid);
+    build_weather_widget(grid);
     build_next(grid);
     build_overhead(grid);
-    build_desk(grid);
-    build_focus(grid);
+    build_air(grid);
 
     subscribe(Topic::Calendar, detail::kNoView, paint_next);
     subscribe(Topic::Radar, detail::kNoView, paint_overhead);
@@ -901,7 +956,6 @@ void build_home(lv_obj_t *page)
             lay_out();
             paint_next();
             paint_overhead();
-            paint_focus();
         });
     }
     subscribe(Topic::Page, detail::kNoView, [] {
@@ -911,7 +965,12 @@ void build_home(lv_obj_t *page)
         paint_all();
     });
     subscribe(Topic::Lookup, detail::kNoView, paint_overhead);  // its route and its photo, as they come
-    lv_timer_create([](lv_timer_t *) { paint_next(); }, REFRESH_MS, nullptr);
+    lv_timer_create(
+        [](lv_timer_t *) {
+            paint_next();
+            paint_weather();  // its rain to come is counted from now
+        },
+        REFRESH_MS, nullptr);
 }
 
 }  // namespace ui::kitfront
