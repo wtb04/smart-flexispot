@@ -9,9 +9,11 @@
 #include "media.h"
 #include "media_model.h"
 #include "room_model.h"
+#include "settings_model.h"
 #include "status_model.h"
 #include "topics.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 
@@ -47,6 +49,56 @@ void paint_status()
     if (lv_obj_is_clickable(s_status.laptop) != clicker) {
         lv_obj_set_clickable(s_status.laptop, clicker);
     }
+}
+
+// An update on its way, beside the status's marks, as the old rail showed it:
+// what arrives, or Bluetooth as it goes on to the companion, with a line
+// filling under it; once it is in and kept, a dot until Setup installs it.
+constexpr std::int32_t UPDATE_W = 28, UPDATE_LINE = 3, UPDATE_DOT = 10;
+
+lv_obj_t *s_update = nullptr, *s_update_glyph = nullptr, *s_update_track = nullptr, *s_update_fill = nullptr;
+lv_obj_t *s_update_dot = nullptr;
+
+void paint_update()
+{
+    const detail::SettingsState &st    = detail::settings_state();
+    const UpdateState           &u     = st.update;
+    const bool                   busy  = st.update_known && u.busy != UpdateTarget::None;
+    const bool                   ready = st.update_known && !busy && (u.panel_ready || u.companion_ready);
+    lv_obj_set_hidden(s_update, !busy && !ready);
+    lv_obj_set_hidden(s_update_glyph, !busy);
+    lv_obj_set_hidden(s_update_track, !busy);
+    lv_obj_set_hidden(s_update_dot, !ready);
+    if (busy) {
+        set_icon(s_update_glyph, u.phase == UpdatePhase::Installing ? ic::bluetooth : ic::downloading, false);
+        lv_obj_set_width(s_update_fill, UPDATE_W * std::clamp(u.percent, 0, 100) / 100);
+    }
+}
+
+void build_update(lv_obj_t *status)
+{
+    s_update = lv_obj_create(status);
+    lv_obj_remove_style_all(s_update);
+    lv_obj_set_size(s_update, UPDATE_W, size::bar);
+    lv_obj_remove_flag(s_update, LV_OBJ_FLAG_CLICKABLE);
+    s_update_glyph = icon(s_update, ic::downloading, UPDATE_W, false, Ink::Primary);
+    lv_obj_align(s_update_glyph, LV_ALIGN_CENTER, 0, -UPDATE_LINE);
+    s_update_track = lv_obj_create(s_update);
+    lv_obj_remove_style_all(s_update_track);
+    lv_obj_set_size(s_update_track, UPDATE_W, UPDATE_LINE);
+    lv_obj_align(s_update_track, LV_ALIGN_CENTER, 0, UPDATE_W / 2 + UPDATE_LINE);
+    lv_obj_set_style_radius(s_update_track, UPDATE_LINE / 2 + 1, 0);
+    lv_obj_set_style_bg_color(s_update_track, colour(Ink::Primary), 0);
+    lv_obj_set_style_bg_opa(s_update_track, colours().fill_opa * 2, 0);
+    s_update_fill = lv_obj_create(s_update_track);
+    lv_obj_remove_style_all(s_update_fill);
+    lv_obj_set_size(s_update_fill, 0, UPDATE_LINE);
+    lv_obj_set_style_radius(s_update_fill, UPDATE_LINE / 2 + 1, 0);
+    lv_obj_set_style_bg_color(s_update_fill, colour(Ink::Accent), 0);
+    lv_obj_set_style_bg_opa(s_update_fill, LV_OPA_COVER, 0);
+    s_update_dot = dot(s_update, Ink::Accent, UPDATE_DOT);
+    lv_obj_center(s_update_dot);
+    lv_obj_set_hidden(s_update, true);
 }
 
 void paint_lights()
@@ -220,6 +272,7 @@ void build_bar(lv_obj_t *chrome)
     lv_obj_set_flex_align(bar, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
     s_status = status(bar);
+    build_update(s_status.root);
     lv_obj_add_flag(s_status.root, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(s_status.root, [](lv_event_t *) { toggle_setup(); }, LV_EVENT_CLICKED, nullptr);
     lv_obj_set_ext_click_area(s_status.laptop, space::m);
@@ -230,6 +283,7 @@ void build_bar(lv_obj_t *chrome)
     build_media(bar);
 
     subscribe(Topic::Status, detail::kNoView, paint_status);
+    subscribe(Topic::Update, detail::kNoView, paint_update);
     subscribe(Topic::Lights, detail::kNoView, paint_lights);
     subscribe(Topic::Home, detail::kNoView, paint_heat);
     subscribe(Topic::Media, detail::kNoView, paint_media);
