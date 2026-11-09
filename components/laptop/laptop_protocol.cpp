@@ -77,6 +77,12 @@ const char *command_name(Command command)
             return "volume_up";
         case Command::VolumeDown:
             return "volume_down";
+        case Command::SlideNext:
+            return "slide_next";
+        case Command::SlideBack:
+            return "slide_back";
+        case Command::SlideShow:
+            return "slide_show";
     }
     return "";
 }
@@ -175,6 +181,20 @@ bool read(const char *body, std::size_t length, NowPlaying &out)
         out.takes_volume   = out.takes_volume || std::strcmp(name, "volume") == 0;
         out.takes_volume_step = out.takes_volume_step || std::strcmp(name, "volume_step") == 0;
         out.takes_seek     = out.takes_seek || std::strcmp(name, "seek") == 0;
+        out.takes_slides   = out.takes_slides || std::strcmp(name, "slides") == 0;
+        out.takes_slide_show = out.takes_slide_show || std::strcmp(name, "slide_show") == 0;
+    }
+    const cJSON *slide = cJSON_GetObjectItemCaseSensitive(root, "slide");
+    const cJSON *page  = cJSON_GetObjectItemCaseSensitive(slide, "page");
+    const cJSON *pages = cJSON_GetObjectItemCaseSensitive(slide, "pages");
+    constexpr int MOST_PAGES = 9999;
+    if (cJSON_IsNumber(page) && cJSON_IsNumber(pages) && pages->valueint > 0 && pages->valueint <= MOST_PAGES &&
+        page->valueint >= 1 && page->valueint <= pages->valueint) {
+        out.slide_page  = page->valueint;
+        out.slide_pages = pages->valueint;
+        out.slide_deck  = text_of(slide, "deck");
+        const cJSON *presenting = cJSON_GetObjectItemCaseSensitive(slide, "presenting");
+        out.slide_presenting = cJSON_IsBool(presenting) ? cJSON_IsTrue(presenting) : -1;
     }
     cJSON_Delete(root);
     return true;

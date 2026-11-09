@@ -466,6 +466,8 @@ extern "C" void app_main(void)
         .seek        = room::on_seek,
         .media_volume = room::on_media_volume,
         .radar_zoom  = on_radar_zoom,
+        .slide       = laptop::slide,
+        .slide_show  = laptop::slide_show,
     };
     const int brightness = settings::get(settings::Key::Brightness);
     ui::set_cards(diagnostics::cards(), diagnostics::card_count());
@@ -525,6 +527,9 @@ extern "C" void app_main(void)
         .claude  = claude_feed::take,
         .sharing = [](int laptops) { ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_laptops(laptops)); },
         .desk    = desk_for_laptop,
+        .slides  = [](const laptop::Clicker &c) {
+            ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_clicker(c.machine.c_str(), c.page, c.pages, c.deck.c_str(), c.presenting, c.shows));
+        },
     }));
     media::set_fetcher(laptop::kCoverScheme, laptop::fetch_cover);
     ESP_ERROR_CHECK_WITHOUT_ABORT(remote::start());

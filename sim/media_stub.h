@@ -25,4 +25,6 @@ void on_media(ui::MediaAction action);
 void on_seek(int position_s);
 void on_volume(int percent);
 void on_pick(int index);
+void on_slide(bool next);
+void on_slide_show();  // the deck into or out of its full screen  // the deck's page moves, as the laptop then says
 }  // namespace media_stub

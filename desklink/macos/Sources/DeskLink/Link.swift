@@ -27,6 +27,13 @@ final class Link: ObservableObject {
     @Published var pings: Bool {  // off, the panel shows the sessions without its chime and notice
         didSet { defaults.set(pings, forKey: "pings") }
     }
+    @Published var sharesSlides: Bool {  // the panel's clicker: the keys, and the page read
+        didSet {
+            defaults.set(sharesSlides, forKey: "slides")
+            if !sharesSlides { slide = nil }
+            report()
+        }
+    }
     @Published var sharing: Bool {
         didSet {
             defaults.set(sharing, forKey: "sharing")
@@ -67,6 +74,9 @@ final class Link: ObservableObject {
     private static let follow: TimeInterval = 0.5  // asked this often while it goes, so its height counts along
     // Longer than it takes from one end to the other, should the panel never say it arrived.
     private static let followFor: TimeInterval = 60
+    // Okular says nothing as its page turns; looked at this often, a turn is
+    // on the panel well within a second.
+    private static let leafingEvery: TimeInterval = 0.3
 
     private let defaults = UserDefaults.standard
     private let source: NowPlayingSource
@@ -77,6 +87,9 @@ final class Link: ObservableObject {
     private var following: Timer?
     private var followUntil = Date()
     private var watching = false  // the menu open, so the desk is asked after as while it goes
+    private var leafing: Timer?  // the slide's page looked at
+    private let deck = SlideDeck()
+    private var slide: SlideDeck.Slide?
     private var awake: NSObjectProtocol?
     private var pendingReport: DispatchWorkItem?
     private var vanishing: DispatchWorkItem?  // nothing playing, passed on once it has lasted
@@ -96,10 +109,12 @@ final class Link: ObservableObject {
     private var toldAway = false
 
     init() {
-        defaults.register(defaults: ["sharing": true, "panel": "smart-flexispot", "claude": true, "pings": true])
+        defaults.register(defaults: ["sharing": true, "panel": "smart-flexispot", "claude": true, "pings": true,
+                                     "slides": true])
         sharing = defaults.bool(forKey: "sharing")
         sharesClaude = defaults.bool(forKey: "claude")
         pings = defaults.bool(forKey: "pings")
+        sharesSlides = defaults.bool(forKey: "slides")
         panel = defaults.string(forKey: "panel") ?? "smart-flexispot"
         // A key handed over with `defaults write nl.w-tb.desklink key ...` is
         // moved into the keychain at once.
@@ -164,7 +179,17 @@ final class Link: ObservableObject {
         beat = Timer.scheduledTimer(withTimeInterval: Self.heartbeat, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.report() }
         }
+        leafing = Timer.scheduledTimer(withTimeInterval: Self.leafingEvery, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.lookAtSlide() }
+        }
         report()
+    }
+
+    private func lookAtSlide() {
+        let now = sharesSlides ? deck.read() : nil
+        guard now != slide else { return }
+        slide = now
+        reportSoon()
     }
 
     private func end() {
@@ -172,6 +197,9 @@ final class Link: ObservableObject {
         vanishing = nil
         beat?.invalidate()
         beat = nil
+        leafing?.invalidate()
+        leafing = nil
+        slide = nil
         if let awake { ProcessInfo.processInfo.endActivity(awake) }
         awake = nil
         source.stop()
@@ -273,8 +301,9 @@ final class Link: ObservableObject {
         toldAway = away
         let track = away ? nil : self.track
         var state: [String: Any] = ["type": "state", "machine": machine, "port": Int(Self.port), "title": ""]
+        var takes: [String] = []
         if let track {
-            var takes = ["pause"]
+            takes = ["pause"]
             if track.duration > 0 { takes.append("seek") }
             // Now Playing does not say what a player takes, and a browser's
             // video, YouTube's, takes no next or previous of its own.
@@ -297,9 +326,15 @@ final class Link: ObservableObject {
             // Now Playing does not say; a clip's cover is a wide frame, and
             // before one comes a browser is most likely playing a video.
             state["video"] = artwork.map(\.wide) ?? Self.browsers.contains(track.bundle)
-            state["takes"] = takes
         }
-        log.info("state \(track?.title ?? (away ? "nothing, away" : "nothing"), privacy: .public), art \(self.artwork?.version ?? "none", privacy: .public), square \(self.square?.version ?? "none", privacy: .public)")
+        // The clicker's, whatever plays: slides seldom play as Now Playing has it.
+        if !away && sharesSlides && VolumeKeys.allowed { takes.append("slides") }
+        if !away, let slide {
+            takes.append("slide_show")
+            state["slide"] = ["page": slide.page, "pages": slide.pages, "deck": slide.deck, "presenting": slide.presenting]
+        }
+        if !takes.isEmpty { state["takes"] = takes }
+        log.info("state \(track?.title ?? (away ? "nothing, away" : "nothing"), privacy: .public), slide \(self.slide.map { "\($0.page) of \($0.pages)" } ?? "none", privacy: .public), art \(self.artwork?.version ?? "none", privacy: .public), square \(self.square?.version ?? "none", privacy: .public)")
         let generation = self.generation
         send(state) { [weak self] reach, answer in
             guard let self, self.sharing, self.generation == generation else { return }
@@ -458,6 +493,12 @@ final class Link: ObservableObject {
             output.set(muted: muted)
         case "volume_up": VolumeKeys.press(up: true)
         case "volume_down": VolumeKeys.press(up: false)
+        case "slide_next", "slide_back":
+            guard sharesSlides, VolumeKeys.allowed else { return false }
+            SlideKeys.press(next: command["command"] as? String == "slide_next")
+        case "slide_show":
+            guard sharesSlides, VolumeKeys.allowed else { return false }
+            return deck.show()
         default:
             return false
         }

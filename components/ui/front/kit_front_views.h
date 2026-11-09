@@ -23,7 +23,8 @@ void on_black(lv_obj_t *button);
 struct Chrome {
     lv_obj_t *left = nullptr;  // the row the quick actions go in
 };
-Chrome chrome(detail::ViewId view, lv_obj_t *root, bool black = false);
+/** `fades` false keeps them up, for a view tapped all the time anyway. */
+Chrome chrome(detail::ViewId view, lv_obj_t *root, bool black = false, bool fades = true);
 /** A round button with a light fill and a filled glyph `px` big. */
 lv_obj_t *fill_button(lv_obj_t *parent, const char *glyph, std::int32_t side, std::int32_t px);
 /** The one primary action: a solid accent capsule, its glyph in the ink that goes on it. */
@@ -43,7 +44,9 @@ lv_obj_t *figures(lv_obj_t *parent, const char *widest, lv_text_align_t align);
 void open_focus_view();
 void build_media(lv_obj_t *screen);   // kit_front_views_media.cpp
 void build_focus(lv_obj_t *screen);   // kit_front_views_focus.cpp
+void build_clicker(lv_obj_t *screen); // kit_front_views_clicker.cpp
 void open_music();
+void open_clicker();
 void open_cinema();
 
 }  // namespace ui::kitfront::views

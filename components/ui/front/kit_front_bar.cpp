@@ -2,6 +2,7 @@
 // and the heating; and what plays. Each opens its card, in kit_front_cards.cpp.
 
 #include "kit_front.h"
+#include "kit_front_views.h"
 
 #include "home_model.h"
 #include "kit_fonts.h"
@@ -39,7 +40,13 @@ void paint_status()
 {
     const detail::StatusState &st = detail::status_state();
     const char *time = detail::pinned_clock() != nullptr ? detail::pinned_clock() : st.time[0] != 0 ? st.time : "--:--";
-    set_status(s_status, time, st.wifi, st.present, st.laptops);
+    // the laptop's mark opens the clicker only while it can be used: a file
+    // open in a viewer the laptop reads, Okular or Preview; and says so
+    const bool clicker = st.clicker[0] != '\0' && st.clicker_pages > 0;
+    set_status(s_status, time, st.wifi, st.present, st.laptops, clicker);
+    if (lv_obj_is_clickable(s_status.laptop) != clicker) {
+        lv_obj_set_clickable(s_status.laptop, clicker);
+    }
 }
 
 void paint_lights()
@@ -215,6 +222,8 @@ void build_bar(lv_obj_t *chrome)
     s_status = status(bar);
     lv_obj_add_flag(s_status.root, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(s_status.root, [](lv_event_t *) { toggle_setup(); }, LV_EVENT_CLICKED, nullptr);
+    lv_obj_set_ext_click_area(s_status.laptop, space::m);
+    lv_obj_add_event_cb(s_status.laptop, [](lv_event_t *) { views::open_clicker(); }, LV_EVENT_CLICKED, nullptr);
     filler(bar);
     build_claude(bar);
     build_room(bar);

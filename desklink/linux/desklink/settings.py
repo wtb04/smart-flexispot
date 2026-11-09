@@ -15,6 +15,7 @@ class Settings:
     sharing: bool = True
     claude: bool = True
     pings: bool = True  # off, the panel shows the sessions without its chime and notice
+    slides: bool = True  # the panel's clicker: the keys, and Okular's page
 
 
 def default_path() -> Path:

@@ -44,6 +44,13 @@ public:
 
     NowPlaying  current_now() const;     // inactive when none is followed
     std::string current_origin() const;  // empty when none is followed
+    /** Where the clicker's next and back go: one showing slides, the one
+     *  followed if it is, else the one followed if it takes them, else the
+     *  one last heard of those that do; -1 for none. */
+    int         slides_row() const;
+    std::string slides_origin() const;   // empty for none
+    std::string slides_machine() const;  // empty for none
+    NowPlaying  slides_now() const;      // its slide, none for none
     int         reaches_of(const std::string &origin) const;  // -2 for one not in the table
     int         count() const { return count_; }
 

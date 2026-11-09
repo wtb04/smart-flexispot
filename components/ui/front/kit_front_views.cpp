@@ -197,7 +197,7 @@ lv_obj_t *desk_chip(lv_obj_t *parent, const char *top, const char *bottom)
     return b;
 }
 
-Chrome chrome(detail::ViewId view, lv_obj_t *root, bool black)
+Chrome chrome(detail::ViewId view, lv_obj_t *root, bool black, bool fades)
 {
     auto *o  = new Over;
     o->black = black;
@@ -234,8 +234,10 @@ Chrome chrome(detail::ViewId view, lv_obj_t *root, bool black)
         ink_on_black(o->percent, Ink::Secondary);
         lv_obj_set_style_text_color(o->cell, lv_color_hex(ON_BLACK), 0);
     }
-    detail::fade_when_idle(view, left);
-    detail::fade_when_idle(view, right);
+    if (fades) {
+        detail::fade_when_idle(view, left);
+        detail::fade_when_idle(view, right);
+    }
     detail::subscribe(Topic::Desk, view, [o] { paint_desk(*o); });
     detail::subscribe(Topic::Status, view, [o] { paint_status(*o); });
     detail::subscribe(Topic::Second, view, [o] {
@@ -505,6 +507,7 @@ void build_views(lv_obj_t *screen)
 {
     views::build_media(screen);
     views::build_focus(screen);
+    views::build_clicker(screen);
     subscribe(Topic::Picks, detail::kNoView, [] {
         for (int i = 0; s_picks != nullptr && i < media::kPickCount; ++i) {
             show_pick_art(i, true);

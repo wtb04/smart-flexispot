@@ -160,6 +160,44 @@ std::string Laptops::current_origin() const
     return current_ >= 0 ? rows_[current_].origin : "";
 }
 
+int Laptops::slides_row() const
+{
+    for (const bool showing : {true, false}) {
+        const auto fits = [&](const Seen &row) { return row.now.takes_slides && (!showing || row.now.slide_pages > 0); };
+        if (current_ >= 0 && fits(rows_[current_])) {
+            return current_;
+        }
+        int best = -1;
+        for (int i = 0; i < count_; ++i) {
+            if (fits(rows_[i]) && (best < 0 || rows_[i].heard_us > rows_[best].heard_us)) {
+                best = i;
+            }
+        }
+        if (best >= 0) {
+            return best;
+        }
+    }
+    return -1;
+}
+
+std::string Laptops::slides_origin() const
+{
+    const int row = slides_row();
+    return row >= 0 ? rows_[row].origin : "";
+}
+
+std::string Laptops::slides_machine() const
+{
+    const int row = slides_row();
+    return row >= 0 ? rows_[row].now.machine : "";
+}
+
+NowPlaying Laptops::slides_now() const
+{
+    const int row = slides_row();
+    return row >= 0 ? rows_[row].now : NowPlaying{};
+}
+
 int Laptops::reaches_of(const std::string &origin) const
 {
     const int index = find(origin);

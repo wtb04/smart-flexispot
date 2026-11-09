@@ -272,9 +272,12 @@ class SettingsWindow:
                               active=link.settings.pings)
         pings.connect("notify::active", lambda row, _p: link.set_pings(row.get_active()))
         claude.bind_property("active", pings, "sensitive", GObject.BindingFlags.SYNC_CREATE)
+        slides = Adw.SwitchRow(title="Presentation clicker", active=link.settings.slides)
+        slides.connect("notify::active", lambda row, _p: link.set_slides(row.get_active()))
         share.add(plays)
         share.add(claude)
         share.add(pings)
+        share.add(slides)
         page.add(share)
         self._plays = plays
 

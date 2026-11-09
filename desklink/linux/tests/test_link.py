@@ -173,6 +173,74 @@ class LinkTest(unittest.TestCase):
         self.timers.advance(30)
         self.assertEqual(len(self.client.posts), count)
 
+    def test_slides_are_taken_whatever_plays(self):
+        self.assertEqual(link.build_state("m", 1, None, None, fakes.FakeVolume(), 0.0, slides=True)["takes"], ["slides"])
+        self.assertIn("slides", link.build_state("m", 1, track(), None, fakes.FakeVolume(), 1000.0, slides=True)["takes"])
+        self.assertNotIn("takes", link.build_state("m", 1, None, None, fakes.FakeVolume(), 0.0))
+
+    def test_clicker_commands_press_the_keys(self):
+        pressed = []
+
+        class Keys:
+            available = True
+
+            def press(self, next_slide):
+                pressed.append(next_slide)
+                return True
+
+        self.make()
+        self.link._keys = Keys()
+        for command in ("slide_next", "slide_back"):
+            reply = self.link.handle("POST", "/link", self.panel.sealed({"type": "command", "command": command}, "/link"), False)
+            self.assertEqual(reply.status, 200)
+        self.assertEqual(pressed, [True, False])
+        self.locked = True
+        reply = self.link.handle("POST", "/link", self.panel.sealed({"type": "command", "command": "slide_next"}, "/link"), False)
+        self.assertEqual(reply.status, 400, "not into a locked screen")
+        self.assertEqual(pressed, [True, False])
+
+    def test_the_slide_okular_is_on(self):
+        from desklink import okular
+        slide = okular.Slide(4, 12, "talk")
+        state = link.build_state("m", 1, None, None, fakes.FakeVolume(), 0.0, slides=True, slide=slide)
+        self.assertEqual(state["slide"], {"page": 4, "pages": 12, "deck": "talk"})
+        self.assertNotIn("slide", link.build_state("m", 1, None, None, fakes.FakeVolume(), 0.0, slide=slide))
+
+    def test_without_a_key_tool_okular_turns_its_own_pages(self):
+        from desklink import okular
+        turned = []
+
+        class Okular:
+            slide = okular.Slide(4, 12, "talk")
+
+            def turn(self, next_slide):
+                turned.append(next_slide)
+                return True
+
+            def show(self):
+                turned.append("show")
+                return True
+
+        class NoKeys:
+            available = False
+
+        self.make()
+        self.link._keys = NoKeys()
+        self.link._okular = Okular()
+        self.link.report()
+        self.assertEqual(self.client.states()[-1]["takes"], ["slides", "slide_show"])
+        self.assertEqual(self.client.states()[-1]["slide"]["page"], 4)
+        reply = self.link.handle("POST", "/link", self.panel.sealed({"type": "command", "command": "slide_back"}, "/link"), False)
+        self.assertEqual(reply.status, 200)
+        self.assertEqual(turned, [False])
+        reply = self.link.handle("POST", "/link", self.panel.sealed({"type": "command", "command": "slide_show"}, "/link"), False)
+        self.assertEqual((reply.status, turned), (200, [False, "show"]))
+        self.link.set_slides(False)
+        self.assertNotIn("takes", self.client.states()[-1], "no clicker once it is switched off")
+        self.assertNotIn("slide", self.client.states()[-1])
+        reply = self.link.handle("POST", "/link", self.panel.sealed({"type": "command", "command": "slide_next"}, "/link"), False)
+        self.assertEqual((reply.status, turned), (400, [False, "show"]))
+
     def test_panel_commands(self):
         self.make()
         self.link.take(track())

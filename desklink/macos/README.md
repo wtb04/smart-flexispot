@@ -22,9 +22,12 @@ Shortcut. With `open -g desklink://stand`, the app in front stays in front.
 <p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="shots/settings-dark.png"><img src="shots/settings-light.png" alt="Desk Link's settings" width="380"></picture></p>
 
 The panel's address and the key the two share, what this Mac shares with it,
-the volume keys for a display whose volume macOS cannot set, and whether Desk
-Link opens at login. There, the Claude Code sessions can show on the panel
-without its chime and notice.
+the keys it may press, which take Accessibility: the volume keys for a display
+whose volume macOS cannot set, and Page Down and Page Up for the panel's
+clicker, which is offered only once they are allowed, with the page Okular or
+Preview in front is on read the same way; and whether Desk Link opens at
+login. There, the Claude Code sessions can show on the panel without its chime
+and notice.
 
 ## Build
 

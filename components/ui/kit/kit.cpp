@@ -902,7 +902,7 @@ Status status(lv_obj_t *parent)
     return s;
 }
 
-void set_status(const Status &s, const char *time, bool wifi, bool phone, int laptops)
+void set_status(const Status &s, const char *time, bool wifi, bool phone, int laptops, bool slides)
 {
     if (std::strcmp(lv_label_get_text(s.clock), time) != 0) {
         lv_label_set_text(s.clock, time);
@@ -915,10 +915,16 @@ void set_status(const Status &s, const char *time, bool wifi, bool phone, int la
     if (lv_image_get_src(s.phone) != p) {
         lv_image_set_src(s.phone, p);
     }
-    const void *l = laptops > 0 ? &icons::laptop_icon : &icons::laptop_off_icon;
+    slides = slides && laptops > 0;
+    const void *l = slides ? &icons::laptop_slides_icon : laptops > 0 ? &icons::laptop_icon : &icons::laptop_off_icon;
     if (lv_image_get_src(s.laptop) != l) {
         lv_image_set_src(s.laptop, l);
     }
+    const lv_color_t ink = slides ? colour(Ink::Accent) : hex(s_pal.ink);
+    if (!lv_color_eq(lv_obj_get_style_image_recolor(s.laptop, LV_PART_MAIN), ink)) {
+        lv_obj_set_style_image_recolor(s.laptop, ink, 0);
+    }
+    laptops = slides ? 0 : laptops;  // the play mark on its screen, where the count goes
     const char count[] = {static_cast<char>('0' + std::min(laptops, 9)), '\0'};
     if (laptops > 1 && std::strcmp(lv_label_get_text(s.laptops), count) != 0) {
         lv_label_set_text(s.laptops, count);

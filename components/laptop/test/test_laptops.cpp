@@ -200,3 +200,57 @@ TEST(Laptops, counts_those_sharing_as_they_join_and_go_quiet)
     EXPECT_TRUE(laptops.forget_quiet(51 * S, QUIET));
     EXPECT_EQ(laptops.count(), 0);
 }
+
+TEST(Laptops, slides_go_to_the_followed_laptop_when_it_takes_them)
+{
+    Laptops    laptops;
+    NowPlaying mac = nothing();
+    mac.takes_slides = true;
+    mac.machine      = "mac";
+    NowPlaying linux_playing = playing("Video");
+    linux_playing.takes_slides = true;
+    laptops.take(MAC, mac, 0, PING);
+    laptops.take(LINUX, linux_playing, 1 * S, PING);
+    EXPECT_EQ(laptops.current_origin(), LINUX);
+    EXPECT_EQ(laptops.slides_origin(), LINUX);
+}
+
+TEST(Laptops, slides_go_to_one_that_takes_them_even_with_nothing_playing)
+{
+    Laptops    laptops;
+    NowPlaying mac = nothing();
+    mac.takes_slides = true;
+    mac.machine      = "mac";
+    laptops.take(LINUX, playing("Video"), 0, PING);  // an older Desk Link, without slides
+    laptops.take(MAC, mac, 1 * S, PING);
+    EXPECT_EQ(laptops.current_origin(), LINUX);
+    EXPECT_EQ(laptops.slides_origin(), MAC);
+    EXPECT_EQ(laptops.slides_machine(), "mac");
+}
+
+TEST(Laptops, slides_go_to_the_laptop_showing_them_over_the_followed_one)
+{
+    Laptops    laptops;
+    NowPlaying mac = nothing();
+    mac.takes_slides = true;
+    mac.slide_page   = 4;
+    mac.slide_pages  = 12;
+    mac.slide_deck   = "talk";
+    NowPlaying linux_playing = playing("Song");
+    linux_playing.takes_slides = true;
+    laptops.take(MAC, mac, 0, PING);
+    laptops.take(LINUX, linux_playing, 1 * S, PING);
+    EXPECT_EQ(laptops.current_origin(), LINUX);
+    EXPECT_EQ(laptops.slides_origin(), MAC);
+    EXPECT_EQ(laptops.slides_now().slide_deck, "talk");
+}
+
+TEST(Laptops, no_laptop_that_takes_slides_is_none)
+{
+    Laptops laptops;
+    laptops.take(MAC, playing("Song"), 0, PING);
+    EXPECT_EQ(laptops.slides_origin(), "");
+    EXPECT_EQ(laptops.slides_row(), -1);
+    laptops.forget_quiet(QUIET + S, QUIET);
+    EXPECT_EQ(laptops.slides_origin(), "");
+}

@@ -17,7 +17,10 @@
 		"command_volume_up":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"volume_up\"}",
 		"command_volume_down":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"volume_down\"}",
 		"pong_desk":	"{\"type\":\"pong\",\"at\":1791223792000,\"panel\":\"smart-flexispot\",\"firmware\":\"v0.9.0\",\"reaches\":true,\"desk\":\"sit\",\"going\":\"stand\",\"height\":742}",
-		"desk":	"{\"type\":\"desk\",\"at\":1791223792000,\"desk\":\"between\",\"going\":\"stand\",\"height\":1043}"
+		"desk":	"{\"type\":\"desk\",\"at\":1791223792000,\"desk\":\"between\",\"going\":\"stand\",\"height\":1043}",
+		"command_slide_next":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"slide_next\"}",
+		"command_slide_back":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"slide_back\"}",
+		"command_slide_show":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"slide_show\"}"
 	},
 	"sealed":	[{
 			"name":	"ping on /link",
@@ -355,6 +358,69 @@
 			"body":	"444c31d13030303030303030303030fd3a2643a181d8cfca2cfbcbb907c41bca5d80e164b467e1f336e5c884f397718877ed3ad1f485f51af643b46b7a4826d4af167c1265095b7ea938639579b11da8e9903894618763551520a2e9c7bdbda13c0be270c318dfe54f403152dd0844ab",
 			"result":	"ok",
 			"plain":	"{\"type\":\"desk\",\"at\":1791223792000,\"desk\":\"between\",\"going\":\"stand\",\"height\":1043}"
+		}, {
+			"name":	"command_slide_next on /link",
+			"path":	"/link",
+			"opens_on":	"/link",
+			"body":	"444c31d131313131313131313131317b8356cde17ea71402cf2679e633e7acc166a4642b3051cfa2d40eb9a8319940788787ac87c1527756a67f37c705f398fcd1e1535eb7fcbb8869d01f6f7f44fac4bb9145d6c971104aa0aff0",
+			"result":	"ok",
+			"plain":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"slide_next\"}"
+		}, {
+			"name":	"command_slide_next on /link reply",
+			"path":	"/link reply",
+			"opens_on":	"/link reply",
+			"body":	"444c31d1323232323232323232323232d603a7cda3502c1118f912cf6b72cf9ed0dceab45076978674796f9d0518144bd4262b1d56503a377d1784b96f6d147fc325c4a0b4cad2e0a72bca198f44502d287ecd5dfba7d6dad25a4c",
+			"result":	"ok",
+			"plain":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"slide_next\"}"
+		}, {
+			"name":	"command_slide_next on /cover reply",
+			"path":	"/cover reply",
+			"opens_on":	"/cover reply",
+			"body":	"444c31d13333333333333333333333bab90019baa15dd78bba364bede6c438128593d0658706d4b3d58999859ddf4b54249dd2063ee0e90055191f014c3ce6d84b6fb78817e27ecf6e828cfbbf9a7a3f19f5511d203489263f8c9c",
+			"result":	"ok",
+			"plain":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"slide_next\"}"
+		}, {
+			"name":	"command_slide_back on /link",
+			"path":	"/link",
+			"opens_on":	"/link",
+			"body":	"444c31d134343434343434343434348c01d918f19cb2b80267c8ece74b25a75205a172a5aff455b68abbb091968bfdcc5f3d6897f02f56401f667dbd7b514ff6459926636a414180dcd42f7e313a37ecec50b50eae45cff61884e3",
+			"result":	"ok",
+			"plain":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"slide_back\"}"
+		}, {
+			"name":	"command_slide_back on /link reply",
+			"path":	"/link reply",
+			"opens_on":	"/link reply",
+			"body":	"444c31d13535353535353535353535138ed1ea1fb385e92c92f155255eeb686e578b02ebe00ec2683a7c8e0e2e25ef36bfe1ea92afefe1f6476f19eab378b3861311ef6b76ccb5c6ddf887573c30c124b67c01d1d5763ad60cc26e",
+			"result":	"ok",
+			"plain":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"slide_back\"}"
+		}, {
+			"name":	"command_slide_back on /cover reply",
+			"path":	"/cover reply",
+			"opens_on":	"/cover reply",
+			"body":	"444c31d13636363636363636363636ba2ec404c5c475e588d9c18b1e81b706617520f3df7adf0a9d345b7b65e51450a7fdca8e521710132b0493a95c4390f35d2a6cd80a82d4e1c58a730f61d37aa2ce62b401b41df84382c4e237",
+			"result":	"ok",
+			"plain":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"slide_back\"}"
+		}, {
+			"name":	"command_slide_show on /link",
+			"path":	"/link",
+			"opens_on":	"/link",
+			"body":	"444c31d1373737373737373737373769b24e1cf738c7553375fa6b6d1ff13ff46a1fba3ca150a5ab8b8e2821e8561b6be070016506b4db4ba17478bd1aa1a1435a46fe202cdcadb6e623a780431b90edd73dad0e14da74aec8cbbd",
+			"result":	"ok",
+			"plain":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"slide_show\"}"
+		}, {
+			"name":	"command_slide_show on /link reply",
+			"path":	"/link reply",
+			"opens_on":	"/link reply",
+			"body":	"444c31d13838383838383838383838d3697701b55f6f736919ab522ab31ed6ea68fedbb8a38a364d6096ed30c5a9187903c6875bb3b574467c259038b8e0000c7dfdbc761aaed157a808834c504e364613b2aeabb50895ffa10482",
+			"result":	"ok",
+			"plain":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"slide_show\"}"
+		}, {
+			"name":	"command_slide_show on /cover reply",
+			"path":	"/cover reply",
+			"opens_on":	"/cover reply",
+			"body":	"444c31d1393939393939393939393902c4e647caffa24e66d733f0c04cc708cf2750535e17eb9ba20933ab39318d48ac0793436c9c70c4c610bc32e8b49a0bf5080aa59fda44335475c6b395a17cf216c718af49c8d11b708b0c60",
+			"result":	"ok",
+			"plain":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"slide_show\"}"
 		}, {
 			"name":	"wrong key",
 			"path":	"/link",

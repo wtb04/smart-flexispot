@@ -348,6 +348,9 @@ private struct SettingsView: View {
                     }
                 }
                 .disabled(!link.sharesClaude)
+                Toggle(isOn: $link.sharesSlides) {
+                    Label { Text("Presentation clicker") } icon: { Tile(symbol: "play.rectangle.fill", colour: .blue) }
+                }
             }
 
             Section {
@@ -358,10 +361,10 @@ private struct SettingsView: View {
                         Button("Allow…") { VolumeKeys.askToAllow() }
                     }
                 } label: {
-                    Label { Text("Volume keys") } icon: { Tile(symbol: "speaker.wave.2.fill", colour: .pink) }
+                    Label { Text("Volume and slide keys") } icon: { Tile(symbol: "speaker.wave.2.fill", colour: .pink) }
                 }
             } footer: {
-                Text("For a display whose volume macOS cannot set: with MonitorControl running, the panel's − and + press the volume keys.")
+                Text("For a display whose volume macOS cannot set: with MonitorControl running, the panel's − and + press the volume keys. The panel's clicker presses Page Down and Page Up, for slides.")
             }
 
             Section {

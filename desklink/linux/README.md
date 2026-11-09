@@ -11,7 +11,11 @@ settings. There, the Claude Code sessions can show on the panel without its chim
 ## Install
 
 Needs Python 3 with PyGObject, GTK 4, libadwaita, gtk4-layer-shell, libsoup 3 and libsecret,
-python3-cryptography, Pillow, `wpctl` and `inotifywait`, all in Ubuntu 26.04's archive.
+python3-cryptography, Pillow, `wpctl` and `inotifywait`, all in Ubuntu 26.04's archive. The
+panel's clicker presses Page Down and Page Up through `wtype`, or `ydotool` where the compositor
+has no virtual keyboard. Okular's page is asked over D-Bus, for the panel to show; without either
+tool, the clicker turns Okular's pages through D-Bus too, and with no Okular open the panel offers
+no clicker for this laptop.
 
     cd desklink/linux && make install    # into ~/.local, enabled as a systemd user unit
     desklink set-key <DESK_LINK_KEY>
