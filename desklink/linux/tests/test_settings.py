@@ -18,7 +18,7 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(settings.load(self.path), settings.Settings())
 
     def test_round_trip(self):
-        saved = settings.Settings(panel="127.0.0.1:8080", sharing=False, claude=False)
+        saved = settings.Settings(panel="127.0.0.1:8080", sharing=False, claude=False, pings=False)
         settings.save(saved, self.path)
         self.assertEqual(settings.load(self.path), saved)
 

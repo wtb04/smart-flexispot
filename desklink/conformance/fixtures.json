@@ -15,7 +15,9 @@
 		"command_volume":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"volume\",\"level\":40}",
 		"command_mute":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"mute\",\"muted\":true}",
 		"command_volume_up":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"volume_up\"}",
-		"command_volume_down":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"volume_down\"}"
+		"command_volume_down":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"volume_down\"}",
+		"pong_desk":	"{\"type\":\"pong\",\"at\":1791223792000,\"panel\":\"smart-flexispot\",\"firmware\":\"v0.9.0\",\"reaches\":true,\"desk\":\"sit\",\"going\":\"stand\",\"height\":742}",
+		"desk":	"{\"type\":\"desk\",\"at\":1791223792000,\"desk\":\"between\",\"going\":\"stand\",\"height\":1043}"
 	},
 	"sealed":	[{
 			"name":	"ping on /link",
@@ -311,6 +313,48 @@
 			"body":	"444c31d12a2a2a2a2a2a2a2a2a2a2af3d552e2e7d72b8ef7003a6edccbbb9fab1a223fb501ee0a487851b227beba370402b3b1b5aef895ce01e923737b0dee9b2ee13fb1252c06ab975a857cd21ad3798ef2d7f7e1d72969c5dc82e1",
 			"result":	"ok",
 			"plain":	"{\"type\":\"command\",\"at\":1791223792000,\"command\":\"volume_down\"}"
+		}, {
+			"name":	"pong_desk on /link",
+			"path":	"/link",
+			"opens_on":	"/link",
+			"body":	"444c31d12b2b2b2b2b2b2b2b2b2b2b1cf6461966a650e73e48ab69ca8f860a9d8040cde950fb6769f84ba60511d1288f7aab29408ea0d55e80df6d6809c37169bf0429b7c7e9ff5e93502c93f8ba5f250995c357f9ea027426ba632af221ff9c87a94d4296256bb826b404026b5b1dff688beaebdbc09d11000c591b50b9c5c089bcc33ae58552b2a8da4804e0ca59b02da2d707ce1188f154ef20f2bae17ff242ab4a22b2382ae3",
+			"result":	"ok",
+			"plain":	"{\"type\":\"pong\",\"at\":1791223792000,\"panel\":\"smart-flexispot\",\"firmware\":\"v0.9.0\",\"reaches\":true,\"desk\":\"sit\",\"going\":\"stand\",\"height\":742}"
+		}, {
+			"name":	"pong_desk on /link reply",
+			"path":	"/link reply",
+			"opens_on":	"/link reply",
+			"body":	"444c31d12c2c2c2c2c2c2c2c2c2c2cb63bb5a86b64df2dc36f7b4286bae9c872e03e59e74bbe336257356fee45ee6071c565050b611a500dfad84998dc0ba1d111052616a87f155ea6502ecdb37862404a17a1311bac81e2f076c716225f669098a94fdeb409c7920c993922924eacec6895cf0c4e4858718f3733fb5e20c9a23d9fca9ab2b3abaa83b0030fa65051466d93aca253069b1c34c648acbc59e557a2e0ad541a0fb662",
+			"result":	"ok",
+			"plain":	"{\"type\":\"pong\",\"at\":1791223792000,\"panel\":\"smart-flexispot\",\"firmware\":\"v0.9.0\",\"reaches\":true,\"desk\":\"sit\",\"going\":\"stand\",\"height\":742}"
+		}, {
+			"name":	"pong_desk on /cover reply",
+			"path":	"/cover reply",
+			"opens_on":	"/cover reply",
+			"body":	"444c31d12d2d2d2d2d2d2d2d2d2d2dbb06eccb2a6058bf6dccacf902fed63e84e5e28c8b313c3db1f901fdb0cc2c40f73f26bb6b80e3522a3150e67e3c1a5a6f9c5f255ccdfe195f260e7f7eea5ede825360585d1d3bb5e5aa8b1236f6bcdd95fe64a32ddd5abddebe42fbdde04e10b06dd3e6538c8e80695d29054de08ee2f672385f7da1c06c435a536be40b4805f9917d52a17971e6c4216310d662b20fb1b90827c00b4238cf",
+			"result":	"ok",
+			"plain":	"{\"type\":\"pong\",\"at\":1791223792000,\"panel\":\"smart-flexispot\",\"firmware\":\"v0.9.0\",\"reaches\":true,\"desk\":\"sit\",\"going\":\"stand\",\"height\":742}"
+		}, {
+			"name":	"desk on /link",
+			"path":	"/link",
+			"opens_on":	"/link",
+			"body":	"444c31d12e2e2e2e2e2e2e2e2e2e2e2954121bf675377ff5e2bd23920429e36b9c247c4ec168230ab50b38e02397d49237d21548e8d9a096681780c5255f41e99220eed327de1daf80d36327f1986c77e443e86c4e090863c8eb548dd978bbc8baff7c92de9da3fe1e6a53fbfb39e5b2",
+			"result":	"ok",
+			"plain":	"{\"type\":\"desk\",\"at\":1791223792000,\"desk\":\"between\",\"going\":\"stand\",\"height\":1043}"
+		}, {
+			"name":	"desk on /link reply",
+			"path":	"/link reply",
+			"opens_on":	"/link reply",
+			"body":	"444c31d12f2f2f2f2f2f2f2f2f2f2f862d5d6a5f6bab1810151c1059bd0a785fe6105fd1ec6e73683d2409ab4a828ef9295443ca4628e8c77f5ce16bc2cd93660d3538716162cf131fa478f830da2f4e48c5f6f54e7b4dfc7614c4cb28df79c7898852d4301314a0d856da1e875c804f",
+			"result":	"ok",
+			"plain":	"{\"type\":\"desk\",\"at\":1791223792000,\"desk\":\"between\",\"going\":\"stand\",\"height\":1043}"
+		}, {
+			"name":	"desk on /cover reply",
+			"path":	"/cover reply",
+			"opens_on":	"/cover reply",
+			"body":	"444c31d13030303030303030303030fd3a2643a181d8cfca2cfbcbb907c41bca5d80e164b467e1f336e5c884f397718877ed3ad1f485f51af643b46b7a4826d4af167c1265095b7ea938639579b11da8e9903894618763551520a2e9c7bdbda13c0be270c318dfe54f403152dd0844ab",
+			"result":	"ok",
+			"plain":	"{\"type\":\"desk\",\"at\":1791223792000,\"desk\":\"between\",\"going\":\"stand\",\"height\":1043}"
 		}, {
 			"name":	"wrong key",
 			"path":	"/link",

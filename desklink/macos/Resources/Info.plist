@@ -24,6 +24,17 @@
     <string>26.0</string>
     <key>LSUIElement</key>
     <true/>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>nl.w-tb.desklink</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>desklink</string>
+            </array>
+        </dict>
+    </array>
     <key>NSLocalNetworkUsageDescription</key>
     <string>Desk Link tells the desk panel what is playing on this Mac, and takes its play, pause and skip back.</string>
 </dict>

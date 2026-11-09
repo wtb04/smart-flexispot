@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct DeskLinkApp: App {
+    @NSApplicationDelegateAdaptor private var opener: Opener
     @StateObject private var link = Link()
 
     var body: some Scene {
@@ -16,6 +17,18 @@ struct DeskLinkApp: App {
             SettingsView(link: link)
         }
         .windowResizability(.contentSize)
+    }
+}
+
+extension Notification.Name {
+    static let openURL = Notification.Name("nl.w-tb.desklink.openURL")
+}
+
+/// Hands desklink:// on to the Link, which is made before the first one comes,
+/// also when one is what starts Desk Link.
+final class Opener: NSObject, NSApplicationDelegate {
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls { NotificationCenter.default.post(name: .openURL, object: url) }
     }
 }
 
@@ -113,6 +126,9 @@ private struct Menu: View {
             if link.sharing {
                 Playing(link: link)
             }
+            if link.desk != nil {
+                DeskButtons(link: link)
+            }
             HStack(spacing: 8) {
                 Circle().fill(link.dot).frame(width: 7, height: 7)
                 Text(link.status).font(.callout).foregroundStyle(.secondary).lineLimit(1)
@@ -142,6 +158,8 @@ private struct Menu: View {
         }
         .padding(10)
         .frame(width: 300)
+        .onAppear { link.watchDesk(true) }
+        .onDisappear { link.watchDesk(false) }
     }
 }
 
@@ -207,6 +225,61 @@ private struct Bar: View {
     }
 }
 
+/// The desk as a card beside what plays: where it is, and Stand and Sit as the
+/// panel screen's own buttons, filled where the desk stands, turning where it
+/// goes; either, tapped while it moves, stops it.
+private struct DeskButtons: View {
+    @ObservedObject var link: Link
+
+    private var words: String {
+        let place: String
+        if let going = link.deskGoing {
+            place = going == .stand ? "Going to Stand" : "Going to Sit"
+        } else {
+            switch link.desk {
+            case .stand: place = "Standing"
+            case .sit: place = "Sitting"
+            default: place = "Between"
+            }
+        }
+        return link.deskHeightMM.map { "\(place), \(Desk.height($0))" } ?? place
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(.quaternary)
+                .overlay(Image(systemName: "table.furniture").foregroundStyle(.secondary))
+                .frame(width: 44, height: 44)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Desk").font(.callout.weight(.semibold))
+                Text(words).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 0)
+            ForEach(Desk.presets, id: \.self) { preset in
+                let look = preset.look(at: link.desk, going: link.deskGoing)
+                let button = Button {
+                    link.go(to: preset)
+                } label: {
+                    Group {
+                        if look == .ringed {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: preset == .stand ? "arrow.up" : "arrow.down")
+                        }
+                    }
+                    .frame(width: 16, height: 16)
+                }
+                .buttonBorderShape(.circle)
+                .help(link.deskGoing != nil ? "On its way: tap to stop it" : preset == .stand ? "Stand" : "Sit")
+                if look == .lit { button.buttonStyle(.glassProminent) } else { button.buttonStyle(.glass) }
+            }
+        }
+        .padding(10)
+        .glassEffect(.regular, in: .rect(cornerRadius: 14))
+    }
+}
+
 /// A row's icon, as System Settings has them: a white symbol on a colour.
 private struct Tile: View {
     let symbol: String
@@ -266,6 +339,15 @@ private struct SettingsView: View {
                 Toggle(isOn: $link.sharesClaude) {
                     Label { Text("Claude Code sessions") } icon: { Tile(symbol: "terminal.fill", colour: .purple) }
                 }
+                Toggle(isOn: $link.pings) {
+                    Label {
+                        Text("Ping when a session needs you")
+                        Text("The panel's chime and notice; off, the sessions still show")
+                    } icon: {
+                        Tile(symbol: "bell.fill", colour: .red)
+                    }
+                }
+                .disabled(!link.sharesClaude)
             }
 
             Section {

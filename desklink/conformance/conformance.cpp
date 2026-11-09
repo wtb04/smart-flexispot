@@ -140,6 +140,8 @@ int fixtures()
         {"command_mute", command_body(Command::Mute, 1, AT)},
         {"command_volume_up", command_body(Command::VolumeUp, 0, AT)},
         {"command_volume_down", command_body(Command::VolumeDown, 0, AT)},
+        {"pong_desk", pong_body("smart-flexispot", "v0.9.0", 1, AT, {Desk::Sit, Desk::Stand, 742})},
+        {"desk", desk_body({Desk::Between, Desk::Stand, 1043}, AT)},
     };
     for (const auto &[name, body] : named) {
         cJSON_AddStringToObject(bodies, name, body.c_str());
@@ -309,6 +311,21 @@ int main(int argc, char **argv)
         std::cout << claude_event(body.data(), body.size());
         return 0;
     }
-    std::cerr << "usage: conformance fixtures | open <path> | seal <path> | read-state | read-head | claude-event\n";
+    if (command == "claude-quiet") {
+        const std::string body  = stdin_all();
+        bool              quiet = false;
+        claude_event(body.data(), body.size(), &quiet);
+        std::cout << (quiet ? "true" : "false");
+        return 0;
+    }
+    if (command == "desk-preset") {
+        const std::string body = stdin_all();
+        Desk              tap  = Desk::None;
+        const bool        ok   = desk_preset(body.data(), body.size(), tap);
+        std::cout << (!ok ? "bad" : tap == Desk::None ? "ask" : desk_name(tap));
+        return 0;
+    }
+    std::cerr << "usage: conformance fixtures | open <path> | seal <path> | read-state | read-head | claude-event"
+                 " | claude-quiet | desk-preset\n";
     return 1;
 }

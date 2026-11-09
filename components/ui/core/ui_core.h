@@ -63,8 +63,8 @@ constexpr int FOCUS_WORK_MIN_MAX           = 90;
 constexpr int FOCUS_ROUNDS_MAX             = 8;
 
 // The presets the dock's Stand and Sit send the desk to.
-constexpr int STAND_PRESET     = 2;
-constexpr int SIT_PRESET       = 3;
+constexpr int STAND_PRESET     = kStandPreset;
+constexpr int SIT_PRESET       = kSitPreset;
 constexpr int ULTRA_LOW_PRESET = 1;  // Preset 2, as the cinema view sends the desk down
 
 // The diagnostics cards set_cards() was given, before init.

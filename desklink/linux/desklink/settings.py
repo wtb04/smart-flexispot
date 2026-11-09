@@ -14,6 +14,7 @@ class Settings:
     panel: str = "smart-flexispot"
     sharing: bool = True
     claude: bool = True
+    pings: bool = True  # off, the panel shows the sessions without its chime and notice
 
 
 def default_path() -> Path:

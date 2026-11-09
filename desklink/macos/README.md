@@ -7,9 +7,15 @@ Mac, from any app that shows under Now Playing, appears on the panel with its
 cover and where it is, and the panel's buttons pause, seek, skip and change the
 volume here. Claude Code's sessions on this Mac reach the panel through it too.
 
-The menu shows what plays, with a button to pause it, and whether the panel
-answers; the switch beside that turns sharing off and on, and the menu behind
-the dots opens the settings.
+The menu shows what plays, with a button to pause it, Stand and Sit for the
+desk, and whether the panel answers; the switch beside that turns sharing off
+and on, and the menu behind the dots opens the settings.
+
+Stand and Sit send the desk there as the panel's buttons do: tapped while the
+desk moves, either stops it. They show once the panel says there is a desk to
+move, which a panel before this Desk Link does not. `desklink://stand` and
+`desklink://sit` do the same, so either can go on a key binding or in a
+Shortcut. With `open -g desklink://stand`, the app in front stays in front.
 
 ## Settings
 
@@ -17,7 +23,8 @@ the dots opens the settings.
 
 The panel's address and the key the two share, what this Mac shares with it,
 the volume keys for a display whose volume macOS cannot set, and whether Desk
-Link opens at login.
+Link opens at login. There, the Claude Code sessions can show on the panel
+without its chime and notice.
 
 ## Build
 
@@ -46,7 +53,10 @@ seconds whatever it is; the panel answers with a pong, and pings port 47801
 here to say whether it reaches the Mac back. The panel sends its commands to
 `/link` here and asks `/cover` for the picture. tools/claude-hook hands its
 events to `/claude` here, which only this Mac may reach, and Desk Link passes
-them on. The messages are in `components/laptop/include/laptop_protocol.h`.
+them on. Stand and Sit go to the panel's `/link` as well, and while the desk
+moves, or the menu is open, Desk Link asks it every half second where the desk
+is and how high. The messages are
+in `components/laptop/include/laptop_protocol.h`.
 
 Since macOS 15.4 Apple only lets its own apps read Now Playing; Desk Link reads
 it through [mediaremote-adapter](https://github.com/ungive/mediaremote-adapter),

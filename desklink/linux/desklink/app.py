@@ -95,8 +95,14 @@ class App(Adw.Application):
         if args == ["settings"]:
             self.show_settings()
             return 0
+        if args in (["stand"], ["sit"]):
+            if not self.link.go_to(args[0]):
+                from .ui import status_line
+                command_line.printerr_literal(f"desklink: {status_line(self.link, self.server_error)}\n")
+                return 1
+            return 0
         if args:
-            command_line.printerr_literal("usage: desklink [settings | set-key <hex> | --version]\n")
+            command_line.printerr_literal("usage: desklink [stand | sit | settings | set-key <hex> | --version]\n")
             return 1
         if self._started:
             self.toggle_dropdown()

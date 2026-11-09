@@ -10,7 +10,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Gtk4LayerShell", "1.0")
-from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, GLib, GObject, Gtk  # noqa: E402
 from gi.repository import Gtk4LayerShell as Layer  # noqa: E402
 
 CSS = """
@@ -26,6 +26,8 @@ progressbar.desklink-progress progress { min-height: 6px; border-radius: 3px; }
 .desklink-dot-trouble { color: #e0821f; }
 .desklink-dot-off { color: #565f89; }
 progressbar.desklink-progress progress { background: #e0821f; }
+.desklink-desk { border-radius: 12px; padding: 8px; }
+.desklink-going { box-shadow: inset 0 0 0 2px #e0821f; }
 """
 
 
@@ -52,6 +54,19 @@ class ToggleGuard:
 
     def may_open(self) -> bool:
         return self._hidden_at < 0 or self._clock() - self._hidden_at > self.QUIET_S
+
+
+def height_text(height_mm: int | None) -> str:
+    """The desk's height to the nearest centimetre, "75 cm"; empty while unknown."""
+    return f"{round(height_mm / 10)} cm" if height_mm is not None else ""
+
+
+def desk_look(link, preset: str) -> list[str]:
+    if link.desk == preset:
+        return ["desklink-desk", "suggested-action"]
+    if link.desk_going == preset:
+        return ["desklink-desk", "desklink-going"]
+    return ["desklink-desk"]
 
 
 def subtitle(track) -> str:
@@ -122,6 +137,16 @@ class Dropdown:
         self._now.append(self._progress)
         self._nothing = Gtk.Label(label="Nothing plays", css_classes=["dim-label"], margin_top=6, margin_bottom=6)
 
+        self._desk = Gtk.Box(spacing=8)
+        self._height = Gtk.Label(css_classes=["dim-label", "numeric"], width_chars=8)
+        self._desk.append(self._height)
+        self._presets = {}
+        for preset, label, icon in (("stand", "Stand", "go-up-symbolic"), ("sit", "Sit", "go-down-symbolic")):
+            button = Gtk.Button(child=Adw.ButtonContent(label=label, icon_name=icon), hexpand=True)
+            button.connect("clicked", lambda _b, p=preset: self._link.go_to(p))
+            self._presets[preset] = button
+            self._desk.append(button)
+
         status = Gtk.Box(spacing=8)
         self._dot = Gtk.Label(label="●")
         self._status = Gtk.Label(xalign=0, hexpand=True, ellipsize=3)
@@ -132,7 +157,7 @@ class Dropdown:
         for child in (self._dot, self._status, self._sharing, more):
             status.append(child)
 
-        for child in (self._now, self._nothing, status):
+        for child in (self._now, self._nothing, self._desk, status):
             card.append(child)
         self.window.set_child(card)
 
@@ -161,11 +186,13 @@ class Dropdown:
             Layer.set_monitor(self.window, monitor)
         self.refresh()
         self.window.present()
+        self._link.set_watching(True)
         from .link import GLibTimers
         self._ticker = GLibTimers().every(1, self._tick)
 
     def hide(self) -> None:
         self.window.set_visible(False)
+        self._link.set_watching(False)
         if self._ticker:
             self._ticker.cancel()
             self._ticker = None
@@ -193,6 +220,11 @@ class Dropdown:
             texture = Gdk.Texture.new_from_bytes(GLib.Bytes.new(link.artwork.jpeg)) if link.artwork else None
             self._cover.set_from_paintable(texture)
             self._cover.set_visible(texture is not None)
+        self._desk.set_visible(link.desk is not None)
+        self._height.set_label(height_text(link.desk_height_mm))
+        for preset, button in self._presets.items():
+            button.set_css_classes(desk_look(link, preset))
+            button.set_tooltip_text("On its way: tap to stop it" if link.desk_going else None)
         self._dot.set_css_classes([f"desklink-dot-{health_of(link, self._app.server_error)}"])
         self._status.set_label(status_line(link, self._app.server_error))
         if self._sharing.get_active() != link.settings.sharing:
@@ -235,8 +267,14 @@ class SettingsWindow:
         plays.connect("notify::active", lambda row, _p: link.set_sharing(row.get_active()))
         claude = Adw.SwitchRow(title="Claude Code sessions", active=link.settings.claude)
         claude.connect("notify::active", lambda row, _p: link.set_claude(row.get_active()))
+        pings = Adw.SwitchRow(title="Ping when a session needs you",
+                              subtitle="The panel's chime and notice; off, the sessions still show",
+                              active=link.settings.pings)
+        pings.connect("notify::active", lambda row, _p: link.set_pings(row.get_active()))
+        claude.bind_property("active", pings, "sensitive", GObject.BindingFlags.SYNC_CREATE)
         share.add(plays)
         share.add(claude)
+        share.add(pings)
         page.add(share)
         self._plays = plays
 

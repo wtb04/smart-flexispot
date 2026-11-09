@@ -3,6 +3,7 @@
 #include "topics.h"
 #include "ui_core.h"
 
+#include <atomic>
 #include <cstdio>
 
 namespace ui::detail {
@@ -74,11 +75,19 @@ void forget_held()
     }
 }
 
+std::atomic<int> s_travelling_shown{-1};  // the same, for tasks off the LVGL one
+
+void travel(int index)
+{
+    s_desk.travelling = index;
+    s_travelling_shown.store(index, std::memory_order_relaxed);
+}
+
 void arrived()
 {
     stop_watching();
     forget_held();
-    s_desk.travelling = -1;
+    travel(-1);
     publish(Topic::Desk);
 }
 
@@ -263,7 +272,8 @@ void desk_go_to(int index)
         if (index == s_held) {
             arrived();
         } else {
-            s_held = s_desk.travelling = index;
+            s_held = index;
+            travel(index);
             publish(Topic::Desk);
         }
         return;
@@ -286,8 +296,8 @@ void desk_go_to(int index)
     if (s_desk.preset_active[index]) {
         return;  // there already
     }
-    s_desk.travelling = index;
-    s_moved_at        = lv_tick_get();
+    travel(index);
+    s_moved_at = lv_tick_get();
     if (s_still_timer == nullptr) {
         s_still_timer = lv_timer_create(check_still, STILL_CHECK_MS, nullptr);
     }
@@ -329,4 +339,9 @@ void lights_take_light(int index, const char *name, bool on)
 void ui::desk_tap(int index)
 {
     detail::desk_go_to(index);
+}
+
+int ui::desk_travelling()
+{
+    return detail::s_travelling_shown.load(std::memory_order_relaxed);
 }

@@ -277,9 +277,23 @@ esp_err_t take_state(httpd_req_t *req, const std::string &plain)
     if (sharing != was) {
         tell_sharing(sharing);
     }
+    const DeskState desk = s_on.desk != nullptr ? s_on.desk(Desk::None) : DeskState{};
     return answer(req, "200 OK",
                   sealed(std::string(LINK) + REPLY,
-                         pong_body(PANEL, esp_app_get_description()->version, taken.reaches, now_ms())));
+                         pong_body(PANEL, esp_app_get_description()->version, taken.reaches, now_ms(), desk)));
+}
+
+esp_err_t take_desk(httpd_req_t *req, const std::string &plain)
+{
+    Desk tap = Desk::None;
+    if (!desk_preset(plain.data(), plain.size(), tap)) {
+        return answer(req, "400 Bad Request");
+    }
+    if (tap != Desk::None) {
+        ESP_LOGI(TAG, "%s tapped from %s", desk_name(tap), sender(req).c_str());
+    }
+    const DeskState desk = s_on.desk != nullptr ? s_on.desk(tap) : DeskState{};
+    return answer(req, "200 OK", sealed(std::string(LINK) + REPLY, desk_body(desk, now_ms())));
 }
 
 esp_err_t take(httpd_req_t *req)
@@ -318,11 +332,15 @@ esp_err_t take(httpd_req_t *req)
         return take_state(req, plain);
     }
     if (head.type == "claude") {
-        const std::string event = claude_event(plain.data(), plain.size());
+        bool              quiet = false;
+        const std::string event = claude_event(plain.data(), plain.size(), &quiet);
         if (!event.empty() && s_on.claude != nullptr) {
-            s_on.claude(event.data(), event.size());
+            s_on.claude(event.data(), event.size(), quiet);
         }
         return answer(req, "200 OK", sealed(std::string(LINK) + REPLY, ok_body(now_ms())));
+    }
+    if (head.type == "desk") {
+        return take_desk(req, plain);
     }
     return answer(req, "400 Bad Request");
 }

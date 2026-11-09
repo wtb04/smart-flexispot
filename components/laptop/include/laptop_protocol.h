@@ -22,7 +22,13 @@
 // laptop's own output, in percent, where it can be set; "volume_step" in
 // "takes" is an output that only steps, as a display's does through
 // MonitorControl, moved by "volume_up" and "volume_down". "claude" carries an
-// event from tools/claude-hook as "event". The panel sends the laptop's /link
+// event from tools/claude-hook as "event", and "quiet": true when the laptop
+// wants its sessions shown without a chime or a notice. "desk" with a "preset",
+// "stand" or "sit", taps that preset as the screen's button does, and without
+// one only asks. It is answered "desk", and "pong" says the same, whenever
+// there is a desk to move: where it stands, "desk": "stand", "sit" or
+// "between", "going": "stand" or "sit" while on its way, and "height" in
+// millimetres once the desk has said it. The panel sends the laptop's /link
 // "ping", and "command": "pause", "seek" with a "position", "volume" with a
 // "level", "mute" with "muted". What answers is sealed as well: "pong", "ok",
 // and for a cover the picture itself.
@@ -60,15 +66,34 @@ bool read_head(const char *body, std::size_t length, Head &out);
 /** A state's now playing; false without a port to answer on. */
 bool read(const char *body, std::size_t length, NowPlaying &out);
 
-/** The hook's event a "claude" message carries, as JSON; empty for none. */
-std::string claude_event(const char *body, std::size_t length);
+/** The hook's event a "claude" message carries, as JSON; empty for none. With
+ *  `quiet`, whether the laptop asked for no chime and no notice. */
+std::string claude_event(const char *body, std::size_t length, bool *quiet = nullptr);
+
+/** None is no desk to move, or nowhere it goes. */
+enum class Desk : std::uint8_t { None, Between, Stand, Sit };
+
+/** "stand", "sit", "between", or empty for None. */
+const char *desk_name(Desk desk);
+
+struct DeskState {
+    Desk at    = Desk::None;  // None without a desk linked
+    Desk going = Desk::None;  // Stand or Sit while it is on its way there
+    int  height_mm = -1;      // negative while the desk has not said
+};
+
+/** Which preset a "desk" message taps, into `out`: Stand, Sit, or None when it
+ *  only asks. False when it names something else. */
+bool desk_preset(const char *body, std::size_t length, Desk &out);
 
 enum class Command { Play, Pause, Next, Previous, Seek, Volume, Mute, VolumeUp, VolumeDown };
 /** `value` is the position for Seek, the percent for Volume, 1 to mute for Mute. */
 std::string command_body(Command command, int value, std::int64_t at_ms);
 
 /** `reaches`: -1 before the panel has tried the laptop's port, else whether it answered. */
-std::string pong_body(const char *panel, const char *firmware, int reaches, std::int64_t at_ms);
+std::string pong_body(const char *panel, const char *firmware, int reaches, std::int64_t at_ms,
+                      DeskState desk = {});
+std::string desk_body(DeskState desk, std::int64_t at_ms);
 std::string ping_body(std::int64_t at_ms);
 std::string ok_body(std::int64_t at_ms);
 std::string cover_body(const std::string &art, std::int64_t at_ms);

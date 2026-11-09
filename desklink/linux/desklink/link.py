@@ -20,6 +20,10 @@ HEARTBEAT_S = 10  # the panel forgets a laptop after 30 s of silence
 SOON_S = 0.3
 GONE_AFTER_S = 3  # players drop their metadata for a moment around a pause
 IDLE_AWAY_S = 120
+DESK_PRESETS = ("stand", "sit")
+DESK_PLACES = (*DESK_PRESETS, "between")
+FOLLOW_S = 0.5  # where the desk stands is asked this often while it goes, so its height counts along
+FOLLOW_FOR_S = 60  # longer than it takes from one end to the other, should the panel never say it arrived
 
 
 class Clock:
@@ -129,6 +133,12 @@ class Link:
         self.reach = Reach.UNKNOWN
         self.reaches_back: bool | None = None
         self.firmware = ""
+        self.desk: str | None = None  # stand, sit or between, as the panel last said; None without a desk
+        self.desk_going: str | None = None  # stand or sit while the panel takes it there
+        self.desk_height_mm: int | None = None
+        self._watching = False  # the dropdown open, so the desk is asked after as while it goes
+        self._following = None
+        self._follow_until = 0.0
         self._beat = None
         self._soon = None
         self._vanishing = None
@@ -164,8 +174,12 @@ class Link:
             self.track, self.artwork, self._cover_url = None, None, ""  # it went; there is no later to pass it on
         self._beat = self._soon = self._vanishing = None
         self.report(force_nothing=True)
-        self.reach, self.reaches_back = Reach.UNKNOWN, None
+        self._forget_panel()
         self._changed()
+
+    def _forget_panel(self) -> None:
+        self.reach, self.reaches_back = Reach.UNKNOWN, None
+        self._desk_said({})
 
     # what plays
 
@@ -303,7 +317,33 @@ class Link:
                     self.firmware = str(answer.get("firmware", ""))
                     reaches = answer.get("reaches")
                     self.reaches_back = reaches if isinstance(reaches, bool) else None
+                    self._desk_said(answer)
+        if self.reach is not Reach.ANSWERING:
+            self._desk_said({})
         self._changed()
+
+    def _desk_said(self, answer: dict) -> None:
+        was_going = self.desk_going
+        desk, going = answer.get("desk"), answer.get("going")
+        self.desk = desk if desk in DESK_PLACES else None
+        self.desk_going = going if self.desk is not None and going in DESK_PRESETS else None
+        height = answer.get("height")
+        ok = self.desk is not None and isinstance(height, int) and not isinstance(height, bool) and 0 <= height < 3000
+        self.desk_height_mm = height if ok else None
+        if self.desk_going is not None and was_going is None:
+            self._follow_until = self._clock.monotonic() + FOLLOW_FOR_S
+        self._keep_following()
+
+    def set_watching(self, watching: bool) -> None:
+        """The dropdown open or shut: open, where the desk is and its height are asked every half second."""
+        self._watching = watching
+        self._keep_following()
+
+    def _keep_following(self) -> None:
+        if self.desk_going is None and not (self._watching and self.desk is not None):
+            self._stop_following()
+        elif self._following is None:
+            self._following = self._timers.every(FOLLOW_S, self._follow)
 
     # settings
 
@@ -319,11 +359,15 @@ class Link:
         self.settings.claude = claude
         self._save(self.settings)
 
+    def set_pings(self, pings: bool) -> None:
+        self.settings.pings = pings
+        self._save(self.settings)
+
     def set_panel(self, panel: str) -> None:
         self.settings.panel = panel.strip()
         self._save(self.settings)
         self._generation += 1
-        self.reach, self.reaches_back = Reach.UNKNOWN, None
+        self._forget_panel()
         self.report()
         self._changed()
 
@@ -335,7 +379,7 @@ class Link:
             return False
         self._generation += 1
         self._envelope = seal.Envelope(key, clock_ms=self._clock.wall_ms) if key else None
-        self.reach, self.reaches_back = Reach.UNKNOWN, None
+        self._forget_panel()
         if store:
             self.report()
             self._changed()
@@ -372,6 +416,42 @@ class Link:
     def play_pause(self) -> None:
         if self.track is not None:
             self._command("pause" if self.track.playing else "play")
+
+    # the desk
+
+    def go_to(self, preset: str) -> bool:
+        # not waiting for the panel to say of a desk, so `desklink stand` works as Desk Link starts
+        if preset not in DESK_PRESETS or not self.settings.sharing or self._envelope is None:
+            return False
+        self._ask_desk({"type": "desk", "preset": preset})
+        return True
+
+    def _ask_desk(self, message: dict) -> None:
+        generation = self._generation
+        self._send(message, lambda status, body: self._desk_answered(status, body, generation))
+
+    def _desk_answered(self, status: int | None, body: bytes, generation: int) -> None:
+        if generation != self._generation or not self.settings.sharing:
+            return
+        answer = self._envelope.opened(body, "/link reply") if status == 200 and self._envelope else None
+        if answer is None or answer.get("type") != "desk":
+            log.warning("the panel did not answer for the desk: %s", status)
+            return
+        self._desk_said(answer)
+        self._changed()
+
+    def _follow(self) -> None:
+        if self.desk_going is not None and self._clock.monotonic() >= self._follow_until:
+            self.desk_going = None
+            self._changed()
+        self._keep_following()
+        if self._following is not None:
+            self._ask_desk({"type": "desk"})
+
+    def _stop_following(self) -> None:
+        if self._following:
+            self._following.cancel()
+            self._following = None
 
     # the panel's messages
 
@@ -439,5 +519,8 @@ class Link:
             except ValueError:
                 event = None
             if isinstance(event, dict):
-                self._send({"type": "claude", "event": event})
+                message = {"type": "claude", "event": event}
+                if not self.settings.pings:
+                    message["quiet"] = True
+                self._send(message)
         return Response(204)

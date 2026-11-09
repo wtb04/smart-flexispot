@@ -4,8 +4,9 @@ A small app that connects a Linux laptop to the desk panel, as [the Mac's](../ma
 plays in any MPRIS player shows on the panel with its cover, the panel's buttons pause, seek,
 skip and change the volume here, and Claude Code's sessions reach the panel through it.
 
-Its icon in the bar opens what plays, whether the panel answers, and the switch that turns
-sharing off and on; the menu behind the dots, or a right click, opens the settings.
+Its icon in the bar opens what plays, Stand and Sit for the desk, whether the panel answers, and
+the switch that turns sharing off and on; the menu behind the dots, or a right click, opens the
+settings. There, the Claude Code sessions can show on the panel without its chime and notice.
 
 ## Install
 
@@ -16,8 +17,10 @@ python3-cryptography, Pillow, `wpctl` and `inotifywait`, all in Ubuntu 26.04's a
     desklink set-key <DESK_LINK_KEY>
 
 The key is the panel's `DESK_LINK_KEY` from `components/laptop/include/desk_link_secrets.h`,
-kept in the keyring. `desklink` toggles the dropdown and `desklink settings` opens the settings,
-so either can go on a key binding.
+kept in the keyring. `desklink` toggles the dropdown, `desklink settings` opens the settings, and
+`desklink stand` and `desklink sit` send the desk there, as the panel's buttons do: tapped while
+the desk moves, either stops it. Any of them can go on a key binding. Stand and Sit show once the
+panel says there is a desk to move, which a panel before this Desk Link does not.
 
 ## In the bar
 

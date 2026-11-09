@@ -42,6 +42,20 @@ cJSON *message(const char *type, std::int64_t at_ms)
     return root;
 }
 
+void add_desk(cJSON *root, DeskState desk)
+{
+    if (desk.at == Desk::None) {
+        return;
+    }
+    cJSON_AddStringToObject(root, "desk", desk_name(desk.at));
+    if (desk.going != Desk::None) {
+        cJSON_AddStringToObject(root, "going", desk_name(desk.going));
+    }
+    if (desk.height_mm >= 0) {
+        cJSON_AddNumberToObject(root, "height", desk.height_mm);
+    }
+}
+
 const char *command_name(Command command)
 {
     switch (command) {
@@ -78,15 +92,43 @@ bool read_head(const char *body, std::size_t length, Head &out)
     return !out.type.empty() && out.at_ms > 0;
 }
 
-std::string claude_event(const char *body, std::size_t length)
+std::string claude_event(const char *body, std::size_t length, bool *quiet)
 {
     cJSON       *root  = cJSON_ParseWithLength(body, length);
     const cJSON *event = cJSON_GetObjectItemCaseSensitive(root, "event");
     char        *text  = cJSON_IsObject(event) ? cJSON_PrintUnformatted(event) : nullptr;
     std::string  out   = text != nullptr ? text : "";
+    if (quiet != nullptr) {
+        *quiet = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "quiet"));
+    }
     cJSON_free(text);
     cJSON_Delete(root);
     return out;
+}
+
+const char *desk_name(Desk desk)
+{
+    switch (desk) {
+        case Desk::Stand:
+            return "stand";
+        case Desk::Sit:
+            return "sit";
+        case Desk::Between:
+            return "between";
+        case Desk::None:
+            break;
+    }
+    return "";
+}
+
+bool desk_preset(const char *body, std::size_t length, Desk &out)
+{
+    cJSON            *root   = cJSON_ParseWithLength(body, length);
+    const bool        asks   = cJSON_GetObjectItemCaseSensitive(root, "preset") == nullptr;
+    const std::string preset = text_of(root, "preset");
+    cJSON_Delete(root);
+    out = preset == "stand" ? Desk::Stand : preset == "sit" ? Desk::Sit : Desk::None;
+    return asks || out != Desk::None;
 }
 
 bool read(const char *body, std::size_t length, NowPlaying &out)
@@ -152,7 +194,7 @@ std::string command_body(Command command, int value, std::int64_t at_ms)
     return print_and_free(root);
 }
 
-std::string pong_body(const char *panel, const char *firmware, int reaches, std::int64_t at_ms)
+std::string pong_body(const char *panel, const char *firmware, int reaches, std::int64_t at_ms, DeskState desk)
 {
     cJSON *root = message("pong", at_ms);
     cJSON_AddStringToObject(root, "panel", panel);
@@ -160,6 +202,14 @@ std::string pong_body(const char *panel, const char *firmware, int reaches, std:
     if (reaches >= 0) {
         cJSON_AddBoolToObject(root, "reaches", reaches != 0);
     }
+    add_desk(root, desk);
+    return print_and_free(root);
+}
+
+std::string desk_body(DeskState desk, std::int64_t at_ms)
+{
+    cJSON *root = message("desk", at_ms);
+    add_desk(root, desk);
     return print_and_free(root);
 }
 
