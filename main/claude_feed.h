@@ -6,7 +6,8 @@
 // Desk Link the panel, sealed.
 namespace claude_feed {
 
-/** One hook event, from the server's task. */
-void take(const char *event, std::size_t length);
+/** One hook event, from the server's task. Quiet, a session that begins to
+ *  wait on you shows as it does, without the chime and the notice. */
+void take(const char *event, std::size_t length, bool quiet);
 
 }  // namespace claude_feed

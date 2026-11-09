@@ -133,3 +133,55 @@ TEST(LaptopProtocol, claude_event)
     const std::string empty = R"({"type":"claude","at":7})";
     EXPECT_EQ(laptop::claude_event(empty.data(), empty.size()), "");
 }
+
+TEST(LaptopProtocol, a_quiet_claude_event)
+{
+    bool              quiet   = true;
+    const std::string message = R"({"type":"claude","at":7,"event":{"event":"PermissionRequest"},"quiet":true})";
+    EXPECT_EQ(laptop::claude_event(message.data(), message.size(), &quiet), R"({"event":"PermissionRequest"})");
+    EXPECT_TRUE(quiet);
+    const std::string loud = R"({"type":"claude","at":7,"event":{"event":"PermissionRequest"}})";
+    laptop::claude_event(loud.data(), loud.size(), &quiet);
+    EXPECT_FALSE(quiet) << "a laptop that does not say chimes, as every one did before";
+}
+
+TEST(LaptopProtocol, desk_preset)
+{
+    const auto preset = [](const std::string &body, laptop::Desk &out) {
+        return laptop::desk_preset(body.data(), body.size(), out);
+    };
+    laptop::Desk tap = laptop::Desk::Between;
+    EXPECT_TRUE(preset(R"({"type":"desk","at":7,"preset":"stand"})", tap));
+    EXPECT_EQ(tap, laptop::Desk::Stand);
+    EXPECT_TRUE(preset(R"({"type":"desk","at":7,"preset":"sit"})", tap));
+    EXPECT_EQ(tap, laptop::Desk::Sit);
+    EXPECT_TRUE(preset(R"({"type":"desk","at":7})", tap)) << "no preset only asks where it stands";
+    EXPECT_EQ(tap, laptop::Desk::None);
+    EXPECT_FALSE(preset(R"({"type":"desk","at":7,"preset":"between"})", tap)) << "where it stands, not somewhere to go";
+    EXPECT_FALSE(preset(R"({"type":"desk","at":7,"preset":3})", tap));
+}
+
+TEST(LaptopProtocol, desk_names)
+{
+    EXPECT_STREQ(laptop::desk_name(laptop::Desk::Stand), "stand");
+    EXPECT_STREQ(laptop::desk_name(laptop::Desk::Sit), "sit");
+    EXPECT_STREQ(laptop::desk_name(laptop::Desk::Between), "between");
+    EXPECT_STREQ(laptop::desk_name(laptop::Desk::None), "");
+}
+
+TEST(LaptopProtocol, a_pong_says_where_the_desk_stands_and_goes)
+{
+    EXPECT_EQ(laptop::pong_body("p", "f", 1, 7, {laptop::Desk::Sit, laptop::Desk::Stand}),
+              R"({"type":"pong","at":7,"panel":"p","firmware":"f","reaches":true,"desk":"sit","going":"stand"})");
+    EXPECT_EQ(laptop::pong_body("p", "f", -1, 7, {laptop::Desk::Between, laptop::Desk::None}),
+              R"({"type":"pong","at":7,"panel":"p","firmware":"f","desk":"between"})");
+    EXPECT_EQ(laptop::pong_body("p", "f", 1, 7, {}), R"({"type":"pong","at":7,"panel":"p","firmware":"f","reaches":true})")
+        << "no desk linked, nothing to move";
+}
+
+TEST(LaptopProtocol, a_tap_is_answered_with_where_the_desk_now_goes)
+{
+    EXPECT_EQ(laptop::desk_body({laptop::Desk::Sit, laptop::Desk::Stand}, 7),
+              R"({"type":"desk","at":7,"desk":"sit","going":"stand"})");
+    EXPECT_EQ(laptop::desk_body({}, 7), R"({"type":"desk","at":7})") << "no desk linked";
+}

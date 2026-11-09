@@ -16,6 +16,7 @@
 #include "cJSON.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_lvgl_port.h"
 #include "esp_app_desc.h"
 #include "esp_timer.h"
 #include "esp_system.h"
@@ -344,6 +345,34 @@ bool desk_moving()
     return std::strcmp(desk::motion(), "idle") != 0;
 }
 
+// What Desk Link needs: a tap through the screen's own, so it shows the desk on
+// its way and a second tap stops it, as the buttons do.
+constexpr std::uint32_t DESK_TAP_LOCK_MS = 1000;
+
+laptop::Desk stand_or_sit(int index, laptop::Desk otherwise)
+{
+    return index == ui::kStandPreset ? laptop::Desk::Stand
+           : index == ui::kSitPreset ? laptop::Desk::Sit
+                                     : otherwise;
+}
+
+laptop::DeskState desk_for_laptop(laptop::Desk tap)
+{
+    if (!desk::linked()) {
+        return {};
+    }
+    if (tap != laptop::Desk::None) {
+        if (lvgl_port_lock(DESK_TAP_LOCK_MS)) {
+            ui::desk_tap(tap == laptop::Desk::Stand ? ui::kStandPreset : ui::kSitPreset);
+            lvgl_port_unlock();
+        } else {
+            ESP_LOGW(TAG, "the screen is busy: a laptop's tap is dropped");
+        }
+    }
+    return {.at    = stand_or_sit(desk::active_preset_index(), laptop::Desk::Between),
+            .going = stand_or_sit(ui::desk_travelling(), laptop::Desk::None)};
+}
+
 // Once for each update that did not take; kept until tapped, as it will be
 // read later, if at all.
 void tell_rolled_back()
@@ -488,6 +517,7 @@ extern "C" void app_main(void)
         .playing = room::on_laptop,
         .claude  = claude_feed::take,
         .sharing = [](int laptops) { ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_laptops(laptops)); },
+        .desk    = desk_for_laptop,
     }));
     media::set_fetcher(laptop::kCoverScheme, laptop::fetch_cover);
     ESP_ERROR_CHECK_WITHOUT_ABORT(remote::start());

@@ -111,7 +111,7 @@ A focus timer in rounds, 25 minutes on and 5 off by default, from its button at 
 |---|---|
 | ![The Claude Code card](docs/screenshots/claude.png) | ![A session waiting on you](docs/screenshots/claude-waiting.png) |
 
-While a Claude Code session on one of my laptops works, a pill in the bar shows it, turning amber with a chime when one waits for me to allow something; tapped, it shows each session's project, steps and what it did last. The laptops tell the panel through Claude Code's hooks and Desk Link, sealed, and only names leave them, never a prompt, a reply or a file's contents.
+While a Claude Code session on one of my laptops works, a pill in the bar shows it, turning amber with a chime when one waits for me to allow something; tapped, it shows each session's project, steps and what it did last. With many at once, Desk Link's settings keep them showing without the chime and the notice. The laptops tell the panel through Claude Code's hooks and Desk Link, sealed, and only names leave them, never a prompt, a reply or a file's contents.
 
 ### Away from the desk
 

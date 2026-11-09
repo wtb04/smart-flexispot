@@ -29,6 +29,9 @@ using ModeHandler = void (*)();
 
 inline constexpr int kPresetCount = deskproto::kPresetCount;
 inline constexpr int kBoxPresets  = deskproto::kBoxPresets;
+// Where the dock's Stand and Sit send the desk: the box's own Stand and Sit keys.
+inline constexpr int kStandPreset = 2;
+inline constexpr int kSitPreset   = 3;
 
 /** What the screen calls a preset, or "Between" for no preset. Everything off
  *  the screen calls them Preset 1 to 6. */
@@ -437,7 +440,11 @@ int bench_radar_open(char *out, std::size_t size);
  *  as it was before. */
 int bench_radar_map(char *out, std::size_t size, bool open);
 
-/** A development build's: preset `index` tapped, as a finger on its button. With the LVGL lock. */
+/** Preset `index` tapped, as a finger on its button: by Desk Link, and a
+ *  development build's /desk page. With the LVGL lock. */
 void desk_tap(int index);
+
+/** The preset the desk is on its way to, or -1, as the screen shows it. From any task. */
+int desk_travelling();
 
 }  // namespace ui

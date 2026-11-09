@@ -225,6 +225,123 @@ class LinkTest(unittest.TestCase):
         self.assertEqual(self.link.handle("POST", "/claude", b"not json", True).status, 204)
         self.assertEqual(len(self.client.posts), count)
 
+    def test_claude_quiet_when_pings_are_off(self):
+        self.make()
+        event = json.dumps({"machine": "CloudPad", "event": "PermissionRequest"}).encode()
+        self.link.handle("POST", "/claude", event, True)
+        self.assertNotIn("quiet", self.client.posts[-1][1])
+        self.link.set_pings(False)
+        self.assertFalse(self.saved[-1].pings)
+        self.link.handle("POST", "/claude", event, True)
+        self.assertEqual((self.client.posts[-1][1]["event"]["event"], self.client.posts[-1][1]["quiet"]),
+                         ("PermissionRequest", True))
+
+    @unittest.skipUnless(TOOL.exists(), "conformance tool not built")
+    def test_panel_hears_quiet(self):
+        self.make(settings=Settings(pings=False))
+        self.link.handle("POST", "/claude", b'{"event": "PermissionRequest"}', True)
+        sent = json.dumps({**self.client.posts[-1][1], "at": 1}).encode()
+        self.assertEqual(run_tool(["claude-quiet"], sent).stdout, b"true")
+
+    def test_where_the_desk_stands_and_goes_is_the_pongs(self):
+        self.make(desk="sit", going="stand")
+        self.assertEqual((self.link.desk, self.link.desk_going), ("sit", "stand"))
+        self.client.desk, self.client.going = "upside down", "stand"
+        self.timers.advance(10)
+        self.assertEqual((self.link.desk, self.link.desk_going), (None, None), "only stand, sit or between")
+        self.client.desk = None
+        self.timers.advance(10)
+        self.assertIsNone(self.link.desk, "an older panel, or no desk linked")
+
+    def test_no_desk_while_the_panel_does_not_answer(self):
+        self.make(desk="sit")
+        self.client.status = None
+        self.timers.advance(10)
+        self.assertIsNone(self.link.desk)
+
+    def test_reads_the_panels_own_answers(self):
+        from tests.test_conformance import FIXTURES
+        pong = {k: v for k, v in json.loads(FIXTURES["bodies"]["pong_desk"]).items() if k != "at"}
+        self.make(pong=pong)
+        self.assertEqual((self.link.desk, self.link.desk_going, self.link.reaches_back), ("sit", "stand", True))
+        answer = json.loads(FIXTURES["bodies"]["desk"])
+        self.link._desk_answered(200, self.panel.sealed(answer, "/link reply"), self.link._generation)
+        self.assertEqual((self.link.desk, self.link.desk_going), ("between", "stand"))
+
+    def test_stand_follows_the_desk_until_it_is_there(self):
+        self.make(desk="sit")
+        self.assertTrue(self.link.go_to("stand"))
+        self.assertEqual((self.client.desks(), self.link.desk_going), (["stand"], "stand"))
+        states = len(self.client.states())
+        self.timers.advance(4)
+        self.assertEqual(self.client.asked(), 2, "asked every two seconds while it goes")
+        self.assertEqual(len(self.client.states()), states, "with a question, not the whole state")
+        self.client.desk, self.client.going = "stand", None
+        self.timers.advance(2)
+        self.assertEqual((self.link.desk, self.link.desk_going), ("stand", None))
+        self.timers.advance(6)
+        self.assertEqual(self.client.asked(), 3, "no more questions once it is there")
+
+    def test_a_tap_while_it_goes_stops_it(self):
+        self.make(desk="sit")
+        self.link.go_to("stand")
+        self.link.go_to("sit")
+        self.assertEqual((self.client.desks(), self.link.desk_going), (["stand", "sit"], None))
+
+    def test_a_tap_that_stops_a_move_from_the_screen_follows_nothing(self):
+        self.make(desk="between")
+        self.client.going = "sit"  # tapped on the screen since the last pong
+        self.link.go_to("stand")
+        self.assertIsNone(self.link.desk_going, "the panel says what the tap did")
+
+    def test_a_move_from_the_screen_is_followed_too(self):
+        self.make(desk="sit")
+        self.client.going = "stand"
+        self.timers.advance(10)
+        self.assertEqual(self.link.desk_going, "stand")
+        self.timers.advance(2)
+        self.assertEqual(self.client.asked(), 1)
+
+    def test_following_while_away(self):
+        self.make(desk="sit")
+        self.locked = True
+        self.timers.advance(130)
+        self.link.go_to("stand")
+        self.timers.advance(4)
+        self.assertEqual(self.client.asked(), 2, "the desk is followed, though what plays is not told")
+
+    def test_following_gives_up(self):
+        self.make(desk="between")
+        self.link.go_to("sit")
+        self.timers.advance(61)
+        self.assertIsNone(self.link.desk_going)
+
+    def test_an_older_panel_refuses_the_tap(self):
+        self.make(desk_status=400)
+        self.assertTrue(self.link.go_to("stand"), "sent before the panel says of a desk, for the command line")
+        self.assertEqual((self.link.desk, self.link.desk_going), (None, None))
+
+    def test_no_tap_without_sharing_or_a_key(self):
+        self.make(desk="sit")
+        self.assertFalse(self.link.go_to("dance"))
+        self.link.set_sharing(False)
+        self.assertEqual((self.link.desk, self.link.desk_going), (None, None))
+        self.assertFalse(self.link.go_to("stand"))
+        self.make(key="")
+        self.assertFalse(self.link.go_to("stand"))
+        self.assertEqual(self.client.desks(), [])
+
+    @unittest.skipUnless(TOOL.exists(), "conformance tool not built")
+    def test_panel_reads_the_tap_and_the_question(self):
+        for preset in ("stand", "sit"):
+            self.make(desk="between")
+            self.link.go_to(preset)
+            sent = json.dumps({**self.client.posts[-1][1], "at": 1}).encode()
+            self.assertEqual(run_tool(["desk-preset"], sent).stdout, preset.encode())
+        self.timers.advance(2)
+        sent = json.dumps({**self.client.posts[-1][1], "at": 1}).encode()
+        self.assertEqual(run_tool(["desk-preset"], sent).stdout, b"ask")
+
     def test_set_key_validates(self):
         self.make(key="")
         self.assertFalse(self.link.set_key("nope"))

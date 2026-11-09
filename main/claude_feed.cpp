@@ -36,7 +36,7 @@ void tell_asked(const claude::Session &session)
 
 }  // namespace
 
-void take(const char *event, std::size_t length)
+void take(const char *event, std::size_t length, bool quiet)
 {
     claude::Session asked;
     claude::Session answered;
@@ -52,7 +52,7 @@ void take(const char *event, std::size_t length)
         key_of(answered, key, sizeof(key));
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::withdraw(key));
     }
-    if (was_asked) {
+    if (was_asked && !quiet) {
         tell_asked(asked);
     }
 }

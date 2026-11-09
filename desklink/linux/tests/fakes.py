@@ -57,10 +57,12 @@ class FakeClock:
 class FakeClient:
     """Answers like the panel: a sealed pong to every state."""
 
-    def __init__(self, clock, reaches=True, status=200, defer=False):
+    def __init__(self, clock, reaches=True, status=200, defer=False, desk=None, going=None, desk_status=200,
+                 pong=None):
         self.posts = []
         self.pending = []
         self.reaches, self.status, self.defer = reaches, status, defer
+        self.desk, self.going, self.desk_status, self.pong = desk, going, desk_status, pong
         self.panel = seal.Envelope(KEY, clock_ms=clock.wall_ms)
 
     def post(self, url, body, done):
@@ -72,13 +74,31 @@ class FakeClient:
         if self.status is None:
             done(None, b"")
             return
-        pong = {"type": "pong", "panel": "smart-flexispot", "firmware": "v0.9.0"}
-        if self.reaches is not None:
+        if message and message["type"] == "desk":
+            if self.desk_status == 200 and self.desk is not None and "preset" in message:
+                # as the screen's own buttons: any tap on its way stops it
+                self.going = None if self.going else (message["preset"] if message["preset"] != self.desk else None)
+            done(self.desk_status, self.panel.sealed({"type": "desk", **self.desk_fields()}, "/link reply"))
+            return
+        pong = self.pong or {"type": "pong", "panel": "smart-flexispot", "firmware": "v0.9.0",
+                             **self.desk_fields()}
+        if self.reaches is not None and self.pong is None:
             pong["reaches"] = self.reaches
         done(self.status, self.panel.sealed(pong, "/link reply"))
 
+    def desk_fields(self):
+        if self.desk is None:
+            return {}
+        return {"desk": self.desk, **({"going": self.going} if self.going else {})}
+
     def states(self):
         return [m for _, m in self.posts if m and m["type"] == "state"]
+
+    def desks(self):
+        return [m["preset"] for _, m in self.posts if m and m["type"] == "desk" and "preset" in m]
+
+    def asked(self):
+        return len([m for _, m in self.posts if m and m["type"] == "desk" and "preset" not in m])
 
 
 class FakeVolume:

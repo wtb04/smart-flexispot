@@ -15,8 +15,11 @@
 namespace laptop {
 struct Handlers {
     void (*playing)(const NowPlaying &now) = nullptr;
-    void (*claude)(const char *event, std::size_t length) = nullptr;  // a tools/claude-hook event
+    // a tools/claude-hook event; quiet, shown without a chime or a notice
+    void (*claude)(const char *event, std::size_t length, bool quiet) = nullptr;
     void (*sharing)(int laptops) = nullptr;  // how many share, as one joins or goes quiet
+    // Stand or Sit tapped from a laptop, or None only to ask; where it stands and goes after
+    DeskState (*desk)(Desk tap) = nullptr;
 };
 
 /** On the update server, which must be up. The handlers run on its task, and
