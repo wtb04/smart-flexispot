@@ -22,7 +22,7 @@ GONE_AFTER_S = 3  # players drop their metadata for a moment around a pause
 IDLE_AWAY_S = 120
 DESK_PRESETS = ("stand", "sit")
 DESK_PLACES = (*DESK_PRESETS, "between")
-FOLLOW_S = 2  # where the desk stands is asked this often while it goes
+FOLLOW_S = 0.5  # where the desk stands is asked this often while it goes, so its height counts along
 FOLLOW_FOR_S = 60  # longer than it takes from one end to the other, should the panel never say it arrived
 
 

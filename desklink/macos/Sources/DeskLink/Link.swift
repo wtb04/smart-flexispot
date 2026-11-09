@@ -64,7 +64,7 @@ final class Link: ObservableObject {
     // The panel forgets a laptop it has not heard from in 30 seconds. It is
     // told how this one is this often whatever plays, which is the ping.
     private static let heartbeat: TimeInterval = 10
-    private static let follow: TimeInterval = 2  // where the desk stands is asked this often while it goes
+    private static let follow: TimeInterval = 0.5  // asked this often while it goes, so its height counts along
     // Longer than it takes from one end to the other, should the panel never say it arrived.
     private static let followFor: TimeInterval = 60
 

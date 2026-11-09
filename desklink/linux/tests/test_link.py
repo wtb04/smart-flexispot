@@ -283,13 +283,13 @@ class LinkTest(unittest.TestCase):
         self.assertTrue(self.link.go_to("stand"))
         self.assertEqual((self.client.desks(), self.link.desk_going), (["stand"], "stand"))
         states = len(self.client.states())
-        self.timers.advance(4)
-        self.assertEqual(self.client.asked(), 2, "asked every two seconds while it goes")
+        self.timers.advance(2 * link.FOLLOW_S)
+        self.assertEqual(self.client.asked(), 2, "asked every half second while it goes")
         self.assertEqual(len(self.client.states()), states, "with a question, not the whole state")
         self.client.desk, self.client.going = "stand", None
-        self.timers.advance(2)
+        self.timers.advance(link.FOLLOW_S)
         self.assertEqual((self.link.desk, self.link.desk_going), ("stand", None))
-        self.timers.advance(6)
+        self.timers.advance(12 * link.FOLLOW_S)
         self.assertEqual(self.client.asked(), 3, "no more questions once it is there")
 
     def test_a_tap_while_it_goes_stops_it(self):
@@ -309,7 +309,7 @@ class LinkTest(unittest.TestCase):
         self.client.going = "stand"
         self.timers.advance(10)
         self.assertEqual(self.link.desk_going, "stand")
-        self.timers.advance(2)
+        self.timers.advance(link.FOLLOW_S)
         self.assertEqual(self.client.asked(), 1)
 
     def test_following_while_away(self):
@@ -317,7 +317,7 @@ class LinkTest(unittest.TestCase):
         self.locked = True
         self.timers.advance(130)
         self.link.go_to("stand")
-        self.timers.advance(4)
+        self.timers.advance(2 * link.FOLLOW_S)
         self.assertEqual(self.client.asked(), 2, "the desk is followed, though what plays is not told")
 
     def test_following_gives_up(self):

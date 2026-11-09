@@ -57,8 +57,8 @@ class ToggleGuard:
 
 
 def height_text(height_mm: int | None) -> str:
-    """The desk's height as the panel shows it, "74.0 cm"; empty while unknown."""
-    return f"{height_mm / 10:.1f} cm" if height_mm is not None else ""
+    """The desk's height to the nearest centimetre, "75 cm"; empty while unknown."""
+    return f"{round(height_mm / 10)} cm" if height_mm is not None else ""
 
 
 def desk_look(link, preset: str) -> list[str]:

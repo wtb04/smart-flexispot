@@ -18,8 +18,8 @@ enum Desk: String {
         return (at, going == .between ? nil : going, height.flatMap { (0..<3000).contains($0) ? $0 : nil })
     }
 
-    /// As the panel shows it, "74.0 cm".
-    static func height(_ mm: Int) -> String { String(format: "%.1f cm", Double(mm) / 10) }
+    /// To the nearest centimetre, "75 cm".
+    static func height(_ mm: Int) -> String { "\(Int((Double(mm) / 10).rounded())) cm" }
 
     /// This preset's button: lit where the desk stands, ringed where it goes.
     func look(at: Desk?, going: Desk?) -> Look {

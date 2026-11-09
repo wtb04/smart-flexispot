@@ -11,7 +11,8 @@ class StatusLineTest(unittest.TestCase):
         self.assertEqual(ui.status_line(link, None), "Connected to smart-flexispot")
 
     def test_the_desks_height_as_the_panel_shows_it(self):
-        self.assertEqual(ui.height_text(1125), "112.5 cm")
+        self.assertEqual(ui.height_text(1126), "113 cm")
+        self.assertEqual(ui.height_text(744), "74 cm")
         self.assertEqual(ui.height_text(None), "")
 
     def test_subtitle(self):
