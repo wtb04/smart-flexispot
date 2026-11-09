@@ -222,6 +222,41 @@ void tell_sharing(int laptops)
     }
 }
 
+// Said only as it changes, from whichever task changed the table.
+void tell_slides()
+{
+    static std::mutex s_told_lock;
+    static Clicker    s_told;
+    Clicker           clicker;
+    {
+        std::lock_guard<std::mutex> hold(s_lock);
+        const NowPlaying now = s_laptops.slides_now();
+        clicker.machine      = now.machine;
+        if (clicker.machine.empty() && !s_laptops.slides_origin().empty()) {
+            clicker.machine = "laptop";  // one that gave no name still takes them
+        }
+        clicker.page  = now.slide_page;
+        clicker.pages = now.slide_pages;
+        clicker.deck  = now.slide_deck;
+        clicker.presenting = now.slide_presenting;
+        clicker.shows      = now.takes_slide_show;
+    }
+    {
+        std::lock_guard<std::mutex> hold(s_told_lock);
+        if (clicker == s_told) {
+            return;
+        }
+        if (clicker.machine != s_told.machine || clicker.deck != s_told.deck) {
+            ESP_LOGI(TAG, "clicker: %s%s%s", clicker.machine.empty() ? "none" : clicker.machine.c_str(),
+                     clicker.deck.empty() ? "" : ", ", clicker.deck.c_str());
+        }
+        s_told = clicker;
+    }
+    if (s_on.slides != nullptr) {
+        s_on.slides(clicker);
+    }
+}
+
 // The laptop's port tried from here: a firewall there lets the laptop talk
 // to the panel and keeps the panel's commands out.
 void ping_back(const std::string &origin)
@@ -277,6 +312,7 @@ esp_err_t take_state(httpd_req_t *req, const std::string &plain)
     if (sharing != was) {
         tell_sharing(sharing);
     }
+    tell_slides();
     const DeskState desk = s_on.desk != nullptr ? s_on.desk(Desk::None) : DeskState{};
     return answer(req, "200 OK",
                   sealed(std::string(LINK) + REPLY,
@@ -367,6 +403,7 @@ void check_quiet(void *)
         tell(followed);
     }
     tell_sharing(sharing);
+    tell_slides();
 }
 
 void send_to(const std::string &origin, Command command, int value = 0)
@@ -483,6 +520,33 @@ void set_muted(bool muted)
 void step_volume(bool up)
 {
     send(up ? Command::VolumeUp : Command::VolumeDown);
+}
+
+// Whatever plays, or nothing: slides are seldom what the laptop says plays.
+void slide(bool next)
+{
+    std::string origin;
+    {
+        std::lock_guard<std::mutex> hold(s_lock);
+        origin = s_laptops.slides_origin();
+    }
+    if (!origin.empty()) {
+        send_to(origin, next ? Command::SlideNext : Command::SlideBack);
+    }
+}
+
+void slide_show()
+{
+    std::string origin;
+    {
+        std::lock_guard<std::mutex> hold(s_lock);
+        if (s_laptops.slides_now().takes_slide_show) {
+            origin = s_laptops.slides_origin();
+        }
+    }
+    if (!origin.empty()) {
+        send_to(origin, Command::SlideShow);
+    }
 }
 
 std::string art_url(const std::string &art)

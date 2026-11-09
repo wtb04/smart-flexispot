@@ -103,6 +103,10 @@ using ScreenHandler = void (*)(bool on);
 
 using RadarZoomHandler = void (*)(int km);  // the radar zoomed to, to keep
 
+/** The clicker's next or back, for the laptop that takes them. */
+using SlideHandler = void (*)(bool next);
+using SlideShowHandler = void (*)();  // the laptop's viewer into or out of its full screen
+
 /** True while the panel is hung the other way up. */
 enum class Orientation : std::uint8_t { Normal, Flipped, Auto };
 
@@ -320,6 +324,8 @@ struct Handlers {
     SeekHandler        seek;
     MediaVolumeHandler media_volume;
     RadarZoomHandler   radar_zoom;
+    SlideHandler       slide;
+    SlideShowHandler   slide_show;
 };
 
 /** Requires the LVGL port to be running. A zero accent keeps the built-in
@@ -364,6 +370,13 @@ esp_err_t set_links(bool wifi);
 
 /** How many laptops share through Desk Link. */
 esp_err_t set_laptops(int count);
+
+/** The laptop the clicker's next and back go to, by its name; "" for none,
+ *  which hides the clicker. With its page of `pages` in `deck` where it can
+ *  tell, 0 pages where it cannot; whether it presents, -1 where it cannot
+ *  tell, and whether the laptop puts it in and out of that. */
+esp_err_t set_clicker(const char *machine, int page = 0, int pages = 0, const char *deck = "", int presenting = -1,
+                      bool shows = false);
 
 /** The owner's phone here or not, which also gates which pages appear. */
 esp_err_t set_presence(bool has_key, bool present);

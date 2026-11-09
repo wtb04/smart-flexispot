@@ -49,5 +49,13 @@ class ToolTest(unittest.TestCase):
         got = run_tool(["seal", "/link reply"], b'{"type":"pong","at":5}')
         self.assertEqual(seal.open_(KEY, "/link reply", got.stdout)[0], b'{"type":"pong","at":5}')
 
+    def test_panel_reads_the_slide(self):
+        from desklink import link, okular
+        from tests import fakes
+        state = link.build_state("m", 47801, None, None, fakes.FakeVolume(), 0.0, slides=True,
+                                 slide=okular.Slide(4, 12, "talk"))
+        got = json.loads(run_tool(["read-state"], json.dumps(state).encode()).stdout)
+        self.assertEqual((got["slide_page"], got["slide_pages"], got["slide_deck"]), (4, 12, "talk"))
+
     def test_panel_refuses_python_with_the_wrong_path(self):
         self.assertEqual(run_tool(["open", "/link"], seal.seal(KEY, "/cover", b"{}")).returncode, 3)

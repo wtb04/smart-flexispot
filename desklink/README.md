@@ -2,6 +2,12 @@
 
 Desk Link connects a laptop to the desk panel. What plays on the laptop shows on the panel with
 its cover, the panel's buttons control it, and the laptop's Claude Code sessions reach the panel.
+The panel is also a presentation clicker for it: tap the laptop's mark in the panel's bar, and its
+Next and Back press Page Down and Page Up on the laptop, which slides in Keynote, PowerPoint,
+Google Slides and a PDF viewer all take. In Okular, and in Preview on the Mac, the panel also shows
+which page of how many and the file's name, for the document last touched: on the Mac read through
+Accessibility, from Preview's title or Okular's toolbar, on Linux asked of Okular over D-Bus. There
+the clicker also puts the file in and out of its full screen, and opens only while one is open.
 The desk goes to Stand or Sit from the laptop too.
 
 - [macOS](macos/), a menu bar app

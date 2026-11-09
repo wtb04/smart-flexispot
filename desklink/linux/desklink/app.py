@@ -10,7 +10,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GLib  # noqa: E402
 
-from . import __version__, artwork, link, player, server, settings, volume, youtube  # noqa: E402
+from . import __version__, artwork, keys, link, okular, player, server, settings, volume, youtube  # noqa: E402
 
 log = logging.getLogger("desklink")
 APP_ID = "nl.w-tb.desklink"
@@ -46,15 +46,17 @@ class App(Adw.Application):
         stored = settings.load(self._settings_path)
         self._volume = volume.Volume(lambda: self.link and self.link.volume_changed())
         self._mpris = player.Mpris(lambda track: self.link and self.link.take(track))
+        self._okular = okular.Okular(lambda _slide: self.link and self.link.report_soon(), link.GLibTimers())
         self.link = link.Link(settings=stored, save_settings=lambda s: settings.save(s, self._settings_path),
                               key=self._keys.read(), client=server.PanelClient(), volume=self._volume,
                               covers=artwork.Covers(), player_command=self._mpris.command, clock=link.Clock(),
                               timers=link.GLibTimers(), machine=machine_name(), locked=hyprlock_running,
-                              youtube=youtube.YouTube())
+                              youtube=youtube.YouTube(), keys=keys.SlideKeys(), okular=self._okular)
         self._server = server.Server(self.link.handle)
         self.server_error = self._server.start()
         self._volume.start()
         self._mpris.start()
+        self._okular.start()
         self._watch_sleep()
         self.link.add_listener(lambda: log.debug("status: %s", self.link.status_text()))
         self.link.start()

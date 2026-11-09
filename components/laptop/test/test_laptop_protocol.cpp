@@ -104,6 +104,35 @@ TEST(LaptopProtocol, a_volume_that_only_steps)
               R"({"type":"command","at":5,"command":"volume_down"})");
 }
 
+TEST(LaptopProtocol, the_clicker)
+{
+    const NowPlaying now = read(R"({"port":47801,"title":"","takes":["slides"]})");
+    EXPECT_FALSE(now.active);
+    EXPECT_TRUE(now.takes_slides) << "slides are taken with nothing playing";
+    EXPECT_FALSE(read(R"({"port":47801,"title":"x","takes":["pause"]})").takes_slides);
+    EXPECT_EQ(laptop::command_body(Command::SlideNext, 0, 5), R"({"type":"command","at":5,"command":"slide_next"})");
+    EXPECT_EQ(laptop::command_body(Command::SlideBack, 0, 5), R"({"type":"command","at":5,"command":"slide_back"})");
+}
+
+TEST(LaptopProtocol, slide)
+{
+    const NowPlaying now = read(R"({"port":47801,"title":"","takes":["slides"],"slide":{"page":4,"pages":12,"deck":"talk"}})");
+    EXPECT_EQ(now.slide_page, 4);
+    EXPECT_EQ(now.slide_pages, 12);
+    EXPECT_EQ(now.slide_deck, "talk");
+    EXPECT_EQ(now.slide_presenting, -1) << "not said";
+    EXPECT_FALSE(now.takes_slide_show);
+    const NowPlaying shown = read(
+        R"({"port":47801,"takes":["slides","slide_show"],"slide":{"page":1,"pages":2,"presenting":true}})");
+    EXPECT_TRUE(shown.takes_slide_show);
+    EXPECT_EQ(shown.slide_presenting, 1);
+    EXPECT_EQ(laptop::command_body(Command::SlideShow, 0, 5), R"({"type":"command","at":5,"command":"slide_show"})");
+    EXPECT_EQ(read(R"({"port":47801,"takes":["slides"]})").slide_pages, 0) << "a viewer it cannot read";
+    EXPECT_EQ(read(R"({"port":47801,"slide":{"page":13,"pages":12}})").slide_page, 0) << "past the last page";
+    EXPECT_EQ(read(R"({"port":47801,"slide":{"page":0,"pages":12}})").slide_page, 0);
+    EXPECT_EQ(read(R"({"port":47801,"slide":{"page":"4","pages":12}})").slide_page, 0);
+}
+
 TEST(LaptopProtocol, head)
 {
     laptop::Head      head;

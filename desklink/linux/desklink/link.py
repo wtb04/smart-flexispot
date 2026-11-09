@@ -84,9 +84,15 @@ class Reach(enum.Enum):
 
 
 def build_state(machine: str, port: int, track: Track | None, art: artwork.Artwork | None, volume,
-                now: float, square: artwork.Artwork | None = None) -> dict:
+                now: float, square: artwork.Artwork | None = None, slides: bool = False, slide=None) -> dict:
     state = {"type": "state", "machine": machine, "port": port, "title": ""}
+    shows = slides and slide is not None
+    if shows:
+        state["slide"] = {"page": slide.page, "pages": slide.pages, "deck": slide.deck}
     if track is None:
+        # the clicker's, whatever plays: slides seldom play as MPRIS has it
+        if slides:
+            state["takes"] = ["slides", "slide_show"] if shows else ["slides"]
         return state
     takes = ["pause"]
     if track.duration > 0 and track.can_seek:
@@ -99,6 +105,10 @@ def build_state(machine: str, port: int, track: Track | None, art: artwork.Artwo
         takes.append("volume")
         state["volume"] = volume.percent
         state["muted"] = volume.muted
+    if slides:
+        takes.append("slides")
+    if shows:
+        takes.append("slide_show")
     state.update(app=track.identity, title=track.title, artist=track.artist, playing=track.playing,
                  position=round(track.position(now), 1), duration=track.duration,
                  art=art.version if art else "", square=square.version if square else "",
@@ -108,7 +118,7 @@ def build_state(machine: str, port: int, track: Track | None, art: artwork.Artwo
 
 class Link:
     def __init__(self, *, settings: Settings, save_settings, key: str, client, volume, covers, player_command,
-                 clock, timers, machine: str, locked: Callable[[], bool], youtube=None):
+                 clock, timers, machine: str, locked: Callable[[], bool], youtube=None, keys=None, okular=None):
         self.settings = settings
         self._save = save_settings
         self._client = client
@@ -120,6 +130,8 @@ class Link:
         self._machine = machine
         self._locked = locked
         self._youtube = youtube
+        self._keys = keys
+        self._okular = okular
         self._envelope: seal.Envelope | None = None
         self._listeners: list[Callable[[], None]] = []
         self.track: Track | None = None
@@ -291,8 +303,12 @@ class Link:
         if not force_nothing and not self.settings.sharing:
             return
         track = None if (away or force_nothing) else self.track
+        on = self.settings.slides
+        slide = self._okular.slide if on and self._okular is not None else None
+        # without a key tool, Okular's own next and back still turn its pages
+        slides = on and not away and (self._keys_available() or slide is not None)
         state = build_state(self._machine, seal.PORT, track, self.artwork if track else None, self._volume,
-                            self._clock.monotonic(), self.square if track else None)
+                            self._clock.monotonic(), self.square if track else None, slides, slide)
         generation = self._generation
         self._send(state, lambda status, body: self._answered(status, body, generation))
 
@@ -362,6 +378,11 @@ class Link:
     def set_pings(self, pings: bool) -> None:
         self.settings.pings = pings
         self._save(self.settings)
+
+    def set_slides(self, slides: bool) -> None:
+        self.settings.slides = slides
+        self._save(self.settings)
+        self.report()
 
     def set_panel(self, panel: str) -> None:
         self.settings.panel = panel.strip()
@@ -508,9 +529,23 @@ class Link:
             self._volume.set_muted(message["muted"])
         elif name in ("volume_up", "volume_down"):
             self._volume.step(5 if name == "volume_up" else -5)
+        elif name in ("slide_next", "slide_back"):
+            if self._locked() or not self.settings.slides:
+                return False
+            next_slide = name == "slide_next"
+            if self._keys_available():
+                return self._keys.press(next_slide)
+            return self._okular is not None and self._okular.turn(next_slide)
+        elif name == "slide_show":
+            if self._locked() or not self.settings.slides or self._okular is None:
+                return False
+            return self._okular.show()
         else:
             return False
         return True
+
+    def _keys_available(self) -> bool:
+        return self._keys is not None and self._keys.available
 
     def _relay(self, body: bytes) -> Response:
         if self.settings.claude:

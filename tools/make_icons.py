@@ -111,6 +111,8 @@ WIFI_OFF = paint(struck(WIFI_LAYERS, 4, 3, 24, 26), STATUS_SIDE)
 PHONE = paint(PHONE_LAYERS, STATUS_SIDE)
 PHONE_OFF = paint(struck(PHONE_LAYERS, 4, 3, 24, 26), STATUS_SIDE)
 LAPTOP = paint(LAPTOP_LAYERS, STATUS_SIDE)
+# With a file the clicker can move through: a play mark on its screen.
+LAPTOP_SLIDES = paint(LAPTOP_LAYERS + [(polygon((11, 8.6), (11, 17.4), (18.6, 13)), True)], STATUS_SIDE)
 LAPTOP_OFF = paint(struck(LAPTOP_LAYERS, 4, 3, 24, 26), STATUS_SIDE)
 
 PLANE_SIDE = 28
@@ -170,7 +172,7 @@ out.write_text(f"""#pragma once
 
 namespace ui {{
 namespace icons {{
-{emit("no_photo", NO_PHOTO, NO_PHOTO_SIDE)}{emit("wifi", WIFI, STATUS_SIDE)}{emit("wifi_off", WIFI_OFF, STATUS_SIDE)}{emit("phone", PHONE, STATUS_SIDE)}{emit("phone_off", PHONE_OFF, STATUS_SIDE)}{emit("laptop", LAPTOP, STATUS_SIDE)}{emit("laptop_off", LAPTOP_OFF, STATUS_SIDE)}{emit("plane", PLANE, PLANE_SIDE)}{emit("plane_large", PLANE_LARGE, PLANE_LARGE_SIDE)}
+{emit("no_photo", NO_PHOTO, NO_PHOTO_SIDE)}{emit("wifi", WIFI, STATUS_SIDE)}{emit("wifi_off", WIFI_OFF, STATUS_SIDE)}{emit("phone", PHONE, STATUS_SIDE)}{emit("phone_off", PHONE_OFF, STATUS_SIDE)}{emit("laptop", LAPTOP, STATUS_SIDE)}{emit("laptop_slides", LAPTOP_SLIDES, STATUS_SIDE)}{emit("laptop_off", LAPTOP_OFF, STATUS_SIDE)}{emit("plane", PLANE, PLANE_SIDE)}{emit("plane_large", PLANE_LARGE, PLANE_LARGE_SIDE)}
 }}  // namespace icons
 }}  // namespace ui
 """)

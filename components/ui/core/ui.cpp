@@ -193,6 +193,16 @@ struct ThermostatArgs {
     Hvac     state;
 };
 using TimeText = Text<16>;
+using MachineText = Text<32>;
+
+struct ClickerArgs {
+    MachineText machine;
+    Text<48>    deck;
+    int         page;
+    int         pages;
+    int         presenting;
+    bool        shows;
+};
 struct PresenceArgs {
     bool has_key;
     bool present;
@@ -251,6 +261,7 @@ Slot<PresenceArgs>   p_presence;
 Slot<TimeText>       p_time;
 Slot<bool>           p_wifi;
 Slot<int>            p_laptops;
+Slot<ClickerArgs>    p_clicker;
 // Kept in PSRAM: sized for the most any card can have, it is several
 // kilobytes, and static data would take them from internal RAM.
 Slot<InfoArgs>      *p_rows = nullptr;  // [card * kMaxRows + row]
@@ -434,6 +445,18 @@ void apply_laptops(int count)
     publish(Topic::Status);
 }
 
+void apply_clicker(const ClickerArgs &a)
+{
+    StatusState &st = status_state();
+    std::snprintf(st.clicker, sizeof st.clicker, "%s", a.machine.get());
+    std::snprintf(st.clicker_deck, sizeof st.clicker_deck, "%s", a.deck.get());
+    st.clicker_page  = a.page;
+    st.clicker_pages = a.pages;
+    st.clicker_presenting = a.presenting;
+    st.clicker_shows      = a.shows;
+    publish(Topic::Status);
+}
+
 void apply_screen(bool on)
 {
     status_state().screen_on = on;
@@ -596,6 +619,9 @@ void apply_status_updates()
     }
     if (int laptops = 0; take(p_laptops, laptops)) {
         apply_laptops(laptops);
+    }
+    if (ClickerArgs clicker{}; take(p_clicker, clicker)) {
+        apply_clicker(clicker);
     }
     if (int volume = 0; take(p_notification_volume, volume)) {
         settings_take_volume(volume);
@@ -915,6 +941,19 @@ esp_err_t set_links(bool wifi)
 esp_err_t set_laptops(int count)
 {
     put(p_laptops, count);
+    return ESP_OK;
+}
+
+esp_err_t set_clicker(const char *machine, int page, int pages, const char *deck, int presenting, bool shows)
+{
+    ClickerArgs args{};
+    args.machine.set(machine != nullptr ? machine : "");
+    args.deck.set(deck != nullptr ? deck : "");
+    args.page  = page;
+    args.pages = pages;
+    args.presenting = presenting;
+    args.shows      = shows;
+    put(p_clicker, args);
     return ESP_OK;
 }
 

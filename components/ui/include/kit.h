@@ -186,7 +186,8 @@ struct Status {
              *laptops = nullptr;
 };
 Status status(lv_obj_t *parent);
-void   set_status(const Status &s, const char *time, bool wifi, bool phone, int laptops);
+/** `slides`: a laptop has a file the clicker can move through, which its mark shows. */
+void   set_status(const Status &s, const char *time, bool wifi, bool phone, int laptops, bool slides = false);
 
 enum class Button : std::uint8_t {
     Raised,  // the ordinary button on a surface

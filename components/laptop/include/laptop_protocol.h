@@ -21,7 +21,13 @@
 // asked for the same way. "volume" is the
 // laptop's own output, in percent, where it can be set; "volume_step" in
 // "takes" is an output that only steps, as a display's does through
-// MonitorControl, moved by "volume_up" and "volume_down". "claude" carries an
+// MonitorControl, moved by "volume_up" and "volume_down". "slides" in
+// "takes" is a laptop that presses Page Down and Page Up for "slide_next" and
+// "slide_back", as a presentation clicker does, whatever plays; "slide", when
+// it can read the viewer the keys go to, is where that is:
+//   "slide": {"page": 4, "pages": 12, "deck": "talk.pdf", "presenting": false}
+// "presenting" left out where it cannot tell. "slide_show" in "takes" is one
+// that puts the viewer in and out of its full screen for "slide_show". "claude" carries an
 // event from tools/claude-hook as "event", and "quiet": true when the laptop
 // wants its sessions shown without a chime or a notice. "desk" with a "preset",
 // "stand" or "sit", taps that preset as the screen's button does, and without
@@ -54,6 +60,12 @@ struct NowPlaying {
     bool        takes_volume   = false;
     bool        takes_volume_step = false;  // up and down, with no level to show
     bool        takes_seek     = false;     // also a live stream's, which has no length
+    bool        takes_slides   = false;     // the clicker's next and back, playing or not
+    bool        takes_slide_show = false;   // the viewer's full screen, in and out
+    int         slide_page  = 0;            // from 1; 0 when the laptop cannot tell
+    int         slide_pages = 0;
+    std::string slide_deck;
+    int         slide_presenting = -1;      // in its full screen; -1 when the laptop cannot tell
 };
 
 /** A message's type and when it was sent; false when it has neither. */
@@ -86,7 +98,7 @@ struct DeskState {
  *  only asks. False when it names something else. */
 bool desk_preset(const char *body, std::size_t length, Desk &out);
 
-enum class Command { Play, Pause, Next, Previous, Seek, Volume, Mute, VolumeUp, VolumeDown };
+enum class Command { Play, Pause, Next, Previous, Seek, Volume, Mute, VolumeUp, VolumeDown, SlideNext, SlideBack, SlideShow };
 /** `value` is the position for Seek, the percent for Volume, 1 to mute for Mute. */
 std::string command_body(Command command, int value, std::int64_t at_ms);
 

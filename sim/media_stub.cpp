@@ -258,6 +258,17 @@ void go_on_to(int item)
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_album_art_large(nullptr));
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_cinema_still(nullptr));
 }
+// The Mac's Okular, as Desk Link reads it: a talk of twelve slides.
+constexpr int DECK_PAGES = 12;
+int           s_deck_page = 1;
+bool          s_presenting = false;
+
+void tell_clicker()
+{
+    ESP_ERROR_CHECK_WITHOUT_ABORT(
+        ui::set_clicker(s_laptops > 0 ? "MacBook" : "", s_deck_page, s_laptops > 0 ? DECK_PAGES : 0,
+                        "Week 3 lecture.pdf", s_presenting ? 1 : 0, true));
+}
 }  // namespace
 
 void start()
@@ -268,6 +279,7 @@ void start()
         ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_pick_art(i, s_pick_art[i].data()));
     }
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_laptops(s_laptops));
+    tell_clicker();
     show(Scene::Idle);
 }
 
@@ -323,6 +335,19 @@ void next_laptops()
 {
     s_laptops = (s_laptops + 1) % 3;
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_laptops(s_laptops));
+    tell_clicker();
+}
+
+void on_slide_show()
+{
+    s_presenting = !s_presenting;
+    tell_clicker();
+}
+
+void on_slide(bool next)
+{
+    s_deck_page = std::clamp(s_deck_page + (next ? 1 : -1), 1, DECK_PAGES);
+    tell_clicker();
 }
 
 void on_media(ui::MediaAction action)

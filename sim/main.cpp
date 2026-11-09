@@ -319,6 +319,14 @@ ui::Handlers handlers()
     h.seek        = media_stub::on_seek;
     h.media_volume = media_stub::on_volume;
     h.pick        = media_stub::on_pick;
+    h.slide       = [](bool next) {
+        said(next ? "slide next" : "slide back");
+        media_stub::on_slide(next);
+    };
+    h.slide_show  = [] {
+        said("slide show");
+        media_stub::on_slide_show();
+    };
     h.lights      = home_assistant::on_lights;
     h.light       = home_assistant::on_light;
     h.setpoint    = home_assistant::on_setpoint;

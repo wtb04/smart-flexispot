@@ -142,6 +142,9 @@ int fixtures()
         {"command_volume_down", command_body(Command::VolumeDown, 0, AT)},
         {"pong_desk", pong_body("smart-flexispot", "v0.9.0", 1, AT, {Desk::Sit, Desk::Stand, 742})},
         {"desk", desk_body({Desk::Between, Desk::Stand, 1043}, AT)},
+        {"command_slide_next", command_body(Command::SlideNext, 0, AT)},
+        {"command_slide_back", command_body(Command::SlideBack, 0, AT)},
+        {"command_slide_show", command_body(Command::SlideShow, 0, AT)},
     };
     for (const auto &[name, body] : named) {
         cJSON_AddStringToObject(bodies, name, body.c_str());
@@ -270,6 +273,12 @@ int read_state()
     cJSON_AddBoolToObject(root, "takes_previous", now.takes_previous);
     cJSON_AddBoolToObject(root, "takes_volume", now.takes_volume);
     cJSON_AddBoolToObject(root, "takes_volume_step", now.takes_volume_step);
+    cJSON_AddBoolToObject(root, "takes_slides", now.takes_slides);
+    cJSON_AddNumberToObject(root, "slide_page", now.slide_page);
+    cJSON_AddNumberToObject(root, "slide_pages", now.slide_pages);
+    cJSON_AddStringToObject(root, "slide_deck", now.slide_deck.c_str());
+    cJSON_AddNumberToObject(root, "slide_presenting", now.slide_presenting);
+    cJSON_AddBoolToObject(root, "takes_slide_show", now.takes_slide_show);
     char *text = cJSON_PrintUnformatted(root);
     std::cout << text;
     cJSON_free(text);
