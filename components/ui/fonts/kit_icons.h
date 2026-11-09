@@ -77,4 +77,6 @@ inline constexpr const char *umbrella = "\xEF\x86\xAD";
 inline constexpr const char *thermostat = "\xEF\x81\xB6";
 inline constexpr const char *navigation = "\xEE\x95\x9D";
 inline constexpr const char *wb_twilight = "\xEE\x87\x86";
+inline constexpr const char *downloading = "\xEF\x80\x81";
+inline constexpr const char *bluetooth = "\xEE\x86\xA7";
 }  // namespace ui::kit::glyph
