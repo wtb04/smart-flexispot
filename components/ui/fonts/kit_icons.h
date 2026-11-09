@@ -65,4 +65,16 @@ inline constexpr const char *sync = "\xEE\x98\xA7";
 inline constexpr const char *arrow_upward = "\xEE\x97\x98";
 inline constexpr const char *arrow_downward = "\xEE\x97\x9B";
 inline constexpr const char *visibility_off = "\xEE\xA3\xB5";
+inline constexpr const char *sunny = "\xEE\xA0\x9A";
+inline constexpr const char *partly_cloudy_day = "\xEF\x85\xB2";
+inline constexpr const char *partly_cloudy_night = "\xEF\x85\xB4";
+inline constexpr const char *cloud = "\xEF\x85\x9C";
+inline constexpr const char *foggy = "\xEE\xA0\x98";
+inline constexpr const char *rainy = "\xEF\x85\xB6";
+inline constexpr const char *weather_snowy = "\xEE\x8B\x8D";
+inline constexpr const char *thunderstorm = "\xEE\xAF\x9B";
+inline constexpr const char *umbrella = "\xEF\x86\xAD";
+inline constexpr const char *thermostat = "\xEF\x81\xB6";
+inline constexpr const char *navigation = "\xEE\x95\x9D";
+inline constexpr const char *wb_twilight = "\xEE\x87\x86";
 }  // namespace ui::kit::glyph

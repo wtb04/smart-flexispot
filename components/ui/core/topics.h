@@ -26,6 +26,7 @@ enum class Topic : std::uint8_t {
     Diagnostics,  // the panel's own report: see diagnostics_model.h
     Calendar,  // the calendar fetched again: the ical component has it
     Radar,     // the traffic fetched again: the radar component has it
+    Weather,   // the forecast, the rain to come or KNMI's warnings: the weather component has them
     Claude,    // the laptops' sessions: the claude component has them
     Lookup,    // a tapped aircraft's details or photo: see radar_model.h
     Notices,   // the notices waiting: see notices_model.h

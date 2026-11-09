@@ -61,6 +61,11 @@ sim/send.sh claude '{"session":"s1","machine":"MbP","project":"smart-flexispot",
 calendar, and `SIM_ROUTE="AMS,Amsterdam,JFK,New York"` makes up that route
 for an aircraft whose own is not on file.
 
+The weather is never asked for, as the panel shares Open-Meteo's daily limit
+from the same address. `SIM_WEATHER_FILES=folder` reads answers recorded there
+instead: Open-Meteo's `forecast.json`, Buienradar's `rain.txt` and MeteoAlarm's
+`warnings.xml`, the last for `SIM_HOME`. Without it Home's weather stays empty.
+
 `sim/sim.env`, gitignored, is read by `run.sh`:
 
 ```sh

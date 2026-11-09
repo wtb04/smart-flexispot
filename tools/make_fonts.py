@@ -65,6 +65,8 @@ floor_lamp light bedtime settings palette tune monitor_heart restart_alt power_s
 air directions_bike train directions_bus directions_walk schedule event music_note info
 aspect_ratio local_laundry_service notifications warning error check_circle sync
 arrow_upward arrow_downward visibility_off
+sunny partly_cloudy_day partly_cloudy_night cloud foggy rainy weather_snowy thunderstorm umbrella
+thermostat navigation wb_twilight
 """.split()
 
 

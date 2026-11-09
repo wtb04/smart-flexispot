@@ -17,13 +17,14 @@ This project's own code, documents and board are copyright 2026 Wouter ten Brink
 | Font Awesome Free 5's icons, in LVGL's built-in fonts | managed component | SIL Open Font License 1.1 |
 | Instrument Sans, drawn into the design kit's fonts in [components/ui/fonts](components/ui/fonts) | [tools/make_fonts.py](tools/make_fonts.py) | SIL Open Font License 1.1 |
 | Material Symbols Rounded, drawn into the design kit's icon fonts in [components/ui/fonts](components/ui/fonts) | [tools/make_fonts.py](tools/make_fonts.py) | Apache-2.0 |
-| Natural Earth, drawn into the map | [tools/make_map.py](tools/make_map.py) | public domain |
+| Natural Earth, drawn into the map and the provinces KNMI's warnings are matched to | [tools/make_map.py](tools/make_map.py), [tools/make_provinces.py](tools/make_provinces.py) | public domain |
 | mediaremote-adapter, built into Desk Link | [desklink/macos/Vendor/mediaremote-adapter](https://github.com/ungive/mediaremote-adapter), a submodule | BSD-3-Clause, its [LICENSE](https://github.com/ungive/mediaremote-adapter/blob/master/LICENSE) |
 
 Not this project's, and not under its licence either:
 
 - **The aircraft photos in the screenshots** in [docs/screenshots](docs/screenshots) belong to their photographers, credited on each, and are shown through [Planespotters.net](https://www.planespotters.net).
 - **The answers under [components/radar/test](components/radar/test)** are kept as they came from adsb.fi (for personal, non-commercial use only), adsb.lol (Open Database License 1.0), adsbdb and Planespotters, to test the parser against.
+- **The answers under [components/weather/test](components/weather/test)** are kept as they came from Open-Meteo (CC BY 4.0), Buienradar and MeteoAlarm, to test the parser against.
 - **The RJ45 jack's 3D model** in [pcb/3dmodels](pcb/3dmodels) is LCSC's, from its EasyEDA library.
 
 The licence texts the images have to carry follow.

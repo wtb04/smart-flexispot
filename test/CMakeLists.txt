@@ -89,6 +89,7 @@ host_test(screen_rules_test COMPONENT ui SOURCES test/test_screen_rules.cpp INCL
 host_test(notice_queue_test COMPONENT ui SOURCES test/test_notice_queue.cpp INCLUDES ${COMPONENTS}/ui/core)
 host_test(glyph_fit_test COMPONENT ui SOURCES test/test_glyph_fit.cpp INCLUDES ${COMPONENTS}/ui/core)
 host_test(travel_parse_test COMPONENT travel SOURCES test/test_travel_parse.cpp)
+host_test(weather_parse_test COMPONENT weather SOURCES test/test_weather_parse.cpp weather_parse.cpp)
 host_test(watchdog_core_test COMPONENT watchdog SOURCES test/test_watchdog_core.cpp watchdog_core.cpp)
 
 # The report: what the tests reached of each component's own code, the tests

@@ -1,0 +1,807 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:cap="urn:oasis:names:tc:emergency:cap:1.2">
+  <link rel="hub" href="https://pubsubhubbub.appspot.com/"/>
+  <link type="application/atom+xml" rel="self" href="https://feeds.meteoalarm.org/feeds/meteoalarm-legacy-atom-netherlands"/>
+  <link type="text/html" rel="alternate" href="https://meteoalarm.org"/>
+  <rights>Copyright © 2026 MeteoAlarm.Org. Licensed under terms equivalent to CC BY 4.0, with additional requirements for redistributing outlined in our Terms and Conditions.</rights>
+  <generator>MeteoAlarm Producer Server</generator>
+  <logo>https://feeds.meteoalarm.org/images/logo.svg</logo>
+  <author>
+    <name>meteoalarm.org</name>
+    <uri>https://meteoalarm.org</uri>
+    <email>meteoalarm@geosphere.at</email>
+  </author>
+  <id>tag:meteoalarm.org,2021-02-19:NL</id>
+  <title>MeteoAlarm - Alerting Europe for Extreme Weather</title>
+  <updated>2026-10-25T17:05:20.643434Z</updated>
+  <entry>
+    <cap:geocode>
+      <valueName>EMMA_ID</valueName>
+      <value>NL812</value>
+    </cap:geocode>
+    <link title="Zierikzee" href="https://meteoalarm.org?geocode=EMMA_ID:NL812" hreflang="en"/>
+    <cap:areaDesc>Zierikzee</cap:areaDesc>
+    <cap:event>Moderate Wind</cap:event>
+    <cap:sent>2026-10-25T16:16:42+00:00</cap:sent>
+    <cap:expires>2026-10-26T16:16:41+00:00</cap:expires>
+    <cap:onset>2026-10-22T20:12:20+00:00</cap:onset>
+    <cap:certainty>Observed</cap:certainty>
+    <cap:severity>Moderate</cap:severity>
+    <cap:urgency>Expected</cap:urgency>
+    <cap:scope>Public</cap:scope>
+    <cap:message_type>Update</cap:message_type>
+    <cap:status>Actual</cap:status>
+    <cap:identifier>2.49.0.0.528.0.NL.20261025161642.e252f35b-55ca-4eae-86cf-dd1f37e65ec8_15</cap:identifier>
+    <link type="application/cap+xml" href="https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/390454ef-288b-4644-a0a8-8183049cc4bb"/>
+    <link title="The Netherlands" rel="related" href="https://meteoalarm.org?region=NL" hreflang="en"/>
+    <author>
+      <name>meteoalarm.org</name>
+      <uri>https://meteoalarm.org</uri>
+    </author>
+    <published>2026-10-25T16:16:42Z</published>
+    <id>https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/390454ef-288b-4644-a0a8-8183049cc4bb?index_info=0&amp;index_area=0&amp;index_geocode=0</id>
+    <title>Yellow Wind Warning issued for The Netherlands - Zierikzee</title>
+    <updated>2026-10-25T16:16:42Z</updated>
+  </entry>
+  <entry>
+    <cap:geocode>
+      <valueName>EMMA_ID</valueName>
+      <value>NL811</value>
+    </cap:geocode>
+    <link title="Marken" href="https://meteoalarm.org?geocode=EMMA_ID:NL811" hreflang="en"/>
+    <cap:areaDesc>Marken</cap:areaDesc>
+    <cap:event>Moderate Wind</cap:event>
+    <cap:sent>2026-10-25T16:16:42+00:00</cap:sent>
+    <cap:expires>2026-10-26T16:16:41+00:00</cap:expires>
+    <cap:onset>2026-10-22T20:12:20+00:00</cap:onset>
+    <cap:certainty>Observed</cap:certainty>
+    <cap:severity>Moderate</cap:severity>
+    <cap:urgency>Expected</cap:urgency>
+    <cap:scope>Public</cap:scope>
+    <cap:message_type>Update</cap:message_type>
+    <cap:status>Actual</cap:status>
+    <cap:identifier>2.49.0.0.528.0.NL.20261025161642.12bc724a-7ffb-4da3-b6bf-46a190d63caa_15</cap:identifier>
+    <link type="application/cap+xml" href="https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/e19d535f-6975-4204-81fa-3301809c2098"/>
+    <link title="The Netherlands" rel="related" href="https://meteoalarm.org?region=NL" hreflang="en"/>
+    <author>
+      <name>meteoalarm.org</name>
+      <uri>https://meteoalarm.org</uri>
+    </author>
+    <published>2026-10-25T16:16:42Z</published>
+    <id>https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/e19d535f-6975-4204-81fa-3301809c2098?index_info=0&amp;index_area=0&amp;index_geocode=0</id>
+    <title>Yellow Wind Warning issued for The Netherlands - Marken</title>
+    <updated>2026-10-25T16:16:42Z</updated>
+  </entry>
+  <entry>
+    <cap:geocode>
+      <valueName>EMMA_ID</valueName>
+      <value>NL810</value>
+    </cap:geocode>
+    <link title="IJsselmeer" href="https://meteoalarm.org?geocode=EMMA_ID:NL810" hreflang="en"/>
+    <cap:areaDesc>IJsselmeer</cap:areaDesc>
+    <cap:event>Moderate Wind</cap:event>
+    <cap:sent>2026-10-25T16:16:42+00:00</cap:sent>
+    <cap:expires>2026-10-26T16:16:41+00:00</cap:expires>
+    <cap:onset>2026-10-22T20:12:20+00:00</cap:onset>
+    <cap:certainty>Observed</cap:certainty>
+    <cap:severity>Moderate</cap:severity>
+    <cap:urgency>Expected</cap:urgency>
+    <cap:scope>Public</cap:scope>
+    <cap:message_type>Update</cap:message_type>
+    <cap:status>Actual</cap:status>
+    <cap:identifier>2.49.0.0.528.0.NL.20261025161642.f513810c-7520-4613-a121-b29da9d3d650_15</cap:identifier>
+    <link type="application/cap+xml" href="https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/4a138a28-d68f-4ae3-9170-709a06c3492c"/>
+    <link title="The Netherlands" rel="related" href="https://meteoalarm.org?region=NL" hreflang="en"/>
+    <author>
+      <name>meteoalarm.org</name>
+      <uri>https://meteoalarm.org</uri>
+    </author>
+    <published>2026-10-25T16:16:42Z</published>
+    <id>https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/4a138a28-d68f-4ae3-9170-709a06c3492c?index_info=0&amp;index_area=0&amp;index_geocode=0</id>
+    <title>Yellow Wind Warning issued for The Netherlands - IJsselmeer</title>
+    <updated>2026-10-25T16:16:42Z</updated>
+  </entry>
+  <entry>
+    <cap:geocode>
+      <valueName>EMMA_ID</valueName>
+      <value>NL809</value>
+    </cap:geocode>
+    <link title="Harlingen" href="https://meteoalarm.org?geocode=EMMA_ID:NL809" hreflang="en"/>
+    <cap:areaDesc>Harlingen</cap:areaDesc>
+    <cap:event>Moderate Wind</cap:event>
+    <cap:sent>2026-10-25T16:16:42+00:00</cap:sent>
+    <cap:expires>2026-10-26T16:16:41+00:00</cap:expires>
+    <cap:onset>2026-10-22T20:12:20+00:00</cap:onset>
+    <cap:certainty>Observed</cap:certainty>
+    <cap:severity>Moderate</cap:severity>
+    <cap:urgency>Expected</cap:urgency>
+    <cap:scope>Public</cap:scope>
+    <cap:message_type>Update</cap:message_type>
+    <cap:status>Actual</cap:status>
+    <cap:identifier>2.49.0.0.528.0.NL.20261025161642.89fe66cd-d145-4cb9-b973-4481bbfac6cd_15</cap:identifier>
+    <link type="application/cap+xml" href="https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/0a8450af-ab93-4056-8d70-c334cb94b28c"/>
+    <link title="The Netherlands" rel="related" href="https://meteoalarm.org?region=NL" hreflang="en"/>
+    <author>
+      <name>meteoalarm.org</name>
+      <uri>https://meteoalarm.org</uri>
+    </author>
+    <published>2026-10-25T16:16:42Z</published>
+    <id>https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/0a8450af-ab93-4056-8d70-c334cb94b28c?index_info=0&amp;index_area=0&amp;index_geocode=0</id>
+    <title>Yellow Wind Warning issued for The Netherlands - Harlingen</title>
+    <updated>2026-10-25T16:16:42Z</updated>
+  </entry>
+  <entry>
+    <cap:geocode>
+      <valueName>EMMA_ID</valueName>
+      <value>NL808</value>
+    </cap:geocode>
+    <link title="Delfzijl" href="https://meteoalarm.org?geocode=EMMA_ID:NL808" hreflang="en"/>
+    <cap:areaDesc>Delfzijl</cap:areaDesc>
+    <cap:event>Moderate Wind</cap:event>
+    <cap:sent>2026-10-25T16:16:42+00:00</cap:sent>
+    <cap:expires>2026-10-26T16:16:41+00:00</cap:expires>
+    <cap:onset>2026-10-22T23:15:37+00:00</cap:onset>
+    <cap:certainty>Observed</cap:certainty>
+    <cap:severity>Moderate</cap:severity>
+    <cap:urgency>Expected</cap:urgency>
+    <cap:scope>Public</cap:scope>
+    <cap:message_type>Update</cap:message_type>
+    <cap:status>Actual</cap:status>
+    <cap:identifier>2.49.0.0.528.0.NL.20261025161642.ba38c10d-0bf1-405d-aacc-1f6ad5154b58_14</cap:identifier>
+    <link type="application/cap+xml" href="https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/ceb45e16-c6a5-4f07-8e60-5a00c7f0a0af"/>
+    <link title="The Netherlands" rel="related" href="https://meteoalarm.org?region=NL" hreflang="en"/>
+    <author>
+      <name>meteoalarm.org</name>
+      <uri>https://meteoalarm.org</uri>
+    </author>
+    <published>2026-10-25T16:16:42Z</published>
+    <id>https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/ceb45e16-c6a5-4f07-8e60-5a00c7f0a0af?index_info=0&amp;index_area=0&amp;index_geocode=0</id>
+    <title>Yellow Wind Warning issued for The Netherlands - Delfzijl</title>
+    <updated>2026-10-25T16:16:42Z</updated>
+  </entry>
+  <entry>
+    <cap:geocode>
+      <valueName>EMMA_ID</valueName>
+      <value>NL803</value>
+    </cap:geocode>
+    <link title="IJmuiden" href="https://meteoalarm.org?geocode=EMMA_ID:NL803" hreflang="en"/>
+    <cap:areaDesc>IJmuiden</cap:areaDesc>
+    <cap:event>Moderate Wind</cap:event>
+    <cap:sent>2026-10-25T16:16:42+00:00</cap:sent>
+    <cap:expires>2026-10-26T16:16:41+00:00</cap:expires>
+    <cap:onset>2026-10-19T09:40:07+00:00</cap:onset>
+    <cap:certainty>Observed</cap:certainty>
+    <cap:severity>Moderate</cap:severity>
+    <cap:urgency>Expected</cap:urgency>
+    <cap:scope>Public</cap:scope>
+    <cap:message_type>Update</cap:message_type>
+    <cap:status>Actual</cap:status>
+    <cap:identifier>2.49.0.0.528.0.NL.20261025161642.0ce5583a-080c-44b4-9442-ceafb0981a0f_32</cap:identifier>
+    <link type="application/cap+xml" href="https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/af983c20-eb25-4508-b807-6a1248b92cad"/>
+    <link title="The Netherlands" rel="related" href="https://meteoalarm.org?region=NL" hreflang="en"/>
+    <author>
+      <name>meteoalarm.org</name>
+      <uri>https://meteoalarm.org</uri>
+    </author>
+    <published>2026-10-25T16:16:42Z</published>
+    <id>https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/af983c20-eb25-4508-b807-6a1248b92cad?index_info=0&amp;index_area=0&amp;index_geocode=0</id>
+    <title>Yellow Wind Warning issued for The Netherlands - IJmuiden</title>
+    <updated>2026-10-25T16:16:42Z</updated>
+  </entry>
+  <entry>
+    <cap:geocode>
+      <valueName>EMMA_ID</valueName>
+      <value>NL802</value>
+    </cap:geocode>
+    <link title="Hook of Holland" href="https://meteoalarm.org?geocode=EMMA_ID:NL802" hreflang="en"/>
+    <cap:areaDesc>Hook of Holland</cap:areaDesc>
+    <cap:event>Moderate Wind</cap:event>
+    <cap:sent>2026-10-25T16:16:42+00:00</cap:sent>
+    <cap:expires>2026-10-26T16:16:41+00:00</cap:expires>
+    <cap:onset>2026-10-19T19:50:43+00:00</cap:onset>
+    <cap:certainty>Observed</cap:certainty>
+    <cap:severity>Moderate</cap:severity>
+    <cap:urgency>Expected</cap:urgency>
+    <cap:scope>Public</cap:scope>
+    <cap:message_type>Update</cap:message_type>
+    <cap:status>Actual</cap:status>
+    <cap:identifier>2.49.0.0.528.0.NL.20261025161642.ca559085-11c2-4bf5-908a-3d14a8837758_30</cap:identifier>
+    <link type="application/cap+xml" href="https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/5043fc8b-c660-49a2-9608-2546b07e25a1"/>
+    <link title="The Netherlands" rel="related" href="https://meteoalarm.org?region=NL" hreflang="en"/>
+    <author>
+      <name>meteoalarm.org</name>
+      <uri>https://meteoalarm.org</uri>
+    </author>
+    <published>2026-10-25T16:16:42Z</published>
+    <id>https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/5043fc8b-c660-49a2-9608-2546b07e25a1?index_info=0&amp;index_area=0&amp;index_geocode=0</id>
+    <title>Yellow Wind Warning issued for The Netherlands - Hook of Holland</title>
+    <updated>2026-10-25T16:16:42Z</updated>
+  </entry>
+  <entry>
+    <cap:geocode>
+      <valueName>EMMA_ID</valueName>
+      <value>NL801</value>
+    </cap:geocode>
+    <link title="Flushing" href="https://meteoalarm.org?geocode=EMMA_ID:NL801" hreflang="en"/>
+    <cap:areaDesc>Flushing</cap:areaDesc>
+    <cap:event>Moderate Wind</cap:event>
+    <cap:sent>2026-10-25T16:16:42+00:00</cap:sent>
+    <cap:expires>2026-10-26T16:16:41+00:00</cap:expires>
+    <cap:onset>2026-10-19T19:50:43+00:00</cap:onset>
+    <cap:certainty>Observed</cap:certainty>
+    <cap:severity>Moderate</cap:severity>
+    <cap:urgency>Expected</cap:urgency>
+    <cap:scope>Public</cap:scope>
+    <cap:message_type>Update</cap:message_type>
+    <cap:status>Actual</cap:status>
+    <cap:identifier>2.49.0.0.528.0.NL.20261025161642.b81ad6bf-0dd1-428d-b10e-f3d3facfa6a9_30</cap:identifier>
+    <link type="application/cap+xml" href="https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/72981642-63ee-43f7-8f80-7c7575f09c0c"/>
+    <link title="The Netherlands" rel="related" href="https://meteoalarm.org?region=NL" hreflang="en"/>
+    <author>
+      <name>meteoalarm.org</name>
+      <uri>https://meteoalarm.org</uri>
+    </author>
+    <published>2026-10-25T16:16:42Z</published>
+    <id>https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/72981642-63ee-43f7-8f80-7c7575f09c0c?index_info=0&amp;index_area=0&amp;index_geocode=0</id>
+    <title>Yellow Wind Warning issued for The Netherlands - Flushing</title>
+    <updated>2026-10-25T16:16:42Z</updated>
+  </entry>
+  <entry>
+    <cap:geocode>
+      <valueName>EMMA_ID</valueName>
+      <value>NL805</value>
+    </cap:geocode>
+    <link title="Rottum" href="https://meteoalarm.org?geocode=EMMA_ID:NL805" hreflang="en"/>
+    <cap:areaDesc>Rottum</cap:areaDesc>
+    <cap:event>Severe Wind</cap:event>
+    <cap:sent>2026-10-25T16:16:42+00:00</cap:sent>
+    <cap:expires>2026-10-26T16:16:41+00:00</cap:expires>
+    <cap:onset>2026-10-22T23:15:37+00:00</cap:onset>
+    <cap:certainty>Observed</cap:certainty>
+    <cap:severity>Severe</cap:severity>
+    <cap:urgency>Expected</cap:urgency>
+    <cap:scope>Public</cap:scope>
+    <cap:message_type>Update</cap:message_type>
+    <cap:status>Actual</cap:status>
+    <cap:identifier>2.49.0.0.528.0.NL.20261025161642.9bba78fe-4fa7-49d7-9b5a-c23099b99fbb_14</cap:identifier>
+    <link type="application/cap+xml" href="https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/0cb20e5b-be78-4a45-9d23-7bc3ec248d68"/>
+    <link title="The Netherlands" rel="related" href="https://meteoalarm.org?region=NL" hreflang="en"/>
+    <author>
+      <name>meteoalarm.org</name>
+      <uri>https://meteoalarm.org</uri>
+    </author>
+    <published>2026-10-25T16:16:42Z</published>
+    <id>https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/0cb20e5b-be78-4a45-9d23-7bc3ec248d68?index_info=0&amp;index_area=0&amp;index_geocode=0</id>
+    <title>Orange Wind Warning issued for The Netherlands - Rottum</title>
+    <updated>2026-10-25T16:16:42Z</updated>
+  </entry>
+  <entry>
+    <cap:geocode>
+      <valueName>EMMA_ID</valueName>
+      <value>NL804</value>
+    </cap:geocode>
+    <link title="Texel" href="https://meteoalarm.org?geocode=EMMA_ID:NL804" hreflang="en"/>
+    <cap:areaDesc>Texel</cap:areaDesc>
+    <cap:event>Severe Wind</cap:event>
+    <cap:sent>2026-10-25T16:16:42+00:00</cap:sent>
+    <cap:expires>2026-10-26T16:16:41+00:00</cap:expires>
+    <cap:onset>2026-10-22T20:12:20+00:00</cap:onset>
+    <cap:certainty>Observed</cap:certainty>
+    <cap:severity>Severe</cap:severity>
+    <cap:urgency>Expected</cap:urgency>
+    <cap:scope>Public</cap:scope>
+    <cap:message_type>Update</cap:message_type>
+    <cap:status>Actual</cap:status>
+    <cap:identifier>2.49.0.0.528.0.NL.20261025161642.e1640c60-77c5-47d5-bb08-892974293788_15</cap:identifier>
+    <link type="application/cap+xml" href="https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/a00276e0-4967-471e-bf35-964d57db1ed9"/>
+    <link title="The Netherlands" rel="related" href="https://meteoalarm.org?region=NL" hreflang="en"/>
+    <author>
+      <name>meteoalarm.org</name>
+      <uri>https://meteoalarm.org</uri>
+    </author>
+    <published>2026-10-25T16:16:42Z</published>
+    <id>https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/a00276e0-4967-471e-bf35-964d57db1ed9?index_info=0&amp;index_area=0&amp;index_geocode=0</id>
+    <title>Orange Wind Warning issued for The Netherlands - Texel</title>
+    <updated>2026-10-25T16:16:42Z</updated>
+  </entry>
+  <entry>
+    <cap:geocode>
+      <valueName>EMMA_ID</valueName>
+      <value>NL009</value>
+    </cap:geocode>
+    <link title="Zuid-Holland" href="https://meteoalarm.org?geocode=EMMA_ID:NL009" hreflang="en"/>
+    <cap:areaDesc>Zuid-Holland</cap:areaDesc>
+    <cap:event>Moderate wind warning</cap:event>
+    <cap:sent>2026-10-25T16:05:43+00:00</cap:sent>
+    <cap:expires>2026-10-25T21:00:00+00:00</cap:expires>
+    <cap:effective>2026-10-25T16:05:43+00:00</cap:effective>
+    <cap:onset>2026-10-25T16:00:00+00:00</cap:onset>
+    <cap:certainty>Likely</cap:certainty>
+    <cap:severity>Moderate</cap:severity>
+    <cap:urgency>Future</cap:urgency>
+    <cap:scope>Public</cap:scope>
+    <cap:message_type>Alert</cap:message_type>
+    <cap:status>Actual</cap:status>
+    <cap:identifier>2.49.0.0.528.0.NL.261025170543.0_FX_ZH</cap:identifier>
+    <link type="application/cap+xml" href="https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/9a6cd4d3-e930-4bea-acb6-b7eb13796c8f"/>
+    <link title="The Netherlands" rel="related" href="https://meteoalarm.org?region=NL" hreflang="en"/>
+    <author>
+      <name>meteoalarm.org</name>
+      <uri>https://meteoalarm.org</uri>
+    </author>
+    <published>2026-10-25T16:05:43Z</published>
+    <id>https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/9a6cd4d3-e930-4bea-acb6-b7eb13796c8f?index_info=1&amp;index_area=0&amp;index_geocode=0</id>
+    <title>Yellow Wind Warning issued for The Netherlands - Zuid-Holland</title>
+    <updated>2026-10-25T16:05:43Z</updated>
+  </entry>
+  <entry>
+    <cap:geocode>
+      <valueName>EMMA_ID</valueName>
+      <value>NL010</value>
+    </cap:geocode>
+    <link title="Zeeland" href="https://meteoalarm.org?geocode=EMMA_ID:NL010" hreflang="en"/>
+    <cap:areaDesc>Zeeland</cap:areaDesc>
+    <cap:event>Moderate wind warning</cap:event>
+    <cap:sent>2026-10-25T16:05:43+00:00</cap:sent>
+    <cap:expires>2026-10-25T21:00:00+00:00</cap:expires>
+    <cap:effective>2026-10-25T16:05:43+00:00</cap:effective>
+    <cap:onset>2026-10-25T16:00:00+00:00</cap:onset>
+    <cap:certainty>Likely</cap:certainty>
+    <cap:severity>Moderate</cap:severity>
+    <cap:urgency>Future</cap:urgency>
+    <cap:scope>Public</cap:scope>
+    <cap:message_type>Alert</cap:message_type>
+    <cap:status>Actual</cap:status>
+    <cap:identifier>2.49.0.0.528.0.NL.261025170543.0_FX_ZE</cap:identifier>
+    <link type="application/cap+xml" href="https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/954746f7-b910-4a75-857d-0b01f8d4fb0c"/>
+    <link title="The Netherlands" rel="related" href="https://meteoalarm.org?region=NL" hreflang="en"/>
+    <author>
+      <name>meteoalarm.org</name>
+      <uri>https://meteoalarm.org</uri>
+    </author>
+    <published>2026-10-25T16:05:43Z</published>
+    <id>https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/954746f7-b910-4a75-857d-0b01f8d4fb0c?index_info=1&amp;index_area=0&amp;index_geocode=0</id>
+    <title>Yellow Wind Warning issued for The Netherlands - Zeeland</title>
+    <updated>2026-10-25T16:05:43Z</updated>
+  </entry>
+  <entry>
+    <cap:geocode>
+      <valueName>EMMA_ID</valueName>
+      <value>NL019</value>
+    </cap:geocode>
+    <link title="Waddeneilanden" href="https://meteoalarm.org?geocode=EMMA_ID:NL019" hreflang="en"/>
+    <cap:areaDesc>Waddeneilanden</cap:areaDesc>
+    <cap:event>Moderate wind warning</cap:event>
+    <cap:sent>2026-10-25T16:05:43+00:00</cap:sent>
+    <cap:expires>2026-10-26T05:00:00+00:00</cap:expires>
+    <cap:effective>2026-10-25T16:05:43+00:00</cap:effective>
+    <cap:onset>2026-10-25T16:00:00+00:00</cap:onset>
+    <cap:certainty>Likely</cap:certainty>
+    <cap:severity>Moderate</cap:severity>
+    <cap:urgency>Future</cap:urgency>
+    <cap:scope>Public</cap:scope>
+    <cap:message_type>Alert</cap:message_type>
+    <cap:status>Actual</cap:status>
+    <cap:identifier>2.49.0.0.528.0.NL.261025170543.0_FX_WAE</cap:identifier>
+    <link type="application/cap+xml" href="https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/e24bcb75-c8bd-445e-bea8-df8e169d5d8e"/>
+    <link title="The Netherlands" rel="related" href="https://meteoalarm.org?region=NL" hreflang="en"/>
+    <author>
+      <name>meteoalarm.org</name>
+      <uri>https://meteoalarm.org</uri>
+    </author>
+    <published>2026-10-25T16:05:43Z</published>
+    <id>https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/e24bcb75-c8bd-445e-bea8-df8e169d5d8e?index_info=1&amp;index_area=0&amp;index_geocode=0</id>
+    <title>Yellow Wind Warning issued for The Netherlands - Waddeneilanden</title>
+    <updated>2026-10-25T16:05:43Z</updated>
+  </entry>
+  <entry>
+    <cap:geocode>
+      <valueName>EMMA_ID</valueName>
+      <value>NL806</value>
+    </cap:geocode>
+    <link title="Waddenzee" href="https://meteoalarm.org?geocode=EMMA_ID:NL806" hreflang="en"/>
+    <cap:areaDesc>Waddenzee</cap:areaDesc>
+    <cap:event>Moderate wind warning</cap:event>
+    <cap:sent>2026-10-25T16:05:43+00:00</cap:sent>
+    <cap:expires>2026-10-26T05:00:00+00:00</cap:expires>
+    <cap:effective>2026-10-25T16:05:43+00:00</cap:effective>
+    <cap:onset>2026-10-25T16:00:00+00:00</cap:onset>
+    <cap:certainty>Likely</cap:certainty>
+    <cap:severity>Moderate</cap:severity>
+    <cap:urgency>Future</cap:urgency>
+    <cap:scope>Public</cap:scope>
+    <cap:message_type>Alert</cap:message_type>
+    <cap:status>Actual</cap:status>
+    <cap:identifier>2.49.0.0.528.0.NL.261025170543.0_FX_WAD</cap:identifier>
+    <link type="application/cap+xml" href="https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/5af344bb-fc78-4980-afb9-d25459223f33"/>
+    <link title="The Netherlands" rel="related" href="https://meteoalarm.org?region=NL" hreflang="en"/>
+    <author>
+      <name>meteoalarm.org</name>
+      <uri>https://meteoalarm.org</uri>
+    </author>
+    <published>2026-10-25T16:05:43Z</published>
+    <id>https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/5af344bb-fc78-4980-afb9-d25459223f33?index_info=1&amp;index_area=0&amp;index_geocode=0</id>
+    <title>Yellow Wind Warning issued for The Netherlands - Waddenzee</title>
+    <updated>2026-10-25T16:05:43Z</updated>
+  </entry>
+  <entry>
+    <cap:geocode>
+      <valueName>EMMA_ID</valueName>
+      <value>NL011</value>
+    </cap:geocode>
+    <link title="Noord-Holland" href="https://meteoalarm.org?geocode=EMMA_ID:NL011" hreflang="en"/>
+    <cap:areaDesc>Noord-Holland</cap:areaDesc>
+    <cap:event>Moderate wind warning</cap:event>
+    <cap:sent>2026-10-25T16:05:43+00:00</cap:sent>
+    <cap:expires>2026-10-26T01:00:00+00:00</cap:expires>
+    <cap:effective>2026-10-25T16:05:43+00:00</cap:effective>
+    <cap:onset>2026-10-25T16:00:00+00:00</cap:onset>
+    <cap:certainty>Likely</cap:certainty>
+    <cap:severity>Moderate</cap:severity>
+    <cap:urgency>Future</cap:urgency>
+    <cap:scope>Public</cap:scope>
+    <cap:message_type>Alert</cap:message_type>
+    <cap:status>Actual</cap:status>
+    <cap:identifier>2.49.0.0.528.0.NL.261025170543.0_FX_NH</cap:identifier>
+    <link type="application/cap+xml" href="https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/7dfdf211-5259-49b4-939f-f2db2cf744d0"/>
+    <link title="The Netherlands" rel="related" href="https://meteoalarm.org?region=NL" hreflang="en"/>
+    <author>
+      <name>meteoalarm.org</name>
+      <uri>https://meteoalarm.org</uri>
+    </author>
+    <published>2026-10-25T16:05:43Z</published>
+    <id>https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/7dfdf211-5259-49b4-939f-f2db2cf744d0?index_info=1&amp;index_area=0&amp;index_geocode=0</id>
+    <title>Yellow Wind Warning issued for The Netherlands - Noord-Holland</title>
+    <updated>2026-10-25T16:05:43Z</updated>
+  </entry>
+  <entry>
+    <cap:geocode>
+      <valueName>EMMA_ID</valueName>
+      <value>NL807</value>
+    </cap:geocode>
+    <link title="IJsselmeergebied" href="https://meteoalarm.org?geocode=EMMA_ID:NL807" hreflang="en"/>
+    <cap:areaDesc>IJsselmeergebied</cap:areaDesc>
+    <cap:event>Moderate wind warning</cap:event>
+    <cap:sent>2026-10-25T16:05:43+00:00</cap:sent>
+    <cap:expires>2026-10-26T01:00:00+00:00</cap:expires>
+    <cap:effective>2026-10-25T16:05:43+00:00</cap:effective>
+    <cap:onset>2026-10-25T16:00:00+00:00</cap:onset>
+    <cap:certainty>Likely</cap:certainty>
+    <cap:severity>Moderate</cap:severity>
+    <cap:urgency>Future</cap:urgency>
+    <cap:scope>Public</cap:scope>
+    <cap:message_type>Alert</cap:message_type>
+    <cap:status>Actual</cap:status>
+    <cap:identifier>2.49.0.0.528.0.NL.261025170543.0_FX_IJG</cap:identifier>
+    <link type="application/cap+xml" href="https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/53f732f9-7bee-4bc3-a35a-f3d9a81ec0c0"/>
+    <link title="The Netherlands" rel="related" href="https://meteoalarm.org?region=NL" hreflang="en"/>
+    <author>
+      <name>meteoalarm.org</name>
+      <uri>https://meteoalarm.org</uri>
+    </author>
+    <published>2026-10-25T16:05:43Z</published>
+    <id>https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/53f732f9-7bee-4bc3-a35a-f3d9a81ec0c0?index_info=1&amp;index_area=0&amp;index_geocode=0</id>
+    <title>Yellow Wind Warning issued for The Netherlands - IJsselmeergebied</title>
+    <updated>2026-10-25T16:05:43Z</updated>
+  </entry>
+  <entry>
+    <cap:geocode>
+      <valueName>EMMA_ID</valueName>
+      <value>NL007</value>
+    </cap:geocode>
+    <link title="Groningen" href="https://meteoalarm.org?geocode=EMMA_ID:NL007" hreflang="en"/>
+    <cap:areaDesc>Groningen</cap:areaDesc>
+    <cap:event>Moderate wind warning</cap:event>
+    <cap:sent>2026-10-25T16:05:43+00:00</cap:sent>
+    <cap:expires>2026-10-26T05:00:00+00:00</cap:expires>
+    <cap:effective>2026-10-25T16:05:43+00:00</cap:effective>
+    <cap:onset>2026-10-25T16:00:00+00:00</cap:onset>
+    <cap:certainty>Likely</cap:certainty>
+    <cap:severity>Moderate</cap:severity>
+    <cap:urgency>Future</cap:urgency>
+    <cap:scope>Public</cap:scope>
+    <cap:message_type>Alert</cap:message_type>
+    <cap:status>Actual</cap:status>
+    <cap:identifier>2.49.0.0.528.0.NL.261025170543.0_FX_GR</cap:identifier>
+    <link type="application/cap+xml" href="https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/56541ef3-74c3-4860-9103-07cb4ca237fc"/>
+    <link title="The Netherlands" rel="related" href="https://meteoalarm.org?region=NL" hreflang="en"/>
+    <author>
+      <name>meteoalarm.org</name>
+      <uri>https://meteoalarm.org</uri>
+    </author>
+    <published>2026-10-25T16:05:43Z</published>
+    <id>https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/56541ef3-74c3-4860-9103-07cb4ca237fc?index_info=1&amp;index_area=0&amp;index_geocode=0</id>
+    <title>Yellow Wind Warning issued for The Netherlands - Groningen</title>
+    <updated>2026-10-25T16:05:43Z</updated>
+  </entry>
+  <entry>
+    <cap:geocode>
+      <valueName>EMMA_ID</valueName>
+      <value>NL017</value>
+    </cap:geocode>
+    <link title="Friesland" href="https://meteoalarm.org?geocode=EMMA_ID:NL017" hreflang="en"/>
+    <cap:areaDesc>Friesland</cap:areaDesc>
+    <cap:event>Moderate wind warning</cap:event>
+    <cap:sent>2026-10-25T16:05:43+00:00</cap:sent>
+    <cap:expires>2026-10-26T05:00:00+00:00</cap:expires>
+    <cap:effective>2026-10-25T16:05:43+00:00</cap:effective>
+    <cap:onset>2026-10-25T16:00:00+00:00</cap:onset>
+    <cap:certainty>Likely</cap:certainty>
+    <cap:severity>Moderate</cap:severity>
+    <cap:urgency>Future</cap:urgency>
+    <cap:scope>Public</cap:scope>
+    <cap:message_type>Alert</cap:message_type>
+    <cap:status>Actual</cap:status>
+    <cap:identifier>2.49.0.0.528.0.NL.261025170543.0_FX_FR</cap:identifier>
+    <link type="application/cap+xml" href="https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/8ea22804-27b1-48ab-b582-c1da49746edb"/>
+    <link title="The Netherlands" rel="related" href="https://meteoalarm.org?region=NL" hreflang="en"/>
+    <author>
+      <name>meteoalarm.org</name>
+      <uri>https://meteoalarm.org</uri>
+    </author>
+    <published>2026-10-25T16:05:43Z</published>
+    <id>https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/8ea22804-27b1-48ab-b582-c1da49746edb?index_info=1&amp;index_area=0&amp;index_geocode=0</id>
+    <title>Yellow Wind Warning issued for The Netherlands - Friesland</title>
+    <updated>2026-10-25T16:05:43Z</updated>
+  </entry>
+  <entry>
+    <cap:polygon>51.84580,4.06140 51.81980,4.12780 51.82470,4.15570 51.80670,4.17840 51.79750,4.21200 51.76690,4.24300 51.74510,4.34690 51.72260,4.40110 51.70300,4.39370 51.68830,4.41160 51.67550,4.39030 51.65250,4.35540 51.62930,4.26120 51.64140,4.16390 51.65580,4.11870 51.63540,4.09410 51.61710,4.12410 51.61550,4.16090 51.61780,4.17840 51.60990,4.18240 51.60950,4.15770 51.60230,4.14700 51.59900,4.11710 51.61370,4.09900 51.61820,4.06500 51.59900,4.01350 51.59850,3.98880 51.58200,3.98200 51.56450,4.02930 51.55690,4.02850 51.55290,4.05020 51.52730,4.07430 51.52480,4.16260 51.50590,4.20710 51.51440,4.22290 51.48430,4.27590 51.48050,4.25820 51.46880,4.27890 51.45580,4.29450 51.35640,4.22380 51.32870,4.15940 51.35860,4.10660 51.36740,4.08310 51.37190,4.04930 51.40390,4.01860 51.41050,3.97280 51.39570,3.96130 51.36980,3.95850 51.36010,3.89860 51.34070,3.85000 51.35020,3.76790 51.35320,3.73390 51.37510,3.68480 51.38100,3.61440 51.40440,3.56280 51.40980,3.50450 51.53370,3.43070 51.60170,3.57760 51.59200,3.62840 51.60230,3.67870 51.62960,3.68650 51.65120,3.72080 51.66500,3.72220 51.67050,3.70060 51.69140,3.67560 51.71900,3.67840 51.73360,3.69730 51.74550,3.78020 51.74230,3.82190 51.75900,3.82610 51.76260,3.85130 51.78510,3.86360 51.80700,3.85360 51.82490,3.86800 51.84920,3.98230 51.84170,4.01370 51.82980,4.03970 51.84580,4.06140</cap:polygon>
+    <link title="Zierikzee" href="https://meteoalarm.org?polygon=390454ef-288b-4644-a0a8-8183049cc4bb,0,0,0" hreflang="en"/>
+    <cap:areaDesc>Zierikzee</cap:areaDesc>
+    <cap:event>Moderate Wind</cap:event>
+    <cap:sent>2026-10-25T16:16:42+00:00</cap:sent>
+    <cap:expires>2026-10-26T16:16:41+00:00</cap:expires>
+    <cap:onset>2026-10-22T20:12:20+00:00</cap:onset>
+    <cap:certainty>Observed</cap:certainty>
+    <cap:severity>Moderate</cap:severity>
+    <cap:urgency>Expected</cap:urgency>
+    <cap:scope>Public</cap:scope>
+    <cap:message_type>Update</cap:message_type>
+    <cap:status>Actual</cap:status>
+    <cap:identifier>2.49.0.0.528.0.NL.20261025161642.e252f35b-55ca-4eae-86cf-dd1f37e65ec8_15</cap:identifier>
+    <link type="application/cap+xml" href="https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/390454ef-288b-4644-a0a8-8183049cc4bb"/>
+    <link title="The Netherlands" rel="related" href="https://meteoalarm.org?region=NL" hreflang="en"/>
+    <author>
+      <name>meteoalarm.org</name>
+      <uri>https://meteoalarm.org</uri>
+    </author>
+    <published>2026-10-25T16:16:42Z</published>
+    <id>https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/390454ef-288b-4644-a0a8-8183049cc4bb?index_info=0&amp;index_area=0&amp;index_polygon=0</id>
+    <title>Yellow Wind Warning issued for The Netherlands - Zierikzee</title>
+    <updated>2026-10-25T16:16:42Z</updated>
+  </entry>
+  <entry>
+    <cap:polygon>52.51840,5.43460 52.49450,5.39310 52.49170,5.38460 52.38480,5.12090 52.34300,5.13360 52.33100,5.14250 52.32830,5.13140 52.34170,5.09580 52.33530,5.03320 52.34670,5.03480 52.35040,5.02730 52.34840,5.02900 52.36860,4.96280 52.38010,4.99400 52.37440,5.00930 52.40120,5.02920 52.41640,5.05290 52.41550,5.06890 52.43930,5.08580 52.44280,5.05140 52.47160,5.06630 52.48840,5.06070 52.50510,5.08470 52.62240,5.01530 52.63360,5.02230 52.64220,5.04520 52.63500,5.05770 52.64350,5.08330 52.63610,5.09840 52.63520,5.11450 52.62480,5.12380 52.62450,5.15890 52.63190,5.17360 52.64040,5.19920 52.65510,5.23120 52.68720,5.24690 52.68750,5.27130 52.69520,5.28060 52.69140,5.28820 52.69440,5.29400 52.67590,5.35900 52.59300,5.45440 52.56910,5.46950 52.56250,5.44150 52.54350,5.42770 52.53040,5.42570 52.52170,5.43510 52.51840,5.43460</cap:polygon>
+    <link title="Marken" href="https://meteoalarm.org?polygon=e19d535f-6975-4204-81fa-3301809c2098,0,0,0" hreflang="en"/>
+    <cap:areaDesc>Marken</cap:areaDesc>
+    <cap:event>Moderate Wind</cap:event>
+    <cap:sent>2026-10-25T16:16:42+00:00</cap:sent>
+    <cap:expires>2026-10-26T16:16:41+00:00</cap:expires>
+    <cap:onset>2026-10-22T20:12:20+00:00</cap:onset>
+    <cap:certainty>Observed</cap:certainty>
+    <cap:severity>Moderate</cap:severity>
+    <cap:urgency>Expected</cap:urgency>
+    <cap:scope>Public</cap:scope>
+    <cap:message_type>Update</cap:message_type>
+    <cap:status>Actual</cap:status>
+    <cap:identifier>2.49.0.0.528.0.NL.20261025161642.12bc724a-7ffb-4da3-b6bf-46a190d63caa_15</cap:identifier>
+    <link type="application/cap+xml" href="https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/e19d535f-6975-4204-81fa-3301809c2098"/>
+    <link title="The Netherlands" rel="related" href="https://meteoalarm.org?region=NL" hreflang="en"/>
+    <author>
+      <name>meteoalarm.org</name>
+      <uri>https://meteoalarm.org</uri>
+    </author>
+    <published>2026-10-25T16:16:42Z</published>
+    <id>https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/e19d535f-6975-4204-81fa-3301809c2098?index_info=0&amp;index_area=0&amp;index_polygon=0</id>
+    <title>Yellow Wind Warning issued for The Netherlands - Marken</title>
+    <updated>2026-10-25T16:16:42Z</updated>
+  </entry>
+  <entry>
+    <cap:polygon>53.09840,5.38210 53.07340,5.38810 53.07480,5.36360 53.06300,5.36730 53.03190,5.39250 53.03420,5.40930 52.99840,5.40100 52.98630,5.41000 52.94670,5.40930 52.94770,5.39300 52.92370,5.40840 52.90930,5.40070 52.90840,5.38690 52.90150,5.36400 52.88880,5.35380 52.88200,5.35820 52.84890,5.41850 52.85670,5.45510 52.83270,5.55480 52.84090,5.58340 52.85070,5.58500 52.85030,5.62030 52.86240,5.63870 52.85670,5.65140 52.84470,5.65760 52.84570,5.69590 52.83670,5.70800 52.83620,5.66160 52.76940,5.59360 52.66250,5.59000 52.61750,5.65310 52.61340,5.63890 52.60600,5.62420 52.59830,5.56070 52.55950,5.49240 52.55480,5.45920 52.53740,5.44840 52.52170,5.43510 52.53040,5.42570 52.54350,5.42770 52.56250,5.44150 52.56910,5.46950 52.59300,5.45440 52.67590,5.35900 52.69440,5.29400 52.69140,5.28820 52.69520,5.28060 52.70260,5.29530 52.71040,5.30190 52.71950,5.28700 52.74270,5.28510 52.75950,5.18990 52.74530,5.17960 52.74040,5.14900 52.75650,5.12430 52.77670,5.11640 52.77900,5.10590 52.84760,5.11600 52.92380,5.04820 52.92770,5.03780 52.94120,5.04040 53.07500,5.29490 53.07580,5.33680 53.09840,5.38210</cap:polygon>
+    <link title="IJsselmeer" href="https://meteoalarm.org?polygon=4a138a28-d68f-4ae3-9170-709a06c3492c,0,0,0" hreflang="en"/>
+    <cap:areaDesc>IJsselmeer</cap:areaDesc>
+    <cap:event>Moderate Wind</cap:event>
+    <cap:sent>2026-10-25T16:16:42+00:00</cap:sent>
+    <cap:expires>2026-10-26T16:16:41+00:00</cap:expires>
+    <cap:onset>2026-10-22T20:12:20+00:00</cap:onset>
+    <cap:certainty>Observed</cap:certainty>
+    <cap:severity>Moderate</cap:severity>
+    <cap:urgency>Expected</cap:urgency>
+    <cap:scope>Public</cap:scope>
+    <cap:message_type>Update</cap:message_type>
+    <cap:status>Actual</cap:status>
+    <cap:identifier>2.49.0.0.528.0.NL.20261025161642.f513810c-7520-4613-a121-b29da9d3d650_15</cap:identifier>
+    <link type="application/cap+xml" href="https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/4a138a28-d68f-4ae3-9170-709a06c3492c"/>
+    <link title="The Netherlands" rel="related" href="https://meteoalarm.org?region=NL" hreflang="en"/>
+    <author>
+      <name>meteoalarm.org</name>
+      <uri>https://meteoalarm.org</uri>
+    </author>
+    <published>2026-10-25T16:16:42Z</published>
+    <id>https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/4a138a28-d68f-4ae3-9170-709a06c3492c?index_info=0&amp;index_area=0&amp;index_polygon=0</id>
+    <title>Yellow Wind Warning issued for The Netherlands - IJsselmeer</title>
+    <updated>2026-10-25T16:16:42Z</updated>
+  </entry>
+  <entry>
+    <cap:polygon>53.28370,5.55320 53.25460,5.51170 53.22920,5.46040 53.17240,5.40950 53.16270,5.41320 53.11930,5.40110 53.09840,5.38210 53.07580,5.33680 53.07500,5.29490 52.94120,5.04040 52.94020,5.02990 52.93420,4.96400 52.91010,4.94500 52.89640,4.90670 52.89020,4.87470 52.91390,4.81050 52.94020,4.78820 52.96800,4.79720 52.97000,4.75590 52.99670,4.75700 53.00290,4.78910 53.02970,4.81880 53.03290,4.84800 53.08080,4.89390 53.14170,4.90250 53.16020,4.87900 53.18820,4.85420 53.21950,4.88740 53.21630,4.91840 53.23570,4.93950 53.25330,4.98390 53.26710,4.97030 53.28250,5.03560 53.29650,5.06910 53.29670,5.09540 53.30760,5.09710 53.34990,5.15860 53.34380,5.18400 53.36830,5.22720 53.37420,5.26230 53.37400,5.29390 53.38700,5.34340 53.40710,5.37810 53.28370,5.55320</cap:polygon>
+    <link title="Harlingen" href="https://meteoalarm.org?polygon=0a8450af-ab93-4056-8d70-c334cb94b28c,0,0,0" hreflang="en"/>
+    <cap:areaDesc>Harlingen</cap:areaDesc>
+    <cap:event>Moderate Wind</cap:event>
+    <cap:sent>2026-10-25T16:16:42+00:00</cap:sent>
+    <cap:expires>2026-10-26T16:16:41+00:00</cap:expires>
+    <cap:onset>2026-10-22T20:12:20+00:00</cap:onset>
+    <cap:certainty>Observed</cap:certainty>
+    <cap:severity>Moderate</cap:severity>
+    <cap:urgency>Expected</cap:urgency>
+    <cap:scope>Public</cap:scope>
+    <cap:message_type>Update</cap:message_type>
+    <cap:status>Actual</cap:status>
+    <cap:identifier>2.49.0.0.528.0.NL.20261025161642.89fe66cd-d145-4cb9-b973-4481bbfac6cd_15</cap:identifier>
+    <link type="application/cap+xml" href="https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/0a8450af-ab93-4056-8d70-c334cb94b28c"/>
+    <link title="The Netherlands" rel="related" href="https://meteoalarm.org?region=NL" hreflang="en"/>
+    <author>
+      <name>meteoalarm.org</name>
+      <uri>https://meteoalarm.org</uri>
+    </author>
+    <published>2026-10-25T16:16:42Z</published>
+    <id>https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/0a8450af-ab93-4056-8d70-c334cb94b28c?index_info=0&amp;index_area=0&amp;index_polygon=0</id>
+    <title>Yellow Wind Warning issued for The Netherlands - Harlingen</title>
+    <updated>2026-10-25T16:16:42Z</updated>
+  </entry>
+  <entry>
+    <cap:polygon>53.60280,6.81630 53.49990,6.92820 53.39410,6.94900 53.33780,6.98500 53.31720,7.00720 53.33530,6.93170 53.35660,6.89910 53.44340,6.87960 53.46690,6.81550 53.46250,6.78820 53.47050,6.72090 53.45140,6.63250 53.42900,6.53310 53.42750,6.42690 53.40050,6.31090 53.42400,6.24130 53.41070,6.15440 53.40200,5.99450 53.39030,5.92910 53.39010,5.88160 53.32690,5.67600 53.31030,5.58380 53.28370,5.55320 53.40710,5.37810 53.40570,5.45960 53.42040,5.47780 53.44340,5.57130 53.44900,5.60910 53.43050,5.62990 53.42430,5.68160 53.44360,5.72710 53.43750,5.80260 53.45810,5.90390 53.45940,5.95960 53.44340,6.03870 53.46540,6.11400 53.45470,6.13330 53.47330,6.16310 53.47740,6.24580 53.50010,6.33210 53.51610,6.40130 53.53620,6.50050 53.53810,6.58840 53.56880,6.69260 53.56150,6.75220 53.56910,6.75640 53.58570,6.72250 53.60280,6.81630</cap:polygon>
+    <link title="Delfzijl" href="https://meteoalarm.org?polygon=ceb45e16-c6a5-4f07-8e60-5a00c7f0a0af,0,0,0" hreflang="en"/>
+    <cap:areaDesc>Delfzijl</cap:areaDesc>
+    <cap:event>Moderate Wind</cap:event>
+    <cap:sent>2026-10-25T16:16:42+00:00</cap:sent>
+    <cap:expires>2026-10-26T16:16:41+00:00</cap:expires>
+    <cap:onset>2026-10-22T23:15:37+00:00</cap:onset>
+    <cap:certainty>Observed</cap:certainty>
+    <cap:severity>Moderate</cap:severity>
+    <cap:urgency>Expected</cap:urgency>
+    <cap:scope>Public</cap:scope>
+    <cap:message_type>Update</cap:message_type>
+    <cap:status>Actual</cap:status>
+    <cap:identifier>2.49.0.0.528.0.NL.20261025161642.ba38c10d-0bf1-405d-aacc-1f6ad5154b58_14</cap:identifier>
+    <link type="application/cap+xml" href="https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/ceb45e16-c6a5-4f07-8e60-5a00c7f0a0af"/>
+    <link title="The Netherlands" rel="related" href="https://meteoalarm.org?region=NL" hreflang="en"/>
+    <author>
+      <name>meteoalarm.org</name>
+      <uri>https://meteoalarm.org</uri>
+    </author>
+    <published>2026-10-25T16:16:42Z</published>
+    <id>https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/ceb45e16-c6a5-4f07-8e60-5a00c7f0a0af?index_info=0&amp;index_area=0&amp;index_polygon=0</id>
+    <title>Yellow Wind Warning issued for The Netherlands - Delfzijl</title>
+    <updated>2026-10-25T16:16:42Z</updated>
+  </entry>
+  <entry>
+    <cap:polygon>52.25000,4.43320 52.29810,3.47470 52.80430,3.80980 52.76700,4.64280 52.68650,4.63170 52.51740,4.59310 52.43700,4.55570 52.25000,4.43320</cap:polygon>
+    <link title="IJmuiden" href="https://meteoalarm.org?polygon=af983c20-eb25-4508-b807-6a1248b92cad,0,0,0" hreflang="en"/>
+    <cap:areaDesc>IJmuiden</cap:areaDesc>
+    <cap:event>Moderate Wind</cap:event>
+    <cap:sent>2026-10-25T16:16:42+00:00</cap:sent>
+    <cap:expires>2026-10-26T16:16:41+00:00</cap:expires>
+    <cap:onset>2026-10-19T09:40:07+00:00</cap:onset>
+    <cap:certainty>Observed</cap:certainty>
+    <cap:severity>Moderate</cap:severity>
+    <cap:urgency>Expected</cap:urgency>
+    <cap:scope>Public</cap:scope>
+    <cap:message_type>Update</cap:message_type>
+    <cap:status>Actual</cap:status>
+    <cap:identifier>2.49.0.0.528.0.NL.20261025161642.0ce5583a-080c-44b4-9442-ceafb0981a0f_32</cap:identifier>
+    <link type="application/cap+xml" href="https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/af983c20-eb25-4508-b807-6a1248b92cad"/>
+    <link title="The Netherlands" rel="related" href="https://meteoalarm.org?region=NL" hreflang="en"/>
+    <author>
+      <name>meteoalarm.org</name>
+      <uri>https://meteoalarm.org</uri>
+    </author>
+    <published>2026-10-25T16:16:42Z</published>
+    <id>https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/af983c20-eb25-4508-b807-6a1248b92cad?index_info=0&amp;index_area=0&amp;index_polygon=0</id>
+    <title>Yellow Wind Warning issued for The Netherlands - IJmuiden</title>
+    <updated>2026-10-25T16:16:42Z</updated>
+  </entry>
+  <entry>
+    <cap:polygon>51.88500,4.04990 51.92910,2.95980 52.29810,3.47470 52.25260,4.43010 52.25000,4.43320 52.15520,4.33780 51.98250,4.09910 51.97740,4.07870 51.98680,4.03280 51.96840,4.00670 51.93880,4.01970 51.91600,4.01600 51.92170,4.04180 51.91860,4.05010 51.88500,4.04990</cap:polygon>
+    <link title="Hook of Holland" href="https://meteoalarm.org?polygon=5043fc8b-c660-49a2-9608-2546b07e25a1,0,0,0" hreflang="en"/>
+    <cap:areaDesc>Hook of Holland</cap:areaDesc>
+    <cap:event>Moderate Wind</cap:event>
+    <cap:sent>2026-10-25T16:16:42+00:00</cap:sent>
+    <cap:expires>2026-10-26T16:16:41+00:00</cap:expires>
+    <cap:onset>2026-10-19T19:50:43+00:00</cap:onset>
+    <cap:certainty>Observed</cap:certainty>
+    <cap:severity>Moderate</cap:severity>
+    <cap:urgency>Expected</cap:urgency>
+    <cap:scope>Public</cap:scope>
+    <cap:message_type>Update</cap:message_type>
+    <cap:status>Actual</cap:status>
+    <cap:identifier>2.49.0.0.528.0.NL.20261025161642.ca559085-11c2-4bf5-908a-3d14a8837758_30</cap:identifier>
+    <link type="application/cap+xml" href="https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/5043fc8b-c660-49a2-9608-2546b07e25a1"/>
+    <link title="The Netherlands" rel="related" href="https://meteoalarm.org?region=NL" hreflang="en"/>
+    <author>
+      <name>meteoalarm.org</name>
+      <uri>https://meteoalarm.org</uri>
+    </author>
+    <published>2026-10-25T16:16:42Z</published>
+    <id>https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/5043fc8b-c660-49a2-9608-2546b07e25a1?index_info=0&amp;index_area=0&amp;index_polygon=0</id>
+    <title>Yellow Wind Warning issued for The Netherlands - Hook of Holland</title>
+    <updated>2026-10-25T16:16:42Z</updated>
+  </entry>
+  <entry>
+    <cap:polygon>51.40980,3.50450 51.38350,3.36140 51.41630,2.30180 51.92910,2.95980 51.88500,4.04990 51.84580,4.06140 51.82980,4.03970 51.84170,4.01370 51.84920,3.98230 51.82490,3.86800 51.80700,3.85360 51.78510,3.86360 51.76260,3.85130 51.75900,3.82610 51.74230,3.82190 51.74550,3.78020 51.73360,3.69730 51.71900,3.67840 51.69140,3.67560 51.67050,3.70060 51.66500,3.72220 51.65120,3.72080 51.62960,3.68650 51.60230,3.67870 51.59200,3.62840 51.60170,3.57760 51.53370,3.43070 51.40980,3.50450</cap:polygon>
+    <link title="Flushing" href="https://meteoalarm.org?polygon=72981642-63ee-43f7-8f80-7c7575f09c0c,0,0,0" hreflang="en"/>
+    <cap:areaDesc>Flushing</cap:areaDesc>
+    <cap:event>Moderate Wind</cap:event>
+    <cap:sent>2026-10-25T16:16:42+00:00</cap:sent>
+    <cap:expires>2026-10-26T16:16:41+00:00</cap:expires>
+    <cap:onset>2026-10-19T19:50:43+00:00</cap:onset>
+    <cap:certainty>Observed</cap:certainty>
+    <cap:severity>Moderate</cap:severity>
+    <cap:urgency>Expected</cap:urgency>
+    <cap:scope>Public</cap:scope>
+    <cap:message_type>Update</cap:message_type>
+    <cap:status>Actual</cap:status>
+    <cap:identifier>2.49.0.0.528.0.NL.20261025161642.b81ad6bf-0dd1-428d-b10e-f3d3facfa6a9_30</cap:identifier>
+    <link type="application/cap+xml" href="https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/72981642-63ee-43f7-8f80-7c7575f09c0c"/>
+    <link title="The Netherlands" rel="related" href="https://meteoalarm.org?region=NL" hreflang="en"/>
+    <author>
+      <name>meteoalarm.org</name>
+      <uri>https://meteoalarm.org</uri>
+    </author>
+    <published>2026-10-25T16:16:42Z</published>
+    <id>https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/72981642-63ee-43f7-8f80-7c7575f09c0c?index_info=0&amp;index_area=0&amp;index_polygon=0</id>
+    <title>Yellow Wind Warning issued for The Netherlands - Flushing</title>
+    <updated>2026-10-25T16:16:42Z</updated>
+  </entry>
+  <entry>
+    <cap:polygon>53.40570,5.45960 53.40710,5.37810 54.04220,5.47990 54.16440,6.75780 53.66880,6.66440 53.60280,6.81630 53.58570,6.72250 53.56910,6.75640 53.56150,6.75220 53.56880,6.69260 53.53810,6.58840 53.53620,6.50050 53.51610,6.40130 53.50010,6.33210 53.47740,6.24580 53.47330,6.16310 53.45470,6.13330 53.46540,6.11400 53.44340,6.03870 53.45940,5.95960 53.45810,5.90390 53.43750,5.80260 53.44360,5.72710 53.42430,5.68160 53.43050,5.62990 53.44900,5.60910 53.44340,5.57130 53.42040,5.47780 53.40570,5.45960</cap:polygon>
+    <link title="Rottum" href="https://meteoalarm.org?polygon=0cb20e5b-be78-4a45-9d23-7bc3ec248d68,0,0,0" hreflang="en"/>
+    <cap:areaDesc>Rottum</cap:areaDesc>
+    <cap:event>Severe Wind</cap:event>
+    <cap:sent>2026-10-25T16:16:42+00:00</cap:sent>
+    <cap:expires>2026-10-26T16:16:41+00:00</cap:expires>
+    <cap:onset>2026-10-22T23:15:37+00:00</cap:onset>
+    <cap:certainty>Observed</cap:certainty>
+    <cap:severity>Severe</cap:severity>
+    <cap:urgency>Expected</cap:urgency>
+    <cap:scope>Public</cap:scope>
+    <cap:message_type>Update</cap:message_type>
+    <cap:status>Actual</cap:status>
+    <cap:identifier>2.49.0.0.528.0.NL.20261025161642.9bba78fe-4fa7-49d7-9b5a-c23099b99fbb_14</cap:identifier>
+    <link type="application/cap+xml" href="https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/0cb20e5b-be78-4a45-9d23-7bc3ec248d68"/>
+    <link title="The Netherlands" rel="related" href="https://meteoalarm.org?region=NL" hreflang="en"/>
+    <author>
+      <name>meteoalarm.org</name>
+      <uri>https://meteoalarm.org</uri>
+    </author>
+    <published>2026-10-25T16:16:42Z</published>
+    <id>https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/0cb20e5b-be78-4a45-9d23-7bc3ec248d68?index_info=0&amp;index_area=0&amp;index_polygon=0</id>
+    <title>Orange Wind Warning issued for The Netherlands - Rottum</title>
+    <updated>2026-10-25T16:16:42Z</updated>
+  </entry>
+  <entry>
+    <cap:polygon>52.99670,4.75700 52.97000,4.75590 52.96800,4.73510 52.96530,4.72380 52.95250,4.71660 52.88040,4.70670 52.81580,4.68160 52.76700,4.64280 52.80430,3.80980 53.27920,3.98250 53.51030,4.15500 53.79500,4.57900 54.04220,5.47990 53.40710,5.37810 53.38700,5.34340 53.37400,5.29390 53.37420,5.26230 53.36830,5.22720 53.34380,5.18400 53.34990,5.15860 53.30760,5.09710 53.29670,5.09540 53.29650,5.06910 53.28250,5.03560 53.26710,4.97030 53.25330,4.98390 53.23570,4.93950 53.21630,4.91840 53.21950,4.88740 53.18820,4.85420 53.16020,4.87900 53.14170,4.90250 53.08080,4.89390 53.03290,4.84800 53.02970,4.81880 53.00290,4.78910 52.99670,4.75700</cap:polygon>
+    <link title="Texel" href="https://meteoalarm.org?polygon=a00276e0-4967-471e-bf35-964d57db1ed9,0,0,0" hreflang="en"/>
+    <cap:areaDesc>Texel</cap:areaDesc>
+    <cap:event>Severe Wind</cap:event>
+    <cap:sent>2026-10-25T16:16:42+00:00</cap:sent>
+    <cap:expires>2026-10-26T16:16:41+00:00</cap:expires>
+    <cap:onset>2026-10-22T20:12:20+00:00</cap:onset>
+    <cap:certainty>Observed</cap:certainty>
+    <cap:severity>Severe</cap:severity>
+    <cap:urgency>Expected</cap:urgency>
+    <cap:scope>Public</cap:scope>
+    <cap:message_type>Update</cap:message_type>
+    <cap:status>Actual</cap:status>
+    <cap:identifier>2.49.0.0.528.0.NL.20261025161642.e1640c60-77c5-47d5-bb08-892974293788_15</cap:identifier>
+    <link type="application/cap+xml" href="https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/a00276e0-4967-471e-bf35-964d57db1ed9"/>
+    <link title="The Netherlands" rel="related" href="https://meteoalarm.org?region=NL" hreflang="en"/>
+    <author>
+      <name>meteoalarm.org</name>
+      <uri>https://meteoalarm.org</uri>
+    </author>
+    <published>2026-10-25T16:16:42Z</published>
+    <id>https://feeds.meteoalarm.org/api/v1/warnings/feeds-netherlands/a00276e0-4967-471e-bf35-964d57db1ed9?index_info=0&amp;index_area=0&amp;index_polygon=0</id>
+    <title>Orange Wind Warning issued for The Netherlands - Texel</title>
+    <updated>2026-10-25T16:16:42Z</updated>
+  </entry>
+</feed>
