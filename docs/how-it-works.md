@@ -104,7 +104,7 @@ time, and gives way to Home once Home Assistant is up, or after 15 s.
 | `components/desk/`, `loctek/`, `deskproto/` | The desk, the control box's frames, the panel-to-companion protocol |
 | `components/hass/`, `room/` | Home Assistant, and the home page's presenter |
 | `components/jellyfin/`, `media/`, `jpeg/` | Jellyfin, cover art, the JPEG engine and its software fallback |
-| `components/radar/`, `ical/`, `travel/` | Planes overhead, calendars, journeys |
+| `components/radar/`, `ical/`, `travel/`, `weather/` | Planes overhead, calendars, journeys, the weather at home |
 | `components/claude/` | The laptops' Claude Code sessions, as `tools/claude-hook` hands them to Desk Link, which passes them on sealed |
 | `components/laptop/` | Desk Link: the laptops' Now Playing and Claude Code events, sealed both ways |
 | `components/units/` | The units and conversions everything shares |

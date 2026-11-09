@@ -387,6 +387,9 @@ esp_err_t set_row(int card, int row, const char *value, Level level = Level::Neu
 /** Re-reads the calendar and redraws its page. Thread-safe. */
 esp_err_t set_calendar();
 
+/** Re-reads the weather and redraws what shows it. Thread-safe. */
+esp_err_t set_weather();
+
 /** True while the Setup page is showing. Nothing needs pushing when it is not. */
 bool diagnostics_open();
 

@@ -264,6 +264,7 @@ Slot<Focus>          p_focus;
 Slot<UpdateState>    p_update;
 Slot<BatteryArgs>    p_battery;
 Slot<bool>           p_radar;
+Slot<bool>           p_weather;
 Slot<bool>           p_claude;
 Slot<DetailsArgs>    p_details;
 Slot<PhotoArgs>      p_photo;
@@ -629,6 +630,9 @@ void apply_page_updates()
     if (bool radar = false; take(p_radar, radar)) {
         publish(Topic::Radar);
     }
+    if (bool weather = false; take(p_weather, weather)) {
+        publish(Topic::Weather);
+    }
     if (bool claude = false; take(p_claude, claude)) {
         publish(Topic::Claude);
     }
@@ -957,6 +961,12 @@ esp_err_t set_row(int card, int row, const char *value, Level level)
 esp_err_t set_calendar()
 {
     put(p_calendar, true);
+    return ESP_OK;
+}
+
+esp_err_t set_weather()
+{
+    put(p_weather, true);
     return ESP_OK;
 }
 

@@ -4,6 +4,7 @@
 #include "ha_ws.h"
 #include "players.h"
 #include "radar.h"
+#include "weather.h"
 #include "room_layout.h"
 #include "ui.h"
 
@@ -109,6 +110,7 @@ void render(const hass::ws::EntityStore &store)
         const float lon = attribute_number(*home, "longitude");
         if (lat != kNoNumber && lon != kNoNumber) {
             radar::set_home(lat, lon);
+            weather::set_home(lat, lon);
         }
     }
 

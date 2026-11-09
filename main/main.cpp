@@ -35,6 +35,7 @@
 #include "room.h"
 #include "network.h"
 #include "travel.h"
+#include "weather.h"
 #include "ui.h"
 #include "wallclock.h"
 #include "wifi.h"
@@ -293,6 +294,11 @@ void on_travel()
     ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_calendar());
 }
 
+void on_weather()
+{
+    ESP_ERROR_CHECK_WITHOUT_ABORT(ui::set_weather());
+}
+
 void restart_now(void *)
 {
     settings::flush();  // a flash write: here on the timer task, not on the screen's
@@ -527,6 +533,7 @@ extern "C" void app_main(void)
     ESP_ERROR_CHECK_WITHOUT_ABORT(diagnostics::start());
     ESP_ERROR_CHECK_WITHOUT_ABORT(ical::start(on_calendar));
     ESP_ERROR_CHECK_WITHOUT_ABORT(travel::start(on_travel));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(weather::start(on_weather));
 
     ESP_LOGI(TAG, "up");
 }

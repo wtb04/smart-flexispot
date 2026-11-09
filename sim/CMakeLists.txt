@@ -61,6 +61,7 @@ set_source_files_properties(${CJSON_DIR}/cJSON.c PROPERTIES COMPILE_OPTIONS -w)
 set(NET_CORE ${ROOT}/components/net/net_core.cpp)  # the panel's own, under net_desktop.cpp
 set(PARSERS ${ROOT}/components/ical/ical_parse.cpp ${ROOT}/components/travel/travel_parse.cpp
     ${ROOT}/components/radar/radar_parse.cpp ${ROOT}/components/radar/radar_trail.cpp
+    ${ROOT}/components/weather/weather_parse.cpp
     ${ROOT}/components/hass/hass_protocol.cpp ${CJSON_DIR}/cJSON.c
     ${ROOT}/components/claude/claude.cpp ${ROOT}/components/claude/claude_sessions.cpp)
 
@@ -80,6 +81,7 @@ target_include_directories(sim PRIVATE
     ${ROOT}/components/room
     ${ROOT}/components/rtc/include
     ${ROOT}/components/travel ${ROOT}/components/travel/include
+    ${ROOT}/components/weather ${ROOT}/components/weather/include
     ${ROOT}/components/units/include
     ${CJSON_DIR})
 target_link_libraries(sim PRIVATE lvgl ZLIB::ZLIB CURL::libcurl)
