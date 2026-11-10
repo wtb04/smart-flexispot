@@ -35,6 +35,10 @@
             </array>
         </dict>
     </array>
+    <key>NSLocationUsageDescription</key>
+    <string>Desk Link reads the Wi-Fi network's name, which macOS gives only with Location Services, to share with the desk panel only on the networks you choose. It never reads where you are.</string>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>Desk Link reads the Wi-Fi network's name, which macOS gives only with Location Services, to share with the desk panel only on the networks you choose. It never reads where you are.</string>
     <key>NSLocalNetworkUsageDescription</key>
     <string>Desk Link tells the desk panel what is playing on this Mac, and takes its play, pause and skip back.</string>
 </dict>

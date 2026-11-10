@@ -37,9 +37,17 @@ final class Link: ObservableObject {
     @Published var sharing: Bool {
         didSet {
             defaults.set(sharing, forKey: "sharing")
-            sharing ? begin() : end()
+            startOrStop()
         }
     }
+    /// Empty, it shares on any network.
+    @Published var networks: [String] {
+        didSet {
+            defaults.set(networks, forKey: "networks")
+            startOrStop()
+        }
+    }
+    @Published private(set) var networksHere: Set<String>?  // nil while nothing can tell
     @Published var panel: String {
         didSet {
             defaults.set(panel, forKey: "panel")
@@ -79,6 +87,8 @@ final class Link: ObservableObject {
     private static let leafingEvery: TimeInterval = 0.3
 
     private let defaults = UserDefaults.standard
+    let networkWatch = Networks()
+    private var running = false
     private let source: NowPlayingSource
     private let output = SystemVolume()
     private var server: CommandServer!
@@ -116,6 +126,7 @@ final class Link: ObservableObject {
         pings = defaults.bool(forKey: "pings")
         sharesSlides = defaults.bool(forKey: "slides")
         panel = defaults.string(forKey: "panel") ?? "smart-flexispot"
+        networks = defaults.stringArray(forKey: "networks") ?? []
         // A key handed over with `defaults write nl.w-tb.desklink key ...` is
         // moved into the keychain at once.
         if let given = defaults.string(forKey: "key"), !given.isEmpty {
@@ -152,8 +163,28 @@ final class Link: ObservableObject {
             guard let url = opened.object as? URL else { return }
             MainActor.assumeIsolated { self?.open(url) }
         }
+        networksHere = networkWatch.here
+        networkWatch.onChange = { [weak self] here in
+            self?.networksHere = here
+            self?.startOrStop()
+        }
         source.clearLeftovers()
-        if sharing { begin() }
+        startOrStop()
+    }
+
+    var onChosenNetwork: Bool {
+        networks.isEmpty || !(networksHere ?? []).isDisjoint(with: networks)
+    }
+
+    /// Switched on, and on one of the networks it is to share on, if any are chosen.
+    var sharesNow: Bool { sharing && onChosenNetwork }
+
+    private func startOrStop() {
+        if sharesNow && !running {
+            begin()
+        } else if !sharesNow && running {
+            end()
+        }
     }
 
     /// The menu's own button, as the panel's is.
@@ -170,6 +201,7 @@ final class Link: ObservableObject {
     }
 
     private func begin() {
+        running = true
         // App Nap holds a menu bar app's timers back by minutes, past the
         // panel's patience, which then takes the Mac for gone.
         awake = ProcessInfo.processInfo.beginActivity(options: .userInitiatedAllowingIdleSystemSleep,
@@ -193,6 +225,7 @@ final class Link: ObservableObject {
     }
 
     private func end() {
+        running = false
         vanishing?.cancel()
         vanishing = nil
         beat?.invalidate()
@@ -209,7 +242,7 @@ final class Link: ObservableObject {
         lookedUp = ""
         thumbnail = nil
         square = nil
-        report()  // nothing playing, so the panel lets go at once
+        report(lettingGo: true)  // nothing playing, so the panel lets go at once
         reach = .unknown
         reachesBack = nil
         deskSaid([:])
@@ -220,7 +253,7 @@ final class Link: ObservableObject {
     private static let goneAfter: TimeInterval = 3
 
     private func take(_ new: Track?) {
-        guard sharing else { return }
+        guard sharesNow else { return }
         vanishing?.cancel()
         vanishing = nil
         if new == nil, track != nil {
@@ -293,7 +326,9 @@ final class Link: ObservableObject {
         return sleeping || (track?.playing != true && Date().timeIntervalSince(stillSince) > Self.idleAway)
     }
 
-    private func report() {
+    private func report(lettingGo: Bool = false) {
+        // Off, or on another network, nothing goes to the panel but the last word.
+        guard running || lettingGo else { return }
         // Told once that nothing plays, the panel lets go; then it hears
         // nothing, so it also takes the Mac for gone.
         let away = self.away
@@ -337,7 +372,7 @@ final class Link: ObservableObject {
         log.info("state \(track?.title ?? (away ? "nothing, away" : "nothing"), privacy: .public), slide \(self.slide.map { "\($0.page) of \($0.pages)" } ?? "none", privacy: .public), art \(self.artwork?.version ?? "none", privacy: .public), square \(self.square?.version ?? "none", privacy: .public)")
         let generation = self.generation
         send(state) { [weak self] reach, answer in
-            guard let self, self.sharing, self.generation == generation else { return }
+            guard let self, self.sharesNow, self.generation == generation else { return }
             self.reach = reach
             if let pong = answer, pong["type"] as? String == "pong" {
                 self.heard = Date()
@@ -377,7 +412,7 @@ final class Link: ObservableObject {
     /// works as Desk Link starts.
     @discardableResult
     func go(to preset: Desk) -> Bool {
-        guard Desk.presets.contains(preset), sharing, seal != nil else { return false }
+        guard Desk.presets.contains(preset), sharesNow, seal != nil else { return false }
         askDesk(["type": "desk", "preset": preset.rawValue])
         return true
     }
@@ -385,7 +420,7 @@ final class Link: ObservableObject {
     private func askDesk(_ message: [String: Any]) {
         let generation = self.generation
         send(message) { [weak self] reach, answer in
-            guard let self, self.sharing, self.generation == generation else { return }
+            guard let self, self.sharesNow, self.generation == generation else { return }
             guard let answer, answer["type"] as? String == "desk" else {
                 return log.warning("the panel did not answer for the desk: \(String(describing: reach), privacy: .public)")
             }
@@ -437,7 +472,7 @@ final class Link: ObservableObject {
 
     /// An event from tools/claude-hook on this Mac, passed on sealed.
     private func relay(_ event: Data) -> Response {
-        guard sharesClaude, let object = try? JSONSerialization.jsonObject(with: event) as? [String: Any] else {
+        guard sharesClaude, onChosenNetwork, let object = try? JSONSerialization.jsonObject(with: event) as? [String: Any] else {
             return .noContent
         }
         var message: [String: Any] = ["type": "claude", "event": object]
