@@ -10,7 +10,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GLib  # noqa: E402
 
-from . import __version__, artwork, keys, link, okular, player, server, settings, volume, youtube  # noqa: E402
+from . import __version__, artwork, keys, link, network, okular, player, server, settings, volume, youtube  # noqa: E402
 
 log = logging.getLogger("desklink")
 APP_ID = "nl.w-tb.desklink"
@@ -60,6 +60,8 @@ class App(Adw.Application):
         self._watch_sleep()
         self.link.add_listener(lambda: log.debug("status: %s", self.link.status_text()))
         self.link.start()
+        self._networks = network.Networks(self.link.networks_changed, link.GLibTimers())
+        self._networks.start()
         from .tray import Tray
         self._tray = Tray(self.link, self.toggle_dropdown, self.show_settings)
         self._tray.start()

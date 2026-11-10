@@ -18,7 +18,8 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(settings.load(self.path), settings.Settings())
 
     def test_round_trip(self):
-        saved = settings.Settings(panel="127.0.0.1:8080", sharing=False, claude=False, pings=False)
+        saved = settings.Settings(panel="127.0.0.1:8080", sharing=False, claude=False, pings=False,
+                                  networks=["Home", "Office"])
         settings.save(saved, self.path)
         self.assertEqual(settings.load(self.path), saved)
 
@@ -28,3 +29,5 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(settings.load(self.path), settings.Settings())
         self.path.write_text(json.dumps({"panel": 5, "sharing": "yes", "claude": False, "extra": 1}))
         self.assertEqual(settings.load(self.path), settings.Settings(claude=False))
+        self.path.write_text(json.dumps({"networks": ["Home", 3, ""]}))
+        self.assertEqual(settings.load(self.path), settings.Settings(networks=["Home"]))

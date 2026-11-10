@@ -281,6 +281,16 @@ class SettingsWindow:
         page.add(share)
         self._plays = plays
 
+        self._networks = Adw.PreferencesGroup(title="Networks")
+        self._here = Gtk.Button(label="Add this network", valign=Gtk.Align.CENTER, css_classes=["flat"])
+        self._here.connect("clicked", lambda *_: link.set_networks(link.settings.networks + sorted(link.networks_here or ())))
+        self._networks.set_header_suffix(self._here)
+        self._typed = Adw.EntryRow(title="Add a network by name", show_apply_button=True)
+        self._typed.connect("apply", self._add_typed)
+        self._network_rows: list[Adw.ActionRow] = []
+        self._shown_networks: list[str] | None = None
+        page.add(self._networks)
+
         login = Adw.PreferencesGroup()
         start = Adw.SwitchRow(title="Open at login", active=app.autostart_enabled())
         start.connect("notify::active", lambda row, _p: app.set_autostart(row.get_active()))
@@ -306,8 +316,41 @@ class SettingsWindow:
         else:
             row.add_css_class("error")
 
+    def _add_typed(self, row) -> None:
+        link = self._app.link
+        link.set_networks(link.settings.networks + [row.get_text().strip()])
+        row.set_text("")
+
+    def _show_networks(self, link) -> None:
+        chosen = link.settings.networks
+        here = link.networks_here
+        self._here.set_sensitive(bool(here and here - set(chosen)))
+        if here is None:
+            self._networks.set_description("Cannot tell which network this is: needs NetworkManager, iwd or iw")
+        else:
+            self._networks.set_description("Shares only on these" if chosen else
+                                           "Shares on any network; add one to share only there")
+        if chosen == self._shown_networks:
+            return
+        if self._shown_networks is not None:
+            for row in self._network_rows:
+                self._networks.remove(row)
+            self._networks.remove(self._typed)
+        self._shown_networks = list(chosen)
+        self._network_rows = []
+        for name in chosen:
+            row = Adw.ActionRow(title=name)
+            remove = Gtk.Button(icon_name="list-remove-symbolic", valign=Gtk.Align.CENTER,
+                                css_classes=["flat", "circular"], tooltip_text="Forget this network")
+            remove.connect("clicked", lambda _b, n=name: link.set_networks([c for c in link.settings.networks if c != n]))
+            row.add_suffix(remove)
+            self._networks.add(row)
+            self._network_rows.append(row)
+        self._networks.add(self._typed)
+
     def refresh(self) -> None:
         link = self._app.link
+        self._show_networks(link)
         self._status.set_label(status_line(link, self._app.server_error))
         self._firmware.set_label(f"Panel firmware {link.firmware}" if link.firmware else "")
         self._key.set_title("Key" if link.has_key() else "Key, 64 hex digits")
