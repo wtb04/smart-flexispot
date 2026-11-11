@@ -29,6 +29,11 @@ Preview in front is on read the same way; and whether Desk Link opens at
 login. There, the Claude Code sessions can show on the panel without its chime
 and notice.
 
+Desk Link can also share only on chosen Wi-Fi networks, by their names. macOS
+gives an app a Wi-Fi network's name only with Location Services allowed, so
+the settings ask for it there; Desk Link never reads where the Mac is. Until it
+is allowed, with networks chosen, it shares nowhere.
+
 ## Build
 
 From the repository's root:

@@ -36,7 +36,7 @@ extension Link {
     enum Health { case off, good, checking, trouble }
 
     var health: Health {
-        guard sharing else { return .off }
+        guard sharesNow else { return .off }
         if key.isEmpty { return .trouble }
         switch reach {
         case .answering: return reachesBack == false ? .trouble : reachesBack == true ? .good : .checking
@@ -56,6 +56,9 @@ extension Link {
 
     var status: String {
         guard sharing else { return "Not sharing" }
+        if !onChosenNetwork {
+            return networksHere == nil ? "Cannot tell which network this is" : "Not sharing on this network"
+        }
         if key.isEmpty { return "Needs the panel's key" }
         switch reach {
         case .unknown: return "Looking for \(panel)"
@@ -294,6 +297,59 @@ private struct Tile: View {
     }
 }
 
+private struct NetworksSection: View {
+    @ObservedObject var link: Link
+    @State private var typed = ""
+
+    var body: some View {
+        Section {
+            ForEach(link.networks, id: \.self) { name in
+                LabeledContent {
+                    Button {
+                        link.networks.removeAll { $0 == name }
+                    } label: {
+                        Image(systemName: "minus.circle")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Forget this network")
+                } label: {
+                    Label { Text(name) } icon: { Tile(symbol: "wifi", colour: .blue) }
+                }
+            }
+            LabeledContent {
+                TextField("Add a network", text: $typed, prompt: Text("Wi-Fi name"))
+                    .labelsHidden()
+                    .onSubmit { add([typed]); typed = "" }
+            } label: {
+                Label { Text("Add a network") } icon: { Tile(symbol: "plus", colour: .gray) }
+            }
+        } header: {
+            HStack {
+                Text("Networks")
+                Spacer()
+                if link.networksHere == nil {
+                    Button("Allow…") { link.networkWatch.askToAllow() }
+                } else {
+                    Button("Add this network") { add((link.networksHere ?? []).sorted()) }
+                        .disabled((link.networksHere ?? []).isSubset(of: link.networks))
+                }
+            }
+        } footer: {
+            if link.networksHere == nil {
+                Text("macOS tells an app the Wi-Fi network's name only with Location Services allowed. Until then, with networks chosen, Desk Link shares nowhere.")
+            } else {
+                Text(link.networks.isEmpty ? "Shares on any network; add one to share only there." : "Shares only on these Wi-Fi networks.")
+            }
+        }
+    }
+
+    private func add(_ names: [String]) {
+        for name in names.map({ $0.trimmingCharacters(in: .whitespaces) }) where !name.isEmpty && !link.networks.contains(name) {
+            link.networks.append(name)
+        }
+    }
+}
+
 private struct SettingsView: View {
     @ObservedObject var link: Link
 
@@ -352,6 +408,8 @@ private struct SettingsView: View {
                     Label { Text("Presentation clicker") } icon: { Tile(symbol: "play.rectangle.fill", colour: .blue) }
                 }
             }
+
+            NetworksSection(link: link)
 
             Section {
                 LabeledContent {

@@ -19,6 +19,7 @@ The versions are the points where the panel was a step further on my desk. None 
 - Desk Link: Claude Code sessions can show on the panel without the chime and the notice, a switch in its settings
 - Desk Link: Stand and Sit in the dropdown send the desk there, as do `desklink stand` and `desklink sit` on Linux and `desklink://stand` and `desklink://sit` on the Mac
 - Desk Link on Linux: shares only on the networks chosen in its settings, a Wi-Fi network by its SSID, asked of NetworkManager, iwd or `iw`
+- Desk Link on the Mac: shares only on the Wi-Fi networks chosen in its settings, which takes Location Services for the network's name
 
 ## v0.9.0, 4 October 2026
 
