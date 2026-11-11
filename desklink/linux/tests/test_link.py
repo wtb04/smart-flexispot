@@ -173,6 +173,42 @@ class LinkTest(unittest.TestCase):
         self.timers.advance(30)
         self.assertEqual(len(self.client.posts), count)
 
+    def test_shares_only_on_a_chosen_network(self):
+        self.make(settings=Settings(networks=["Home"]))
+        self.link.networks_changed(frozenset({"Cafe"}))
+        self.assertEqual(self.client.posts, [])
+        self.assertEqual(self.link.status_text(), "Not sharing on this network")
+        self.assertEqual(self.link.health(), "off")
+        self.assertFalse(self.link.go_to("stand"))
+        self.link.networks_changed(frozenset({"Home"}))
+        self.assertEqual(len(self.client.states()), 1)
+        self.assertEqual(self.link.status_text(), "Connected to smart-flexispot")
+        self.link.take(track())
+        self.timers.advance(0.3)
+        self.link.networks_changed(frozenset({"Cafe"}))
+        self.assertEqual(self.client.states()[-1]["title"], "", "lets go of the panel as it leaves")
+        count = len(self.client.posts)
+        self.timers.advance(30)
+        self.link.handle("POST", "/claude", b'{"hook_event_name": "Stop"}', True)
+        self.assertEqual(len(self.client.posts), count)
+
+    def test_choosing_no_network_shares_anywhere(self):
+        self.make(settings=Settings(networks=["Home"]))
+        self.link.networks_changed(frozenset({"Cafe"}))
+        self.link.set_networks([])
+        self.assertEqual(self.saved[-1].networks, [])
+        self.assertEqual(len(self.client.states()), 1)
+        self.link.set_networks(["Home", "", "Home"])
+        self.assertEqual(self.link.settings.networks, ["Home"])
+        self.assertEqual(self.link.status_text(), "Not sharing on this network")
+
+    def test_no_way_to_tell_the_network_shares_only_without_a_choice(self):
+        self.make()
+        self.assertEqual(self.link.status_text(), "Connected to smart-flexispot")
+        self.link.set_networks(["Home"])
+        self.assertEqual(self.link.status_text(), "Cannot tell which network this is")
+        self.assertEqual(self.link.health(), "off")
+
     def test_slides_are_taken_whatever_plays(self):
         self.assertEqual(link.build_state("m", 1, None, None, fakes.FakeVolume(), 0.0, slides=True)["takes"], ["slides"])
         self.assertIn("slides", link.build_state("m", 1, track(), None, fakes.FakeVolume(), 1000.0, slides=True)["takes"])

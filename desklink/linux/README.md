@@ -6,7 +6,10 @@ skip and change the volume here, and Claude Code's sessions reach the panel thro
 
 Its icon in the bar opens what plays, Stand and Sit for the desk, whether the panel answers, and
 the switch that turns sharing off and on; the menu behind the dots, or a right click, opens the
-settings. There, the Claude Code sessions can show on the panel without its chime and notice.
+settings. There, the Claude Code sessions can show on the panel without its chime and notice, and
+Desk Link can share only on chosen networks: a Wi-Fi network by its SSID, a wired one by its
+connection's name. It asks NetworkManager, else iwd, else `iw`; with none of them it cannot tell
+where it is, and with networks chosen it shares nowhere until one can.
 
 ## Install
 
