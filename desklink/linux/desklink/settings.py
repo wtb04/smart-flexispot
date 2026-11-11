@@ -1,6 +1,6 @@
 import json
 import os
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 import gi
@@ -16,6 +16,7 @@ class Settings:
     claude: bool = True
     pings: bool = True  # off, the panel shows the sessions without its chime and notice
     slides: bool = True  # the panel's clicker: the keys, and Okular's page
+    networks: list[str] = field(default_factory=list)  # empty, it shares on any network
 
 
 def default_path() -> Path:
@@ -31,10 +32,11 @@ def load(path: Path) -> Settings:
     if not isinstance(stored, dict):
         return Settings()
     result = Settings()
-    for field in fields(Settings):
-        value = stored.get(field.name)
-        if isinstance(value, type(getattr(result, field.name))):
-            setattr(result, field.name, value)
+    for each in fields(Settings):
+        value = stored.get(each.name)
+        if isinstance(value, type(getattr(result, each.name))):
+            setattr(result, each.name, value)
+    result.networks = [name for name in result.networks if isinstance(name, str) and name]
     return result
 
 

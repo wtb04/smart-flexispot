@@ -155,6 +155,7 @@ class Link:
         self._soon = None
         self._vanishing = None
         self._sleeping = False
+        self.networks_here: frozenset[str] | None = None  # None while nothing here can tell
         self._still_since = clock.monotonic()
         self._told_away = False
         self._generation = 0  # bumped by a new address or key, so an older reply is not taken for theirs
@@ -170,8 +171,21 @@ class Link:
             fn()
 
     def start(self) -> None:
-        if self.settings.sharing:
+        if self.sharing():
             self._begin()
+
+    def on_a_chosen_network(self) -> bool:
+        chosen = self.settings.networks
+        return not chosen or any(name in chosen for name in self.networks_here or ())
+
+    def sharing(self) -> bool:
+        """Switched on, and on one of the networks it is to share on, if any are chosen."""
+        return self.settings.sharing and self.on_a_chosen_network()
+
+    def _sharing_now_or_not(self, was: bool) -> None:
+        if self.sharing() != was:
+            self._begin() if not was else self._end()
+        self._changed()
 
     def _begin(self) -> None:
         if self._beat is None:
@@ -300,7 +314,7 @@ class Link:
         if away and self._told_away and not force_nothing:
             return
         self._told_away = away
-        if not force_nothing and not self.settings.sharing:
+        if not force_nothing and not self.sharing():
             return
         track = None if (away or force_nothing) else self.track
         on = self.settings.slides
@@ -319,7 +333,7 @@ class Link:
         self._client.post(f"http://{self.settings.panel}/link", body, done or (lambda *_: None))
 
     def _answered(self, status: int | None, body: bytes, generation: int | None = None) -> None:
-        if not self.settings.sharing or (generation is not None and generation != self._generation):
+        if not self.sharing() or (generation is not None and generation != self._generation):
             return
         if status is None:
             self.reach = Reach.UNREACHABLE
@@ -366,10 +380,21 @@ class Link:
     def set_sharing(self, sharing: bool) -> None:
         if sharing == self.settings.sharing:
             return
+        was = self.sharing()
         self.settings.sharing = sharing
         self._save(self.settings)
-        self._begin() if sharing else self._end()
-        self._changed()
+        self._sharing_now_or_not(was)
+
+    def set_networks(self, networks: list[str]) -> None:
+        was = self.sharing()
+        self.settings.networks = list(dict.fromkeys(name for name in networks if name))
+        self._save(self.settings)
+        self._sharing_now_or_not(was)
+
+    def networks_changed(self, here: frozenset[str] | None) -> None:
+        was = self.sharing()
+        self.networks_here = here
+        self._sharing_now_or_not(was)
 
     def set_claude(self, claude: bool) -> None:
         self.settings.claude = claude
@@ -413,6 +438,10 @@ class Link:
         panel = self.settings.panel
         if not self.settings.sharing:
             return "Not sharing"
+        if self.networks_here is None and not self.on_a_chosen_network():
+            return "Cannot tell which network this is"
+        if not self.on_a_chosen_network():
+            return "Not sharing on this network"
         if self._envelope is None:
             return "Needs the panel's key"
         if self.reach is Reach.UNKNOWN:
@@ -428,7 +457,7 @@ class Link:
         return "Connected, checking back"
 
     def health(self) -> str:
-        if not self.settings.sharing:
+        if not self.sharing():
             return "off"
         if self._envelope is None or self.reach in (Reach.REFUSED, Reach.UNREACHABLE) or self.reaches_back is False:
             return "trouble"
@@ -442,7 +471,7 @@ class Link:
 
     def go_to(self, preset: str) -> bool:
         # not waiting for the panel to say of a desk, so `desklink stand` works as Desk Link starts
-        if preset not in DESK_PRESETS or not self.settings.sharing or self._envelope is None:
+        if preset not in DESK_PRESETS or not self.sharing() or self._envelope is None:
             return False
         self._ask_desk({"type": "desk", "preset": preset})
         return True
@@ -452,7 +481,7 @@ class Link:
         self._send(message, lambda status, body: self._desk_answered(status, body, generation))
 
     def _desk_answered(self, status: int | None, body: bytes, generation: int) -> None:
-        if generation != self._generation or not self.settings.sharing:
+        if generation != self._generation or not self.sharing():
             return
         answer = self._envelope.opened(body, "/link reply") if status == 200 and self._envelope else None
         if answer is None or answer.get("type") != "desk":
@@ -548,7 +577,7 @@ class Link:
         return self._keys is not None and self._keys.available
 
     def _relay(self, body: bytes) -> Response:
-        if self.settings.claude:
+        if self.settings.claude and self.on_a_chosen_network():
             try:
                 event = json.loads(body)
             except ValueError:
